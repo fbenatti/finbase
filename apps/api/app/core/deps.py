@@ -29,9 +29,15 @@ async def _get_dev_admin(db: AsyncSession) -> User:
 
 
 async def resolve_user_from_request(request: Request, db: AsyncSession) -> User:
-    """Resolve o usuário a partir do header Authorization (sem DEV bypass implícito aqui)."""
+    """Resolve o usuário autenticado, respeitando os modos locais de desenvolvimento."""
+    if _dev_bypass_active():
+        return await _get_dev_admin(db)
+
     auth = request.headers.get("authorization", "")
     scheme, _, token = auth.partition(" ")
+    if scheme.lower() == "bearer" and token and _master_token_active():
+        if security.tokens_equal(token, settings.dev_master_token):
+            return await _get_dev_admin(db)
     if scheme.lower() != "bearer" or not token:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Não autenticado")
     try:
