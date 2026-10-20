@@ -24,13 +24,14 @@ import NotificationsIcon from "@mui/icons-material/Notifications";
 import RefreshIcon from "@mui/icons-material/Refresh";
 import PlayArrowIcon from "@mui/icons-material/PlayArrow";
 import type {
-  AnomalyCase, AnomalyConfig, AnomalyNotification, AnomalyRunSummary, AnomalySeries, CaseSummary,
+  AnomalyCase, AnomalyConfig, AnomalyNotification, AnomalyRunSummary, AnomalySeries, CaseSummary, ImpactSummary,
   ExpectedEventFamily, QualityBucket,
 } from "../../services/anomaliesApi";
 import {
   createAnomalyAction, enqueueAnomalyRun, getAnomalyCase, getAnomalyCaseEvents,
   getAnomalyCaseSeries, getAnomalyMetrics, getExpectedEvents, getQuality,
   listAnomalyCases, listAnomalyConfigs, listAnomalyNotifications, listAnomalyRuns,
+  getAnomalyImpactSummary,
   readAnomalyNotification, transitionAnomalyCase, updateAnomalyAction,
   updateAnomalyConfig,
 } from "../../services/anomaliesApi";
@@ -165,6 +166,8 @@ export default function Anomalies() {
   const [tab, setTab] = useState(0);
   const [configs, setConfigs] = useState<AnomalyConfig[]>([]);
   const [summary, setSummary] = useState<CaseSummary | null>(null);
+  const [impactSummary, setImpactSummary] = useState<ImpactSummary | null>(null);
+  const [retrospectiveItems, setRetrospectiveItems] = useState<AnomalyCase[]>([]);
   const [latestRun, setLatestRun] = useState<AnomalyRunSummary | null>(null);
   const detectionRunning = latestRun?.status === "QUEUED" || latestRun?.status === "RUNNING";
   const [cases, setCases] = useState<AnomalyCase[]>([]);
@@ -201,6 +204,7 @@ export default function Anomalies() {
         listAnomalyNotifications({ limit: 25 }),
         listAnomalyRuns(1),
       ]);
+      void getAnomalyImpactSummary().then(setImpactSummary).catch(() => setImpactSummary(null));
       setConfigs(configList);
       setSummary(metrics);
       setNotifications(notificationPage.items);
@@ -258,6 +262,7 @@ export default function Anomalies() {
       if (stateFilter === "__open__") params.state = ["NEW", "ASSIGNED", "INVESTIGATING", "DECIDED", "IN_REMEDIATION", "VERIFYING", "RETROSPECTIVE"];
       if (stateFilter === "__confirmed__") params.decision = ["CONFIRMED_ACTION", "CONFIRMED_ACCEPTED"];
       if (stateFilter === "__recurrence__") params.recurrence_only = true;
+      if (["__confirmed__", "__recurrence__"].includes(stateFilter)) delete params.state;
       const page = await listAnomalyCases(params);
       setCases(page.items);
       setTotal(page.total);
@@ -303,6 +308,11 @@ export default function Anomalies() {
   useEffect(() => {
     if (tab === 3) void loadExpected();
     if (tab === 4) void loadQuality();
+    if (tab === 5) {
+      void listAnomalyCases({ limit: 200, order_by: "score", deviation_status: ["AUTOCORRIGIDO", "CORRIGIDO_COM_ACAO"] })
+        .then((page) => setRetrospectiveItems(page.items))
+        .catch(() => setRetrospectiveItems([]));
+    }
   }, [tab, loadExpected, loadQuality]);
 
   const openCasesFilter = (filter: "overdue" | "unassigned" | "open" | "closed" | "new" | "confirmed" | "recurrence") => {
@@ -451,11 +461,7 @@ export default function Anomalies() {
     }
   };
 
-  const retrospectiveCases = useMemo(
-    () => cases.filter((item) => item.decision === "CONFIRMED_ACTION" || item.decision === "CONFIRMED_ACCEPTED"
-      || item.deviation_status === "AUTOCORRIGIDO" || item.deviation_status === "CORRIGIDO_COM_ACAO"),
-    [cases],
-  );
+  const retrospectiveCases = useMemo(() => retrospectiveItems, [retrospectiveItems]);
 
   return (
     <Box sx={{ p: { xs: 1.5, md: 3 }, maxWidth: 1600, mx: "auto", width: "100%", minWidth: 0, boxSizing: "border-box" }}>
@@ -508,6 +514,23 @@ export default function Anomalies() {
 
       {tab === 0 && summary && (
         <Box>
+          {impactSummary && <Paper variant="outlined" sx={{ p: 2, mb: 2, borderColor: "success.light", background: "linear-gradient(110deg,#f5fbf8,#fff)" }}>
+            <Typography variant="subtitle2">Impacto financeiro dos casos monitorados</Typography>
+            <Typography variant="caption" color="text.secondary">Atualizado com todos os episódios registrados · saving é projeção para casos corrigidos, não economia realizada auditada.</Typography>
+            <Stack direction="row" spacing={2} flexWrap="wrap" sx={{ mt: 1.5 }}>
+              {[
+                { label: "Custo excedente incorrido", value: money(impactSummary.incurred_excess_cost, currency), note: "Soma estimada dos dias acima da faixa" },
+                { label: "Saving projetado / mês", value: money(impactSummary.projected_saving_monthly, currency), note: "Casos autocorrigidos ou corrigidos com ação" },
+                { label: "Saving projetado / ano", value: money(impactSummary.projected_saving_annual, currency), note: "Projeção anualizada do ritmo recente" },
+                { label: "Exposição aberta / mês", value: money(impactSummary.open_exposure_monthly, currency), note: "Desvios ativos, aceitos ou reincidentes" },
+                { label: "Exposição aberta / ano", value: money(impactSummary.open_exposure_annual, currency), note: "Projeção anualizada da exposição" },
+              ].map((item) => <Paper key={item.label} variant="outlined" sx={{ p: 1.25, minWidth: 180, flex: "1 1 180px", cursor: "pointer", "&:hover": { borderColor: "primary.main", bgcolor: "action.hover" } }} onClick={() => openCasesFilter(item.label.includes("Saving") ? "confirmed" : "open")}>
+                <Typography variant="caption" color="text.secondary">{item.label}</Typography>
+                <Typography variant="h6">{item.value}</Typography>
+                <Typography variant="caption" color="text.secondary">{item.note}</Typography>
+              </Paper>)}
+            </Stack>
+          </Paper>}
           <Stack direction="row" spacing={2} flexWrap="wrap" sx={{ mb: 2 }}>
             {[
               { label: "Casos novos", value: summary.new },
