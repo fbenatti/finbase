@@ -60,7 +60,7 @@ function SeverityEditCell(props: GridRenderEditCellParams) {
   return (
     <Select
       size="small" autoFocus fullWidth
-      value={String(value ?? "Informação")}
+      value={severityLabel(String(value ?? "Informação"))}
       onChange={(e) => { api.setEditCellValue({ id, field, value: String(e.target.value) }); api.stopCellEditMode({ id, field }); }}
       onKeyDown={(e) => { if (e.key === "Escape") api.stopCellEditMode({ id, field }); }}
     >
@@ -406,7 +406,7 @@ export default function AcksRegisteredTab({ defaultMonth, department }: { defaul
           </FormControl>
           <FormControl fullWidth sx={{ mb: 2 }}>
             <InputLabel>Severidade</InputLabel>
-            <Select label="Severidade" value={editSeverity} onChange={e => setEditSeverity(e.target.value)}>
+            <Select label="Severidade" value={severityLabel(editSeverity)} onChange={e => setEditSeverity(e.target.value)}>
               {ACK_SEVERITIES.map(sev => <MenuItem key={sev} value={sev}>{sev}</MenuItem>)}
             </Select>
           </FormControl>
