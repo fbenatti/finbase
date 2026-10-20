@@ -1060,28 +1060,41 @@ async def impact_summary(
     db: AsyncSession = Depends(get_db),
     user: User = Depends(require("anomalies", "read")),
 ):
+    config_query = select(AnomalyConfig)
+    if config_id is not None:
+        config_query = config_query.where(AnomalyConfig.id == config_id)
+    configs = (await db.execute(config_query)).scalars().all()
+    settings_by_id = {
+        config.id: detector_settings(config.detector_settings)
+        for config in configs
+    }
     base = select(AnomalyCase)
     if config_id is not None:
         base = base.where(AnomalyCase.anomaly_config_id == config_id)
     rows = (await db.execute(base)).scalars().all()
     by_status: dict[str, int] = {}
-    incurred = saving_m = exposure_m = 0.0
+    incurred = saving_m = saving_a = exposure_m = exposure_a = 0.0
     for case in rows:
         status = getattr(case, "deviation_status", None) or case.state
         by_status[str(status)] = by_status.get(str(status), 0) + 1
         incurred += float(getattr(case, "impact_to_date", None) or case.anomalous_cost_cloud or 0)
+        settings = settings_by_id.get(case.anomaly_config_id, detector_settings())
+        monthly = float(getattr(case, "projected_month_impact", 0) or 0)
+        annual = monthly / float(settings["projection_days_month"]) * float(settings["projection_days_year"])
         if str(getattr(case, "deviation_status", "")) in ("AUTOCORRIGIDO", "CORRIGIDO_COM_ACAO"):
-            saving_m += float(getattr(case, "projected_month_impact", 0) or 0)
+            saving_m += monthly
+            saving_a += annual
         if str(getattr(case, "deviation_status", "")) in ("EM_DESVIO", "ACEITO", "REINCIDENTE"):
-            exposure_m += float(getattr(case, "projected_month_impact", 0) or 0)
+            exposure_m += monthly
+            exposure_a += annual
     return {
         "detected": len(rows),
         "by_deviation_status": by_status,
         "incurred_excess_cost": round(incurred, 2),
         "projected_saving_monthly": round(saving_m, 2),
-        "projected_saving_annual": round(saving_m * 12, 2),
+        "projected_saving_annual": round(saving_a, 2),
         "open_exposure_monthly": round(exposure_m, 2),
-        "open_exposure_annual": round(exposure_m * 12, 2),
+        "open_exposure_annual": round(exposure_a, 2),
     }
 
 
