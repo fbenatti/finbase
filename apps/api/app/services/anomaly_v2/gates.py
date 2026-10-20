@@ -7,6 +7,7 @@ import statistics
 from typing import Any, Mapping, Sequence
 
 from app.services.anomaly_v2.detectors import TIER_ALERT, TIER_WATCH
+from app.services.anomaly_v2.settings import detector_settings
 
 
 def cloud_load_quality(
@@ -14,6 +15,7 @@ def cloud_load_quality(
     *,
     day: str,
     baseline_days: Sequence[str],
+    settings: Mapping[str, Any] | None = None,
 ) -> dict[str, float]:
     """Razão do total do dia vs mediana dos dias baseline por nuvem."""
     by_cloud_day: dict[tuple[str, str], float] = defaultdict(float)
@@ -31,12 +33,15 @@ def cloud_load_quality(
             ratios[cloud] = 1.0
             continue
         hist_sorted = sorted(hist)
-        median = hist_sorted[len(hist_sorted) // 2]
+        median = statistics.median(hist_sorted)
         ratios[cloud] = today / median if median > 0 else 1.0
     return ratios
 
 
-def valid_days_by_cloud(daily_rows: Sequence[Mapping[str, Any]]) -> dict[str, set[str]]:
+def valid_days_by_cloud(daily_rows: Sequence[Mapping[str, Any]], *,
+                        settings: Mapping[str, Any] | None = None) -> dict[str, set[str]]:
+    config = detector_settings(settings)
+    lookback = int(config["load_quality_lookback_days"])
     totals: dict[str, dict[str, float]] = defaultdict(lambda: defaultdict(float))
     for row in daily_rows:
         cloud = str(row.get("cloud_origem") or row.get("cloud") or "")
@@ -45,10 +50,10 @@ def valid_days_by_cloud(daily_rows: Sequence[Mapping[str, Any]]) -> dict[str, se
     for cloud, days in totals.items():
         for day, total in days.items():
             current = date.fromisoformat(day)
-            history = [days[prior] for offset in range(1, 15)
+            history = [days[prior] for offset in range(1, lookback + 1)
                        if (prior := (current - timedelta(days=offset)).isoformat()) in days]
             median = statistics.median(history) if history else 0
-            if median <= 0 or total >= median * 0.70:
+            if median <= 0 or total >= median * float(config["load_completeness_threshold"]):
                 valid[cloud].add(day)
     return dict(valid)
 
@@ -62,11 +67,13 @@ def apply_gates(
     cloud_ratio: float,
     persistence_days: int = 1,
     confidence: str = "MEDIUM",
+    settings: Mapping[str, Any] | None = None,
 ) -> Mapping[str, Any]:
     """Ajusta tier após portões."""
+    config = detector_settings(settings)
     out = dict(signal)
     reasons: list[str] = list(out.get("reason_codes") or [])
-    if cloud_ratio < 0.70:
+    if cloud_ratio < float(config["load_completeness_threshold"]):
         out["tier"] = TIER_WATCH
         reasons.append("PARTIAL_LOAD")
     obs = float(out.get("observed") or 0)
@@ -81,7 +88,7 @@ def apply_gates(
     if confidence == "LOW" and out.get("tier") == TIER_ALERT:
         out["tier"] = TIER_WATCH
         reasons.append("LOW_CONFIDENCE")
-    if persistence_days < 2 and delta < materiality_daily * 5:
+    if persistence_days < int(config["persistence_gate_min_days"]) and delta < materiality_daily * float(config["persistence_gate_materiality_multiple"]):
         if out.get("tier") == TIER_ALERT and out.get("detector") == "SPIKE":
             out["tier"] = TIER_WATCH
             reasons.append("NEEDS_PERSISTENCE")
