@@ -71,6 +71,11 @@ async def _publish_signals(run_id: int, rows: list[dict[str, Any]]) -> int:
 
 
 def _config_from_row(row: Any) -> dict[str, Any]:
+    engine_settings = detector_settings(getattr(row, "detector_settings", None))
+    legacy_tiers = dict(getattr(row, "severity_tiers", None) or {})
+    for legacy_key, setting_key in (("MEDIUM", "severity_medium_min"), ("HIGH", "severity_high_min"), ("CRITICAL", "severity_critical_min")):
+        if legacy_key in legacy_tiers:
+            engine_settings[setting_key] = float(legacy_tiers[legacy_key])
     return {
         "id": row.id,
         "version": row.version,
@@ -89,8 +94,8 @@ def _config_from_row(row: Any) -> dict[str, Any]:
         "period_column": row.period_column,
         "type_column": row.type_column,
         "measure_column": row.measure_column,
-        "severity_tiers": getattr(row, "severity_tiers", None),
-        "detector_settings": detector_settings(getattr(row, "detector_settings", None)),
+        "severity_tiers": None,
+        "detector_settings": engine_settings,
     }
 
 
@@ -546,7 +551,7 @@ async def _sync_cases(
             revised = {**leader, "delta": delta,
                        "pct_delta": delta / max(float(existing.expected_cloud or 0), 1)}
             prioritization = score_signal(revised, materiality=mat_daily,
-                severity_tiers=getattr(config_row, "severity_tiers", None), confidence=existing.confidence,
+                confidence=existing.confidence,
                 settings=_config_from_row(config_row)["detector_settings"])
             fields = {
                 "event_date": event_day,
