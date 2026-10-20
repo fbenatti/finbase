@@ -1,6 +1,6 @@
 """Regression tests for investigation read reuse, isolation and retries."""
 import asyncio
-from datetime import date
+from datetime import date, timedelta
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
@@ -137,3 +137,17 @@ def test_cache_size_is_bounded(monkeypatch):
         assert len(series._SERIES_CACHE) == 2
 
     asyncio.run(scenario())
+
+
+def test_chart_baseline_is_independent_of_trino_result_order():
+    start = date(2026, 9, 1)
+    end = start + timedelta(days=44)
+    rows = [{"day": (start + timedelta(days=index)).isoformat(),
+             "cost_cloud": 100 + index * 3 + (index % 7) * 20}
+            for index in range(45)]
+    by_day = {row["day"]: row["cost_cloud"] for row in rows}
+    expected = series._chart_items(by_day, rows, start=start, end=end, as_of=end)
+    reversed_rows = list(reversed(rows))
+    actual = series._chart_items(dict(reversed(list(by_day.items()))), reversed_rows,
+                                 start=start, end=end, as_of=end)
+    assert actual == expected
