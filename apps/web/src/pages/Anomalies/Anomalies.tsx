@@ -24,13 +24,13 @@ import NotificationsIcon from "@mui/icons-material/Notifications";
 import RefreshIcon from "@mui/icons-material/Refresh";
 import PlayArrowIcon from "@mui/icons-material/PlayArrow";
 import type {
-  AnomalyCase, AnomalyConfig, AnomalyNotification, AnomalySeries, CaseSummary,
+  AnomalyCase, AnomalyConfig, AnomalyNotification, AnomalyRunSummary, AnomalySeries, CaseSummary,
   ExpectedEventFamily, QualityBucket,
 } from "../../services/anomaliesApi";
 import {
   createAnomalyAction, enqueueAnomalyRun, getAnomalyCase, getAnomalyCaseEvents,
   getAnomalyCaseSeries, getAnomalyMetrics, getExpectedEvents, getQuality,
-  listAnomalyCases, listAnomalyConfigs, listAnomalyNotifications,
+  listAnomalyCases, listAnomalyConfigs, listAnomalyNotifications, listAnomalyRuns,
   readAnomalyNotification, transitionAnomalyCase, updateAnomalyAction,
   updateAnomalyConfig,
 } from "../../services/anomaliesApi";
@@ -165,6 +165,8 @@ export default function Anomalies() {
   const [tab, setTab] = useState(0);
   const [configs, setConfigs] = useState<AnomalyConfig[]>([]);
   const [summary, setSummary] = useState<CaseSummary | null>(null);
+  const [latestRun, setLatestRun] = useState<AnomalyRunSummary | null>(null);
+  const detectionRunning = latestRun?.status === "QUEUED" || latestRun?.status === "RUNNING";
   const [cases, setCases] = useState<AnomalyCase[]>([]);
   const [total, setTotal] = useState(0);
   const [selected, setSelected] = useState<AnomalyCase | null>(null);
@@ -193,15 +195,17 @@ export default function Anomalies() {
     setBusy(true);
     setError(null);
     try {
-      const [configList, metrics, notificationPage] = await Promise.all([
+      const [configList, metrics, notificationPage, runPage] = await Promise.all([
         listAnomalyConfigs(),
         getAnomalyMetrics(),
         listAnomalyNotifications({ limit: 25 }),
+        listAnomalyRuns(1),
       ]);
       setConfigs(configList);
       setSummary(metrics);
       setNotifications(notificationPage.items);
       setUnread(notificationPage.unread);
+      setLatestRun(runPage.items[0] ?? null);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Falha ao carregar anomalias");
     } finally {
@@ -268,6 +272,30 @@ export default function Anomalies() {
   useEffect(() => {
     void loadCases();
   }, [loadCases]);
+
+  useEffect(() => {
+    if (!detectionRunning) return;
+    let active = true;
+    let pending = false;
+    const timer = window.setInterval(async () => {
+      if (pending) return;
+      pending = true;
+      try {
+        const page = await listAnomalyRuns(1);
+        if (!active) return;
+        const run = page.items[0] ?? null;
+        setLatestRun(run);
+        if (run && run.status !== "QUEUED" && run.status !== "RUNNING") {
+          await Promise.all([loadAll(), loadCases()]);
+        }
+      } catch (err) {
+        if (active) setError(err instanceof Error ? err.message : "Falha ao acompanhar a detecção");
+      } finally {
+        pending = false;
+      }
+    }, 5000);
+    return () => { active = false; window.clearInterval(timer); };
+  }, [detectionRunning, loadAll, loadCases]);
 
   useEffect(() => {
     if (tab === 3) void loadExpected();
@@ -444,7 +472,7 @@ export default function Anomalies() {
               <Chip size="small" color={config.enabled ? "success" : "default"}
                     label={config.enabled ? "Habilitada" : "Desabilitada"} />
               <Button size="small" onClick={toggleEnabled}>{config.enabled ? "Desabilitar" : "Habilitar"}</Button>
-              <Button size="small" variant="contained" startIcon={<PlayArrowIcon />} onClick={runNow} disabled={!config.enabled}>
+              <Button size="small" variant="contained" startIcon={<PlayArrowIcon />} onClick={runNow} disabled={!config.enabled || detectionRunning || busy}>
                 Executar detecção
               </Button>
             </>
@@ -453,6 +481,12 @@ export default function Anomalies() {
       </Box>
 
       {error && <Alert severity="error" sx={{ mb: 1 }} onClose={() => setError(null)}>{error}</Alert>}
+      {latestRun && <Alert severity={latestRun.status === "FAILED" ? "error" : latestRun.status === "COMPLETED" ? "success" : "info"} sx={{ mb: 2 }}>
+        Detecção #{latestRun.id} · {latestRun.status === "FAILED" ? "Falhou" : latestRun.status === "COMPLETED" ? "Concluída" : latestRun.status === "CANCELLED" ? "Cancelada" : latestRun.status === "QUEUED" ? "Na fila" : "Em execução"}
+        {latestRun.status === "FAILED" ? `: ${latestRun.error ?? latestRun.phase ?? "Consulte os logs de processamento"}`
+          : latestRun.status === "COMPLETED" ? ` · ${latestRun.cases_created ?? 0} caso(s) novo(s), ${latestRun.cases_updated ?? 0} atualizado(s) · ${latestRun.phase ?? ""}`
+            : ` · ${latestRun.phase ?? "Aguardando processamento"}`}
+      </Alert>}
 
       <Tabs value={tab} onChange={(_, value) => setTab(value)} variant="scrollable" scrollButtons="auto" allowScrollButtonsMobile sx={{ mb: 2, borderBottom: 1, borderColor: "divider" }}>
         <Tab label="Visão geral" />
