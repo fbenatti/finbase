@@ -360,6 +360,10 @@ export default function ExpectedViewV2({
   );
   const forecast = filteredRows.reduce((sum, row) => sum + expectedOf(row), 0);
   const variance = budget - forecast;
+  const forecastManual = filteredRows.reduce(
+    (sum, row) => sum + forecastManualOf(row),
+    0,
+  );
   const forecastOnly = forecast - actual;
   const realizedBudgetPct = budgetAvailable && budget > 0 ? `${(actual / budget * 100).toLocaleString("pt-BR", { maximumFractionDigits: 1 })}%` : "Sem orçamento";
   const actualEnd = filteredRows.reduce(
@@ -1158,7 +1162,8 @@ export default function ExpectedViewV2({
       <Alert severity="info" sx={{ mb: 2 }}>
         Forecast = realizado dos meses fechados + no mês corrente, realizado
         parcial com o forecast do restante empilhado + forecast dos meses
-        futuros. Variação = orçamento menos forecast. Com o interruptor ligado,
+        futuros. Forecast Manual compõe o total projetado. Variação = orçamento
+        menos o total projetado consolidado. Com o interruptor ligado,
         o custo compartilhado aparece empilhado em laranja sobre o consumo real
         — não mistura as duas barras. O card Realizado soma os dois.
       </Alert>
@@ -1188,13 +1193,14 @@ export default function ExpectedViewV2({
           <Stack direction="row" gap={2} flexWrap="wrap" mb={2}>
             {card("Realizado", actual, "#F2A900", () => { setDrillTipo("realizado"); setDrillPeriod(undefined); setDrillOpen(true); })}
             {card("Forecast", forecastOnly, "#7C3AED", () => { setDrillTipo("forecast"); setDrillPeriod(undefined); setDrillOpen(true); }, `Realizado / orçamento: ${realizedBudgetPct} · horizonte até ${filteredRows[filteredRows.length - 1] ? monthLong(filteredRows[filteredRows.length - 1].period) : "—"}`)}
+            {card("Forecast Manual", budgetAvailable ? forecastManual : "Sem forecast manual para este filtro", "#0EA5E9", undefined, "Planejamento manual consolidado")}
             {card("Orçamento", budgetAvailable ? budget : "Sem orçamento para este filtro", "#64748B")}
             {card(
               "Total projetado",
               forecast,
               "#16A34A",
               () => { setDrillTipo("ambos"); setDrillPeriod(undefined); setDrillOpen(true); },
-              "Realizado + Forecast",
+              "Realizado + Forecast + Forecast Manual",
             )}
             {card("Variação", budgetAvailable ? variance : "Sem base", variance >= 0 ? "#16A34A" : "#EF4444")}
           </Stack>

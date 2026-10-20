@@ -369,6 +369,10 @@ export default function ExpectedView({
   );
   const forecast = filteredRows.reduce((sum, row) => sum + expectedOf(row), 0);
   const variance = budget - forecast;
+  const forecastManual = filteredRows.reduce(
+    (sum, row) => sum + forecastManualOf(row),
+    0,
+  );
   const forecastOnly = forecast - actual;
   const actualEnd = filteredRows.reduce(
     (last, row, index) => (row.actual_value == null ? last : index),
@@ -1081,10 +1085,15 @@ export default function ExpectedView({
     const forecast = pivotDrivers.map(
       (driver, index) => Number(driver.forecast_value || 0) - realized[index],
     );
+    const forecastManual = pivotDrivers.map((driver) =>
+      Number(driver.forecast_manual_value || 0),
+    );
     const budget = pivotDrivers.map((driver) =>
       Number(driver.budget_value || 0),
     );
-    const projected = realized.map((value, index) => value + forecast[index]);
+    const projected = realized.map(
+      (value, index) => value + forecast[index] + forecastManual[index],
+    );
     const delta = projected.map((value, index) => value - budget[index]);
     const toRow = (id: string, medida: string, values: number[]) =>
       Object.fromEntries([
@@ -1099,7 +1108,8 @@ export default function ExpectedView({
     return [
       toRow("realizado", "Realizado", realized),
       toRow("forecast", "Forecast", forecast),
-      toRow("projetado", "Total projetado (Realizado + Forecast)", projected),
+      toRow("forecast_manual", "Forecast Manual", forecastManual),
+      toRow("projetado", "Total projetado (Realizado + Forecast + Forecast Manual)", projected),
       ...(showBudget ? [toRow("orcamento", "Orçamento", budget)] : []),
       ...(showBudget
         ? [toRow("delta", "Delta vs Orçamento (Projetado − Orçamento)", delta)]
@@ -1304,7 +1314,8 @@ export default function ExpectedView({
       <Alert severity="info" sx={{ mb: 2 }}>
         Forecast = realizado dos meses fechados + no mês corrente, realizado
         parcial com o forecast do restante empilhado + forecast dos meses
-        futuros. Variação = orçamento menos forecast. Com o interruptor ligado,
+        futuros. Forecast Manual compõe o total projetado. Variação = orçamento
+        menos o total projetado consolidado. Com o interruptor ligado,
         o custo compartilhado aparece empilhado em laranja sobre o consumo real
         — não mistura as duas barras. O card Realizado soma os dois.
       </Alert>
@@ -1333,8 +1344,9 @@ export default function ExpectedView({
           <Stack direction="row" gap={2} flexWrap="wrap" mb={2}>
             {card("Realizado", actual, "#F2A900", () => openConsumptionDetails("realizado"))}
             {card("Forecast", forecastOnly, "#7C3AED", () => openConsumptionDetails("forecast"), "Projeção adicional ao realizado")}
+            {card("Forecast Manual", forecastManual, "#0EA5E9", undefined, "Planejamento manual consolidado")}
             {card(
-              "Realizado + Forecast",
+              "Total projetado",
               forecast,
               "#16A34A",
               () => openConsumptionDetails("ambos"),
@@ -1476,7 +1488,7 @@ export default function ExpectedView({
                   {pathParts.join(" > ") || "Consumo Cloud"}
                 </Typography>
                 <Typography variant="caption" display="block" color="text.secondary">
-                  Total projetado = Realizado + Forecast · Delta vs Orçamento = Total projetado − Orçamento (positivo indica valor acima do orçamento)
+                  Total projetado = Realizado + Forecast + Forecast Manual · Delta vs Orçamento = Total projetado − Orçamento (positivo indica valor acima do orçamento)
                 </Typography>
               </Box>
               <Stack direction="row" gap={1} alignItems="center">
