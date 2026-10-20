@@ -6,6 +6,7 @@ import re
 import shlex
 import base64
 from hashlib import sha256
+from datetime import date, datetime, timezone
 
 from pydantic import BaseModel, Field
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -23,6 +24,7 @@ from app.services.azure_tag_policy_service import (
     AzureTagPolicyService, TAG_CONTRIBUTOR_ROLE, slugify, _collapse_tag_keys,
 )
 from app.services.azure_tag_dashboard_service import AzureTagDashboardService
+from app.services.azure_tag_timeline_service import AzureTagTimelineService
 
 router = APIRouter(prefix="/azure-tag-policy", tags=["azure-tag-policy"])
 FOCUS_FIELD_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
@@ -118,6 +120,34 @@ async def executive_tag_dashboard(connection_id: int = Query(...), db: AsyncSess
         return await AzureTagDashboardService(db).executive_summary(connection_id)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except (PermissionError, RuntimeError) as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+
+
+@router.get("/timeline")
+async def azure_tag_policy_timeline(
+    connection_id: int = Query(...),
+    since: date = Query(default=date(2026, 10, 12)),
+    db: AsyncSession = Depends(get_db),
+):
+    try:
+        return await AzureTagTimelineService(db).timeline(connection_id, since)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
+@router.post("/timeline/backfill")
+async def backfill_azure_tag_policy_timeline(
+    connection_id: int = Query(...),
+    since: date = Query(default=date(2026, 10, 12)),
+    db: AsyncSession = Depends(get_db),
+):
+    if since > datetime.now(timezone.utc).date():
+        raise HTTPException(status_code=422, detail="A data inicial não pode estar no futuro")
+    try:
+        return await AzureTagTimelineService(db).backfill(connection_id, since)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
     except (PermissionError, RuntimeError) as exc:
         raise HTTPException(status_code=502, detail=str(exc)) from exc
 
