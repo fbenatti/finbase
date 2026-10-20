@@ -13,6 +13,7 @@ from sqlalchemy import text
 
 from app.database import async_session
 from app.services.anomaly_v2.baseline import expected_for_day, expected_from_reference
+from app.services.anomaly_v2.settings import detector_settings
 from app.services.trino_service import execute as trino_execute
 
 logger = logging.getLogger(__name__)
@@ -396,6 +397,7 @@ def _chart_items(
     end: date,
     as_of: date,
     frozen_reference: Mapping[str, Any] | None = None,
+    settings: Mapping[str, Any] | None = None,
 ) -> list[dict[str, Any]]:
     # Trino GROUP BY has no ordering guarantee. Baseline residuals accumulate
     # chronologically, so the same daily values must always enter in date order.
@@ -409,7 +411,7 @@ def _chart_items(
         if frozen_reference and iso >= str(frozen_reference["reference_day"]):
             expected, lower, upper, _mad = expected_from_reference(frozen_reference, target=cursor)
         else:
-            expected, lower, upper, _mad = expected_for_day(scope_rows, target=cursor)
+            expected, lower, upper, _mad = expected_for_day(scope_rows, target=cursor, settings=settings)
         has_history = first_positive is not None and first_positive < iso
         comparable = has_history and obs is not None
         items.append({
@@ -439,7 +441,8 @@ async def _read_v2_case_series(case: Any, config: Any, *, as_of: date) -> dict[s
         event_day = date.fromisoformat(str(case.event_date)[:10])
     except ValueError:
         event_day = as_of
-    start = event_day - timedelta(days=45)
+    settings = detector_settings(getattr(config, "detector_settings", None))
+    start = event_day - timedelta(days=int(settings["detection_lookback_days"]))
     end = max(as_of, event_day)
     namespace = str(config.source_namespace or "silver")
     table = str(config.destination_physical_name)
@@ -575,7 +578,8 @@ async def _read_v2_case_series(case: Any, config: Any, *, as_of: date) -> dict[s
             "method": "FROZEN_CASE_VALUES",
         }
     items = _chart_items(by_day, scope_rows, start=start, end=end, as_of=as_of,
-                         frozen_reference=frozen_reference if not monthly else None)
+                         frozen_reference=frozen_reference if not monthly else None,
+                         settings=settings)
     detail_dimensions, detail_items, common = breakdown_from_rows(detail_rows, specs) if detail_rows else ([], [], {})
     member_dimensions = {**{key: value for key, value in dimensions.items() if value not in (None, "")}, **common}
     event_point = next((point for point in items if point["event_date"] == event_iso), {})
