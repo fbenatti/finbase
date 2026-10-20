@@ -35,6 +35,7 @@ const DIRECTOR_VIEW_LABELS: Record<string, string> = {
 const DIRECTOR_PATH_ROOT_PREFIXES = ["Consumo Cloud"] as const;
 
 const DEFAULT_CHILD_LIMIT = 7;
+const OTHER_CHILD_PAGE_SIZE = 100;
 export const EMPTY_DIMENSION_LABEL = "Não informado";
 const MAX_EMPTY_ORG_SKIP = 6;
 
@@ -61,14 +62,22 @@ export function isEmptyOrgLevel(field: string, children: Array<{ key: string; __
   return children[0].key === EMPTY_DIMENSION_LABEL;
 }
 
-type TreeChildAgg = { key: string; cost: number; mom: number | null; __other?: boolean };
+type TreeChildAgg = { key: string; cost: number; mom: number | null; __other?: boolean; __manualForecast?: boolean };
 
-function aggregateTreeChildren(rows: Record<string, unknown>[], field: string, filterRowTypes: boolean, measureColumn: "realizado" | "realizado_cloud"): Map<string, { cost: number; byMonth: Map<string, number> }> {
-  const map = new Map<string, { cost: number; byMonth: Map<string, number> }>();
+type TreeChildTotal = { cost: number; byMonth: Map<string, number>; manualForecast: boolean };
+
+function aggregateTreeChildren(rows: Record<string, unknown>[], field: string, filterRowTypes: boolean, measureColumn: "realizado" | "realizado_cloud", includeAllChildren = false, labelManualForecast = false): Map<string, TreeChildTotal> {
+  const map = new Map<string, TreeChildTotal>();
   for (const r of rows) {
-    const k = String(r[field] ?? EMPTY_DIMENSION_LABEL);
-    if (!map.has(k)) map.set(k, { cost: 0, byMonth: new Map() });
+    const tipo = String(r.tipo ?? r.Tipo ?? "").trim().toLowerCase();
+    const rawValue = r[field];
+    const rawKey = String(rawValue ?? EMPTY_DIMENSION_LABEL);
+    const isManualForecast = labelManualForecast && tipo === "forecast-manual" && isOrgField(field) &&
+      (rawValue == null || rawKey.trim() === "" || rawKey.trim().toLowerCase() === EMPTY_DIMENSION_LABEL.toLowerCase());
+    const k = isManualForecast ? "Forecast Manual" : rawKey;
+    if (!map.has(k)) map.set(k, { cost: 0, byMonth: new Map(), manualForecast: false });
     const o = map.get(k)!;
+    o.manualForecast ||= isManualForecast;
     const v = Number(r[measureColumn] || 0);
     // No diálogo de consumo o filtro SQL já selecionou somente realizado.
     // Não dependa do nome retornado da coluna ``tipo`` (que pode preservar a
@@ -83,18 +92,18 @@ function aggregateTreeChildren(rows: Record<string, unknown>[], field: string, f
   return map;
 }
 
-function rankTreeChildren(map: Map<string, { cost: number; byMonth: Map<string, number> }>, field: string): TreeChildAgg[] {
+function rankTreeChildren(map: Map<string, TreeChildTotal>, field: string, includeAllChildren = false): TreeChildAgg[] {
   const items: TreeChildAgg[] = [...map.entries()]
     .map(([key, o]) => {
       const months = [...o.byMonth.keys()].sort();
       const cur = months.length ? o.byMonth.get(months[months.length - 1]) || 0 : 0;
       const prev = months.length > 1 ? o.byMonth.get(months[months.length - 2]) || 0 : 0;
-      return { key, cost: o.cost, mom: prev ? ((cur - prev) / Math.abs(prev)) * 100 : null };
+      return { key, cost: o.cost, mom: prev ? ((cur - prev) / Math.abs(prev)) * 100 : null, __manualForecast: o.manualForecast };
     });
   // Toda a decomposição é uma visão de consumo: a ordem precisa ser
   // materialidade (maior → menor), inclusive para Serviço e SKU.
   items.sort((a, b) => Math.abs(b.cost) - Math.abs(a.cost));
-  const limit = DEFAULT_CHILD_LIMIT;
+  const limit = includeAllChildren ? items.length : DEFAULT_CHILD_LIMIT;
   const top = items.slice(0, limit);
   const rest = items.slice(limit);
   if (rest.length) top.push({ key: "Outros", cost: rest.reduce((s, x) => s + x.cost, 0), mom: null, __other: true });
@@ -183,6 +192,7 @@ export default function HierarchicalDecompTree({
   shareCaption = "participação no contexto atual",
   filterRowTypes = true,
   measureColumn = "realizado",
+  labelManualForecast = false,
 }: {
   table: string;
   baseFilters: GoldQueryFilter[];
@@ -195,17 +205,21 @@ export default function HierarchicalDecompTree({
   filterRowTypes?: boolean;
   /** Medida financeira usada pelos demais widgets no mesmo contexto. */
   measureColumn?: "realizado" | "realizado_cloud";
+  /** Marca como Forecast Manual as linhas forecast-manual sem nível organizacional. */
+  labelManualForecast?: boolean;
 }) {
   const svgId = useId().replace(/:/g, "");
   const [treePath, setTreePath] = useState<DecompPathStep[]>([]);
   const [treeMetric, setTreeMetric] = useState<"cost" | "share" | "mom">("cost");
   const [results, setResults] = useState<Record<string, GoldQueryResult | null>>({});
   const [emptyLevelSkip, setEmptyLevelSkip] = useState(0);
+  const [showOtherChildren, setShowOtherChildren] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
 
   useEffect(() => {
     setTreePath([]);
+    setShowOtherChildren(false);
   }, [queryKey]);
 
   const treeStart = treePath.length;
@@ -223,6 +237,7 @@ export default function HierarchicalDecompTree({
   const chainKey = chain.map(c => c.field).join(",");
   useEffect(() => {
     setEmptyLevelSkip(0);
+    setShowOtherChildren(false);
   }, [treePathKey, chainKey]);
   useEffect(() => {
     let alive = true;
@@ -271,10 +286,10 @@ export default function HierarchicalDecompTree({
             measures: [{ column: measureColumn, aggregation: "SUM" }],
             filters: [...baseFilters, ...pathFilters(treeStart)],
             filter_groups: filterGroups.length ? filterGroups : undefined,
-            row_limit: 10000,
+            row_limit: showOtherChildren ? OTHER_CHILD_PAGE_SIZE : 10000,
           });
           if (!alive) return;
-          const children = rankTreeChildren(aggregateTreeChildren(rowsOf(treeResult), field, filterRowTypes, measureColumn), field);
+          const children = rankTreeChildren(aggregateTreeChildren(rowsOf(treeResult), field, filterRowTypes, measureColumn, showOtherChildren, labelManualForecast), field, showOtherChildren);
           m[`tree${treeStart}`] = treeResult;
           if (!isEmptyOrgLevel(field, children)) {
             setEmptyLevelSkip(skip);
@@ -292,7 +307,7 @@ export default function HierarchicalDecompTree({
     });
     return () => { alive = false; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [table, queryKey, treePathKey, chainKey, measureColumn]);
+  }, [table, queryKey, treePathKey, chainKey, measureColumn, showOtherChildren, labelManualForecast]);
 
   const spineCosts = useMemo(() => {
     const arr: number[] = [];
@@ -314,8 +329,8 @@ export default function HierarchicalDecompTree({
     if (nextDistinctIndex >= chain.length) return [];
     const rows = rowsOf(results[`tree${treeStart}`]);
     const field = chain[nextDistinctIndex].field;
-    return rankTreeChildren(aggregateTreeChildren(rows, field, filterRowTypes, measureColumn), field);
-  }, [results, treeStart, nextDistinctIndex, chain, filterRowTypes, measureColumn]);
+    return rankTreeChildren(aggregateTreeChildren(rows, field, filterRowTypes, measureColumn, showOtherChildren, labelManualForecast), field, showOtherChildren);
+  }, [results, treeStart, nextDistinctIndex, chain, filterRowTypes, measureColumn, showOtherChildren, labelManualForecast]);
   const nextField = nextDistinctIndex < chain.length ? chain[nextDistinctIndex].field : null;
   const nextLabel = nextDistinctIndex < chain.length ? chain[nextDistinctIndex].label : null;
   const topShare = treeChildren.length && nodeTotal ? (Math.abs(treeChildren[0].cost) / Math.abs(nodeTotal)) * 100 : 0;
@@ -458,18 +473,18 @@ export default function HierarchicalDecompTree({
                   const x = branchX, y = top + idx * childGap;
                   const share = nodeTotal ? (Math.abs(it.cost) / Math.abs(nodeTotal)) * 100 : 0;
                   const barW = Math.max(3, (nodeW - 26) * Math.min(1, share / Math.max(topShare, 1)));
-                  const clickable = !it.__other && it.key !== EMPTY_DIMENSION_LABEL;
+                  const clickable = it.key !== EMPTY_DIMENSION_LABEL && !it.__manualForecast;
                   const metric = treeMetricText(it, nodeTotal);
                   const metricColor = treeMetric === "mom" && it.mom != null ? (it.mom >= 0 ? "#dc2626" : "#059669") : PURPLE;
                   return (
-                    <g key={`cn${idx}`} className="node" style={{ cursor: clickable ? "pointer" : "default" }} onClick={clickable && nextField ? () => selectTreeNode(treeStart, nextField, it.key) : undefined}>
+                    <g key={`cn${idx}`} className="node" style={{ cursor: clickable || it.__other ? "pointer" : "default" }} onClick={it.__other ? () => setShowOtherChildren(true) : clickable && nextField ? () => selectTreeNode(treeStart, nextField, it.key) : undefined}>
                       <rect x={x} y={y} width={nodeW} height={nodeH} rx={14} fill="#fff" stroke="#e5e7eb" strokeWidth={1} />
                       <text x={x + 13} y={y + 20} fontSize={11} fontWeight={900} fill="#1f2937">{String(it.key).slice(0, 28)}</text>
                       <text x={x + 13} y={y + 40} fontSize={10} fontWeight={800} fill="#64748b">{compact(it.cost)}</text>
                       <text x={x + nodeW - 12} y={y + 40} fontSize={10} fontWeight={950} textAnchor="end" fill={metricColor}>{metric}</text>
                       <rect x={x + 13} y={y + 50} width={nodeW - 26} height={5} rx={3} fill="#eef2f7" />
                       <rect x={x + 13} y={y + 50} width={barW} height={5} rx={3} fill={`url(#${barGrad})`} />
-                      <title>{`${it.key} · custo ${compact(it.cost)} · share ${pct(share)}${it.mom == null ? "" : ` · MoM ${it.mom >= 0 ? "+" : ""}${pct(it.mom)}`}`}</title>
+                      <title>{`${it.key} · custo ${compact(it.cost)} · share ${pct(share)}${it.mom == null ? "" : ` · MoM ${it.mom >= 0 ? "+" : ""}${pct(it.mom)}`}${it.__other ? " · clique para listar os demais filhos" : ""}`}</title>
                     </g>
                   );
                 })}
@@ -479,7 +494,7 @@ export default function HierarchicalDecompTree({
           })()}
         </Box>
         <Stack direction="row" justifyContent="space-between" gap={1.5} alignItems="center" flexWrap="wrap" sx={{ px: 1.6, py: 1.2, color: "#667085", fontSize: 10, fontWeight: 750 }}>
-          <Box><Typography component="span" sx={{ color: "#344054", fontWeight: 900 }}>Como ler:</Typography> a espessura das conexões representa o share do custo no nó pai. Clique em um filho para aprofundar até ServiceSubcategory e Sub Serviço (SKU name).</Box>
+          <Box><Typography component="span" sx={{ color: "#344054", fontWeight: 900 }}>Como ler:</Typography> a espessura das conexões representa o share do custo no nó pai. Clique em um filho para aprofundar até ServiceSubcategory e Sub Serviço (SKU name). Clique em “Outros” para listar os demais filhos.</Box>
           <Stack direction="row" gap={1.5} alignItems="center">
             <Box><Box component="span" sx={{ display: "inline-block", width: 9, height: 9, borderRadius: 99, bgcolor: "#7c3aed", mr: 0.6 }} />estrutura / share</Box>
             <Box><Box component="span" sx={{ display: "inline-block", width: 9, height: 9, borderRadius: 99, bgcolor: "#dc2626", mr: 0.6 }} />MoM positivo</Box>
