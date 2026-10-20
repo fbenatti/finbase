@@ -1650,6 +1650,19 @@ def _leaf_totals(
     return forecast, actual
 
 
+def _desvio_cost_paths(leaves, forecast_grain, actual_grain, scope_path):
+    """Partition financial facts once, including direct costs of parent nodes."""
+    paths = {tuple(path) for path in leaves}
+    scope = tuple(scope_path)
+    for levels in set(forecast_grain) | set(actual_grain):
+        path = [str(value or "").strip() for value in levels]
+        while path and not path[-1]:
+            path.pop()
+        if path and all(path) and tuple(path[:len(scope)]) == scope:
+            paths.add(tuple(path))
+    return [list(path) for path in sorted(paths) if path[:len(scope)] == scope]
+
+
 async def _desvios_subcat_grain(
     run: ForecastRun,
     snapshot: dict[str, Any],
@@ -1769,13 +1782,18 @@ async def accuracy_desvios(
     departments = (await db.execute(select(Department).where(Department.active == True))).scalars().all()
     leaves = _leaf_paths(departments, scope_path)
     forecast_grain, actual_grain = await _desvios_grain(run, snapshot, target, scope_path)
+    leaves = _desvio_cost_paths(leaves, forecast_grain, actual_grain, scope_path)
+    parents = {tuple(path[:depth]) for path in leaves for depth in range(1, len(path))}
     items = []
     for leaf in leaves:
         forecast, actual = _leaf_totals(leaf, forecast_grain, actual_grain)
         if forecast == 0 and actual == 0:
             continue
         metrics = _desvio_metrics(forecast, actual)
-        items.append({"path": leaf, "name": leaf[-1] if leaf else "", "forecast_value": forecast, "actual_value": actual, **{k: metrics[k] for k in ("variance", "variance_pct", "accuracy", "wape", "bias")}})
+        name = leaf[-1] if leaf else ""
+        if tuple(leaf) in parents:
+            name += " (lançamentos diretos)"
+        items.append({"path": leaf, "name": name, "forecast_value": forecast, "actual_value": actual, **{k: metrics[k] for k in ("variance", "variance_pct", "accuracy", "wape", "bias")}})
     positive = sorted((i for i in items if i["variance"] > 0), key=lambda i: -i["variance"])
     negative = sorted((i for i in items if i["variance"] < 0), key=lambda i: i["variance"])
     if limit:
