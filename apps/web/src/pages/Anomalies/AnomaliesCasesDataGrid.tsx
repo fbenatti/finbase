@@ -12,6 +12,24 @@ type Props = {
 };
 
 export default function AnomaliesCasesDataGrid({ cases, currency, onOpen }: Props) {
+  const anomalyName = (row: AnomalyCase) => {
+    const dimensions = row.series_dimensions ?? {};
+    const keys = [
+      "skuname", "sku_name", "sku", "skumeter", "metername", "meter_name",
+      "servicesubcategory", "service_category", "servicename", "service_name",
+    ];
+    for (const key of keys) {
+      const value = dimensions[key]?.trim();
+      if (value) return value;
+    }
+    for (const key of keys) {
+      const prefix = `${key}=`;
+      const value = row.event_family?.split("|").find((part) => part.trim().toLowerCase().startsWith(prefix));
+      if (value) return value.slice(value.indexOf("=") + 1).trim();
+    }
+    return "—";
+  };
+
   const columns: GridColDef[] = [
     {
       field: "severity",
@@ -20,7 +38,13 @@ export default function AnomaliesCasesDataGrid({ cases, currency, onOpen }: Prop
       renderCell: ({ value }) => <Chip size="small" label={String(value)} />,
     },
     { field: "state", headerName: "Estado", width: 120 },
-    { field: "event_family", headerName: "Anomalia", flex: 1.2, minWidth: 180 },
+    {
+      field: "event_family",
+      headerName: "Anomalia",
+      flex: 1.2,
+      minWidth: 180,
+      valueGetter: (_, row) => anomalyName(row),
+    },
     {
       field: "cloud",
       headerName: "Nuvem",
