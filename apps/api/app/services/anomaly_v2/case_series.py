@@ -329,6 +329,9 @@ def _chart_items(
     end: date,
     as_of: date,
 ) -> list[dict[str, Any]]:
+    # Trino GROUP BY has no ordering guarantee. Baseline residuals accumulate
+    # chronologically, so the same daily values must always enter in date order.
+    scope_rows = sorted(scope_rows, key=lambda row: str(row.get("day") or ""))
     first_positive = min((day for day, cost in by_day.items() if cost > 0), default=None)
     items: list[dict[str, Any]] = []
     cursor = start
