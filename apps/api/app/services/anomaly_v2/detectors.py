@@ -210,7 +210,8 @@ def continuous_episode(
             cursor += timedelta(days=1)
             continue
         obs = by_day[cursor.isoformat()]
-        expected, lower, upper, mad = expected_for_day(scope_daily, target=cursor)
+        reference_day = date.fromisoformat(active["episode_start"]) if active else cursor
+        expected, lower, upper, mad = expected_for_day(scope_daily, target=cursor, reference_day=reference_day)
         pct = _pct_delta(obs, expected)
         hot = obs > upper and obs >= materiality and pct >= min_pct
         if hot:

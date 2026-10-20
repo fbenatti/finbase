@@ -38,7 +38,7 @@ def evaluate_return(
             cursor += timedelta(days=1)
             continue
         obs = sum(float(row.get("cost_cloud") or 0) for row in observations)
-        expected, _l, upper, _mad = expected_for_day(scope_daily, target=cursor)
+        expected, _l, upper, _mad = expected_for_day(scope_daily, target=cursor, reference_day=episode_start)
         if obs <= upper:
             valid_streak += 1
             if valid_streak >= RETURN_VALID_DAYS and returned_at is None:

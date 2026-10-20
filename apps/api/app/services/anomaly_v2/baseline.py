@@ -47,14 +47,16 @@ def expected_for_day(
     *,
     target: date,
     z: float = DEFAULT_Z,
+    reference_day: date | None = None,
 ) -> tuple[float, float, float, float]:
     """Retorna expected, lower, upper, mad."""
-    level_start = target - timedelta(days=LEVEL_DAYS)
-    mad_start = target - timedelta(days=MAD_DAYS)
+    reference_day = min(reference_day or target, target)
+    level_start = reference_day - timedelta(days=LEVEL_DAYS)
+    mad_start = reference_day - timedelta(days=MAD_DAYS)
     level_vals: list[float] = []
     mad_residuals: list[float] = []
     # A day's own charge (and future data) cannot train its reference.
-    factors = weekday_factors(daily, as_of=target - timedelta(days=1))
+    factors = weekday_factors(daily, as_of=reference_day - timedelta(days=1))
     wd_factor = factors.get(target.weekday(), 1.0)
 
     by_day: dict[str, float] = {}
@@ -62,18 +64,26 @@ def expected_for_day(
         day_s = str(row.get("day") or "")[:10]
         by_day[day_s] = by_day.get(day_s, 0.0) + float(row.get("cost_cloud") or 0)
 
+    from collections import deque
+
+    trailing = deque()
     for day_s, cost in sorted(by_day.items()):
         try:
             day = date.fromisoformat(day_s)
         except ValueError:
             continue
-        if level_start <= day < target:
-            level_vals.append(cost)
-        if mad_start <= day < target:
-            f = factors.get(day.weekday(), 1.0)
-            expected = statistics.median(level_vals) * f if level_vals else cost
-            if expected > 0:
-                mad_residuals.append(cost - expected)
+        if day >= reference_day:
+            continue
+        f = factors.get(day.weekday(), 1.0)
+        normalized = cost / f
+        if level_start <= day:
+            level_vals.append(normalized)
+        while trailing and trailing[0][0] < day - timedelta(days=LEVEL_DAYS):
+            trailing.popleft()
+        if mad_start <= day and trailing:
+            prior_expected = statistics.median([value for _, value in trailing]) * f
+            mad_residuals.append(cost - prior_expected)
+        trailing.append((day, normalized))
 
     level = statistics.median(level_vals) if level_vals else 0.0
     expected = level * wd_factor
