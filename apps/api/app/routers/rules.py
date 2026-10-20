@@ -163,6 +163,10 @@ async def _move_department(
         if len(_department_path(department_id, departments)) > MAX_DEPARTMENT_LEVELS:
             department.parent_id = old_parent_id
             raise HTTPException(status_code=422, detail="A movimentação deixaria um descendente acima do nível 7")
+    # Persist the in-memory parent change before querying entries; the session
+    # may otherwise autoflush only when the SELECT runs, after its identity map
+    # has already loaded stale planning rows.
+    await db.flush()
     entries_updated = await _refresh_planning_paths(db, departments, impacted_ids)
     db.add(OrganizationMoveAudit(
         department_id=department.id, old_parent_id=old_parent_id, new_parent_id=new_parent_id,
