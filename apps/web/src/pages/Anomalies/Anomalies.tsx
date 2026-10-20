@@ -73,6 +73,8 @@ const CAUSE_LABEL: Record<string, string> = {
   UNDETERMINED: "Causa não determinada",
 };
 
+const DISMISSED_RUN_STORAGE_KEY = "openfinops:anomalies:dismissed-run-id";
+
 const money = (value: number | null | undefined, currency = "BRL") =>
   value === null || value === undefined
     ? "—"
@@ -177,6 +179,10 @@ export default function Anomalies() {
   const [retrospectiveItems, setRetrospectiveItems] = useState<AnomalyCase[]>([]);
   const [confirmedItems, setConfirmedItems] = useState<AnomalyCase[]>([]);
   const [latestRun, setLatestRun] = useState<AnomalyRunSummary | null>(null);
+  const [dismissedRunId, setDismissedRunId] = useState<number | null>(() => {
+    const stored = Number(window.localStorage.getItem(DISMISSED_RUN_STORAGE_KEY));
+    return Number.isFinite(stored) && stored > 0 ? stored : null;
+  });
   const detectionRunning = latestRun?.status === "QUEUED" || latestRun?.status === "RUNNING";
   const [cases, setCases] = useState<AnomalyCase[]>([]);
   const [total, setTotal] = useState(0);
@@ -514,7 +520,14 @@ export default function Anomalies() {
       </Box>
 
       {error && <Alert severity="error" sx={{ mb: 1 }} onClose={() => setError(null)}>{error}</Alert>}
-      {latestRun && <Alert severity={latestRun.status === "FAILED" ? "error" : latestRun.status === "COMPLETED" ? "success" : "info"} sx={{ mb: 2 }}>
+      {latestRun && latestRun.id !== dismissedRunId && <Alert
+        severity={latestRun.status === "FAILED" ? "error" : latestRun.status === "COMPLETED" ? "success" : "info"}
+        sx={{ mb: 2 }}
+        onClose={() => {
+          setDismissedRunId(latestRun.id);
+          window.localStorage.setItem(DISMISSED_RUN_STORAGE_KEY, String(latestRun.id));
+        }}
+      >
         Detecção #{latestRun.id} · {latestRun.status === "FAILED" ? "Falhou" : latestRun.status === "COMPLETED" ? "Concluída" : latestRun.status === "CANCELLED" ? "Cancelada" : latestRun.status === "QUEUED" ? "Na fila" : "Em execução"}
         {latestRun.status === "FAILED" ? `: ${latestRun.error ?? latestRun.phase ?? "Consulte os logs de processamento"}`
           : latestRun.status === "COMPLETED" ? ` · ${latestRun.cases_created ?? 0} caso(s) novo(s), ${latestRun.cases_updated ?? 0} atualizado(s) · ${latestRun.phase ?? ""}`
