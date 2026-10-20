@@ -216,6 +216,10 @@ def continuous_episode(
             cursor += timedelta(days=1)
             continue
         obs = by_day[cursor.isoformat()]
+        if active is None and sum(day < cursor.isoformat() for day in by_day) < 14:
+            # A first observation has no baseline; it is not a historical spike.
+            cursor += timedelta(days=1)
+            continue
         reference_day = date.fromisoformat(active["episode_start"]) if active else cursor
         expected, lower, upper, mad = expected_for_day(scope_daily, target=cursor, reference_day=reference_day)
         pct = _pct_delta(obs, expected)
