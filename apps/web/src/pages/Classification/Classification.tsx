@@ -866,7 +866,7 @@ export function TagsTab() {
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
   const [viewTab, setViewTab] = useState<"script" | "json">("script");
-  const [tagSubTab, setTagSubTab] = useState<"policies" | "executive" | "mapping">("policies");
+  const [tagSubTab, setTagSubTab] = useState<"policies" | "executive" | "mapping">("executive");
   const [flowDialogOpen, setFlowDialogOpen] = useState(false);
   const [selectedJsonTenantIndex, setSelectedJsonTenantIndex] = useState(0);
   const [isEditing, setIsEditing] = useState(false);
@@ -966,8 +966,8 @@ export function TagsTab() {
   ]);
 
   const tagTabs = <Tabs value={tagSubTab} onChange={(_, value) => setTagSubTab(value)} sx={{ mb: 3, borderBottom: 1, borderColor: "divider" }}>
-    <Tab value="policies" label="Policies Azure" />
     <Tab value="executive" label="Dashboard Executivo" />
+    <Tab value="policies" label="Policies Azure" />
     <Tab value="mapping" label="Mapeamento de Tags" />
   </Tabs>;
 
