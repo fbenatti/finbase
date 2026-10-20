@@ -10,6 +10,12 @@ const monthName = (month: string) => {
   return new Date(Number(match[1]), Number(match[2]) - 1, 1).toLocaleDateString("pt-BR", { month: "short", year: "numeric" });
 };
 const rateLabel = (rate: number) => rate.toLocaleString("pt-BR", { style: "currency", currency: "BRL", minimumFractionDigits: 4, maximumFractionDigits: 4 });
+const compactMonth = (period: string) => {
+  const match = period.match(/^(\d{4})[-/]?(\d{2})/);
+  if (!match) return period;
+  const month = new Date(Number(match[1]), Number(match[2]) - 1, 1).toLocaleDateString("pt-BR", { month: "short" }).replace(".", "");
+  return `${month}/${match[1]}`;
+};
 
 type MonthRow = { period: string; rate: number; deltaPct: number | null };
 
@@ -57,6 +63,7 @@ export default function DollarEvolution() {
       deltaPct: monthlyChanges.length ? monthlyChanges.reduce((sum, value) => sum + value, 0) / monthlyChanges.length : null,
     };
   }, [rows]);
+  const periodRange = rows.length ? `${compactMonth(rows[0].period)} a ${compactMonth(rows[rows.length - 1].period)}` : "";
   const minRate = useMemo(() => Math.min(...rows.map(row => row.rate)), [rows]);
   const maxRate = useMemo(() => Math.max(...rows.map(row => row.rate)), [rows]);
   const span = Math.max(maxRate - minRate, 0.01);
@@ -66,8 +73,8 @@ export default function DollarEvolution() {
     {error && <Alert severity="error" sx={{ mb: 2 }}>{error}</Alert>}
     {loading ? <Box display="flex" justifyContent="center" p={5}><CircularProgress /></Box> : error ? null : rows.length === 0 ? <Alert severity="warning">O cubo está disponível, mas não retornou taxas mensais para Azure.</Alert> : <>
       <Grid container spacing={2} mb={2}>
-        <Grid item xs={12} md={6}><Card variant="outlined"><CardContent><Typography color="text.secondary" variant="body2">Dólar médio do período</Typography><Typography variant="h5" fontWeight={750}>{periodAverages.rate === null ? "—" : rateLabel(periodAverages.rate)}</Typography></CardContent></Card></Grid>
-        <Grid item xs={12} md={6}><Card variant="outlined"><CardContent><Typography color="text.secondary" variant="body2">Média da variação mensal</Typography><Typography variant="h5" fontWeight={750}>{periodAverages.deltaPct === null ? "—" : pct.format(periodAverages.deltaPct)}</Typography></CardContent></Card></Grid>
+        <Grid item xs={12} md={6}><Card variant="outlined"><CardContent><Typography color="text.secondary" variant="body2">Dólar médio · {periodRange}</Typography><Typography variant="h5" fontWeight={750}>{periodAverages.rate === null ? "—" : rateLabel(periodAverages.rate)}</Typography></CardContent></Card></Grid>
+        <Grid item xs={12} md={6}><Card variant="outlined"><CardContent><Typography color="text.secondary" variant="body2">Variação mensal média · {periodRange}</Typography><Typography variant="h5" fontWeight={750}>{periodAverages.deltaPct === null ? "—" : pct.format(periodAverages.deltaPct)}</Typography></CardContent></Card></Grid>
       </Grid>
       <Paper variant="outlined" sx={{ p: 2, mb: 2 }}>
         <Typography variant="subtitle1" fontWeight={700} mb={2}>Taxa mensal BRL/USD</Typography>
