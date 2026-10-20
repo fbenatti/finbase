@@ -474,6 +474,9 @@ _GOLD_MEASURE_COLUMNS = frozenset({
     "billedcost",
     "effectivecost",
     "consumedquantity",
+    "consumo_usd",
+    "realizado_brl",
+    "taxa_brl_usd",
 })
 _GOLD_OPERATORS = frozenset({"IN", "NOT_IN", "CONTAINS", "NOT_CONTAINS", "IS_REALIZED"})
 # Aliases lógicos → colunas físicas da Gold (ex.: "quantity" da UI = consumedquantity).
