@@ -90,6 +90,9 @@ export default function AnomalyCaseScope({ kase, series, currency }: {
       </Stack>
     </Paper>
 
+    <Typography variant="subtitle2" sx={{ mt: 2.5 }}>Realizado × forecast</Typography>
+    <AnomalyEvolutionChart key={`${kase.id}-${JSON.stringify(filters)}`} series={selectedSeries} kase={kase} currency={currency} />
+
     <Paper variant="outlined" sx={{ mt: 2, p: { xs: 2, sm: 2.5 }, borderRadius: 3 }}>
       <Typography sx={{ fontWeight: 750, fontSize: 17 }}>De onde veio o desvio?</Typography>
       <Typography variant="body2" color="text.secondary" sx={{ mt: .25 }}>Localize o salto pelo organograma, subconta, grupo de recursos e produto.</Typography>
@@ -171,7 +174,5 @@ export default function AnomalyCaseScope({ kase, series, currency }: {
       </Box>
     </Paper>
     {rawDetailSelected && <Typography variant="caption" color="text.secondary" sx={{ display: "block", mt: 1.5 }}>O custo detalhado é observado na data do evento. Forecast e linha do tempo continuam no nível {forecastScopeLabel}, a granularidade que a previsão sustenta.</Typography>}
-    <Typography variant="subtitle2" sx={{ mt: 2.5 }}>Evolução · {forecastScopeLabel}</Typography>
-    <AnomalyEvolutionChart key={`${kase.id}-${JSON.stringify(filters)}`} series={selectedSeries} kase={kase} currency={currency} />
   </Box>;
 }
