@@ -183,7 +183,7 @@ export default function Anomalies() {
   const [form, setForm] = useState<TransitionForm>(EMPTY_FORM);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [stateFilter, setStateFilter] = useState<string>("");
+  const [stateFilter, setStateFilter] = useState<string>("NEW");
   const [severityFilter, setSeverityFilter] = useState<string>("");
   const [queueOnly, setQueueOnly] = useState(false);
   const [myCasesOnly, setMyCasesOnly] = useState(false);
@@ -255,6 +255,9 @@ export default function Anomalies() {
         params.unassigned_only = true;
         delete params.state;
       }
+      if (stateFilter === "__open__") params.state = ["NEW", "ASSIGNED", "INVESTIGATING", "DECIDED", "IN_REMEDIATION", "VERIFYING", "RETROSPECTIVE"];
+      if (stateFilter === "__confirmed__") params.decision = ["CONFIRMED_ACTION", "CONFIRMED_ACCEPTED"];
+      if (stateFilter === "__recurrence__") params.recurrence_only = true;
       const page = await listAnomalyCases(params);
       setCases(page.items);
       setTotal(page.total);
@@ -302,12 +305,12 @@ export default function Anomalies() {
     if (tab === 4) void loadQuality();
   }, [tab, loadExpected, loadQuality]);
 
-  const openCasesFilter = (filter: "" | "overdue" | "unassigned" | "open") => {
+  const openCasesFilter = (filter: "overdue" | "unassigned" | "open" | "closed" | "new" | "confirmed" | "recurrence") => {
     setTab(2);
-    if (filter === "overdue") setStateFilter("__overdue__");
-    else if (filter === "unassigned") setStateFilter("__unassigned__");
-    else if (filter === "open") setStateFilter("");
-    else setStateFilter("");
+    setStateFilter(({ overdue: "__overdue__", unassigned: "__unassigned__", open: "__open__", closed: "CLOSED", new: "NEW", confirmed: "__confirmed__", recurrence: "__recurrence__" })[filter]);
+    setSeverityFilter("");
+    setQueueOnly(false);
+    setMyCasesOnly(false);
   };
 
   const openCase = async (id: number) => {
@@ -441,11 +444,8 @@ export default function Anomalies() {
   };
 
   const retrospectiveCases = useMemo(
-    () => cases.filter((item) =>
-      item.state === "RETROSPECTIVE"
-      || item.state === "CLOSED"
-      || item.deviation_status === "AUTOCORRIGIDO"
-      || item.deviation_status === "CORRIGIDO_COM_ACAO"),
+    () => cases.filter((item) => item.decision === "CONFIRMED_ACTION" || item.decision === "CONFIRMED_ACCEPTED"
+      || item.deviation_status === "AUTOCORRIGIDO" || item.deviation_status === "CORRIGIDO_COM_ACAO"),
     [cases],
   );
 
