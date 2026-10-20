@@ -14,7 +14,7 @@ from typing import Any, Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from pydantic import BaseModel, Field
-from sqlalchemy import func, select
+from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.audit import audit
@@ -30,6 +30,7 @@ from app.models.anomaly import (
     AnomalyRun,
 )
 from app.models.identity import User
+from app.models.source_connection import SourceConnection
 from app.services import anomaly_workflow as workflow
 from app.services.anomaly_v2.settings import detector_settings, validate_detector_settings
 
@@ -138,7 +139,7 @@ def _dim(case: AnomalyCase, *keys: str) -> str | None:
     return None
 
 
-def _case_out(case: AnomalyCase) -> dict[str, Any]:
+def _case_out(case: AnomalyCase, *, cloud: str | None = None) -> dict[str, Any]:
     return {
         "id": case.id,
         "case_key": case.case_key,
@@ -188,7 +189,7 @@ def _case_out(case: AnomalyCase) -> dict[str, Any]:
         "reopen_count": case.reopen_count,
         "parent_case_id": case.parent_case_id,
         "case_version": case.case_version,
-        "cloud": getattr(case, "cloud", None) or _dim(case, "cloud_origem", "cloud"),
+        "cloud": cloud or getattr(case, "cloud", None) or _dim(case, "cloud_origem", "cloud"),
         "subaccount_name": getattr(case, "subaccount_name", None) or _dim(case, "subaccountname", "subaccount_name"),
         "resource_group": getattr(case, "resource_group", None) or _dim(case, "resource_group", "source_resource_group_name", "resourcegroupname"),
         "service_name": getattr(case, "service_name", None) or _dim(case, "servicename", "service_name"),
@@ -547,7 +548,45 @@ async def list_cases(
         deviation_statuses=deviation_status,
         recurrence_only=recurrence_only,
     )
-    return {"items": [_case_out(case) for case in rows], "total": total, "limit": size, "offset": skip}
+    cloud_values = {
+        str(case.cloud or _dim(case, "cloud_origem", "cloud")).strip()
+        for case in rows
+        if case.cloud or _dim(case, "cloud_origem", "cloud")
+    }
+    connection_ids = {int(value) for value in cloud_values if value.isdigit()}
+    connection_codes = {value for value in cloud_values if not value.isdigit()}
+    connection_conditions = []
+    if connection_ids:
+        connection_conditions.append(SourceConnection.id.in_(connection_ids))
+    if connection_codes:
+        connection_conditions.append(func.lower(SourceConnection.code).in_({value.lower() for value in connection_codes}))
+    connection_rows = (
+        (await db.execute(select(SourceConnection).where(or_(*connection_conditions)))).scalars().all()
+        if connection_conditions
+        else []
+    )
+    provider_by_connection = {}
+    for connection in connection_rows:
+        provider = connection.cloud_scope or connection.cloud_name
+        if provider:
+            provider_by_connection[str(connection.id)] = str(provider)
+            provider_by_connection[connection.code.lower()] = str(provider)
+
+    def case_provider(case: AnomalyCase) -> str | None:
+        raw = str(case.cloud or _dim(case, "cloud_origem", "cloud") or "").strip()
+        if not raw:
+            return None
+        provider = provider_by_connection.get(raw.lower())
+        if provider:
+            return provider
+        return "Nuvem não identificada" if raw.isdigit() else raw
+
+    return {
+        "items": [_case_out(case, cloud=case_provider(case)) for case in rows],
+        "total": total,
+        "limit": size,
+        "offset": skip,
+    }
 
 
 @router.get("/cases/summary")
