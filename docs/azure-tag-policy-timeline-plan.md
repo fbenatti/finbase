@@ -22,7 +22,7 @@ O consolidado é calculado pela soma dos snapshots das subscriptions no mesmo in
 
 ## Entrega
 
-- Backfill idempotente dos inventários Bronze existentes e dos eventos Azure desde 12/10; pode ser executado novamente após novas coletas para acrescentar os snapshots mais recentes.
+- Backfill idempotente dos inventários Bronze existentes e dos eventos Azure desde 12/10. A consulta da timeline também importa novos snapshots Bronze automaticamente; a leitura de eventos Azure pode ser repetida pelo botão.
 - API para consultar snapshots, lacunas e eventos; API para executar novamente o backfill.
 - Seção “Evolução” no Dashboard Executivo de Tags com consolidado, seletor de subscription e trilha de execução.
 - A ingestão não recalcula nem sobrescreve snapshots antigos; cada blob Bronze é importado uma vez por subscription.
