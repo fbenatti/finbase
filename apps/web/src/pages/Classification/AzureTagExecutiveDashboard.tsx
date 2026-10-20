@@ -21,6 +21,13 @@ import {
 } from "../../services/api";
 
 const fmt = (value: number) => new Intl.NumberFormat("pt-BR").format(value);
+const adherenceLevel = (value: number | null) => {
+  if (value === null) return { label: "Sem dado", color: "#94a3b8", background: "#f1f5f9" };
+  if (value < 25) return { label: "0–24%", color: "#dc2626", background: "#fef2f2" };
+  if (value < 50) return { label: "25–49%", color: "#ea580c", background: "#fff7ed" };
+  if (value < 75) return { label: "50–74%", color: "#ca8a04", background: "#fefce8" };
+  return { label: "75–100%", color: "#16a34a", background: "#f0fdf4" };
+};
 const statusLabel = (resource: AzureTagExecutiveResource) => {
   if (resource.taggable === false) return "Não tageável";
   if (resource.taggable === null) return "Não classificado";
@@ -300,10 +307,19 @@ export default function AzureTagExecutiveDashboard() {
             </Stack>
             {timelineLoading && <LinearProgress sx={{ mb: 2, borderRadius: 2 }} />}
             {timeline && timelinePoints.length > 0 && <>
+              <Stack direction="row" spacing={1.5} useFlexGap flexWrap="wrap" sx={{ mb: 2 }}>
+                {[25, 50, 75, 100].map((threshold) => {
+                  const level = adherenceLevel(threshold - 1);
+                  return <Stack key={threshold} direction="row" spacing={0.6} alignItems="center">
+                    <Box sx={{ width: 9, height: 9, borderRadius: "50%", bgcolor: level.color }} />
+                    <Typography variant="caption" color="text.secondary">{level.label}</Typography>
+                  </Stack>;
+                })}
+              </Stack>
               <Box sx={{ display: "grid", gridTemplateColumns: { xs: "1fr", sm: "repeat(3, minmax(0,1fr))" }, gap: 1.25, mb: 2.5 }}>
                 <Box sx={{ p: 1.6, borderRadius: 2, bgcolor: "background.paper", border: "1px solid", borderColor: "divider" }}>
                   <Typography variant="caption" color="text.secondary">{timelineMetricLabel.toLocaleUpperCase("pt-BR")}</Typography>
-                  <Typography variant="h4" fontWeight={800} color={lastTimelineValue === null ? "text.secondary" : lastTimelineValue >= 90 ? "success.main" : lastTimelineValue >= 60 ? "warning.main" : "error.main"}>{lastTimelineValue === null ? "—" : `${lastTimelineValue.toLocaleString("pt-BR", { minimumFractionDigits: 1 })}%`}</Typography>
+                  <Typography variant="h4" fontWeight={800} color={adherenceLevel(lastTimelineValue).color}>{lastTimelineValue === null ? "—" : `${lastTimelineValue.toLocaleString("pt-BR", { minimumFractionDigits: 1 })}%`}</Typography>
                   <Typography variant="caption" color="text.secondary">{lastTimelinePoint?.label ?? "Sem medição"}</Typography>
                 </Box>
                 <Box sx={{ p: 1.6, borderRadius: 2, bgcolor: "background.paper", border: "1px solid", borderColor: "divider" }}>
@@ -326,12 +342,13 @@ export default function AzureTagExecutiveDashboard() {
                       const previousPoint = timelinePoints.slice(0, index).reverse().find((candidate) => candidate.value !== null);
                       const delta = point.value !== null && previousPoint?.value !== null && previousPoint
                         ? point.value - previousPoint.value : null;
+                      const level = adherenceLevel(point.value);
                       return <Box key={point.date} sx={{ textAlign: "center", px: 0.75 }}>
-                        <Box sx={{ mx: "auto", width: 42, height: 42, borderRadius: "50%", display: "grid", placeItems: "center", bgcolor: "background.paper", border: "4px solid", borderColor: index === timelinePoints.length - 1 ? "#0891b2" : "#2563eb", boxShadow: "0 4px 14px rgba(37,99,235,.2)", position: "relative", zIndex: 1 }}>
-                          <Box sx={{ width: 12, height: 12, borderRadius: "50%", bgcolor: index === timelinePoints.length - 1 ? "#0891b2" : "#2563eb" }} />
+                        <Box sx={{ mx: "auto", width: 42, height: 42, borderRadius: "50%", display: "grid", placeItems: "center", bgcolor: level.background, border: "4px solid", borderColor: level.color, boxShadow: `0 4px 14px ${level.color}33`, position: "relative", zIndex: 1 }}>
+                          <Box sx={{ width: 12, height: 12, borderRadius: "50%", bgcolor: level.color }} />
                         </Box>
                         <Typography variant="caption" display="block" color="text.secondary" sx={{ mt: 1.2 }}>{point.label}</Typography>
-                        <Typography variant="h6" fontWeight={800} color={point.value === null ? "text.disabled" : timelineSubscription ? "#0e7490" : "primary.dark"}>{point.value === null ? "—" : `${point.value.toLocaleString("pt-BR", { minimumFractionDigits: 1 })}%`}</Typography>
+                        <Typography variant="h6" fontWeight={800} color={level.color}>{point.value === null ? "—" : `${point.value.toLocaleString("pt-BR", { minimumFractionDigits: 1 })}%`}</Typography>
                         <Typography variant="caption" display="block" color={delta === null ? "text.secondary" : delta >= 0 ? "success.main" : "error.main"} fontWeight={700}>
                           {index === 0 ? "primeiro snapshot" : delta === null ? "sem comparação" : `${delta >= 0 ? "↑" : "↓"} ${Math.abs(delta).toLocaleString("pt-BR", { minimumFractionDigits: 1 })} p.p.`}
                         </Typography>
