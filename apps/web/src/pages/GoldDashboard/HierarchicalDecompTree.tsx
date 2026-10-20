@@ -62,12 +62,16 @@ export function isEmptyOrgLevel(field: string, children: Array<{ key: string; __
   return children[0].key === EMPTY_DIMENSION_LABEL;
 }
 
-type TreeChildAgg = { key: string; cost: number; mom: number | null; __other?: boolean };
+type TreeChildAgg = { key: string; cost: number; mom: number | null; __other?: boolean; __manualForecast?: boolean };
 
 function aggregateTreeChildren(rows: Record<string, unknown>[], field: string, filterRowTypes: boolean, measureColumn: "realizado" | "realizado_cloud", includeAllChildren = false): Map<string, { cost: number; byMonth: Map<string, number> }> {
   const map = new Map<string, { cost: number; byMonth: Map<string, number> }>();
   for (const r of rows) {
-    const k = String(r[field] ?? EMPTY_DIMENSION_LABEL);
+    const tipo = String(r.tipo ?? r.Tipo ?? "").trim().toLowerCase();
+    const rawKey = String(r[field] ?? "").trim();
+    const isManualForecast = tipo === "forecast-manual" && isOrgField(field) &&
+      (!rawKey || rawKey.toLowerCase() === EMPTY_DIMENSION_LABEL.toLowerCase());
+    const k = isManualForecast ? "Forecast Manual" : rawKey || EMPTY_DIMENSION_LABEL;
     if (!map.has(k)) map.set(k, { cost: 0, byMonth: new Map() });
     const o = map.get(k)!;
     const v = Number(r[measureColumn] || 0);
@@ -90,7 +94,7 @@ function rankTreeChildren(map: Map<string, { cost: number; byMonth: Map<string, 
       const months = [...o.byMonth.keys()].sort();
       const cur = months.length ? o.byMonth.get(months[months.length - 1]) || 0 : 0;
       const prev = months.length > 1 ? o.byMonth.get(months[months.length - 2]) || 0 : 0;
-      return { key, cost: o.cost, mom: prev ? ((cur - prev) / Math.abs(prev)) * 100 : null };
+      return { key, cost: o.cost, mom: prev ? ((cur - prev) / Math.abs(prev)) * 100 : null, __manualForecast: key === "Forecast Manual" };
     });
   // Toda a decomposição é uma visão de consumo: a ordem precisa ser
   // materialidade (maior → menor), inclusive para Serviço e SKU.
@@ -462,7 +466,7 @@ export default function HierarchicalDecompTree({
                   const x = branchX, y = top + idx * childGap;
                   const share = nodeTotal ? (Math.abs(it.cost) / Math.abs(nodeTotal)) * 100 : 0;
                   const barW = Math.max(3, (nodeW - 26) * Math.min(1, share / Math.max(topShare, 1)));
-                  const clickable = it.key !== EMPTY_DIMENSION_LABEL;
+                  const clickable = it.key !== EMPTY_DIMENSION_LABEL && !it.__manualForecast;
                   const metric = treeMetricText(it, nodeTotal);
                   const metricColor = treeMetric === "mom" && it.mom != null ? (it.mom >= 0 ? "#dc2626" : "#059669") : PURPLE;
                   return (
