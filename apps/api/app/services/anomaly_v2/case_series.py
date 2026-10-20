@@ -103,6 +103,7 @@ def _lit(value: str) -> str:
 
 def _scope_sql_filter(dimensions: Mapping[str, Any], exact_values: Mapping[str, list[str]] | None = None) -> str:
     clauses = ["TRUE"]
+    native_clauses: list[str] = []
     columns = [(key, key) for key in _DIRECT_FILTERS] + [
         ("resource_group", "source_resource_group_name"), ("region", "regionname"),
     ]
@@ -112,12 +113,18 @@ def _scope_sql_filter(dimensions: Mapping[str, Any], exact_values: Mapping[str, 
             continue
         if exact_values is not None and key in exact_values:
             values = exact_values[key]
-            clauses.append(f"{_quote(column)} IN ({', '.join(_lit(value) for value in values)})" if values else "FALSE")
+            native_clauses.append(f"{_quote(column)} IN ({', '.join(_lit(value) for value in values)})" if values else "FALSE")
             continue
         clauses.append(
             f"lower(trim(CAST({_quote(column)} AS VARCHAR))) = {_lit(str(raw).strip().lower())}"
         )
-    return " AND ".join(clauses)
+    normalized = " AND ".join(clauses)
+    if native_clauses:
+        native = " AND ".join(native_clauses)
+        # Keep the native domain visible for file/dictionary pruning and defer
+        # all expensive normalization until the selective anchor has matched.
+        return f"({native}) AND CASE WHEN {native} THEN ({normalized}) ELSE FALSE END"
+    return normalized
 
 
 def _table_ref(namespace: str, table: str, snapshot_id: int | None = None) -> str:
