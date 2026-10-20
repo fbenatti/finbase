@@ -545,7 +545,7 @@ export default function Anomalies() {
               { label: "Vencidos", value: summary.overdue },
               { label: "Encerrados", value: summary.closed },
               { label: "Sem responsável", value: summary.unassigned },
-              { label: "Custo anômalo observado", value: money(summary.anomalous_cost_cloud, currency) },
+              { label: "Custo anômalo observado", value: money(summary.confirmed_anomalous_cost_cloud ?? summary.anomalous_cost_cloud, currency) },
               { label: "Tempo até ciência (h)", value: summary.median_acknowledgement_hours ?? "—" },
               { label: "Tempo até resolução (h)", value: summary.median_resolution_hours ?? "—" },
               { label: "Classificados", value: summary.classified },
@@ -568,7 +568,7 @@ export default function Anomalies() {
               >
                 <Typography variant="caption" color="text.secondary">{item.label}</Typography>
                 <Typography variant="h6">{item.value}</Typography>
-                {item.label === "Custo anômalo observado" && <Typography variant="caption" color="text.secondary">Soma histórica de todos os casos · inclui decisões esperadas e confirmadas</Typography>}
+                {item.label === "Custo anômalo observado" && <Typography variant="caption" color="text.secondary">Confirmadas · {summary.event_period_start ?? "sem início"} a {summary.event_period_end ?? "sem dados"}</Typography>}
                 {item.label === "Tempo até ciência (h)" && <Typography variant="caption" color="text.secondary">Mediana dos casos já reconhecidos</Typography>}
                 {item.label === "Tempo até resolução (h)" && <Typography variant="caption" color="text.secondary">Mediana dos casos encerrados</Typography>}
                 {item.label === "Vencidos" && (
