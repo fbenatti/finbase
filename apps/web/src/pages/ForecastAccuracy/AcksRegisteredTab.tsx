@@ -15,8 +15,24 @@ const pct = (value: number | null | undefined) => value == null ? "—" : (value
 const ACK_CATEGORIES = ["Pico sazonal", "Migração", "Projeto novo", "Erro de precificação", "Outro"];
 const ACK_SEVERITIES = ["Alto", "Médio", "Baixo", "Informação"];
 
+const severityLabel = (severity?: string) => {
+  switch ((severity || "").trim().toLocaleLowerCase("pt-BR")) {
+    case "crítico":
+    case "critico":
+    case "alto": return "Alto";
+    case "perigo":
+    case "medio":
+    case "médio": return "Médio";
+    case "sucesso":
+    case "baixo": return "Baixo";
+    case "informacao":
+    case "informação": return "Informação";
+    default: return severity || "Informação";
+  }
+};
+
 const severityColor = (severity?: string): "info" | "warning" | "error" | "success" => {
-  switch ((severity || "").toLowerCase()) {
+  switch (severityLabel(severity).toLocaleLowerCase("pt-BR")) {
     case "alto":
     case "crítico":
     case "critico": return "error";
@@ -114,7 +130,7 @@ export default function AcksRegisteredTab({ defaultMonth, department }: { defaul
   const openEdit = (ack: ForecastAck) => {
     setEditTarget(ack);
     setEditCategory(ack.category || ACK_CATEGORIES[0]);
-    setEditSeverity(ack.severity || ACK_SEVERITIES[0]);
+    setEditSeverity(severityLabel(ack.severity));
     setEditOrdem(Number(ack.ordem ?? SEVERITY_ORDER[(ack.severity || "").toLowerCase()] ?? 0));
     setEditDate(ack.registered_at ? ack.registered_at.slice(0, 10) : "");
     setEditReason(ack.reason || "");
@@ -240,7 +256,7 @@ export default function AcksRegisteredTab({ defaultMonth, department }: { defaul
     { field: "reason", headerName: "Motivo", minWidth: 230, flex: 1.4, editable: true },
     {
       field: "severity", headerName: "Severidade", width: 140, editable: true,
-      renderCell: ({ row }) => <Chip size="small" color={severityColor(row.severity)} label={row.severity || "Informação"} />,
+      renderCell: ({ row }) => <Chip size="small" color={severityColor(row.severity)} label={severityLabel(row.severity)} />,
       renderEditCell: (params) => <SeverityEditCell {...params} />,
     },
     {
