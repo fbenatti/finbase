@@ -476,6 +476,8 @@ _GOLD_MEASURE_COLUMNS = frozenset({
     "consumedquantity",
     "consumo_usd",
     "realizado_brl",
+    "realizado_fx_brl",
+    "realizado_local_brl",
     "taxa_brl_usd",
 })
 _GOLD_OPERATORS = frozenset({"IN", "NOT_IN", "CONTAINS", "NOT_CONTAINS", "IS_REALIZED"})
