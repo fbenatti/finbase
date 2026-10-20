@@ -63,8 +63,6 @@ export default function DollarEvolution() {
 
   return <Box>
     <Typography variant="h5" fontWeight={750} mb={0.5}>Evolução do dólar</Typography>
-    <Typography color="text.secondary" mb={2}>Taxa BRL/USD mensal observada nos dados Azure e variação percentual contra o mês anterior. Fonte: cubo {TABLE}.</Typography>
-    <Alert severity="info" sx={{ mb: 2 }}>A taxa mensal é a média das taxas distintas de source_exchange_rate acima de 1 observadas no mês. Esta visão contém somente câmbio e sua variação percentual.</Alert>
     {error && <Alert severity="error" sx={{ mb: 2 }}>{error}</Alert>}
     {loading ? <Box display="flex" justifyContent="center" p={5}><CircularProgress /></Box> : error ? null : rows.length === 0 ? <Alert severity="warning">O cubo está disponível, mas não retornou taxas mensais para Azure.</Alert> : <>
       <Grid container spacing={2} mb={2}>
