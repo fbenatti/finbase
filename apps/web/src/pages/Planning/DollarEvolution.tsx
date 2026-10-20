@@ -49,7 +49,14 @@ export default function DollarEvolution() {
     return () => { alive = false; };
   }, []);
 
-  const latest = rows[rows.length - 1];
+  const periodAverages = useMemo(() => {
+    if (!rows.length) return { rate: null as number | null, deltaPct: null as number | null };
+    const monthlyChanges = rows.flatMap(row => row.deltaPct === null ? [] : [row.deltaPct]);
+    return {
+      rate: rows.reduce((sum, row) => sum + row.rate, 0) / rows.length,
+      deltaPct: monthlyChanges.length ? monthlyChanges.reduce((sum, value) => sum + value, 0) / monthlyChanges.length : null,
+    };
+  }, [rows]);
   const minRate = useMemo(() => Math.min(...rows.map(row => row.rate)), [rows]);
   const maxRate = useMemo(() => Math.max(...rows.map(row => row.rate)), [rows]);
   const span = Math.max(maxRate - minRate, 0.01);
@@ -61,8 +68,8 @@ export default function DollarEvolution() {
     {error && <Alert severity="error" sx={{ mb: 2 }}>{error}</Alert>}
     {loading ? <Box display="flex" justifyContent="center" p={5}><CircularProgress /></Box> : error ? null : rows.length === 0 ? <Alert severity="warning">O cubo está disponível, mas não retornou taxas mensais para Azure.</Alert> : <>
       <Grid container spacing={2} mb={2}>
-        <Grid item xs={12} md={6}><Card variant="outlined"><CardContent><Typography color="text.secondary" variant="body2">Dólar · {monthName(latest!.period)}</Typography><Typography variant="h5" fontWeight={750}>{rateLabel(latest!.rate)}</Typography></CardContent></Card></Grid>
-        <Grid item xs={12} md={6}><Card variant="outlined"><CardContent><Typography color="text.secondary" variant="body2">Variação mensal</Typography><Typography variant="h5" fontWeight={750}>{latest!.deltaPct === null ? "—" : pct.format(latest!.deltaPct)}</Typography></CardContent></Card></Grid>
+        <Grid item xs={12} md={6}><Card variant="outlined"><CardContent><Typography color="text.secondary" variant="body2">Dólar médio do período</Typography><Typography variant="h5" fontWeight={750}>{periodAverages.rate === null ? "—" : rateLabel(periodAverages.rate)}</Typography></CardContent></Card></Grid>
+        <Grid item xs={12} md={6}><Card variant="outlined"><CardContent><Typography color="text.secondary" variant="body2">Média da variação mensal</Typography><Typography variant="h5" fontWeight={750}>{periodAverages.deltaPct === null ? "—" : pct.format(periodAverages.deltaPct)}</Typography></CardContent></Card></Grid>
       </Grid>
       <Paper variant="outlined" sx={{ p: 2, mb: 2 }}>
         <Typography variant="subtitle1" fontWeight={700} mb={2}>Taxa mensal BRL/USD</Typography>
