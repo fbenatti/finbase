@@ -313,6 +313,14 @@ export default function Anomalies() {
     setMyCasesOnly(false);
   };
 
+  const setCasesView = (state: string) => {
+    setTab(2);
+    setStateFilter(state);
+    setSeverityFilter("");
+    setQueueOnly(false);
+    setMyCasesOnly(false);
+  };
+
   const openCase = async (id: number) => {
     const request = ++caseRequest.current;
     setBusy(true);
@@ -516,15 +524,22 @@ export default function Anomalies() {
               <Paper
                 key={item.label}
                 variant="outlined"
-                sx={{ p: 1.5, minWidth: 150, cursor: ["Abertos", "Vencidos", "Sem responsável"].includes(item.label) ? "pointer" : "default" }}
+                sx={{ p: 1.5, minWidth: 150, cursor: "pointer", transition: "all .15s", "&:hover": { borderColor: "primary.main", bgcolor: "action.hover", transform: "translateY(-1px)" } }}
                 onClick={() => {
                   if (item.label === "Abertos") openCasesFilter("open");
-                  if (item.label === "Vencidos") openCasesFilter("overdue");
-                  if (item.label === "Sem responsável") openCasesFilter("unassigned");
+                  else if (item.label === "Encerrados") openCasesFilter("closed");
+                  else if (item.label === "Casos novos") openCasesFilter("new");
+                  else if (item.label === "Vencidos") openCasesFilter("overdue");
+                  else if (item.label === "Sem responsável") openCasesFilter("unassigned");
+                  else if (item.label === "Famílias reincidentes") openCasesFilter("recurrence");
+                  else if (item.label === "Classificados") openCasesFilter("confirmed");
                 }}
               >
                 <Typography variant="caption" color="text.secondary">{item.label}</Typography>
                 <Typography variant="h6">{item.value}</Typography>
+                {item.label === "Custo anômalo observado" && <Typography variant="caption" color="text.secondary">Soma histórica de todos os casos · inclui decisões esperadas e confirmadas</Typography>}
+                {item.label === "Tempo até ciência (h)" && <Typography variant="caption" color="text.secondary">Mediana dos casos já reconhecidos</Typography>}
+                {item.label === "Tempo até resolução (h)" && <Typography variant="caption" color="text.secondary">Mediana dos casos encerrados</Typography>}
                 {item.label === "Vencidos" && (
                   <Typography variant="caption" color="text.secondary">Prazo de ciência sem confirmação</Typography>
                 )}
@@ -535,7 +550,7 @@ export default function Anomalies() {
             <Typography variant="subtitle2" gutterBottom>Distribuição por estado</Typography>
             <Stack direction="row" spacing={1} flexWrap="wrap">
               {Object.entries(summary.by_state).map(([state, count]) => (
-                <Chip key={state} label={`${STATE_LABEL[state] ?? state}: ${count}`} size="small" />
+                <Chip key={state} label={`${STATE_LABEL[state] ?? state}: ${count}`} size="small" clickable onClick={() => setCasesView(state)} />
               ))}
               {Object.keys(summary.by_state).length === 0 && (
                 <Typography variant="body2" color="text.secondary">Nenhum caso registrado ainda.</Typography>
@@ -545,7 +560,7 @@ export default function Anomalies() {
             <Typography variant="subtitle2" gutterBottom>Decisões</Typography>
             <Stack direction="row" spacing={1} flexWrap="wrap">
               {Object.entries(summary.decisions).map(([decision, count]) => (
-                <Chip key={decision} size="small"
+                <Chip key={decision} size="small" clickable onClick={() => openCasesFilter("confirmed")}
                       label={`${DECISION_LABEL[decision] ?? decision}: ${count}`} />
               ))}
             </Stack>
@@ -564,6 +579,9 @@ export default function Anomalies() {
             <TextField select size="small" label="Estado" value={stateFilter}
                        onChange={(event) => setStateFilter(event.target.value)} sx={{ minWidth: 170 }}>
               <MenuItem value="">Todos</MenuItem>
+              <MenuItem value="__open__">Abertos</MenuItem>
+              <MenuItem value="__confirmed__">Anomalias confirmadas</MenuItem>
+              <MenuItem value="__recurrence__">Famílias reincidentes</MenuItem>
               {Object.keys(STATE_LABEL).map((state) => (
                 <MenuItem key={state} value={state}>{STATE_LABEL[state]}</MenuItem>
               ))}
@@ -712,8 +730,7 @@ export default function Anomalies() {
         <Paper variant="outlined" sx={{ p: 2 }}>
           <Typography variant="subtitle2" gutterBottom>Retrospectiva</Typography>
           <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>
-            Casos encerrados, com aprendizado registrado, ou cujo custo voltou à faixa sozinho.
-            Voltar ao normal não é economia comprovada: o custo já incorrido continua visível e nenhuma causa é inventada.
+            Anomalias confirmadas (com ação ou aceitas), autocorrigidas e corrigidas com ação. O custo observado soma os dias anômalos; savings são projeções do ritmo recente após correção, não economia realizada auditada.
           </Typography>
           <Table size="small">
             <TableHead>
