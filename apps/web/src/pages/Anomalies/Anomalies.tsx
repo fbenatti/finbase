@@ -722,7 +722,7 @@ export default function Anomalies() {
                     label={`${({ LOW: "Baixa", MEDIUM: "Média", HIGH: "Alta", CRITICAL: "Crítica" } as Record<string, string>)[selected.severity] ?? selected.severity}`} />
               <Chip size="small" label={STATE_LABEL[selected.state] ?? selected.state} />
               <Box sx={{ flexGrow: 1 }} />
-              <IconButton aria-label="Fechar caso" onClick={() => setSelected(null)}><CloseIcon /></IconButton>
+              <IconButton aria-label="Fechar caso" onClick={closeCase}><CloseIcon /></IconButton>
             </Stack>
             <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>
               {[selected.series_dimensions.cloud_origem, (series?.contributor_series_count ?? 1) > 1 ? `${series?.contributor_series_count} séries agregadas` : selected.series_dimensions.subaccountname, selected.series_dimensions.servicesubcategory ?? selected.series_dimensions.servicename].filter(Boolean).join(" · ")}
