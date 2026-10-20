@@ -1693,6 +1693,51 @@ export interface AzureTagExecutiveDashboard {
   subscriptions: AzureTagExecutiveSubscription[];
 }
 
+export interface AzureTagPolicyTimelineSubscription {
+  subscription_id: string;
+  name: string;
+  taggable_items: number;
+  fully_tagged: number;
+  partially_tagged: number;
+  without_managed_tags: number;
+  adherence_percent: number | null;
+}
+
+export interface AzureTagPolicyTimelineSnapshot {
+  snapshot_at: string;
+  snapshot_date: string;
+  tag_keys: string[];
+  source: string;
+  global: Omit<AzureTagPolicyTimelineSubscription, "subscription_id" | "name">;
+  subscriptions: AzureTagPolicyTimelineSubscription[];
+}
+
+export interface AzureTagPolicyTimelineEvent {
+  event_at: string;
+  subscription_id: string;
+  operation: string;
+  status: string | null;
+  resource_id: string | null;
+  policy_assignment_id: string | null;
+  remediation_id: string | null;
+  correlation_id: string | null;
+  details: Record<string, unknown>;
+}
+
+export interface AzureTagPolicyTimeline {
+  connection_id: number;
+  since: string;
+  through: string;
+  snapshot_count: number;
+  subscription_count: number;
+  event_count: number;
+  events_truncated: boolean;
+  missing_inventory_dates: string[];
+  snapshots: AzureTagPolicyTimelineSnapshot[];
+  subscriptions: AzurePolicySubscription[];
+  events: AzureTagPolicyTimelineEvent[];
+}
+
 export interface AzureTagExecutiveResource {
   subscription_id: string;
   resource_id: string;
@@ -1833,6 +1878,26 @@ export async function getAzurePolicySubscriptions(connectionId: number): Promise
 export async function getAzureTagExecutiveDashboard(connectionId: number): Promise<AzureTagExecutiveDashboard> {
   const { data } = await api.get("/azure-tag-policy/executive-dashboard", {
     params: { connection_id: connectionId },
+  });
+  return data;
+}
+
+export async function getAzureTagPolicyTimeline(
+  connectionId: number,
+  since = "2026-10-12",
+): Promise<AzureTagPolicyTimeline> {
+  const { data } = await api.get("/azure-tag-policy/timeline", {
+    params: { connection_id: connectionId, since },
+  });
+  return data;
+}
+
+export async function backfillAzureTagPolicyTimeline(
+  connectionId: number,
+  since = "2026-10-12",
+): Promise<{ connection_id: number; since: string; snapshots_added: number; events_added: number; errors: string[]; partial: boolean }> {
+  const { data } = await api.post("/azure-tag-policy/timeline/backfill", null, {
+    params: { connection_id: connectionId, since },
   });
   return data;
 }

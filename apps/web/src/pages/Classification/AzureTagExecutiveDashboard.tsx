@@ -10,9 +10,12 @@ import jsPDF from "jspdf";
 import {
   AzureTagExecutiveDashboard as DashboardData,
   AzureTagExecutiveResource,
+  AzureTagPolicyTimeline,
   AzureTenant,
+  backfillAzureTagPolicyTimeline,
   getAzureTagExecutiveDashboard,
   getAzureTagExecutiveResources,
+  getAzureTagPolicyTimeline,
   getAzureTenants,
   getTaskStatus,
   queueAzureTagExecutiveRefresh,
@@ -40,6 +43,11 @@ export default function AzureTagExecutiveDashboard() {
   const [refreshing, setRefreshing] = useState(false);
   const [refreshMessage, setRefreshMessage] = useState("");
   const [exporting, setExporting] = useState(false);
+  const [timeline, setTimeline] = useState<AzureTagPolicyTimeline | null>(null);
+  const [timelineLoading, setTimelineLoading] = useState(false);
+  const [timelineBackfill, setTimelineBackfill] = useState(false);
+  const [timelineSubscription, setTimelineSubscription] = useState("");
+  const [timelineMessage, setTimelineMessage] = useState("");
   const exportRootRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -71,6 +79,42 @@ export default function AzureTagExecutiveDashboard() {
   }, [connectionId]);
 
   useEffect(() => { if (connectionId !== "") void loadDashboard(); }, [connectionId, loadDashboard]);
+
+  const loadTimeline = useCallback(async () => {
+    if (connectionId === "") return;
+    setTimelineLoading(true);
+    try {
+      const result = await getAzureTagPolicyTimeline(connectionId);
+      setTimeline(result);
+    } catch (cause: any) {
+      setError(cause?.response?.data?.detail || "Não foi possível carregar o histórico de tags e policies.");
+    } finally {
+      setTimelineLoading(false);
+    }
+  }, [connectionId]);
+
+  useEffect(() => { if (connectionId !== "") void loadTimeline(); }, [connectionId, loadTimeline]);
+
+  const importTimelineHistory = async () => {
+    if (connectionId === "") return;
+    setTimelineBackfill(true);
+    setError("");
+    setTimelineMessage("Importando snapshots Bronze e eventos das policies desde 12/10…");
+    try {
+      const result = await backfillAzureTagPolicyTimeline(connectionId);
+      await loadTimeline();
+      setTimelineMessage(
+        `Importação concluída: ${fmt(result.snapshots_added)} snapshots e ${fmt(result.events_added)} eventos adicionados.`
+        + (result.partial ? ` ${result.errors.length} aviso(s); confira as lacunas abaixo.` : ""),
+      );
+      if (result.errors.length) setError(result.errors.join("\n"));
+    } catch (cause: any) {
+      setError(cause?.response?.data?.detail || cause?.message || "Falha ao importar o histórico de tags.");
+      setTimelineMessage("");
+    } finally {
+      setTimelineBackfill(false);
+    }
+  };
 
   const totals = useMemo(() => (data?.subscriptions ?? []).reduce((acc, item) => {
     acc.resources += item.total_resources;
@@ -198,7 +242,7 @@ export default function AzureTagExecutiveDashboard() {
       </Stack>
     </Stack>
 
-    {error && <Alert severity="error" sx={{ mb: 2 }} onClose={() => setError("")}>{error}</Alert>}
+    {error && <Alert severity="error" sx={{ mb: 2, whiteSpace: "pre-line" }} onClose={() => setError("")}>{error}</Alert>}
     {refreshMessage && <Alert severity={refreshing ? "info" : "success"} sx={{ mb: 2 }}>{refreshMessage}</Alert>}
     {loading && <LinearProgress sx={{ mb: 2 }} />}
     {data && <>
@@ -209,6 +253,70 @@ export default function AzureTagExecutiveDashboard() {
           ["Tageáveis", totals.taggable], ["Não tageáveis", totals.nonTaggable],
         ].map(([label, value]) => <Card key={String(label)} variant="outlined" sx={{ minWidth: 0, ...(label === "Aderência global" ? { borderLeft: "4px solid", borderLeftColor: globalAdherence === null ? "grey.400" : globalAdherence >= 90 ? "success.main" : globalAdherence >= 60 ? "warning.main" : "error.main" } : {}) }}><CardContent sx={{ p: { xs: "10px !important", md: "14px !important" }, minWidth: 0 }}><Typography variant="caption" color="text.secondary" noWrap display="block">{label}</Typography><Typography variant="h5" fontWeight={700} noWrap color={label === "Aderência global" && globalAdherence !== null ? globalAdherence >= 90 ? "success.main" : globalAdherence >= 60 ? "warning.main" : "error.main" : undefined}>{label === "Aderência global" ? <>{value}<Typography component="span" variant="caption" display="block" color="text.secondary" noWrap>{fmt(totals.complete)} / {fmt(totals.taggable)} tageáveis</Typography></> : fmt(Number(value))}</Typography></CardContent></Card>)}
       </Box>
+      <Card variant="outlined" sx={{ mb: 3 }}>
+        <CardContent>
+          <Stack direction={{ xs: "column", md: "row" }} justifyContent="space-between" alignItems={{ xs: "stretch", md: "center" }} spacing={1.5} sx={{ mb: 1.5 }}>
+            <Box>
+              <Typography variant="h6" fontWeight={700}>Evolução de tags e execução das policies</Typography>
+              <Typography variant="body2" color="text.secondary">Snapshots por subscription e eventos Azure desde 12/10/2026. O consolidado é calculado a partir das subscriptions.</Typography>
+            </Box>
+            <Stack direction={{ xs: "column", sm: "row" }} spacing={1}>
+              <FormControl size="small" sx={{ minWidth: 240 }}>
+                <InputLabel>Subscription na timeline</InputLabel>
+                <Select label="Subscription na timeline" value={timelineSubscription} onChange={(event) => setTimelineSubscription(event.target.value)}>
+                  <MenuItem value="">Todas as subscriptions</MenuItem>
+                  {(timeline?.subscriptions ?? []).map((item) => <MenuItem key={item.subscription_id} value={item.subscription_id}>{item.name}</MenuItem>)}
+                </Select>
+              </FormControl>
+              <Button variant="outlined" onClick={() => void importTimelineHistory()} disabled={timelineBackfill || timelineLoading || connectionId === ""}>
+                {timelineBackfill ? <><CircularProgress size={16} sx={{ mr: 1 }} />Importando…</> : "Importar histórico desde 12/10"}
+              </Button>
+            </Stack>
+          </Stack>
+          {timelineMessage && <Alert severity={timelineBackfill ? "info" : "success"} sx={{ mb: 1.5 }}>{timelineMessage}</Alert>}
+          {timelineLoading && <LinearProgress sx={{ mb: 1.5 }} />}
+          {timeline?.missing_inventory_dates.length ? <Alert severity="info" sx={{ mb: 1.5 }}>
+            Sem snapshot de inventário em: {timeline.missing_inventory_dates.map((day) => new Date(`${day}T00:00:00`).toLocaleDateString("pt-BR")).join(", ")}. Esses dias aparecem como lacunas, não como 0%.
+          </Alert> : null}
+          {timeline?.snapshots.length ? <Box sx={{ overflowX: "auto", mb: 2 }}>
+            <Table size="small">
+              <TableHead><TableRow><TableCell>Snapshot</TableCell><TableCell>Aderência global</TableCell><TableCell>Itens globais completos</TableCell>{timelineSubscription && <TableCell>Aderência da subscription</TableCell>}</TableRow></TableHead>
+              <TableBody>{timeline.snapshots.map((snapshot) => {
+                const selected = timelineSubscription ? snapshot.subscriptions.find((item) => item.subscription_id === timelineSubscription) : null;
+                return <TableRow key={snapshot.snapshot_at}>
+                  <TableCell>{new Date(snapshot.snapshot_at).toLocaleString("pt-BR")}</TableCell>
+                  <TableCell>{snapshot.global.adherence_percent === null ? "—" : `${snapshot.global.adherence_percent.toLocaleString("pt-BR", { minimumFractionDigits: 1 })}%`}</TableCell>
+                  <TableCell>{fmt(snapshot.global.fully_tagged)} / {fmt(snapshot.global.taggable_items)}</TableCell>
+                  {timelineSubscription && <TableCell>{selected?.adherence_percent == null ? "Sem dado neste snapshot" : `${selected.adherence_percent.toLocaleString("pt-BR", { minimumFractionDigits: 1 })}% (${fmt(selected.fully_tagged)} / ${fmt(selected.taggable_items)})`}</TableCell>}
+                </TableRow>;
+              })}</TableBody>
+            </Table>
+          </Box> : <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>Ainda não há snapshots importados. Use “Importar histórico desde 12/10” para carregar o que está preservado na Bronze e consultar os eventos do Azure.</Typography>}
+          <Typography variant="subtitle2" fontWeight={700} sx={{ mb: 0.5 }}>Eventos de execução</Typography>
+          {timeline?.events.length ? <Box sx={{ overflowX: "auto" }}>
+            <Table size="small">
+              <TableHead><TableRow><TableCell>Data/hora</TableCell><TableCell>Subscription</TableCell><TableCell>Operação</TableCell><TableCell>Status</TableCell><TableCell>Deployments</TableCell><TableCell>Assignment / Remediação</TableCell></TableRow></TableHead>
+              <TableBody>{timeline.events.filter((event) => !timelineSubscription || event.subscription_id === timelineSubscription).slice(-30).reverse().map((event, index) => {
+                const subscriptionName = timeline.subscriptions.find((item) => item.subscription_id === event.subscription_id)?.name || event.subscription_id;
+                const deploymentSummary = event.details?.deployment_summary as {
+                  totalDeployments?: number;
+                  successfulDeployments?: number;
+                  failedDeployments?: number;
+                } | undefined;
+                return <TableRow key={`${event.event_at}-${event.correlation_id}-${index}`}>
+                  <TableCell>{new Date(event.event_at).toLocaleString("pt-BR")}</TableCell>
+                  <TableCell>{subscriptionName}</TableCell>
+                  <TableCell>{event.operation}</TableCell>
+                  <TableCell><Chip size="small" label={event.status || "—"} color={event.status?.toLowerCase().includes("fail") ? "error" : event.status?.toLowerCase().includes("succeed") ? "success" : "default"} /></TableCell>
+                  <TableCell>{deploymentSummary ? `${fmt(deploymentSummary.successfulDeployments || 0)} ok / ${fmt(deploymentSummary.failedDeployments || 0)} falhas de ${fmt(deploymentSummary.totalDeployments || 0)}` : "—"}</TableCell>
+                  <TableCell sx={{ maxWidth: 320, overflowWrap: "anywhere" }}>{event.remediation_id || event.policy_assignment_id || event.resource_id || "—"}</TableCell>
+                </TableRow>;
+              })}</TableBody>
+            </Table>
+            {timeline.events_truncated && <Typography variant="caption" color="text.secondary">Exibindo os 30 eventos mais recentes dos 1.000 registros consultados.</Typography>}
+          </Box> : <Typography variant="body2" color="text.secondary">Nenhum evento importado ainda.</Typography>}
+        </CardContent>
+      </Card>
       <Stack spacing={1.5}>
         {data.subscriptions.map((item) => {
           const isOpen = expanded === item.subscription_id;
