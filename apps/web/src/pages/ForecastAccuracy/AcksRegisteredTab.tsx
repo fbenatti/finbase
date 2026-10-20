@@ -13,19 +13,26 @@ import AckRegisterDialog from "./AckRegisterDialog";
 const money = new Intl.NumberFormat("pt-BR", { maximumFractionDigits: 0 });
 const pct = (value: number | null | undefined) => value == null ? "—" : (value * 100).toFixed(1) + "%";
 const ACK_CATEGORIES = ["Pico sazonal", "Migração", "Projeto novo", "Erro de precificação", "Outro"];
-const ACK_SEVERITIES = ["Informação", "Perigo", "Crítico", "Sucesso"];
+const ACK_SEVERITIES = ["Alto", "Médio", "Baixo", "Informação"];
 
 const severityColor = (severity?: string): "info" | "warning" | "error" | "success" => {
   switch ((severity || "").toLowerCase()) {
-    case "perigo": return "warning";
+    case "alto":
     case "crítico":
     case "critico": return "error";
+    case "médio":
+    case "medio":
+    case "perigo": return "warning";
+    case "baixo":
     case "sucesso": return "success";
     default: return "info";
   }
 };
 const SEVERITY_ORDER: Record<string, number> = {
-  "crítico": 0, "critico": 0, "perigo": 1, "informação": 2, "informacao": 2, "sucesso": 3,
+  "alto": 0, "crítico": 0, "critico": 0,
+  "médio": 1, "medio": 1, "perigo": 1,
+  "baixo": 2, "sucesso": 2,
+  "informação": 3, "informacao": 3,
 };
 
 const prettyMonthLabel = (p: string) => p && p.length === 6
