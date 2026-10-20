@@ -1309,6 +1309,40 @@ def estimate_destination_slice_rows(
     return sum(int(task.file.record_count or 0) for task in table.scan(row_filter=row_filter).plan_files())
 
 
+def publish_dataframe_atomic(
+    namespace: str,
+    physical_name: str,
+    df: pd.DataFrame,
+    *,
+    column_types: Optional[dict[str, str]] = None,
+) -> dict[str, Any]:
+    """Replace an analytical result with one Iceberg snapshot commit.
+
+    Keep the canonical table and its previous snapshot on failure. Empty
+    results also replace the previous result, rather than leaving stale alerts.
+    This writer adds no financial or partition columns to analytical schemas.
+    """
+    from pyiceberg.exceptions import NoSuchTableError
+    from pyiceberg.io.pyarrow import pyarrow_to_schema
+
+    _ensure_namespace(namespace)
+    safe_name = physical_name.replace("-", "_").replace(".", "_")
+    tid = _table_id(namespace, safe_name)
+    cat = _get_catalog()
+    try:
+        table = cat.load_table(tid)
+    except NoSuchTableError:
+        table = None
+    arrow = _df_to_arrow(df, column_types=column_types,
+                         target_schema=table.schema() if table is not None else None)
+    if table is None:
+        table = cat.create_table(tid, schema=pyarrow_to_schema(arrow.schema))
+    table.overwrite(arrow)
+    snapshot = table.current_snapshot()
+    return {"table": f"{namespace}.{safe_name}", "rows": len(df),
+            "snapshot_id": snapshot.snapshot_id if snapshot else None}
+
+
 def write_destination_staged(
     physical_name: str,
     df: pd.DataFrame,
