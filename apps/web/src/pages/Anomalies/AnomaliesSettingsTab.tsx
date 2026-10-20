@@ -68,6 +68,7 @@ const groups: Array<{ title: string; summary: string; fields: SettingField[] }> 
       { key: "score_confidence_high_factor", label: "Fator de confiança alta (%)", help: "Multiplicador final da nota quando o histórico sustenta confiança alta.", step: 1, percent: true },
       { key: "score_confidence_medium_factor", label: "Fator de confiança média (%)", help: "Multiplicador final da nota quando a confiança é média.", step: 1, percent: true },
       { key: "score_confidence_low_factor", label: "Fator de confiança baixa (%)", help: "Multiplicador final da nota quando a confiança é baixa.", step: 1, percent: true },
+      { key: "score_confidence_unknown_factor", label: "Fator de confiança indisponível (%)", help: "Multiplicador final quando não há classificação de confiança.", step: 1, percent: true },
       { key: "severity_medium_min", label: "Severidade média a partir de (moeda da configuração)", help: "Impacto financeiro projetado mínimo para severidade média.", step: 10 },
       { key: "severity_high_min", label: "Severidade alta a partir de (moeda da configuração)", help: "Impacto financeiro projetado mínimo para severidade alta.", step: 10 },
       { key: "severity_critical_min", label: "Severidade crítica a partir de (moeda da configuração)", help: "Impacto financeiro projetado mínimo para severidade crítica.", step: 10 },
