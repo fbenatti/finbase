@@ -15,8 +15,8 @@ if [[ "$current_branch" != "$branch" ]]; then
   exit 1
 fi
 
-git fetch origin "$branch:refs/remotes/origin/$branch"
-if ! git merge-base --is-ancestor "origin/$branch" "$branch"; then
+git fetch origin "refs/heads/$branch:refs/remotes/origin/$branch"
+if ! git merge-base --is-ancestor "refs/remotes/origin/$branch" "refs/heads/$branch"; then
   echo "A branch local '$branch' está atrás/divergente de origin/$branch. Atualize e revise antes do deploy." >&2
   exit 1
 fi
