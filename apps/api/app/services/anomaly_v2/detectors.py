@@ -80,7 +80,6 @@ def run_detectors_for_scope(
     as_of: date,
     materiality: float,
     min_pct: float,
-    investigate_score: int,
     ledger_entries: Sequence[Mapping[str, Any]],
     valid_days: set[str] | None = None,
     settings: Mapping[str, Any] | None = None,
