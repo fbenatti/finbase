@@ -20,7 +20,7 @@ from app.services.anomaly_v2.readiness import max_day_by_cloud, readiness_finger
 from app.services.anomaly_v2.scoring import score_signal
 from app.services.anomaly_v2.schema import SIGNAL_COLUMNS, SIGNAL_TABLE, SILVER_NS, ddl_statements
 from app.services.anomaly_v2.scope import display_scope
-from app.services.trino_service import execute as trino_execute
+from app.services.anomaly_v2.query_control import execute as trino_execute
 
 logger = logging.getLogger(__name__)
 
@@ -97,6 +97,44 @@ def _analysis_end(detected_at: datetime, lag_days: int) -> date:
 
 
 async def execute_detection_v2(
+    config_id: int,
+    *,
+    run_id: int | None = None,
+    progress: Callable[[int, int, str], None] | None = None,
+    should_abort: Callable[[], bool] | None = None,
+    detected_at: datetime | None = None,
+    force: bool = False,
+) -> dict[str, Any]:
+    from contextlib import suppress
+    from app.services.anomaly_v2.query_control import cancel_event
+    from app.services.trino_service import TrinoCancelled
+
+    event = asyncio.Event()
+    token = cancel_event.set(event)
+
+    async def watch_cancellation() -> None:
+        while True:
+            if should_abort and await asyncio.to_thread(should_abort):
+                event.set()
+                return
+            await asyncio.sleep(1)
+
+    watcher = asyncio.create_task(watch_cancellation()) if should_abort else None
+    try:
+        return await _execute_detection_v2(config_id, run_id=run_id, progress=progress,
+            should_abort=should_abort, detected_at=detected_at, force=force)
+    except TrinoCancelled:
+        async with async_session() as session:
+            return await _finish_cancelled(session, run_id)
+    finally:
+        if watcher:
+            watcher.cancel()
+            with suppress(asyncio.CancelledError):
+                await watcher
+        cancel_event.reset(token)
+
+
+async def _execute_detection_v2(
     config_id: int,
     *,
     run_id: int | None = None,

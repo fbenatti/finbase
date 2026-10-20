@@ -10,7 +10,7 @@ from typing import Any, Mapping, Sequence
 
 from app.services.anomaly_v2.scope import scope_id_for, scope_values_from_row
 from app.services.forecast_service import gold_date_expr
-from app.services.trino_service import execute as trino_execute
+from app.services.anomaly_v2.query_control import execute as trino_execute
 
 logger = logging.getLogger(__name__)
 
