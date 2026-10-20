@@ -4,8 +4,7 @@ Classification may move offsets to a central RI department. Forecasting that
 aggregate independently is not additive when AUTO_BACKTEST chooses different
 windows for the individual consumer departments.
 """
-from datetime import date, timedelta
-from typing import Any
+from datetime import date
 
 import pandas as pd
 
@@ -25,10 +24,12 @@ def apply_linked_offsets(output, history, links, columns):
         key = _key(row, columns)
         totals[key] = totals.get(key, 0.0) + float(row["value"])
     forecasts = {}
+    source_forecasts = {}
     destinations = {}
     for idx, row in output.iterrows():
         key = (_key(row, columns), str(row["forecast_month"]))
         forecasts[key] = forecasts.get(key, 0.0) + float(row["forecast_value"])
+        source_forecasts.setdefault(key[0], {})[key[1]] = forecasts[key]
         destinations.setdefault(key, []).append(idx)
     weights = {}
     for row in links:
@@ -40,9 +41,7 @@ def apply_linked_offsets(output, history, links, columns):
     for (origin, target), amount in weights.items():
         denominator = totals.get(origin, 0.0)
         share = amount / denominator if denominator else 0.0
-        for (key, month), forecast in forecasts.items():
-            if key != origin:
-                continue
+        for month, forecast in source_forecasts.get(origin, {}).items():
             target_key = (target, month)
             if target_key not in destinations:
                 raise ValueError("Synthetic forecast has no destination series for its traced source")
