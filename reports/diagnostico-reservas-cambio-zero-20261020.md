@@ -79,3 +79,38 @@ para USD→BRL e 1 para BRL→BRL, conforme as observações do mês.
 Commits: 7fb5f1ba, 7e62da88 e 2aa22924. Reconstrução local: tarefa 8942,
 precedida de auditoria Bronze 8941. A primeira tentativa 8940 foi interrompida
 antes de aplicar a correção de câmbio, para não repetir os zeros antigos.
+
+## Resultado publicado e validado
+
+As três tarefas finais concluíram com sucesso:
+
+- 8942: agosto Azure-TI reconstruído e publicado, 3.470.023 linhas.
+- 8943: setembro recalculado, nova run **446**, cutoff 31/08/2026.
+- 8944: cubo Gold regra 4 / visão completa atualizado para agosto, 17.233 linhas.
+
+Na Silver publicada, o uso reservado de agosto do SAPTDF passou a
+R$ 337.449,40, com retorno de R$ -337.449,40. Para Terra Mexico AVS, o par passou
+a R$ 308.855,38 e R$ -308.855,38. A quantidade original de consumo foi
+preservada: 3.719,866797 e 6.696 horas, respectivamente. Nenhuma linha desses
+grupos continua com quantidade positiva e valor zero por câmbio inválido.
+
+O endpoint efetivamente usado pelo dashboard retornou, na run 446:
+
+| Linha de setembro | Projetado | Realizado | Delta | Delta (%) |
+|---|---:|---:|---:|---:|
+| SAPTDF — Reserva | 116.519,41 | 117.259,98 | 740,58 | +0,64% |
+| SAPTDF — Retorno | -329.049,67 | -328.187,09 | 862,58 | +0,26% |
+| Terra Mexico — Reserva AVS | 489.003,22 | 488.301,71 | -701,51 | -0,14% |
+| Terra Mexico — Retorno AVS | -300.031,96 | -298.129,53 | 1.902,44 | +0,63% |
+
+Reserva AVS inclui Purchase e Usage reservado, como na classificação existente.
+O Return segue no filho próprio. O ranking agora inclui também os lançamentos
+diretos do SAPTDF e do México. Somando todas as linhas do escopo uma única vez,
+os deltas líquidos são R$ -6.301,06 para SAPTDF e R$ -649,97 para Terra Mexico;
+estes incluem os demais serviços desses projetos, além das reservas.
+
+A verificação global de Usage+Return com commitmentdiscounttype=Reservation,
+agrupada por origem e subcategoria em setembro da run 446, não encontrou saldo
+superior a um centavo em valor absoluto. O snapshot antigo 443 foi preservado.
+O seletor de meses passou a escolher a run 446 para setembro. A API e o worker
+foram conferidos saudáveis após a publicação.
