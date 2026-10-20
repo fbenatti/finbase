@@ -33,30 +33,3 @@ class AzureTagPolicySnapshot(Base):
     adherence_percent = Column(Float, nullable=True)
     source_blob_path = Column(Text, nullable=False)
     created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
-
-
-class AzureTagPolicyEvent(Base):
-    """Azure Activity Log events related to tag policy lifecycle and remediation."""
-
-    __tablename__ = "azure_tag_policy_event"
-    __table_args__ = (
-        UniqueConstraint("connection_id", "event_key", name="uq_azure_tag_event_connection_key"),
-        Index("ix_azure_tag_event_connection_time", "connection_id", "event_at"),
-        Index("ix_azure_tag_event_subscription_time", "subscription_id", "event_at"),
-        Index("ix_azure_tag_event_correlation", "correlation_id"),
-    )
-
-    id = Column(BigInteger, primary_key=True, autoincrement=True)
-    connection_id = Column(Integer, ForeignKey("source_connection.id", ondelete="CASCADE"), nullable=False)
-    event_key = Column(String(64), nullable=False)
-    source_event_id = Column(Text, nullable=False)
-    event_at = Column(DateTime(timezone=True), nullable=False)
-    subscription_id = Column(String(36), nullable=False)
-    operation = Column(String(300), nullable=False)
-    status = Column(String(80), nullable=True)
-    resource_id = Column(Text, nullable=True)
-    policy_assignment_id = Column(Text, nullable=True)
-    remediation_id = Column(Text, nullable=True)
-    correlation_id = Column(String(100), nullable=True)
-    details = Column(JSON, nullable=False, default=dict)
-    created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())

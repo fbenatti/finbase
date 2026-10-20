@@ -6,7 +6,7 @@ import re
 import shlex
 import base64
 from hashlib import sha256
-from datetime import date, datetime, timezone
+from datetime import date
 
 from pydantic import BaseModel, Field
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -134,22 +134,6 @@ async def azure_tag_policy_timeline(
         return await AzureTagTimelineService(db).timeline(connection_id, since)
     except ValueError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
-
-
-@router.post("/timeline/backfill")
-async def backfill_azure_tag_policy_timeline(
-    connection_id: int = Query(...),
-    since: date = Query(default=date(2026, 10, 12)),
-    db: AsyncSession = Depends(get_db),
-):
-    if since > datetime.now(timezone.utc).date():
-        raise HTTPException(status_code=422, detail="A data inicial não pode estar no futuro")
-    try:
-        return await AzureTagTimelineService(db).backfill(connection_id, since)
-    except ValueError as exc:
-        raise HTTPException(status_code=404, detail=str(exc)) from exc
-    except (PermissionError, RuntimeError) as exc:
-        raise HTTPException(status_code=502, detail=str(exc)) from exc
 
 
 @router.post("/executive-dashboard/refresh", status_code=202)

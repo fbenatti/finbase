@@ -1712,30 +1712,15 @@ export interface AzureTagPolicyTimelineSnapshot {
   subscriptions: AzureTagPolicyTimelineSubscription[];
 }
 
-export interface AzureTagPolicyTimelineEvent {
-  event_at: string;
-  subscription_id: string;
-  operation: string;
-  status: string | null;
-  resource_id: string | null;
-  policy_assignment_id: string | null;
-  remediation_id: string | null;
-  correlation_id: string | null;
-  details: Record<string, unknown>;
-}
-
 export interface AzureTagPolicyTimeline {
   connection_id: number;
   since: string;
   through: string;
   snapshot_count: number;
   subscription_count: number;
-  event_count: number;
-  events_truncated: boolean;
   missing_inventory_dates: string[];
   snapshots: AzureTagPolicyTimelineSnapshot[];
-  subscriptions: AzurePolicySubscription[];
-  events: AzureTagPolicyTimelineEvent[];
+  subscriptions: { subscription_id: string; name: string }[];
 }
 
 export interface AzureTagExecutiveResource {
@@ -1880,16 +1865,6 @@ export async function getAzureTagPolicyTimeline(
   since = "2026-10-12",
 ): Promise<AzureTagPolicyTimeline> {
   const { data } = await api.get("/azure-tag-policy/timeline", {
-    params: { connection_id: connectionId, since },
-  });
-  return data;
-}
-
-export async function backfillAzureTagPolicyTimeline(
-  connectionId: number,
-  since = "2026-10-12",
-): Promise<{ connection_id: number; since: string; snapshots_added: number; events_added: number; errors: string[]; partial: boolean }> {
-  const { data } = await api.post("/azure-tag-policy/timeline/backfill", null, {
     params: { connection_id: connectionId, since },
   });
   return data;

@@ -4,7 +4,7 @@ import {
   FormControl, IconButton, InputLabel, LinearProgress, MenuItem, Select,
   Stack, Table, TableBody, TableCell, TableHead, TableRow, Typography,
 } from "@mui/material";
-import { ExpandLess, ExpandMore, PictureAsPdfOutlined, Refresh } from "@mui/icons-material";
+import { ExpandLess, ExpandMore, History, PictureAsPdfOutlined, Refresh } from "@mui/icons-material";
 import html2canvas from "html2canvas";
 import jsPDF from "jspdf";
 import {
@@ -12,7 +12,6 @@ import {
   AzureTagExecutiveResource,
   AzureTagPolicyTimeline,
   AzureTenant,
-  backfillAzureTagPolicyTimeline,
   getAzureTagExecutiveDashboard,
   getAzureTagExecutiveResources,
   getAzureTagPolicyTimeline,
@@ -45,9 +44,8 @@ export default function AzureTagExecutiveDashboard() {
   const [exporting, setExporting] = useState(false);
   const [timeline, setTimeline] = useState<AzureTagPolicyTimeline | null>(null);
   const [timelineLoading, setTimelineLoading] = useState(false);
-  const [timelineBackfill, setTimelineBackfill] = useState(false);
   const [timelineSubscription, setTimelineSubscription] = useState("");
-  const [timelineMessage, setTimelineMessage] = useState("");
+  const [timelineOpen, setTimelineOpen] = useState(false);
   const exportRootRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -93,28 +91,27 @@ export default function AzureTagExecutiveDashboard() {
     }
   }, [connectionId]);
 
-  useEffect(() => { if (connectionId !== "") void loadTimeline(); }, [connectionId, loadTimeline]);
+  useEffect(() => {
+    setTimeline(null);
+    setTimelineSubscription("");
+    setTimelineOpen(false);
+  }, [connectionId]);
 
-  const importTimelineHistory = async () => {
-    if (connectionId === "") return;
-    setTimelineBackfill(true);
-    setError("");
-    setTimelineMessage("Importando snapshots Bronze e eventos das policies desde 12/10…");
-    try {
-      const result = await backfillAzureTagPolicyTimeline(connectionId);
-      await loadTimeline();
-      setTimelineMessage(
-        `Importação concluída: ${fmt(result.snapshots_added)} snapshots e ${fmt(result.events_added)} eventos adicionados.`
-        + (result.partial ? ` ${result.errors.length} aviso(s); confira as lacunas abaixo.` : ""),
-      );
-      if (result.errors.length) setError(result.errors.join("\n"));
-    } catch (cause: any) {
-      setError(cause?.response?.data?.detail || cause?.message || "Falha ao importar o histórico de tags.");
-      setTimelineMessage("");
-    } finally {
-      setTimelineBackfill(false);
-    }
-  };
+  useEffect(() => {
+    if (timelineOpen && connectionId !== "" && !timeline) void loadTimeline();
+  }, [timelineOpen, connectionId, timeline, loadTimeline]);
+
+  const timelinePoints = useMemo(() => (timeline?.snapshots ?? []).map((snapshot) => {
+    const selected = timelineSubscription
+      ? snapshot.subscriptions.find((item) => item.subscription_id === timelineSubscription)
+      : null;
+    return {
+      date: snapshot.snapshot_date,
+      label: new Date(`${snapshot.snapshot_date}T00:00:00`).toLocaleDateString("pt-BR", { day: "2-digit", month: "short" }),
+      global: snapshot.global.adherence_percent,
+      selected: selected?.adherence_percent ?? null,
+    };
+  }), [timeline, timelineSubscription]);
 
   const totals = useMemo(() => (data?.subscriptions ?? []).reduce((acc, item) => {
     acc.resources += item.total_resources;
@@ -127,6 +124,11 @@ export default function AzureTagExecutiveDashboard() {
   const globalAdherence = totals.taggable > 0 && data?.tag_keys.length
     ? Math.round((totals.complete / totals.taggable) * 1000) / 10
     : null;
+  const globalCardColor = globalAdherence === null ? "grey.500" : globalAdherence >= 90 ? "success.main" : globalAdherence >= 60 ? "warning.main" : "error.main";
+  const firstTimelineValue = timelinePoints.find((point) => point.global !== null)?.global ?? null;
+  const lastTimelineValue = [...timelinePoints].reverse().find((point) => point.global !== null)?.global ?? null;
+  const timelineDelta = firstTimelineValue !== null && lastTimelineValue !== null ? lastTimelineValue - firstTimelineValue : null;
+  const timelineSubscriptionName = timeline?.subscriptions.find((item) => item.subscription_id === timelineSubscription)?.name;
 
   const exportPdf = async () => {
     if (!exportRootRef.current || exporting) return;
@@ -246,77 +248,104 @@ export default function AzureTagExecutiveDashboard() {
     {refreshMessage && <Alert severity={refreshing ? "info" : "success"} sx={{ mb: 2 }}>{refreshMessage}</Alert>}
     {loading && <LinearProgress sx={{ mb: 2 }} />}
     {data && <>
-      <Box sx={{ display: "grid", gridTemplateColumns: { xs: "repeat(2,minmax(0,1fr))", sm: "repeat(3,minmax(0,1fr))", lg: "repeat(6,minmax(0,1fr))" }, gap: 1.5, mb: 3 }}>
+      <Box sx={{ display: "grid", gridTemplateColumns: { xs: "repeat(2,minmax(0,1fr))", sm: "repeat(3,minmax(0,1fr))", lg: "repeat(6,minmax(0,1fr))" }, gap: 1.5, mb: 1.5 }}>
         {[
           ["Aderência global", globalAdherence === null ? "—" : `${globalAdherence.toLocaleString("pt-BR", { minimumFractionDigits: 1, maximumFractionDigits: 1 })}%`],
           ["Subscriptions", data.subscriptions.length], ["Recursos", totals.resources], ["Resource Groups", totals.groups],
           ["Tageáveis", totals.taggable], ["Não tageáveis", totals.nonTaggable],
-        ].map(([label, value]) => <Card key={String(label)} variant="outlined" sx={{ minWidth: 0, ...(label === "Aderência global" ? { borderLeft: "4px solid", borderLeftColor: globalAdherence === null ? "grey.400" : globalAdherence >= 90 ? "success.main" : globalAdherence >= 60 ? "warning.main" : "error.main" } : {}) }}><CardContent sx={{ p: { xs: "10px !important", md: "14px !important" }, minWidth: 0 }}><Typography variant="caption" color="text.secondary" noWrap display="block">{label}</Typography><Typography variant="h5" fontWeight={700} noWrap color={label === "Aderência global" && globalAdherence !== null ? globalAdherence >= 90 ? "success.main" : globalAdherence >= 60 ? "warning.main" : "error.main" : undefined}>{label === "Aderência global" ? <>{value}<Typography component="span" variant="caption" display="block" color="text.secondary" noWrap>{fmt(totals.complete)} / {fmt(totals.taggable)} tageáveis</Typography></> : fmt(Number(value))}</Typography></CardContent></Card>)}
-      </Box>
-      <Card variant="outlined" sx={{ mb: 3 }}>
-        <CardContent>
-          <Stack direction={{ xs: "column", md: "row" }} justifyContent="space-between" alignItems={{ xs: "stretch", md: "center" }} spacing={1.5} sx={{ mb: 1.5 }}>
-            <Box>
-              <Typography variant="h6" fontWeight={700}>Evolução de tags e execução das policies</Typography>
-              <Typography variant="body2" color="text.secondary">Snapshots por subscription e eventos Azure desde 12/10/2026. O consolidado é calculado a partir das subscriptions.</Typography>
-            </Box>
-            <Stack direction={{ xs: "column", sm: "row" }} spacing={1}>
-              <FormControl size="small" sx={{ minWidth: 240 }}>
-                <InputLabel>Subscription na timeline</InputLabel>
-                <Select label="Subscription na timeline" value={timelineSubscription} onChange={(event) => setTimelineSubscription(event.target.value)}>
-                  <MenuItem value="">Todas as subscriptions</MenuItem>
-                  {(timeline?.subscriptions ?? []).map((item) => <MenuItem key={item.subscription_id} value={item.subscription_id}>{item.name}</MenuItem>)}
-                </Select>
-              </FormControl>
-              <Button variant="outlined" onClick={() => void importTimelineHistory()} disabled={timelineBackfill || timelineLoading || connectionId === ""}>
-                {timelineBackfill ? <><CircularProgress size={16} sx={{ mr: 1 }} />Importando…</> : "Importar histórico desde 12/10"}
-              </Button>
+        ].map(([label, value]) => label === "Aderência global" ? <Card
+          key="global-adherence"
+          variant="outlined"
+          role="button"
+          tabIndex={0}
+          aria-expanded={timelineOpen}
+          aria-label={`${timelineOpen ? "Ocultar" : "Ver"} timeline de aderência global`}
+          onClick={() => setTimelineOpen((open) => !open)}
+          onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); setTimelineOpen((open) => !open); } }}
+          sx={{ minWidth: 0, cursor: "pointer", borderLeft: "4px solid", borderLeftColor: globalCardColor, bgcolor: timelineOpen ? "action.hover" : "background.paper", transition: "background-color 160ms ease, transform 160ms ease", "&:hover": { bgcolor: "action.hover", transform: "translateY(-2px)" }, "&:focus-visible": { outline: "2px solid", outlineColor: "primary.main", outlineOffset: 2 } }}
+        >
+          <CardContent sx={{ p: { xs: "10px !important", md: "14px !important" }, minWidth: 0 }}>
+            <Stack direction="row" justifyContent="space-between" alignItems="center" spacing={0.5}>
+              <Typography variant="caption" color="text.secondary" noWrap>Aderência global</Typography>
+              <History fontSize="small" color="action" />
             </Stack>
-          </Stack>
-          {timelineMessage && <Alert severity={timelineBackfill ? "info" : "success"} sx={{ mb: 1.5 }}>{timelineMessage}</Alert>}
-          {timelineLoading && <LinearProgress sx={{ mb: 1.5 }} />}
-          {timeline?.missing_inventory_dates.length ? <Alert severity="info" sx={{ mb: 1.5 }}>
-            Sem snapshot de inventário em: {timeline.missing_inventory_dates.map((day) => new Date(`${day}T00:00:00`).toLocaleDateString("pt-BR")).join(", ")}. Esses dias aparecem como lacunas, não como 0%.
-          </Alert> : null}
-          {timeline?.snapshots.length ? <Box sx={{ overflowX: "auto", mb: 2 }}>
-            <Table size="small">
-              <TableHead><TableRow><TableCell>Snapshot</TableCell><TableCell>Aderência global</TableCell><TableCell>Itens globais completos</TableCell>{timelineSubscription && <TableCell>Aderência da subscription</TableCell>}</TableRow></TableHead>
-              <TableBody>{timeline.snapshots.map((snapshot) => {
-                const selected = timelineSubscription ? snapshot.subscriptions.find((item) => item.subscription_id === timelineSubscription) : null;
-                return <TableRow key={snapshot.snapshot_at}>
-                  <TableCell>{new Date(snapshot.snapshot_at).toLocaleString("pt-BR")}</TableCell>
-                  <TableCell>{snapshot.global.adherence_percent === null ? "—" : `${snapshot.global.adherence_percent.toLocaleString("pt-BR", { minimumFractionDigits: 1 })}%`}</TableCell>
-                  <TableCell>{fmt(snapshot.global.fully_tagged)} / {fmt(snapshot.global.taggable_items)}</TableCell>
-                  {timelineSubscription && <TableCell>{selected?.adherence_percent == null ? "Sem dado neste snapshot" : `${selected.adherence_percent.toLocaleString("pt-BR", { minimumFractionDigits: 1 })}% (${fmt(selected.fully_tagged)} / ${fmt(selected.taggable_items)})`}</TableCell>}
-                </TableRow>;
-              })}</TableBody>
-            </Table>
-          </Box> : <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>Ainda não há snapshots importados. Use “Importar histórico desde 12/10” para carregar o que está preservado na Bronze e consultar os eventos do Azure.</Typography>}
-          <Typography variant="subtitle2" fontWeight={700} sx={{ mb: 0.5 }}>Eventos de execução</Typography>
-          {timeline?.events.length ? <Box sx={{ overflowX: "auto" }}>
-            <Table size="small">
-              <TableHead><TableRow><TableCell>Data/hora</TableCell><TableCell>Subscription</TableCell><TableCell>Operação</TableCell><TableCell>Status</TableCell><TableCell>Deployments</TableCell><TableCell>Assignment / Remediação</TableCell></TableRow></TableHead>
-              <TableBody>{timeline.events.filter((event) => !timelineSubscription || event.subscription_id === timelineSubscription).slice(-30).reverse().map((event, index) => {
-                const subscriptionName = timeline.subscriptions.find((item) => item.subscription_id === event.subscription_id)?.name || event.subscription_id;
-                const deploymentSummary = event.details?.deployment_summary as {
-                  totalDeployments?: number;
-                  successfulDeployments?: number;
-                  failedDeployments?: number;
-                } | undefined;
-                return <TableRow key={`${event.event_at}-${event.correlation_id}-${index}`}>
-                  <TableCell>{new Date(event.event_at).toLocaleString("pt-BR")}</TableCell>
-                  <TableCell>{subscriptionName}</TableCell>
-                  <TableCell>{event.operation}</TableCell>
-                  <TableCell><Chip size="small" label={event.status || "—"} color={event.status?.toLowerCase().includes("fail") ? "error" : event.status?.toLowerCase().includes("succeed") ? "success" : "default"} /></TableCell>
-                  <TableCell>{deploymentSummary ? `${fmt(deploymentSummary.successfulDeployments || 0)} ok / ${fmt(deploymentSummary.failedDeployments || 0)} falhas de ${fmt(deploymentSummary.totalDeployments || 0)}` : "—"}</TableCell>
-                  <TableCell sx={{ maxWidth: 320, overflowWrap: "anywhere" }}>{event.remediation_id || event.policy_assignment_id || event.resource_id || "—"}</TableCell>
-                </TableRow>;
-              })}</TableBody>
-            </Table>
-            {timeline.events_truncated && <Typography variant="caption" color="text.secondary">Exibindo os 30 eventos mais recentes dos 1.000 registros consultados.</Typography>}
-          </Box> : <Typography variant="body2" color="text.secondary">Nenhum evento importado ainda.</Typography>}
-        </CardContent>
-      </Card>
+            <Typography variant="h5" fontWeight={700} noWrap color={globalCardColor}>{value}</Typography>
+            <Typography variant="caption" display="block" color="text.secondary" noWrap>{fmt(totals.complete)} / {fmt(totals.taggable)} tageáveis · {timelineOpen ? "Ocultar evolução" : "Ver evolução"}</Typography>
+          </CardContent>
+        </Card> : <Card key={String(label)} variant="outlined" sx={{ minWidth: 0 }}><CardContent sx={{ p: { xs: "10px !important", md: "14px !important" }, minWidth: 0 }}><Typography variant="caption" color="text.secondary" noWrap display="block">{label}</Typography><Typography variant="h5" fontWeight={700} noWrap>{fmt(Number(value))}</Typography></CardContent></Card>)}
+      </Box>
+      <Collapse in={timelineOpen} unmountOnExit>
+        <Card variant="outlined" sx={{ mb: 3, overflow: "hidden", background: "linear-gradient(135deg, #ffffff 0%, #f5f8ff 65%, #f0fdfa 100%)" }}>
+          <CardContent sx={{ p: { xs: 2, md: 3 } }}>
+            <Stack direction={{ xs: "column", md: "row" }} justifyContent="space-between" alignItems={{ xs: "stretch", md: "center" }} spacing={2} sx={{ mb: 2.5 }}>
+              <Box>
+                <Typography variant="overline" color="primary.main" fontWeight={800} letterSpacing={1.1}>HISTÓRICO DE ADERÊNCIA</Typography>
+                <Typography variant="h5" fontWeight={750}>Evolução das tags</Typography>
+                <Typography variant="body2" color="text.secondary">Snapshots de inventário preservados desde 12/10/2026</Typography>
+              </Box>
+              <Stack direction="row" spacing={1} alignItems="center">
+                <FormControl size="small" sx={{ minWidth: { xs: 210, sm: 260 }, bgcolor: "background.paper" }}>
+                  <InputLabel>Comparar subscription</InputLabel>
+                  <Select label="Comparar subscription" value={timelineSubscription} onChange={(event) => setTimelineSubscription(event.target.value)}>
+                    <MenuItem value="">Somente consolidado</MenuItem>
+                    {(timeline?.subscriptions ?? []).map((item) => <MenuItem key={item.subscription_id} value={item.subscription_id}>{item.name}</MenuItem>)}
+                  </Select>
+                </FormControl>
+                <IconButton data-pdf-hide aria-label="Ocultar timeline" onClick={() => setTimelineOpen(false)}><ExpandLess /></IconButton>
+              </Stack>
+            </Stack>
+            {timelineLoading && <LinearProgress sx={{ mb: 2, borderRadius: 2 }} />}
+            {timeline && timelinePoints.length > 0 && <>
+              <Box sx={{ display: "grid", gridTemplateColumns: { xs: "1fr", sm: "repeat(3, minmax(0,1fr))" }, gap: 1.25, mb: 2.5 }}>
+                <Box sx={{ p: 1.6, borderRadius: 2, bgcolor: "background.paper", border: "1px solid", borderColor: "divider" }}>
+                  <Typography variant="caption" color="text.secondary">ADERÊNCIA MAIS RECENTE</Typography>
+                  <Typography variant="h4" fontWeight={800} color={globalCardColor}>{lastTimelineValue === null ? "—" : `${lastTimelineValue.toLocaleString("pt-BR", { minimumFractionDigits: 1 })}%`}</Typography>
+                  <Typography variant="caption" color="text.secondary">{timelinePoints.at(-1)?.label}</Typography>
+                </Box>
+                <Box sx={{ p: 1.6, borderRadius: 2, bgcolor: "background.paper", border: "1px solid", borderColor: "divider" }}>
+                  <Typography variant="caption" color="text.secondary">VARIAÇÃO NO PERÍODO</Typography>
+                  <Typography variant="h4" fontWeight={800} color={timelineDelta === null ? "text.primary" : timelineDelta >= 0 ? "success.main" : "error.main"}>{timelineDelta === null ? "—" : `${timelineDelta >= 0 ? "+" : ""}${timelineDelta.toLocaleString("pt-BR", { minimumFractionDigits: 1 })} p.p.`}</Typography>
+                  <Typography variant="caption" color="text.secondary">desde {timelinePoints[0]?.label}</Typography>
+                </Box>
+                <Box sx={{ p: 1.6, borderRadius: 2, bgcolor: "background.paper", border: "1px solid", borderColor: "divider" }}>
+                  <Typography variant="caption" color="text.secondary">MEDIÇÕES DE INVENTÁRIO</Typography>
+                  <Typography variant="h4" fontWeight={800}>{fmt(timelinePoints.length)}</Typography>
+                  <Typography variant="caption" color="text.secondary">{timelinePoints[0]?.label} – {timelinePoints.at(-1)?.label}</Typography>
+                </Box>
+              </Box>
+              <Box sx={{ position: "relative", px: { xs: 0.5, sm: 2 }, py: 2.5, overflowX: "auto" }}>
+                <Box sx={{ minWidth: Math.max(560, timelinePoints.length * 155), position: "relative" }}>
+                  <Box sx={{ position: "absolute", left: 24, right: 24, top: 18, height: 6, borderRadius: 4, bgcolor: "#dbe5f3" }} />
+                  <Box sx={{ position: "absolute", left: 24, width: timelinePoints.length > 1 ? `calc((100% - 48px) * ${(timelinePoints.length - 1) / timelinePoints.length})` : 0, top: 18, height: 6, borderRadius: 4, background: "linear-gradient(90deg, #2563eb, #06b6d4)" }} />
+                  <Box sx={{ display: "grid", gridTemplateColumns: `repeat(${timelinePoints.length}, minmax(130px, 1fr))`, position: "relative" }}>
+                    {timelinePoints.map((point, index) => {
+                      const delta = index > 0 && point.global !== null && timelinePoints[index - 1].global !== null
+                        ? point.global - (timelinePoints[index - 1].global as number) : null;
+                      return <Box key={point.date} sx={{ textAlign: "center", px: 0.75 }}>
+                        <Box sx={{ mx: "auto", width: 42, height: 42, borderRadius: "50%", display: "grid", placeItems: "center", bgcolor: "background.paper", border: "4px solid", borderColor: index === timelinePoints.length - 1 ? "#0891b2" : "#2563eb", boxShadow: "0 4px 14px rgba(37,99,235,.2)", position: "relative", zIndex: 1 }}>
+                          <Box sx={{ width: 12, height: 12, borderRadius: "50%", bgcolor: index === timelinePoints.length - 1 ? "#0891b2" : "#2563eb" }} />
+                        </Box>
+                        <Typography variant="caption" display="block" color="text.secondary" sx={{ mt: 1.2 }}>{point.label}</Typography>
+                        <Typography variant="h6" fontWeight={800} color="primary.dark">{point.global === null ? "—" : `${point.global.toLocaleString("pt-BR", { minimumFractionDigits: 1 })}%`}</Typography>
+                        <Typography variant="caption" display="block" color={delta === null ? "text.secondary" : delta >= 0 ? "success.main" : "error.main"} fontWeight={700}>
+                          {index === 0 ? "primeiro snapshot" : delta === null ? "sem comparação" : `${delta >= 0 ? "↑" : "↓"} ${Math.abs(delta).toLocaleString("pt-BR", { minimumFractionDigits: 1 })} p.p.`}
+                        </Typography>
+                        {timelineSubscription && point.selected !== null && <Chip size="small" label={`${point.selected.toLocaleString("pt-BR", { minimumFractionDigits: 1 })}%`} sx={{ mt: 1, bgcolor: "#cffafe", color: "#155e75", fontWeight: 700 }} />}
+                      </Box>;
+                    })}
+                  </Box>
+                </Box>
+              </Box>
+              {timelineSubscriptionName && <Typography variant="body2" color="text.secondary" sx={{ mt: 0.5 }}><Box component="span" sx={{ color: "#0891b2", fontWeight: 800 }}>●</Box> {timelineSubscriptionName} · valores por snapshot</Typography>}
+              {timeline?.missing_inventory_dates.length ? <Alert severity="info" sx={{ mt: 2, borderRadius: 2 }}>
+                Sem inventário nos dias {timeline.missing_inventory_dates.map((day) => new Date(`${day}T00:00:00`).toLocaleDateString("pt-BR")).join(", ")}; o histórico mostra apenas medições disponíveis.
+              </Alert> : null}
+            </>}
+            {timeline && timelinePoints.length === 0 && !timelineLoading && <Alert severity="info">Ainda não existem snapshots de inventário desde 12/10/2026.</Alert>}
+            {!timeline && !timelineLoading && <Typography variant="body2" color="text.secondary">Abrindo histórico…</Typography>}
+          </CardContent>
+        </Card>
+      </Collapse>
       <Stack spacing={1.5}>
         {data.subscriptions.map((item) => {
           const isOpen = expanded === item.subscription_id;
