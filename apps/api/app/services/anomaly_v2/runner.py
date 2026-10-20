@@ -282,6 +282,8 @@ async def execute_detection_v2(
             ]
 
         report(7, 8, "Publicando sinais")
+        if await _source_snapshot_id(config) != source_snapshot_id:
+            raise AnomalyV2RunError("A origem mudou durante a detecção; execute novamente para publicar dados consistentes")
         await _ensure_tables()
         pub_rows = [
             {
@@ -382,8 +384,7 @@ async def _apply_return_engine(session, *, config_id: int, history: list[dict[st
                                valid_days: dict[str, set[str]]) -> int:
     from sqlalchemy import select
 
-    from app.models.anomaly import AnomalyAction, AnomalyCase
-    from app.services.anomaly_v2.impact import compute_impact
+    from app.models.anomaly import AnomalyAction, AnomalyCase, AnomalyCaseEvent
     from app.services.anomaly_v2.return_engine import DEVIATION_ACTIVE, evaluate_return
 
     rows = (
@@ -423,8 +424,15 @@ async def _apply_return_engine(session, *, config_id: int, history: list[dict[st
             valid_days=valid_days.get(str(case.cloud or (case.series_dimensions or {}).get("cloud_origem") or ""), set()),
         )
         if ret.get("deviation_status") != DEVIATION_ACTIVE:
+            previous_status = case.deviation_status
             case.deviation_status = ret["deviation_status"]
             case.episode_end = ret.get("returned_at")
+            case.case_version = int(case.case_version or 1) + 1
+            session.add(AnomalyCaseEvent(case_id=case.id, event_type="RETURN_DETECTED",
+                from_state=case.state, to_state=case.state, case_version=case.case_version,
+                payload={"before": previous_status, "after": case.deviation_status,
+                         "returned_at": case.episode_end, "model_version": MODEL_VERSION},
+                note="Retorno confirmado por três dias coletados válidos; workflow preservado"))
             # Recovery does not erase the incurred excess or close human workflow.
             updated += 1
     return updated
@@ -478,15 +486,27 @@ async def _sync_cases(
             if existing.state == "CLOSED":
                 ignored += 1
                 continue
+            observed = float(leader.get("observed") or 0)
+            delta = observed - float(existing.expected_cloud or 0)
+            revised = {**leader, "delta": delta,
+                       "pct_delta": delta / max(float(existing.expected_cloud or 0), 1)}
+            prioritization = score_signal(revised, materiality=mat_daily,
+                severity_tiers=getattr(config_row, "severity_tiers", None), confidence=existing.confidence)
             fields = {
-                "observed_cloud": float(leader.get("observed") or 0),
-                "delta_cloud": float(leader.get("delta") or 0),
-                "score": float(leader.get("score") or 0),
-                "severity": str(leader.get("severity") or "MEDIUM"),
-                "projected_month_impact": float(leader.get("projected_month_impact") or 0),
-                "deviation_status": str(leader.get("deviation_status") or "EM_DESVIO"),
+                "event_date": event_day,
+                "observed_cloud": observed,
+                "delta_cloud": delta,
+                "anomalous_cost_cloud": max(0.0, delta),
+                "impact_to_date": max(float(existing.impact_to_date or 0), max(0.0, delta)),
+                "score": prioritization["score"],
+                "severity": prioritization["severity"],
+                "projected_month_impact": prioritization["projected_month_impact"],
+                "explanation": explain_signal(revised, materiality=mat_daily,
+                    min_pct=float(config_row.min_relative_deviation or 0.2)),
                 "episode_end": leader.get("episode_end"),
             }
+            if existing.deviation_status in (None, "EM_DESVIO", "AUTOCORRIGIDO", "CORRIGIDO_COM_ACAO"):
+                fields["deviation_status"] = str(leader.get("deviation_status") or "EM_DESVIO")
             changed = {field: value for field, value in fields.items() if getattr(existing, field) != value}
             if changed:
                 before = {field: getattr(existing, field) for field in changed}
