@@ -103,7 +103,7 @@ def detector_settings(value: Mapping[str, Any] | None) -> dict[str, int | float]
     return merged
 
 
-def validate_detector_settings(value: Mapping[str, Any]) -> dict[str, int | float]:
+def validate_detector_settings(value: Mapping[str, Any], *, history_days: int | None = None) -> dict[str, int | float]:
     unknown = set(value) - set(DEFAULT_DETECTOR_SETTINGS)
     if unknown:
         raise ValueError(f"Parâmetros desconhecidos: {', '.join(sorted(unknown))}")
@@ -121,4 +121,17 @@ def validate_detector_settings(value: Mapping[str, Any]) -> dict[str, int | floa
     ))
     if weights <= 0:
         raise ValueError("Ao menos um peso da nota precisa ser maior que zero")
+    if not (
+        float(merged["severity_medium_min"])
+        <= float(merged["severity_high_min"])
+        <= float(merged["severity_critical_min"])
+    ):
+        raise ValueError("Os limites de severidade devem seguir a ordem média ≤ alta ≤ crítica")
+    if history_days is not None:
+        minimum_history = int(merged["detection_lookback_days"]) + int(merged["baseline_variability_days"])
+        if int(history_days) < minimum_history:
+            raise ValueError(
+                "O histórico total precisa cobrir a janela de detecção mais o histórico da linha de base "
+                f"(mínimo atual: {minimum_history} dias)"
+            )
     return merged
