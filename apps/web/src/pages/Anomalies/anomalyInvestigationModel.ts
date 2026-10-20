@@ -17,12 +17,17 @@ export const detailScopeChain = (details: Array<{ key: string; label: string }> 
     { field: "gcp_project", label: "Projeto GCP" },
     { field: "servicesubcategory", label: "Produto / família" }, { field: "skumeter", label: "SKU / medidor" },
   ];
-  const custom = details.map(item => ({ field: item.key, label: item.label }));
+  const hiddenFields = new Set(["subscription", "subscription_id", "resource", "resource_name", "resource_id", "region"]);
+  const hiddenLabels = /^(id\s+da\s+assinatura|assinatura\s+id|subscription(?:\s+id)?|recurso(?:\s+id)?|id\s+do\s+recurso|nome\s+do\s+recurso|resource(?:\s+id|\s+name)?|regi[aã]o|region)$/i;
+  const custom = details
+    .filter(item => !hiddenFields.has(item.key.toLowerCase()) && !hiddenLabels.test(item.label.trim()))
+    .map(item => ({ field: item.key, label: item.label }));
   const noise = /^(centro.?custo|cost.?center|servicename|service.?name|pricingcategory|commitmentdiscounttype)$/i;
   const unseen = custom.filter(item => !base.some(candidate => candidate.field === item.field) && !noise.test(item.field) && !noise.test(item.label.replace(/\s/g, "")));
-  const infrastructure = unseen.filter(item => ["resource_group", "gcp_project"].includes(item.field));
-  const resourceDetails = unseen.filter(item => !infrastructure.includes(item));
-  const all = [...base.slice(0, 8), ...infrastructure, ...base.slice(8), ...resourceDetails];
+  const sku = base.find(item => item.field === "skumeter");
+  const product = base.find(item => item.field === "servicesubcategory");
+  const path = base.filter(item => item !== sku && item !== product);
+  const all = [...path, ...unseen, ...(product ? [product] : []), ...(sku ? [sku] : [])];
   return all.filter((item, index) => all.findIndex(candidate => candidate.field === item.field) === index);
 };
 export function caseLineageNodes(
