@@ -16,7 +16,7 @@ from app.services.anomaly_v2.daily_build import build_daily_aggregate, load_dail
 from app.services.anomaly_v2.detectors import TIER_ALERT, TIER_WATCH, run_detectors_for_scope
 from app.services.anomaly_v2.gates import apply_gates, cloud_load_quality, valid_days_by_cloud
 from app.services.anomaly_v2.hierarchy import consolidate_alerts
-from app.services.anomaly_v2.readiness import clouds_advanced, max_day_by_cloud, readiness_fingerprint
+from app.services.anomaly_v2.readiness import max_day_by_cloud, readiness_fingerprint
 from app.services.anomaly_v2.scoring import score_signal
 from app.services.anomaly_v2.schema import SIGNAL_COLUMNS, SIGNAL_TABLE, SILVER_NS, ddl_statements
 from app.services.anomaly_v2.scope import display_scope
@@ -42,6 +42,17 @@ def _materiality(config: Mapping[str, Any]) -> tuple[float, float]:
 async def _ensure_tables() -> None:
     for stmt in ddl_statements():
         await trino_execute(stmt, timeout_s=120)
+
+
+async def _source_snapshot_id(config: Mapping[str, Any]) -> str:
+    from app.services.iceberg_service import get_catalog
+
+    def read() -> str:
+        table = get_catalog().load_table((str(config["source_namespace"]), str(config["destination_physical_name"])))
+        snapshot = table.current_snapshot()
+        return str(snapshot.snapshot_id) if snapshot else "empty"
+
+    return await asyncio.to_thread(read)
 
 
 async def _publish_signals(run_id: int, rows: list[dict[str, Any]]) -> int:
@@ -125,7 +136,10 @@ async def execute_detection_v2(
         history_days = int(config.get("history_days") or 90)
 
         report(1, 8, "Verificando prontidão")
+        source_snapshot_id = await _source_snapshot_id(config)
         history = await load_daily_history(config, as_of=as_of, history_days=history_days)
+        if await _source_snapshot_id(config) != source_snapshot_id:
+            raise AnomalyV2RunError("A origem mudou durante a leitura; execute novamente para avaliar um snapshot consistente")
         current_max = max_day_by_cloud(history)
         if not current_max:
             raise AnomalyV2RunError("Nenhum realizado cloud disponível na janela de análise")
@@ -142,20 +156,14 @@ async def execute_detection_v2(
             prev_fp = (previous.config_snapshot or {}).get("readiness_fingerprint")
         current_run = await session.get(AnomalyRun, run_id) if run_id else None
         force = force or bool(current_run and current_run.trigger_type == "MANUAL")
-        fingerprint = readiness_fingerprint(current_max, int(config_row.version))
-        previous_clouds = None
-        if prev_fp:
-            import json
-
-            try:
-                previous_clouds = json.loads(prev_fp).get("clouds")
-            except json.JSONDecodeError:
-                previous_clouds = None
+        fingerprint = readiness_fingerprint(current_max, int(config_row.version), source_snapshot_id)
         if not force and prev_fp == fingerprint:
             skipped = {
                 "status": "SKIPPED_NO_NEW_DATA",
                 "as_of": as_of.isoformat(),
                 "fingerprint": fingerprint,
+                "engine": "v2",
+                "model_version": MODEL_VERSION,
             }
             if run_id:
                 run = await session.get(AnomalyRun, run_id)
@@ -165,24 +173,10 @@ async def execute_detection_v2(
                     run.finished_at = datetime.now(timezone.utc)
                     snap = dict(run.config_snapshot or {})
                     snap["readiness_fingerprint"] = fingerprint
+                    snap["v2_summary"] = skipped
                     run.config_snapshot = snap
                     await session.commit()
             return skipped
-        if not force and prev_fp == fingerprint and not clouds_advanced(current_max, previous_clouds):
-            skipped = {
-                "status": "SKIPPED_NO_NEW_DATA",
-                "as_of": as_of.isoformat(),
-                "fingerprint": fingerprint,
-            }
-            if run_id:
-                run = await session.get(AnomalyRun, run_id)
-                if run:
-                    run.status = "COMPLETED"
-                    run.phase = "Sem dado novo"
-                    run.finished_at = datetime.now(timezone.utc)
-                    await session.commit()
-            return skipped
-
         if should_abort and should_abort():
             return await _finish_cancelled(session, run_id)
 
@@ -195,11 +189,13 @@ async def execute_detection_v2(
         commitment_scope_ids = {str(e["scope_id"]) for e in ledger}
 
         report(4, 8, "Classificando séries")
-        profiles = classify_scopes(
-            history,
-            as_of=as_of,
-            commitment_scope_ids=commitment_scope_ids,
-        )
+        history_by_cloud: dict[str, list[dict[str, Any]]] = defaultdict(list)
+        for row in history:
+            history_by_cloud[str(row.get("cloud_origem") or row.get("cloud") or "")].append(row)
+        profiles = {}
+        for cloud, rows in history_by_cloud.items():
+            profiles.update(classify_scopes(rows, as_of=date.fromisoformat(current_max[cloud]),
+                                           commitment_scope_ids=commitment_scope_ids))
         scope_meta: dict[str, dict[str, Any]] = {}
         for row in history:
             sid = str(row["scope_id"])
@@ -355,8 +351,15 @@ async def execute_detection_v2(
                 run.phase = "Detecção v2 publicada"
                 run.finished_at = datetime.now(timezone.utc)
                 run.rows_written = int(result.get("rows_written") or 0)
-                run.processed_series = int(result.get("signals") or 0)
+                run.source_snapshot_id = source_snapshot_id
+                run.data_cutoff = as_of.isoformat()
+                run.evaluation_start = (as_of - timedelta(days=history_days - 1)).isoformat()
+                run.evaluation_end = as_of.isoformat()
+                run.reference_kind = "V2_BASELINE"
+                run.assessment_table = SIGNAL_TABLE
+                run.total_series = run.processed_series = len(rows_by_scope)
                 run.cases_created = int(result.get("cases_created") or 0)
+                run.cases_updated = int(result.get("cases_updated") or 0)
         await session.commit()
         return result
 

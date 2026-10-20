@@ -114,6 +114,7 @@ def test_runner_publishes_and_persists_cases_idempotently(monkeypatch, recovered
             yield AsyncAdapter(db)
 
         monkeypatch.setattr(runner, "async_session", sessions)
+        monkeypatch.setattr(runner, "_source_snapshot_id", AsyncMock(return_value="snapshot-1"))
         monkeypatch.setattr(runner, "load_daily_history", AsyncMock(return_value=rows))
         monkeypatch.setattr(runner, "build_daily_aggregate", AsyncMock(return_value={"row_count": len(rows)}))
         monkeypatch.setattr(runner, "refresh_commitment_ledger", AsyncMock(return_value={"entries": []}))
