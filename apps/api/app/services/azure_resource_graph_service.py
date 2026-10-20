@@ -508,9 +508,34 @@ def run_resource_graph_collection(
             for item in accessible
             if str(item.get("subscription_id") or "").strip()
         }
-        effective_subscriptions = configured_subscriptions or list(subscription_names)
+        # Subscription IDs persisted on a connection can become stale when a
+        # subscription is moved, disabled, or replaced. ARG rejects the whole
+        # request with NoValidSubscriptionsInQueryRequest if even one such ID
+        # is queried. Treat ARM's current enabled subscription list as the
+        # authoritative set, and apply configured IDs only as a filter.
+        if configured_subscriptions:
+            accessible_ids = set(subscription_names)
+            effective_subscriptions = [
+                subscription_id for subscription_id in configured_subscriptions
+                if subscription_id.casefold() in accessible_ids
+            ]
+            stale_subscriptions = [
+                subscription_id for subscription_id in configured_subscriptions
+                if subscription_id.casefold() not in accessible_ids
+            ]
+            if stale_subscriptions:
+                logger.warning(
+                    "Azure Resource Graph connection %s: ignorando %d subscription(s) configurada(s) "
+                    "que não estão acessíveis/Enabled no ARM",
+                    connection_id, len(stale_subscriptions),
+                )
+        else:
+            effective_subscriptions = list(subscription_names)
         if not effective_subscriptions:
-            raise RuntimeError("Azure Resource Graph não encontrou subscriptions acessíveis para coletar")
+            raise RuntimeError(
+                "Azure Resource Graph não encontrou subscriptions acessíveis/Enabled no ARM "
+                "dentro do escopo configurado"
+            )
 
         # Always query inventory per subscription. An unscoped ARG query is
         # capped at 10,000 rows and silently truncates large Azure tenants.

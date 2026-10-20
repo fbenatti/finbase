@@ -632,6 +632,13 @@ async def collect_environment(
             "source_key": source_key,
             "source_code": source_code(connection.code, source_key),
         }
+        if source_key == "resource_graph":
+            selected_subscriptions = [
+                value.strip()
+                for value in (selection.subscription_ids or "").split(",")
+                if value.strip()
+            ]
+            result_json["subscription_ids"] = selected_subscriptions or None
         phase = "Na fila: coleta"
         if is_telemetry(source_key):
             window = max(1, min(int(days or entry.get("default_window_days") or 1), 90))
