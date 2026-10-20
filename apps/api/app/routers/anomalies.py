@@ -221,8 +221,14 @@ async def list_configs(
     user: User = Depends(require("anomalies", "read")),
 ):
     rows = (await db.execute(select(AnomalyConfig).order_by(AnomalyConfig.id))).scalars().all()
-    return [
-        {
+    configs = []
+    for row in rows:
+        saved_settings = detector_settings(row.detector_settings)
+        legacy_tiers = dict(row.severity_tiers or {})
+        for legacy_key, setting_key in (("MEDIUM", "severity_medium_min"), ("HIGH", "severity_high_min"), ("CRITICAL", "severity_critical_min")):
+            if legacy_key in legacy_tiers:
+                saved_settings[setting_key] = float(legacy_tiers[legacy_key])
+        configs.append({
             "id": row.id,
             "name": row.name,
             "description": row.description,
@@ -250,10 +256,9 @@ async def list_configs(
             "source_namespace": row.source_namespace,
             "destination_physical_name": row.destination_physical_name,
             "severity_tiers": row.severity_tiers,
-            "detector_settings": detector_settings(row.detector_settings),
-        }
-        for row in rows
-    ]
+            "detector_settings": saved_settings,
+        })
+    return configs
 
 
 @router.put("/configs/{config_id}")
@@ -284,6 +289,8 @@ async def update_config(
     for field, value in data.items():
         if value is not None:
             setattr(config, field, value)
+    if "detector_settings" in data:
+        config.severity_tiers = None
     config.version = int(config.version or 1) + 1
     await db.flush()
     await db.refresh(config)
