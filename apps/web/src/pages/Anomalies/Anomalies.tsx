@@ -175,6 +175,7 @@ export default function Anomalies() {
   const [summary, setSummary] = useState<CaseSummary | null>(null);
   const [impactSummary, setImpactSummary] = useState<ImpactSummary | null>(null);
   const [retrospectiveItems, setRetrospectiveItems] = useState<AnomalyCase[]>([]);
+  const [confirmedItems, setConfirmedItems] = useState<AnomalyCase[]>([]);
   const [latestRun, setLatestRun] = useState<AnomalyRunSummary | null>(null);
   const detectionRunning = latestRun?.status === "QUEUED" || latestRun?.status === "RUNNING";
   const [cases, setCases] = useState<AnomalyCase[]>([]);
@@ -319,6 +320,11 @@ export default function Anomalies() {
       void listAnomalyCases({ limit: 200, order_by: "score", deviation_status: ["AUTOCORRIGIDO", "CORRIGIDO_COM_ACAO"] })
         .then((page) => setRetrospectiveItems(page.items))
         .catch(() => setRetrospectiveItems([]));
+    }
+    if (tab === 6) {
+      void listAnomalyCases({ limit: 200, order_by: "score", decision: ["CONFIRMED_ACTION", "CONFIRMED_ACCEPTED"] })
+        .then((page) => setConfirmedItems(page.items))
+        .catch(() => setConfirmedItems([]));
     }
   }, [tab, loadExpected, loadQuality]);
 
@@ -516,6 +522,7 @@ export default function Anomalies() {
         <Tab label="Eventos esperados" />
         <Tab label="Saúde do modelo" />
         <Tab label="Retrospectiva" />
+        <Tab label="Anomalias confirmadas" />
         <Tab label="Configurações" />
       </Tabs>
 
@@ -662,7 +669,16 @@ export default function Anomalies() {
         </Box>
       )}
 
-      {tab === 6 && config && (
+      {tab === 6 && (
+        <Box>
+          <Typography variant="subtitle2" gutterBottom>Anomalias confirmadas</Typography>
+          <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>Casos classificados como “confirmado com ação” ou “confirmado aceito”. Eventos esperados e casos sem decisão ficam fora desta lista.</Typography>
+          <Typography variant="caption" color="text.secondary">{confirmedItems.length} caso(s) · clique em uma linha para abrir a investigação.</Typography>
+          <Box sx={{ mt: 1 }}><AnomaliesCasesDataGrid cases={confirmedItems} currency={currency} onOpen={(id) => void openCase(id)} /></Box>
+        </Box>
+      )}
+
+      {tab === 7 && config && (
         <AnomaliesSettingsTab config={config} onSaved={() => void loadAll()} busy={busy} setBusy={setBusy} />
       )}
 
