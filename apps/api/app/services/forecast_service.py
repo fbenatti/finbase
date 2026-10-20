@@ -1616,8 +1616,14 @@ async def run_forecast(config: Any, adjustments: list[Any], cutoff: date | None 
         if interval_series and series_last_date < cloud_effective_cutoff.replace(day=1):
             continue
         daily = history.resample("D").sum()
+        # The beginning of the model window must also be shared: a new Return
+        # may start after its Usage's zero rows. Otherwise a five-day credit
+        # uses MEAN_AVAILABLE while Usage averages five charges over seven
+        # calendar days. The SQL fetch already establishes this source window.
+        source_history_start = cloud_effective_cutoff - (effective_cutoff - daily_history_start)
+        calendar_start = min(daily.index.min(), pd.Timestamp(source_history_start))
         daily = daily.reindex(
-            pd.date_range(daily.index.min(), pd.Timestamp(series_cutoff), freq="D"),
+            pd.date_range(calendar_start, pd.Timestamp(series_cutoff), freq="D"),
             fill_value=0.0,
         )
         # Gold omits dimension tuples with no realized rows in a month.
