@@ -25,7 +25,7 @@ if [[ -n "$(git status --porcelain)" ]]; then
   echo "Aviso: alterações locais sem commit serão excluídas do release." >&2
 fi
 
-git push origin "$branch"
+git push origin "refs/heads/$branch:refs/heads/$branch"
 target="$(git rev-parse "$branch")"
 short_target="$(git rev-parse --short=8 "$target")"
 remote_bundle="$bundle_dir/openfinops-prod-release-$short_target.bundle"
