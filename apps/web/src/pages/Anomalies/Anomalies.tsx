@@ -47,6 +47,15 @@ const STATE_LABEL: Record<string, string> = {
   CLOSED: "Encerrado",
 };
 
+const OPEN_CASE_STATES = ["NEW", "ASSIGNED", "INVESTIGATING", "DECIDED", "IN_REMEDIATION", "VERIFYING", "RETROSPECTIVE"];
+const CASE_SLICE_LABEL: Record<string, string> = {
+  __open__: "Abertos",
+  __overdue__: "Vencidos",
+  __unassigned__: "Sem responsável",
+  __confirmed__: "Anomalias confirmadas",
+  __recurrence__: "Famílias reincidentes",
+};
+
 const SEVERITY_COLOR: Record<string, "default" | "info" | "warning" | "error"> = {
   LOW: "default",
   MEDIUM: "info",
@@ -202,6 +211,7 @@ export default function Anomalies() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [stateFilter, setStateFilter] = useState<string>("NEW");
+  const [caseSliceFilter, setCaseSliceFilter] = useState<string>("");
   const [severityFilter, setSeverityFilter] = useState<string>("");
   const [queueOnly, setQueueOnly] = useState(false);
   const [myCasesOnly, setMyCasesOnly] = useState(false);
@@ -267,31 +277,28 @@ export default function Anomalies() {
       if (stateFilter) params.state = [stateFilter];
       if (severityFilter) params.severity = [severityFilter];
       if (queueOnly) params.queue_only = true;
-      if (stateFilter === "__overdue__") {
+      if (caseSliceFilter === "__overdue__") {
         params.overdue_only = true;
         delete params.state;
       }
-      if (stateFilter === "__unassigned__") {
+      if (caseSliceFilter === "__unassigned__") {
         params.unassigned_only = true;
         delete params.state;
       }
-      if (stateFilter === "__open__") params.state = ["NEW", "ASSIGNED", "INVESTIGATING", "DECIDED", "IN_REMEDIATION", "VERIFYING", "RETROSPECTIVE"];
-      if (stateFilter === "__confirmed__") params.decision = ["CONFIRMED_ACTION", "CONFIRMED_ACCEPTED"];
-      if (stateFilter === "__recurrence__") params.recurrence_only = true;
-      if (["__confirmed__", "__recurrence__"].includes(stateFilter)) delete params.state;
+      if (caseSliceFilter === "__open__") params.state = OPEN_CASE_STATES;
+      if (caseSliceFilter === "__confirmed__") params.decision = ["CONFIRMED_ACTION", "CONFIRMED_ACCEPTED"];
+      if (caseSliceFilter === "__recurrence__") params.recurrence_only = true;
+      if (["__confirmed__", "__recurrence__"].includes(caseSliceFilter)) delete params.state;
       const page = await listAnomalyCases(params);
       if (request !== listRequest.current) return;
-      const visibleItems = stateFilter === "__open__"
-        ? page.items.filter((item) => item.state !== "CLOSED")
-        : page.items;
-      setCases(visibleItems);
+      setCases(page.items);
       setTotal(page.total);
     } catch (err) {
       if (request === listRequest.current) setError(err instanceof Error ? err.message : "Falha ao listar casos");
     } finally {
       if (request === listRequest.current) setBusy(false);
     }
-  }, [stateFilter, severityFilter, queueOnly]);
+  }, [stateFilter, caseSliceFilter, severityFilter, queueOnly]);
 
   useEffect(() => {
     void loadAll();
@@ -342,7 +349,16 @@ export default function Anomalies() {
 
   const openCasesFilter = (filter: "overdue" | "unassigned" | "open" | "closed" | "new" | "confirmed" | "recurrence") => {
     setTab(2);
-    setStateFilter(({ overdue: "__overdue__", unassigned: "__unassigned__", open: "__open__", closed: "CLOSED", new: "NEW", confirmed: "__confirmed__", recurrence: "__recurrence__" })[filter]);
+    const state = filter === "closed" ? "CLOSED" : filter === "new" ? "NEW" : "";
+    const slice = ({
+      overdue: "__overdue__",
+      unassigned: "__unassigned__",
+      open: "__open__",
+      confirmed: "__confirmed__",
+      recurrence: "__recurrence__",
+    } as Partial<Record<typeof filter, string>>)[filter] ?? "";
+    setStateFilter(state);
+    setCaseSliceFilter(slice);
     setSeverityFilter("");
     setQueueOnly(false);
     setMyCasesOnly(false);
@@ -351,6 +367,7 @@ export default function Anomalies() {
   const setCasesView = (state: string) => {
     setTab(2);
     setStateFilter(state);
+    setCaseSliceFilter("");
     setSeverityFilter("");
     setQueueOnly(false);
     setMyCasesOnly(false);
@@ -634,15 +651,18 @@ export default function Anomalies() {
         <Box>
           <Stack direction="row" spacing={2} sx={{ mb: 1 }} flexWrap="wrap">
             <TextField select size="small" label="Estado" value={stateFilter}
-                       onChange={(event) => setStateFilter(event.target.value)} sx={{ minWidth: 170 }}>
+                       onChange={(event) => { setStateFilter(event.target.value); setCaseSliceFilter(""); }} sx={{ minWidth: 170 }}>
               <MenuItem value="">Todos</MenuItem>
-              <MenuItem value="__open__">Abertos</MenuItem>
-              <MenuItem value="__confirmed__">Anomalias confirmadas</MenuItem>
-              <MenuItem value="__recurrence__">Famílias reincidentes</MenuItem>
               {Object.keys(STATE_LABEL).map((state) => (
                 <MenuItem key={state} value={state}>{STATE_LABEL[state]}</MenuItem>
               ))}
             </TextField>
+            {caseSliceFilter && <Chip
+              label={`Visão: ${CASE_SLICE_LABEL[caseSliceFilter] ?? caseSliceFilter}`}
+              onDelete={() => setCaseSliceFilter("")}
+              size="small"
+              sx={{ alignSelf: "center" }}
+            />}
             <TextField select size="small" label="Severidade" value={severityFilter}
                        onChange={(event) => setSeverityFilter(event.target.value)} sx={{ minWidth: 150 }}>
               <MenuItem value="">Todas</MenuItem>
