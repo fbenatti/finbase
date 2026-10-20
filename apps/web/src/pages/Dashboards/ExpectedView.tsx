@@ -1079,14 +1079,15 @@ export default function ExpectedView({
         Number(driver.actual_value || 0) +
         (sharedOn ? Number(driver.shared_value || 0) : 0),
     );
-    // The API's forecast_value is the projected total (realized + remaining
-    // forecast). In this table the Forecast row must show only the incremental
-    // forecast, while Total projetado reconstructs the projected total.
-    const forecast = pivotDrivers.map(
-      (driver, index) => Number(driver.forecast_value || 0) - realized[index],
-    );
     const forecastManual = pivotDrivers.map((driver) =>
       Number(driver.forecast_manual_value || 0),
+    );
+    // The API's forecast_value is the consolidated projection, including
+    // realized and manual forecast. Extract the automatic forecast component
+    // so the three rows add to the projected total without double counting.
+    const forecast = pivotDrivers.map(
+      (driver, index) =>
+        Number(driver.forecast_value || 0) - realized[index] - forecastManual[index],
     );
     const budget = pivotDrivers.map((driver) =>
       Number(driver.budget_value || 0),
