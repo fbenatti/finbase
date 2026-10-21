@@ -97,7 +97,10 @@ const MENU_GROUPS: MenuGroup[] = [
       { path: "/financial-planning?tab=carta-credito", label: "Créditos", icon: <ReceiptLongOutlined /> },
       { path: "/financial-planning?tab=defesa-orcamentaria", label: "Defesa orçamentária", icon: <FactCheckOutlined /> },
       { path: "/financial-planning?tab=visao-contabil", label: "Pedidos SAP e câmbio", icon: <CurrencyExchangeOutlined /> },
-      { path: "/forecast", label: "Forecast", icon: <ShowChartOutlined /> },
+      { path: "/forecast?tab=accuracy", label: "Acurácia de projeções", icon: <AutoGraphOutlined /> },
+      { path: "/forecast?tab=config", label: "Configuração e execução", icon: <SettingsOutlined /> },
+      { path: "/forecast?tab=rules", label: "Regras de projeção", icon: <RuleOutlined /> },
+      { path: "/forecast?tab=history", label: "Histórico de projeções", icon: <HistoryOutlined /> },
     ],
   },
   {
