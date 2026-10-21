@@ -1,9 +1,9 @@
 import { useState, useMemo } from "react";
 import {
   Table, TableBody, TableCell, TableContainer, TableHead, TableRow,
-  Paper, TextField, Box, Typography, TableSortLabel,
+  Paper, TextField, Box, Typography, TableSortLabel, InputAdornment, Stack,
 } from "@mui/material";
-import { Search as SearchIcon } from "@mui/icons-material";
+import { Search as SearchIcon } from "./FinbaseIcons";
 
 export interface ColumnDef<T> {
   key: string;
@@ -92,9 +92,11 @@ export default function SortableTable<T extends object>({
   }, [filtered, sortKey, sortDir]);
 
   return (
-    <Box>
+    <Paper variant="outlined" sx={{ overflow: "hidden", minWidth: 0 }}>
+      <Stack direction={{ xs: "column", sm: "row" }} alignItems={{ sm: "center" }} justifyContent="space-between" gap={1} sx={{ p: 2, bgcolor: "background.default", borderBottom: 1, borderColor: "divider" }}>
       <TextField
         size="small"
+        label="Buscar registros"
         placeholder={placeholder}
         value={effectiveSearch}
         onChange={(e) => {
@@ -102,14 +104,15 @@ export default function SortableTable<T extends object>({
           if (searchValue === undefined) setSearch(value);
           onSearchChange?.(value);
         }}
-        InputProps={{ startAdornment: <SearchIcon sx={{ mr: 0.5, color: "text.secondary", fontSize: 18 }} /> }}
-        sx={{ mb: 1, minWidth: 280 }}
+        InputProps={{ startAdornment: <InputAdornment position="start"><SearchIcon sx={{ color: "text.secondary", fontSize: 20 }} /></InputAdornment> }}
+        sx={{ width: { xs: "100%", sm: 320 }, bgcolor: "background.paper" }}
       />
-      <Typography variant="caption" color="text.secondary" sx={{ ml: 1 }}>
+      <Typography variant="caption" color="text.secondary" role="status">
         {filtered.length} de {data.length} registros
       </Typography>
+      </Stack>
 
-      <TableContainer component={Paper} sx={{ maxHeight }}>
+      <TableContainer sx={{ maxHeight, width: "100%" }}>
         <Table size={size} stickyHeader={stickyHeader}>
           <TableHead>
             <TableRow>
@@ -123,12 +126,11 @@ export default function SortableTable<T extends object>({
                     cursor: col.sortable !== false ? "pointer" : "default",
                     userSelect: "none",
                   }}
-                  onClick={() => {
-                    if (col.sortable !== false) handleSort(col.key);
-                  }}
+                  sortDirection={sortKey === col.key ? sortDir : false}
                 >
                   {col.headerRender ? col.headerRender() : col.sortable !== false ? (
                     <TableSortLabel
+                      onClick={() => handleSort(col.key)}
                       active={sortKey === col.key}
                       direction={sortKey === col.key ? sortDir : "asc"}
                     >
@@ -159,7 +161,8 @@ export default function SortableTable<T extends object>({
                         overflow: col.render ? "visible" : "hidden",
                         textOverflow: col.render ? "clip" : "ellipsis",
                         whiteSpace: col.render ? "normal" : "nowrap",
-                        fontSize: size === "small" ? "0.8rem" : undefined,
+                        fontSize: "0.875rem",
+                        height: 48,
                       }}
                     >
                       {col.render ? col.render(row) : String((row as Record<string, unknown>)[col.key] ?? "")}
@@ -171,6 +174,6 @@ export default function SortableTable<T extends object>({
           </TableBody>
         </Table>
       </TableContainer>
-    </Box>
+    </Paper>
   );
 }

@@ -5,6 +5,7 @@ import {
   type DataGridProps, type GridValidRowModel, type GridToolbarProps,
 } from "@mui/x-data-grid";
 import { Box, Typography, type SxProps, type Theme } from "@mui/material";
+import { ptBR } from "@mui/x-data-grid/locales";
 import { dataGridIcons } from "./DataGridIcons";
 
 export function FinbaseGridToolbar({ csvOptions, printOptions }: GridToolbarProps) {
@@ -44,7 +45,9 @@ const gridStyle: SxProps<Theme> = theme => ({
   "& .MuiDataGrid-footerContainer": { minHeight: 48, borderColor: theme.palette.divider, backgroundColor: theme.palette.background.default },
   "& .MuiDataGrid-toolbarContainer": { backgroundColor: theme.palette.background.paper, borderBottom: `1px solid ${theme.palette.divider}` },
   "& .MuiDataGrid-toolbarContainer .MuiButton-root": { minHeight: 40, textTransform: "none", fontSize: "0.8125rem", padding: "8px 12px" },
+  "& .MuiDataGrid-cell[data-field=actions]": { padding: "0 4px", justifyContent: "center" },
   "& .MuiDataGrid-cell .MuiIconButton-root": { width: 36, height: 36 },
+  "&.MuiDataGrid-root--densityCompact .MuiDataGrid-cell .MuiIconButton-root": { width: 28, height: 28 },
   "& .MuiDataGrid-cell .MuiSvgIcon-root": { fontSize: 20 },
 });
 
@@ -54,6 +57,7 @@ export default function FinbaseDataGrid<R extends GridValidRowModel = any>({ sx,
     rowHeight={48} columnHeaderHeight={48} disableRowSelectionOnClick
     {...props}
     slots={{ ...dataGridIcons, toolbar: FinbaseGridToolbar, ...slots }}
+    localeText={{ ...ptBR.components.MuiDataGrid.defaultProps.localeText, toolbarExportCSV: props.paginationMode === "server" ? "Exportar página atual (CSV)" : "Exportar registros (CSV)", ...props.localeText }}
     sx={[...(Array.isArray(sx) ? sx : sx ? [sx] : []), gridStyle]}
   />;
 }
