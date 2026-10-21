@@ -61,6 +61,7 @@ import { useAuth } from "../auth/AuthContext";
 import { permissionTargetsForLocation } from "../auth/moduleMap";
 import LogoutIcon from "@mui/icons-material/Logout";
 import { NotificationBell, useNotifications } from "../context/NotificationContext";
+import { moduleDisplayName } from "../utils/dataPresentation";
 import {
   Content as CarbonContent,
   Header as CarbonHeader,
@@ -206,17 +207,17 @@ const MENU_GROUPS: MenuGroup[] = [
       { path: "/operacoes/execucoes?tab=forecast&subtab=forecast", label: "Execuções de forecast", icon: <TrendingUpOutlined /> },
       { path: "/operacoes/execucoes?tab=forecast&subtab=accuracy", label: "Acurácia do forecast", icon: <AutoGraphOutlined /> },
       { path: "/operacoes/execucoes?tab=shared", label: "Custo compartilhado", icon: <PaidOutlined /> },
-      { path: "/operacoes/execucoes?tab=gold&subtab=cubes", label: "Materialização de cubos", icon: <DataObjectOutlined /> },
-      { path: "/operacoes/execucoes?tab=gold&subtab=ai-cost", label: "Relacionamentos de custo da IA", icon: <SmartToyOutlined /> },
+      { path: "/operacoes/execucoes?tab=cubos&subtab=cubes", label: "Materialização de cubos", icon: <DataObjectOutlined /> },
+      { path: "/operacoes/execucoes?tab=cubos&subtab=ai-cost", label: "Relacionamentos de custo da IA", icon: <SmartToyOutlined /> },
       { path: "/operacoes/execucoes?tab=extraction", label: "Extrações", icon: <CloudOutlined /> },
       { path: "/operacoes/execucoes?tab=schedules", label: "Agendamentos", icon: <ScheduleOutlined /> },
       { path: "/operacoes/execucoes?tab=logs", label: "Histórico de execuções", icon: <HistoryOutlined /> },
       { path: "/dados/explorador?tab=destino", label: "Explorador · tabelas de destino", icon: <TableChartOutlined /> },
       { path: "/dados/explorador?tab=fontes", label: "Explorador · fontes de origem", icon: <CloudOutlined /> },
-      { path: "/dados/explorador?tab=iceberg&layer=bronze", label: "Base de origem", icon: <StorageOutlined /> },
-      { path: "/dados/explorador?tab=iceberg&layer=silver", label: "Base preparada", icon: <DataObjectOutlined /> },
-      { path: "/dados/explorador?tab=iceberg&layer=gold", label: "Base consolidada", icon: <PaidOutlined /> },
-      { path: "/dados/explorador?tab=staging", label: "Área temporária", icon: <DeleteSweepOutlined /> },
+      { path: "/dados/explorador?tab=acervo&etapa=origem", label: "Base de origem", icon: <StorageOutlined /> },
+      { path: "/dados/explorador?tab=acervo&etapa=preparacao", label: "Base preparada", icon: <DataObjectOutlined /> },
+      { path: "/dados/explorador?tab=acervo&etapa=consolidacao", label: "Base consolidada", icon: <PaidOutlined /> },
+      { path: "/dados/explorador?tab=temporarios", label: "Área temporária", icon: <DeleteSweepOutlined /> },
       { path: "/dados/explorador?tab=pivot", label: "Explorador · tabelas dinâmicas", icon: <AutoGraphOutlined /> },
       { path: "/dados/explorador?tab=busca", label: "Explorador · busca na fonte", icon: <ScienceOutlined /> },
     ],

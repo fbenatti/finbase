@@ -1,5 +1,6 @@
 import { Box, Paper, Typography } from "@mui/material";
 import { useSearchParams } from "react-router-dom";
+import { canonicalOperationsParams } from "../../utils/dataNavigation";
 import Extraction from "../Extraction/Extraction";
 import SchedulesPanel from "../Extraction/SchedulesPanel";
 import ReprocessDataTab from "./ReprocessDataTab";
@@ -17,17 +18,14 @@ export default function Reprocess() {
   const [schedulesError, setSchedulesError] = useState("");
   const requestedTab = params.get("tab");
   const legacyAccuracyTab = requestedTab === "accuracy";
-  const normalizedTab = legacyAccuracyTab ? "forecast" : requestedTab;
+  const normalizedTab = legacyAccuracyTab ? "forecast" : requestedTab === "cubos" ? "gold" : requestedTab;
   const allowedTabs = ["data", "forecast", "shared", "gold", "extraction", "schedules", "logs"];
   const tab = allowedTabs.includes(normalizedTab || "") ? normalizedTab! : "data";
 
   useEffect(() => {
-    if (!legacyAccuracyTab) return;
-    const next = new URLSearchParams(params);
-    next.set("tab", "forecast");
-    next.set("subtab", "accuracy");
-    setParams(next, { replace: true });
-  }, [legacyAccuracyTab, params, setParams]);
+    const next = canonicalOperationsParams(params);
+    if (next.toString() !== params.toString()) setParams(next, { replace: true });
+  }, [params, setParams]);
 
   useEffect(() => {
     if (tab === "schedules") {

@@ -1,5 +1,7 @@
 import React, { useState, useEffect, useMemo } from "react";
 import { useSearchParams } from "react-router-dom";
+import { DATA_LAYER_LABELS, DATA_SERVICE_LABELS, dataDisplayText } from "../../utils/dataPresentation";
+import { canonicalExplorerParams, DATA_LAYER_STAGES, dataLayerForStage } from "../../utils/dataNavigation";
 import {
   Box, Typography, Button, Card, CardContent, Chip, Alert,
   FormControl, InputLabel, Select, MenuItem, Stack,
@@ -96,15 +98,15 @@ const PREBUILT: Record<string, { label: string; sql: string }[]> = {
 
 export default function Analysis() {
   const [searchParams, setSearchParams] = useSearchParams();
-  const requestedTab = searchParams.get("tab") as AnalysisTab | null;
+  const publicTab = searchParams.get("tab");
+  const requestedTab = (publicTab === "acervo" ? "iceberg" : publicTab === "temporarios" ? "staging" : publicTab) as AnalysisTab | null;
   const tab: AnalysisTab = requestedTab && ["destino", "fontes", "iceberg", "staging", "pivot", "busca"].includes(requestedTab) ? requestedTab : "fontes";
   const [health, setHealth] = useState<TrinoHealth>({ trino: "?", nessie: "?", minio: "?" });
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
 
   // ─── Iceberg state ───
-  const requestedLayer = searchParams.get("layer");
-  const layer: "bronze" | "silver" | "gold" = requestedLayer === "bronze" || requestedLayer === "silver" || requestedLayer === "gold" ? requestedLayer : "gold";
+  const layer = dataLayerForStage(searchParams.get("etapa") || searchParams.get("layer"));
   const [tables, setTables] = useState<TrinoTableList>({ bronze: [], silver: [], gold: [] });
   const [sql, setSql] = useState("");
   const [result, setResult] = useState<TrinoQueryResult | null>(null);
@@ -125,18 +127,25 @@ export default function Analysis() {
 
   const setTab = (nextTab: AnalysisTab) => {
     const next = new URLSearchParams(searchParams);
-    next.set("tab", nextTab);
-    if (nextTab !== "iceberg") next.delete("layer");
+    next.set("tab", nextTab === "iceberg" ? "acervo" : nextTab === "staging" ? "temporarios" : nextTab);
+    next.delete("layer");
+    if (nextTab !== "iceberg") next.delete("etapa");
     setSearchParams(next, { replace: true });
   };
   const setLayer = (nextLayer: "bronze" | "silver" | "gold") => {
     const next = new URLSearchParams(searchParams);
-    next.set("tab", "iceberg");
-    next.set("layer", nextLayer);
+    next.set("tab", "acervo");
+    next.set("etapa", DATA_LAYER_STAGES[nextLayer]);
+    next.delete("layer");
     setSearchParams(next, { replace: true });
     setSelectedIcebergTable("");
     setPartitionRows([]);
   };
+
+  useEffect(() => {
+    const next = canonicalExplorerParams(searchParams);
+    if (next.toString() !== searchParams.toString()) setSearchParams(next, { replace: true });
+  }, [searchParams, setSearchParams]);
 
   useEffect(() => {
     setResult(null);
@@ -565,7 +574,7 @@ export default function Analysis() {
         {/* Health status */}
         <Box sx={{ display: "flex", gap: 1, mb: 2, flexWrap: "wrap" }}>
           {Object.entries(health).map(([k, v]) => (
-            <Chip key={k} label={k + ": " + v} size="small" color={v === "ok" ? "success" : "warning"} variant="outlined" />
+            <Chip key={k} label={`${DATA_SERVICE_LABELS[k] || dataDisplayText(k)}: ${v === "ok" ? "Disponível" : "Indisponível"}`} size="small" color={v === "ok" ? "success" : "warning"} variant="outlined" />
           ))}
         </Box>
 
@@ -785,7 +794,7 @@ export default function Analysis() {
             <>
               <Box sx={{ display: "flex", alignItems: "center", gap: 1, mb: 1.5, flexWrap: "wrap" }}>
                 <SchemaIcon color="primary" fontSize="small" />
-                <Typography variant="subtitle2" sx={{ fontWeight: 700 }}>{layer === "bronze" ? "base de origem" : "base preparada"} — grupos e tabelas</Typography>
+                <Typography variant="subtitle2" sx={{ fontWeight: 700 }}>{DATA_LAYER_LABELS[layer]} — grupos e tabelas</Typography>
                 <Chip label={`${(tables[layer] || []).length} tabela(s) física(s)`} size="small" color="primary" variant="outlined" />
                 <Chip label={`${icebergTableGroups.length} grupo(s)`} size="small" variant="outlined" />
               </Box>
