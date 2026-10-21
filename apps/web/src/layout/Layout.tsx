@@ -130,7 +130,8 @@ const MENU_GROUPS: MenuGroup[] = [
     label: "Dados e operação",
     icon: <StorageOutlined fontSize="small" />,
     items: [
-      { path: "/connections", label: "Integrações", icon: <CloudOutlined /> },
+      { path: "/connections?view=connections", label: "Fontes de dados", icon: <CloudOutlined /> },
+      { path: "/connections?view=integrations", label: "Serviços auxiliares", icon: <SmartToyOutlined /> },
       { path: "/tables?tab=destinations", label: "Catálogo de dados", icon: <TableChartOutlined /> },
       { path: "/tables?tab=relationship", label: "Relacionamentos", icon: <AccountTreeOutlined /> },
       { path: "/pipeline", label: "Fluxos de dados", icon: <AccountTreeOutlined /> },
