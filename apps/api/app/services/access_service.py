@@ -85,11 +85,24 @@ async def decide_for_user(
     resource_type: str,
     resource: str,
     now: datetime | None = None,
+    use_cache: bool = False,
 ) -> Decision:
+    """Decisão para uma pessoa. Com use_cache, consulta o cache versionado (access_cache)."""
+    from app.services import access_cache
+
+    version = None
+    if use_cache and now is None:
+        version = await access_cache.current_version(db)
+        cached = access_cache.get_cached(version, user_id, operation, resource_type, resource)
+        if cached is not None:
+            return cached
     grants = await load_grants(db, user_id)
     scopes = await load_scopes(db, user_id, now)
     children = await load_children(db)
-    return decide(grants, operation, resource_type, resource, scopes, children=children)
+    decision = decide(grants, operation, resource_type, resource, scopes, children=children)
+    if version is not None:
+        access_cache.put_cached(version, user_id, operation, resource_type, resource, decision)
+    return decision
 
 
 def _coerce(column, value):

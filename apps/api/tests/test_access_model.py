@@ -22,6 +22,7 @@ NEW_TABLES = {
     "user_scope",
     "group_scope",
     "access_business_rule",
+    "access_policy_version",
 }
 
 

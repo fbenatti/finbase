@@ -113,3 +113,16 @@ class AccessBusinessRule(Base):
     priority = Column(Integer, nullable=False, default=100)
     active = Column(Boolean, nullable=False, default=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+
+class AccessPolicyVersion(Base):
+    """Versão global da política. Cada alteração de ACL ou escopo incrementa `version`.
+
+    O cache de decisões compara a versão em cada leitura, então vale entre workers.
+    """
+
+    __tablename__ = "access_policy_version"
+
+    id = Column(Integer, primary_key=True)
+    version = Column(Integer, nullable=False, default=0)
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())

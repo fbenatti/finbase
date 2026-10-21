@@ -9,6 +9,7 @@ from typing import Literal
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 from sqlalchemy import delete, select
+from sqlalchemy.orm import selectinload
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.access.policy import validate_grant_fields, validate_match_mode
@@ -16,6 +17,7 @@ from app.core.deps import require
 from app.database import get_db
 from app.models.access import AccessAcl, AccessAclCondition, AccessScope, UserScope
 from app.models.identity import User
+from app.services import access_cache
 from app.services.access_service import decide_for_user, load_scopes
 
 router = APIRouter(prefix="/access", tags=["access"])
@@ -70,7 +72,7 @@ async def simulate_decision(
     _: User = Depends(require("users", "read")),
 ):
     """Simulador "ver como": decisão e motivo para uma pessoa."""
-    decision = await decide_for_user(db, user_id, operation, resource_type, resource)
+    decision = await decide_for_user(db, user_id, operation, resource_type, resource, use_cache=True)
     return {
         "allowed": decision.allowed,
         "reason": decision.reason,
@@ -93,7 +95,23 @@ async def create_scope(body: ScopeIn, db: AsyncSession = Depends(get_db), _: Use
     scope = AccessScope(**body.model_dump())
     db.add(scope)
     await db.flush()
+    await access_cache.bump_version(db)
     return {"id": scope.id, "scope_type": scope.scope_type, "value": scope.value}
+
+
+@router.get("/scopes")
+async def list_scopes(db: AsyncSession = Depends(get_db), _: User = Depends(require("users", "read"))):
+    rows = (await db.execute(select(AccessScope).order_by(AccessScope.scope_type, AccessScope.value))).scalars().all()
+    return [{"id": s.id, "scope_type": s.scope_type, "value": s.value, "label": s.label, "node_ref": s.node_ref} for s in rows]
+
+
+@router.get("/roles/{role_id}/acls")
+async def list_acls(role_id: int, db: AsyncSession = Depends(get_db), _: User = Depends(require("roles", "read"))):
+    acls = (await db.execute(
+        select(AccessAcl).options(selectinload(AccessAcl.conditions))
+        .where(AccessAcl.role_id == role_id).order_by(AccessAcl.id)
+    )).scalars().all()
+    return [_acl_out(a) for a in acls]
 
 
 @router.post("/roles/{role_id}/acls", status_code=201)
@@ -112,12 +130,14 @@ async def create_acl(role_id: int, body: AclIn, db: AsyncSession = Depends(get_d
     ]
     db.add(acl)
     await db.flush()
+    await access_cache.bump_version(db)
     return _acl_out(acl)
 
 
 @router.delete("/acls/{acl_id}", status_code=204)
 async def delete_acl(acl_id: int, db: AsyncSession = Depends(get_db), _: User = Depends(require("users", "delete"))):
     await db.execute(delete(AccessAcl).where(AccessAcl.id == acl_id))
+    await access_cache.bump_version(db)
 
 
 @router.post("/users/{user_id}/scopes", status_code=201)
@@ -134,4 +154,5 @@ async def grant_user_scope(
                       granted_by_id=actor.id, reason=body.reason, expires_at=body.expires_at)
     db.add(grant)
     await db.flush()
+    await access_cache.bump_version(db)
     return {"id": grant.id, "user_id": user_id, "scope_id": body.scope_id}

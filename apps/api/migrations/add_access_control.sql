@@ -86,3 +86,11 @@ FROM role_permission rp
 WHERE rp.scope IS NULL
   AND rp.action IN ('read', 'create', 'update', 'delete')
 ON CONFLICT ON CONSTRAINT uq_access_acl DO NOTHING;
+
+-- Versão da política: o cache de decisões compara esta linha a cada leitura.
+CREATE TABLE IF NOT EXISTS access_policy_version (
+    id INTEGER PRIMARY KEY,
+    version INTEGER NOT NULL DEFAULT 0,
+    updated_at TIMESTAMPTZ DEFAULT now()
+);
+INSERT INTO access_policy_version (id, version) VALUES (1, 0) ON CONFLICT (id) DO NOTHING;

@@ -27,7 +27,7 @@ pytestmark = pytest.mark.skipif(not URL, reason="TEST_ACCESS_DATABASE_URL não d
 TABLES = [
     "user_account", "role", "role_role", "user_role", "group_account", "user_group",
     "group_role", "role_permission", "user_grant", "department",
-    "access_scope", "access_acl", "access_acl_condition", "user_scope", "group_scope",
+    "access_scope", "access_acl", "access_acl_condition", "user_scope", "group_scope", "access_policy_version",
 ]
 
 FACT = Table("fact_cost_test", MetaData(), Column("id", Integer, primary_key=True),
@@ -121,3 +121,19 @@ def test_negacao_explicita_vence_no_banco():
         ))
         return (await decide_for_user(session, 10, "read", "table", "fact_cost_test")).allowed
     assert _run(scenario) is False
+
+
+def test_cache_respeita_versao_da_politica():
+    from app.services import access_cache
+
+    async def scenario(session):
+        await session.execute(text("INSERT INTO access_policy_version (id, version) VALUES (1, 0) ON CONFLICT (id) DO NOTHING"))
+        access_cache.clear_cache()
+        first = await decide_for_user(session, 10, "read", "table", "fact_cost_test", use_cache=True)
+        # remove o escopo e confirma que a decisão antiga não volta do cache
+        await session.execute(text("DELETE FROM user_scope WHERE user_id = 10"))
+        stale = await decide_for_user(session, 10, "read", "table", "fact_cost_test", use_cache=True)
+        await access_cache.bump_version(session)
+        fresh = await decide_for_user(session, 10, "read", "table", "fact_cost_test", use_cache=True)
+        return first.allowed, stale.allowed, fresh.allowed
+    assert _run(scenario) == (True, True, False)
