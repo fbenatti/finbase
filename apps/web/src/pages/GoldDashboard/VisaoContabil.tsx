@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useState } from "react";
+import { useSearchParams } from "react-router-dom";
 import {
   Box, Paper, Typography, Stack, Alert, Button, Table, TableBody, TableCell,
-  TableContainer, TableHead, TableRow, CircularProgress, Tab, Tabs,
+  TableContainer, TableHead, TableRow, CircularProgress,
 } from "@mui/material";
 import { FileDownload } from "@mui/icons-material";
 import * as XLSX from "xlsx";
@@ -89,7 +90,8 @@ function LoadingBlock({ loading, children }: { loading: boolean; children: React
 
 // ── Visão Contábil: pares Realizado X → Provisão X+1 (Forecast Accuracy) ──
 export default function VisaoContabil({ table, filters, filterKey, dollarEvolution }: { table: string; filters: Filters; filterKey: string; dollarEvolution?: React.ReactNode }) {
-  const [view, setView] = useState<"pedidos-sap" | "evolucao-dolar">("pedidos-sap");
+  const [searchParams] = useSearchParams();
+  const view = searchParams.get("subview") === "evolucao-dolar" ? "evolucao-dolar" : "pedidos-sap";
   const [selectedPair, setSelectedPair] = useState<[string, string] | null>(null);
   const [months, setMonths] = useState<ForecastAccuracyMonth[]>([]);
   const [monthsLoading, setMonthsLoading] = useState(true);
@@ -192,10 +194,6 @@ export default function VisaoContabil({ table, filters, filterKey, dollarEvoluti
 
   return (
     <Box>
-      <Tabs value={view} onChange={(_, value: "pedidos-sap" | "evolucao-dolar") => setView(value)} aria-label="Pedidos SAP e evolução do dólar" sx={{ mb: 2, borderBottom: 1, borderColor: "divider" }}>
-        <Tab value="pedidos-sap" label="Pedidos SAP" />
-        <Tab value="evolucao-dolar" label="Evolução do Dólar" />
-      </Tabs>
       {view === "evolucao-dolar" ? (dollarEvolution ?? <Alert severity="warning">Dashboard de evolução indisponível.</Alert>) : <>
       <SectionPanel title="Pedido SAP — Realizado × Provisão"
         subtitle="Selecione o par Realizado do mês X → Provisão do mês seguinte. Confira o detalhe por cloud e centro de custo e exporte o pedido SAP em Excel.">
