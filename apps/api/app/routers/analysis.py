@@ -29,6 +29,8 @@ from sqlalchemy import select, func, text, and_, or_
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
+from app.core.sql_guard import SqlRejected, check_read_only_select
+from app.models.destination import DestinationTable
 from app.models.source_connection import SourceConnection
 from app.models.ingested_blob import IngestedBlob
 from app.models.pivot_view import PivotView
@@ -2767,7 +2769,7 @@ async def delete_staging_table(table_name: str, db: AsyncSession = Depends(get_d
 
 
 @router.post("/query", response_model=QueryResponse)
-async def run_query(req: QueryRequest, request: Request):
+async def run_query(req: QueryRequest, request: Request, db: AsyncSession = Depends(get_db)):
     """
     Execute a SQL query against Trino + Iceberg.
 
@@ -2775,6 +2777,11 @@ async def run_query(req: QueryRequest, request: Request):
       SELECT * FROM iceberg.bronze.raw_azure_4p WHERE _billing_period = '202504' LIMIT 10
       SELECT SUM("BilledCost") AS total_billed FROM iceberg.silver.dest_modelo_focus WHERE "_billing_period" = '202504'
     """
+    allowed = set((await db.execute(select(DestinationTable.physical_name).where(DestinationTable.active.is_(True)))).scalars().all())
+    try:
+        check_read_only_select(req.sql, allowed)
+    except SqlRejected as exc:
+        raise HTTPException(status_code=403, detail=str(exc))
     async with _ClientCancelScope(request) as scope:
         try:
             rows = await trino_execute(req.sql, catalog=req.catalog, **scope.trino_kwargs)
