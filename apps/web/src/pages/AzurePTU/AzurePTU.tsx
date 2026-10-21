@@ -4,7 +4,7 @@ import Plot from "@/components/Plot";
 import PictureAsPdfIcon from "@mui/icons-material/PictureAsPdf";
 import {
   Alert, Box, Button, Card, CardContent, Chip, CircularProgress, FormControl, Grid,
-  InputLabel, MenuItem, Select, Stack, Tab, Tabs, Table, TableBody, TableCell, TableHead,
+  InputLabel, MenuItem, Select, Stack, Table, TableBody, TableCell, TableHead,
   TableRow, Typography,
 } from "@mui/material";
 import { getAzurePtuOverview, getAzurePtuView } from "../../services/api";
@@ -244,9 +244,12 @@ export default function AzurePTU() {
         </Button>
       </Stack>
 
-      <Tabs value={tab} onChange={(_, v) => setTab(v)} sx={{ mb: 2 }} data-print-hide>
-        {TAB_LABELS.map(label => <Tab key={label} label={label} />)}
-      </Tabs>
+      <FormControl size="small" sx={{ mb: 2, minWidth: 220 }} data-print-hide>
+        <InputLabel id="legacy-ptu-view-label">Visão</InputLabel>
+        <Select labelId="legacy-ptu-view-label" value={tab} label="Visão" onChange={event => setTab(Number(event.target.value))}>
+          {TAB_LABELS.map((label, index) => <MenuItem key={label} value={index}>{label}</MenuItem>)}
+        </Select>
+      </FormControl>
 
       {error && (
         <Alert severity="warning" sx={{ mb: 2 }}>{error} — exibindo último recorte disponível.</Alert>
