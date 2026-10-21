@@ -1,9 +1,10 @@
 import { useState, useEffect, useMemo, useCallback, memo, useRef } from "react";
+import { useSearchParams } from "react-router-dom";
 import {
   Box, Typography, Button, IconButton, Chip,
   Dialog, DialogTitle, DialogContent, DialogActions, TextField,
   Select, MenuItem, FormControl, InputLabel, Switch, Checkbox, FormControlLabel,
-  Alert, CircularProgress, Divider, Autocomplete, Tabs, Tab, InputAdornment, Stack,
+  Alert, CircularProgress, Divider, Autocomplete, InputAdornment, Stack, ToggleButton, ToggleButtonGroup,
 } from "@mui/material";
 import { Add, Edit, Delete, Download, ContentCopy, Check, Code, Terminal, Search, Refresh, Clear, AccountTree, Close } from "@mui/icons-material";
 import {
@@ -66,10 +67,10 @@ export default function Classification() {
   return (
     <Box>
       <Typography variant="h4" sx={{ mb: 1 }}>Regras de Classificação</Typography>
-      <Tabs value={tab} onChange={(_, v) => setTab(v)} sx={{ mb: 3, borderBottom: 1, borderColor: "divider" }}>
-        <Tab label="Regras" />
-        <Tab label="Criação de Tags" />
-      </Tabs>
+      <ToggleButtonGroup exclusive size="small" value={tab} onChange={(_, value: number | null) => { if (value !== null) setTab(value); }} sx={{ mb: 3 }}>
+        <ToggleButton value={0}>Regras</ToggleButton>
+        <ToggleButton value={1}>Criação de tags</ToggleButton>
+      </ToggleButtonGroup>
       {tab === 0 ? <ClassificationRulesTab /> : <TagsTab />}
     </Box>
   );
@@ -854,6 +855,7 @@ function TagMappingsTab() {
 }
 
 export function TagsTab() {
+  const [searchParams] = useSearchParams();
   const [tenants, setTenants] = useState<AzureTenant[]>([]);
   const [selectedTenant, setSelectedTenant] = useState<number | "">("");
   const [selectedSubscription, setSelectedSubscription] = useState("");
@@ -866,7 +868,8 @@ export function TagsTab() {
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
   const [viewTab, setViewTab] = useState<"script" | "json">("script");
-  const [tagSubTab, setTagSubTab] = useState<"policies" | "executive" | "mapping">("executive");
+  const requestedSubtab = searchParams.get("subtab");
+  const tagSubTab = requestedSubtab === "policies" || requestedSubtab === "mapping" ? requestedSubtab : "executive";
   const [flowDialogOpen, setFlowDialogOpen] = useState(false);
   const [selectedJsonTenantIndex, setSelectedJsonTenantIndex] = useState(0);
   const [isEditing, setIsEditing] = useState(false);
@@ -974,18 +977,11 @@ export function TagsTab() {
     ...(tenant.layers?.resources || []).map((item) => ({ ...item, connection_code: tenant.connection_code })),
   ]);
 
-  const tagTabs = <Tabs value={tagSubTab} onChange={(_, value) => setTagSubTab(value)} sx={{ mb: 3, borderBottom: 1, borderColor: "divider" }}>
-    <Tab value="executive" label="Dashboard Executivo" />
-    <Tab value="policies" label="Policies Azure" />
-    <Tab value="mapping" label="Mapeamento de Tags" />
-  </Tabs>;
-
-  if (tagSubTab === "mapping") return <Box>{tagTabs}<TagMappingsTab /></Box>;
-  if (tagSubTab === "executive") return <Box>{tagTabs}<AzureTagExecutiveDashboard /></Box>;
+  if (tagSubTab === "mapping") return <Box><TagMappingsTab /></Box>;
+  if (tagSubTab === "executive") return <Box><AzureTagExecutiveDashboard /></Box>;
 
   return (
     <Box>
-      {tagTabs}
       {error && <Alert severity="error" sx={{ mb: 2 }} onClose={() => setError("")}>{error}</Alert>}
       {success && <Alert severity="success" sx={{ mb: 2 }} onClose={() => setSuccess("")}>{success}</Alert>}
 
@@ -1130,35 +1126,13 @@ export function TagsTab() {
           {/* Text Output Viewer with Sub-tabs & Syntax Highlighting */}
           <Box sx={{ border: "1px solid #d0d7de", borderRadius: 2, overflow: "hidden", bgcolor: "#ffffff", boxShadow: "0 1px 4px rgba(0,0,0,0.06)" }}>
             <Box sx={{ display: "flex", justifyContent: "space-between", alignItems: "center", borderBottom: "1px solid #e1e4e8", px: 2, pt: 1, bgcolor: "#f6f8fa", flexWrap: "wrap", gap: 1 }}>
-              <Tabs
-                value={viewTab}
-                onChange={(_, v) => {
-                  if (v === "flow") {
-                    setFlowDialogOpen(true);
-                    return;
-                  }
-                  setViewTab(v);
-                }}
-                sx={{ minHeight: 44 }}
-              >
-                <Tab
-                  value="script"
-                  icon={<Terminal fontSize="small" />}
-                  iconPosition="start"
-                  label="Script de Deploy (.sh)"
-                  sx={{ minHeight: 44, textTransform: "none", fontWeight: 600 }}
-                />
-                <Tab
-                  value="json"
-                  icon={<Code fontSize="small" />}
-                  iconPosition="start"
-                  label="Políticas JSON (.json)"
-                  sx={{ minHeight: 44, textTransform: "none", fontWeight: 600 }}
-                />
-                <Tab value="flow" icon={<AccountTree fontSize="small" />} iconPosition="start" label="Fluxo da policy" sx={{ minHeight: 44, textTransform: "none", fontWeight: 600 }} />
-              </Tabs>
+              <ToggleButtonGroup exclusive size="small" value={viewTab} onChange={(_, value: "script" | "json" | null) => { if (value) setViewTab(value); }} aria-label="Formato do conteúdo exportado">
+                <ToggleButton value="script"><Terminal fontSize="small" sx={{ mr: 0.75 }} />Script de deploy</ToggleButton>
+                <ToggleButton value="json"><Code fontSize="small" sx={{ mr: 0.75 }} />Políticas JSON</ToggleButton>
+              </ToggleButtonGroup>
 
               <Box sx={{ display: "flex", gap: 1, pb: 1, alignItems: "center" }}>
+                <Button size="small" startIcon={<AccountTree fontSize="small" />} onClick={() => setFlowDialogOpen(true)}>Ver fluxo</Button>
                 <FormControlLabel
                   control={
                     <Switch
