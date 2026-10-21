@@ -26,6 +26,16 @@ const ROUTE_TARGETS: Array<{ prefix: string; targets: PermTarget[] }> = [
   { prefix: "/projecoes/acuracia", targets: [{ module: "forecast" }] },
   { prefix: "/projecoes", targets: [{ module: "forecast" }] },
   { prefix: "/otimizacao", targets: [{ module: "savings" }] },
+  {
+    prefix: "/governanca",
+    targets: [
+      { module: "planning" },
+      { module: "rules" },
+      { module: "reservations" },
+      { module: "azure_tag_policy" },
+      { module: "gold" },
+    ],
+  },
   { prefix: "/ideas", targets: [{ module: "ideas" }] },
   { prefix: "/anomalies", targets: [{ module: "anomalies" }] },
   { prefix: "/admin/audit", targets: [{ module: "audit" }] },
