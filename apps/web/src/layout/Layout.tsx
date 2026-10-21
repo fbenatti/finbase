@@ -56,7 +56,7 @@ import {
 } from "@mui/icons-material";
 import { cancelPendingAnalysisRequests } from "../services/api";
 import { useAuth } from "../auth/AuthContext";
-import { permissionTargetsForPath } from "../auth/moduleMap";
+import { permissionTargetsForLocation, permissionTargetsForPath } from "../auth/moduleMap";
 import LogoutIcon from "@mui/icons-material/Logout";
 import { NotificationBell } from "../context/NotificationContext";
 
@@ -237,8 +237,8 @@ export default function Layout() {
       if (item.path.startsWith("/admin?tab=groups")) return hasPerm("groups", "read");
       if (item.path.startsWith("/admin?tab=roles")) return hasPerm("roles", "read");
       if (item.path === "/admin?tab=users") return canAdmin;
-      const { pathname } = menuPath(item.path);
-      const targets = permissionTargetsForPath(pathname);
+      const { pathname, search } = menuPath(item.path);
+      const targets = permissionTargetsForLocation(pathname, search);
       return !targets || targets.some(target => hasPerm(target.module, "read", target.scope));
     }),
   })).filter(group => group.items.length > 0), [canAdmin, canIdeas, hasPerm]);
@@ -330,7 +330,7 @@ export default function Layout() {
         </AppBar>
         <Box component="main" sx={{ flex: 1, minHeight: 0, overflow: "auto", bgcolor: "background.default", p: { xs: 1.5, sm: 2.5, lg: 3 } }}>
           {(() => {
-            const targets = permissionTargetsForPath(location.pathname);
+            const targets = permissionTargetsForLocation(location.pathname, location.search);
             if (targets && !targets.some(target => hasPerm(target.module, "read", target.scope))) {
               const modules = targets.map(target => target.scope ? `${target.module}:${target.scope}` : target.module).join(" / ");
               return <Box sx={{ p: 6, textAlign: "center" }}><Typography variant="h6" sx={{ mb: 1 }}>Acesso negado</Typography><Typography color="text.secondary">Você não tem permissão de leitura no módulo <b>{modules}</b>. Solicite acesso ao administrador se precisar utilizá-lo.</Typography></Box>;
