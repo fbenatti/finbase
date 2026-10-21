@@ -24,6 +24,7 @@ TRINO_URL = os.getenv("TRINO_URL", "http://localhost:8080")
 TRINO_USER = os.getenv("TRINO_USER", "finops")
 TRINO_CATALOG = os.getenv("TRINO_CATALOG", "iceberg")
 TRINO_TRANSPORT_RETRIES = max(1, int(os.getenv("TRINO_TRANSPORT_RETRIES", "12")))
+TRINO_STARTUP_RECOVERY_RETRIES = max(1, int(os.getenv("TRINO_STARTUP_RECOVERY_RETRIES", "16")))
 TRINO_READY_WAIT_S = max(5.0, float(os.getenv("TRINO_READY_WAIT_S", "120")))
 
 _RETRYABLE_MARKERS = (
@@ -106,7 +107,8 @@ async def execute(
     last_error: Exception | None = None
     wait_for_coordinator = False
     attempts = TRINO_TRANSPORT_RETRIES if max_retries is None else max(1, max_retries)
-    for attempt in range(attempts):
+    attempt = 0
+    while attempt < attempts:
         try:
             if wait_for_coordinator:
                 # Give the coordinator a full, constant readiness window on
@@ -121,11 +123,17 @@ async def execute(
                 raise
             last_error = exc
             wait_for_coordinator = True
+            # Worker processes can take over a minute to finish Trino startup.
+            # Keep the normal retry budget for transport failures, but allow a
+            # longer bounded window for this explicit transient response.
+            if "still initializing" in str(exc).lower():
+                attempts = max(attempts, TRINO_STARTUP_RECOVERY_RETRIES)
             if attempt + 1 >= attempts:
                 break
             delay = min(10.0, 1.0 * (2 ** attempt))
             logger.warning("Trino query retry %s/%s after %s: %s", attempt + 1, attempts, type(exc).__name__, exc)
             await asyncio.sleep(delay)
+            attempt += 1
     detail = str(last_error).strip() if last_error else ""
     if not detail:
         detail = type(last_error).__name__ if last_error else "TransportError"
