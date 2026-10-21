@@ -176,7 +176,7 @@ export default function ReprocessAccuracyTab() {
                 label={task.status || "—"}
               />
             )}
-            <Button size="small" startIcon={<Visibility />} onClick={() => navigate("/projecoes/acuracia")}>
+            <Button size="small" startIcon={<Visibility />} onClick={() => navigate("/projecoes/acuracia/visao")}>
               Abrir dashboard de acurácia
             </Button>
           </Stack>

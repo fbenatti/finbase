@@ -234,7 +234,7 @@ export default function AzurePTU() {
           </Select>
         </FormControl>
         <Chip size="small" label={`Fonte: ${data.data_source === "gold" ? "Base consolidada" : data.data_source === "stale" ? "Dados parciais" : "Azure Monitor live"}`} />
-        <Button component={RouterLink} to="/dados/catalogo?tab=ai-cost-relationship" size="small" variant="outlined">Origem de custo IA</Button>
+        <Button component={RouterLink} to="/dados/catalogo/tabelas" size="small" variant="outlined">Origem de custo IA</Button>
         <Button
           size="small"
           variant="contained"

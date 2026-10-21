@@ -64,7 +64,7 @@ export default function ForecastHistory() {
               Execução {runId} · consulta server-side sobre o snapshot publicado.
             </Typography>
           </Box>
-          <Button size="small" startIcon={<ArrowBack />} onClick={() => navigate("/projecoes?tab=history")} sx={{ flexShrink: 0 }}>
+          <Button size="small" startIcon={<ArrowBack />} onClick={() => navigate("/projecoes/historico")} sx={{ flexShrink: 0 }}>
             Voltar para Forecast
           </Button>
         </Box>

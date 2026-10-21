@@ -31,10 +31,10 @@ export default function Governance() {
     return <Navigate to={`/otimizacao?tab=${requested}`} replace />;
   }
   if (requested === "reservas-legacy") {
-    return <Navigate to="/governanca?tab=reservas" replace />;
+    return <Navigate to="/governanca/reservas-azure" replace />;
   }
   if (requested === "clone-rules") {
-    return <Navigate to="/governanca?tab=rules&subtab=clone-rules" replace />;
+    return <Navigate to="/governanca/compromissos" replace />;
   }
   const allowedTabs = TABS.filter((item) => item.perms.some((p) => hasPerm(p.module, "read", p.scope)));
   const fallback = allowedTabs[0]?.id ?? null;

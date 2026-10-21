@@ -222,7 +222,7 @@ export default function DashboardsIA() {
           <Alert severity={coverage.overall >= 80 ? "success" : "warning"} sx={{ mb: 2 }}>
             Cobertura de custo — token: {coverage.token.toFixed(1)}% · licença: {coverage.license.toFixed(1)}% · geral: {coverage.overall.toFixed(1)}%.
             {(coverage.license < 100 || coverage.token < 100) && (
-              <> <Link component={RouterLink} to="/dados/catalogo?tab=ai-cost-relationship">Relacionamento Origem de Custo IA</Link></>
+              <> <Link component={RouterLink} to="/dados/catalogo/tabelas">Relacionamento Origem de Custo IA</Link></>
             )}
           </Alert>
         )}

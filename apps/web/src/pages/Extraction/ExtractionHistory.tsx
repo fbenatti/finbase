@@ -215,7 +215,7 @@ export default function ExtractionHistory() {
             )}
           </Typography>
         </Box>
-        <Button startIcon={<ArrowBack />} variant="outlined" onClick={() => navigate("/operacoes/execucoes?tab=extraction")}>
+        <Button startIcon={<ArrowBack />} variant="outlined" onClick={() => navigate("/operacoes/extracoes")}>
           Voltar para Extrações
         </Button>
       </Stack>

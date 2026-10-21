@@ -58,7 +58,7 @@ export default function Explorer() {
           <Button variant="outlined" startIcon={<Refresh />} onClick={doScan} disabled={loading}>
             Escanear
           </Button>
-          <Button variant="contained" startIcon={<PlayArrow />} onClick={() => navigate("/operacoes/execucoes?tab=extraction")}>
+          <Button variant="contained" startIcon={<PlayArrow />} onClick={() => navigate("/operacoes/extracoes")}>
             Ir para Extração
           </Button>
         </Box>
