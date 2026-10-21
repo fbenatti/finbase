@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { NavigationModule } from "./types";
-import { searchWorkspaceMenus } from "./workspaceSearch";
+import { searchWorkspaceMenus } from "./menuSearchIndex";
 const item = (code: string, label: string, parent_code: string | null = null, extra: Partial<NavigationModule> = {}): NavigationModule => ({
   code, label, parent_code, path: `/${code}`, renderer: "ModuleIndex", view_params: {}, legacy_path: null,
   permission_module: null, permission_scope: "", position: 1, icon: "", required: false,

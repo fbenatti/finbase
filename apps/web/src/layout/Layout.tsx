@@ -1,5 +1,5 @@
 import WorkspaceSearch from "../navigation/WorkspaceSearch";
-import { searchWorkspaceMenus } from "../navigation/workspaceSearch";
+import { searchWorkspaceMenus } from "../navigation/menuSearchIndex";
 import { useNavigation } from "../navigation/NavigationContext";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Outlet, useNavigate, useLocation } from "react-router-dom";
