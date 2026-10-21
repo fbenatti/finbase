@@ -1,6 +1,6 @@
 import { Navigate, useSearchParams } from "react-router-dom";
 import { useAuth } from "../../auth/AuthContext";
-import { Box, Paper, Tab, Tabs, Typography } from "@mui/material";
+import { Box, Paper, Typography } from "@mui/material";
 import Rules from "../Rules/Rules";
 import { ClassificationRulesTab, TagsTab } from "../Classification/Classification";
 import CloneRules from "../CloneRules/CloneRules";
@@ -48,10 +48,6 @@ export default function Governance() {
   const requestedRulesTab = searchParams.get("subtab");
   const rulesTab: RulesTabId | undefined = allowedRulesTabs.find((item) => item.id === requestedRulesTab)?.id ?? allowedRulesTabs[0]?.id;
 
-  const setTab = (value: TabId) => {
-    setSearchParams({ tab: value }, { replace: true });
-  };
-
   return (
     <Box sx={{ mx: -3, mt: -3, pb: 3, minHeight: "calc(100vh - 64px)", bgcolor: "#f8fafc" }}>
       {/* Faixa de contexto branca */}
@@ -62,11 +58,6 @@ export default function Governance() {
             Regras de negócio, reservas e Savings Plans, classificação organizacional e políticas de tags.
           </Typography>
         </Box>
-        <Tabs value={tab} onChange={(_, value: TabId) => setTab(value)} aria-label="Governança" sx={{ mb: 0, minHeight: 42 }}>
-          {allowedTabs.map((item) => (
-            <Tab key={item.id} value={item.id} label={item.label} sx={{ minHeight: 42 }} />
-          ))}
-        </Tabs>
       </Box>
 
       {/* Área de trabalho com campos simples de 40px */}
@@ -83,9 +74,6 @@ export default function Governance() {
         {tab === "organization" && <Departments embedded />}
         {tab === "rules" && (
           <Paper elevation={0} sx={{ p: { xs: 1.5, md: 2 }, borderRadius: 2, bgcolor: "background.paper", border: "1px solid", borderColor: "divider" }}>
-            <Tabs value={rulesTab} onChange={(_, value: RulesTabId) => setSearchParams({ tab: "rules", subtab: value }, { replace: true })} aria-label="Ajustes financeiros" sx={{ mb: 2 }}>
-              {allowedRulesTabs.map((item) => <Tab key={item.id} value={item.id} label={item.label} />)}
-            </Tabs>
             {rulesTab === "adjustments" && <Rules embedded />}
             {rulesTab === "clone-rules" && <CloneRules embedded />}
           </Paper>
