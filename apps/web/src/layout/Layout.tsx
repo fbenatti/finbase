@@ -60,7 +60,7 @@ import { cancelPendingAnalysisRequests } from "../services/api";
 import { useAuth } from "../auth/AuthContext";
 import { permissionTargetsForLocation } from "../auth/moduleMap";
 import LogoutIcon from "@mui/icons-material/Logout";
-import { NotificationBell } from "../context/NotificationContext";
+import { NotificationBell, useNotifications } from "../context/NotificationContext";
 import {
   Content as CarbonContent,
   Header as CarbonHeader,
@@ -264,6 +264,7 @@ export default function Layout() {
   const theme = useTheme();
   const isMobile = useMediaQuery(theme.breakpoints.down("md"));
   const { hasPerm, user, logout } = useAuth();
+  const { unreadCount, openDialog: openNotifications } = useNotifications();
   const canAdmin = hasPerm("users", "read") || hasPerm("groups", "read") || hasPerm("roles", "read");
   const visibleMenuGroups = useMemo(() => MENU_GROUPS.map(group => ({
     ...group,
@@ -411,8 +412,10 @@ export default function Layout() {
                 <button type="button" aria-pressed={!isCarbon} onClick={() => setLayoutMode("finbase")}>Finbase</button>
                 <button type="button" aria-pressed={isCarbon} onClick={() => setLayoutMode("carbon")}>Carbon</button>
               </Box>
-              <Box className="finbase-carbon-notification"><NotificationBell /></Box>
-              <CarbonHeaderGlobalAction aria-label="Notificações"><CarbonNotification size={20} /></CarbonHeaderGlobalAction>
+              <CarbonHeaderGlobalAction aria-label={`Notificações${unreadCount ? `, ${unreadCount} não lidas` : ""}`} onClick={openNotifications}>
+                <CarbonNotification size={20} />
+                {unreadCount > 0 && <span className="finbase-carbon-notification-count">{unreadCount > 99 ? "99+" : unreadCount}</span>}
+              </CarbonHeaderGlobalAction>
               <CarbonHeaderGlobalAction aria-label={`Sair${user?.username ? ` de ${user.username}` : ""}`} onClick={() => logout()}><CarbonLogout size={20} /></CarbonHeaderGlobalAction>
             </CarbonHeaderGlobalBar>
           </CarbonHeader>
