@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
+import { useSearchParams } from "react-router-dom";
 import {
-  Box, Typography, Paper, Grid, Alert, CircularProgress, LinearProgress, Button, Tabs, Tab, Checkbox, ListItemText,
+  Box, Typography, Paper, Grid, Alert, CircularProgress, LinearProgress, Button, Checkbox, ListItemText,
   Table, TableBody, TableCell, TableContainer, TableHead, TableRow, Chip, Tooltip,
   TextField, Dialog, DialogTitle, DialogContent, DialogActions, FormControl,
   InputLabel, Select, MenuItem, IconButton, Stack,
@@ -68,7 +69,8 @@ const PADRAO_EXPLICACAO: Record<string, string> = {
 };
 
 export default function DesligueProgramado({ embedded }: { embedded?: boolean }) {
-  const [tab, setTab] = useState(0);
+  const [searchParams] = useSearchParams();
+  const tab = ({ dashboard: 0, governance: 1, exceptions: 2 } as Record<string, number>)[searchParams.get("subview") || "dashboard"] ?? 0;
   const [data, setData] = useState<VmMonthSaving[]>([]);
   const [periods, setPeriods] = useState<string[]>([]);
   const [loading, setLoading] = useState(true);
@@ -246,12 +248,6 @@ export default function DesligueProgramado({ embedded }: { embedded?: boolean })
   return (
     <Box>
       {error && <Alert severity="error" sx={{ mb: 2 }}>{error}</Alert>}
-
-      <Tabs value={tab} onChange={(_, v) => setTab(v)} sx={{ mb: 2 }}>
-        <Tab label="Dashboard" />
-        <Tab label="Governança" />
-        <Tab label="Exceções" />
-      </Tabs>
 
       {tab === 0 && (
         <>

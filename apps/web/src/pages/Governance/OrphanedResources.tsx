@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { useSearchParams } from "react-router-dom";
 import {
   Alert, Box, Button, Chip, CircularProgress, Dialog, DialogActions, DialogContent,
   DialogTitle, IconButton, Paper, Stack, Table, TableBody, TableCell, TableContainer,
-  TableHead, TableRow, Tab, Tabs, Tooltip, Typography,
+  TableHead, TableRow, Tooltip, Typography,
 } from "@mui/material";
 import { ContentCopy, InfoOutlined, ManageSearch, Restore, VerifiedUser, Visibility } from "@mui/icons-material";
 import {
@@ -61,13 +62,14 @@ function formatAge(value: number | null | undefined): string {
 }
 
 export default function OrphanedResources() {
+  const [searchParams] = useSearchParams();
   const [summary, setSummary] = useState<Awaited<ReturnType<typeof getOrphanSummary>> | null>(null);
   const [rows, setRows] = useState<OrphanRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [period, setPeriod] = useState("");
   const [snapshotDate, setSnapshotDate] = useState("");
-  const [view, setView] = useState<"current" | "savings">("current");
+  const view = searchParams.get("subview") === "savings" ? "savings" : "current";
   const [savings, setSavings] = useState<OrphanSavings | null>(null);
   const [savingsLoading, setSavingsLoading] = useState(true);
   // Multi-seleção: selecionar "Discos" mantém os demais tipos/regras visíveis
@@ -188,17 +190,9 @@ export default function OrphanedResources() {
   const toggleInList = (list: string[], value: string): string[] =>
     list.includes(value) ? list.filter((v) => v !== value) : [...list, value];
 
-  const viewTabs = (
-    <Tabs value={view} onChange={(_, value) => setView(value)} sx={{ mb: 2 }}>
-      <Tab value="current" label="Órfãos atuais" />
-      <Tab value="savings" label={`Saving gerado (${savings?.total ?? 0})`} />
-    </Tabs>
-  );
-
   if (view === "savings") {
     return (
       <Box>
-        {viewTabs}
         {error && <Alert severity="warning" sx={{ mb: 2 }} onClose={() => setError("")}>{error}</Alert>}
         <Alert severity="info" sx={{ mb: 2 }}>
           Um recurso entra aqui quando estava no snapshot anterior e deixa de aparecer no snapshot diário seguinte.
@@ -266,7 +260,6 @@ export default function OrphanedResources() {
 
   return (
     <Box>
-      {viewTabs}
       {error && <Alert severity="warning" sx={{ mb: 2 }} onClose={() => setError("")}>{error}</Alert>}
       {saveError && <Alert severity="error" sx={{ mb: 2 }}>{saveError}</Alert>}
 
