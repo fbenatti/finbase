@@ -1,6 +1,5 @@
 """Administration of customer modules; the customer identity comes from the session."""
 import re
-import unicodedata
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field

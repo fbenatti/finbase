@@ -23,6 +23,7 @@ from app.models.identity import User
 # maior prefixo primeiro; (prefixo, módulo)
 PATH_MODULE: list[tuple[str, str]] = [
     ("/visoes-consumo-ia/provider", "ai_provider_dashboards"),
+    ("/modules", "modules"),
     ("/integrations", "connections"),
     ("/etl/periods", "periods"),
     ("/connections", "connections"),
@@ -58,7 +59,7 @@ PATH_MODULE: list[tuple[str, str]] = [
 
 PUBLIC_PATHS = ("/auth/login", "/auth/refresh", "/auth/sso", "/health", "/etl/worker-health")
 # já protegidos por Depends(require(...)) nos próprios routers
-SKIP_PREFIXES = ("/auth", "/users", "/groups", "/roles", "/planning/budget-defense")
+SKIP_PREFIXES = ("/modules", "/navigation", "/auth", "/users", "/groups", "/roles", "/planning/budget-defense")
 
 METHOD_ACTION = {
     "GET": "read",
@@ -183,6 +184,14 @@ class RBACMiddleware:
             break
 
         headers = dict(scope.get("headers") or [])
+        # The navigation policy validates this code against the authenticated
+        # customer; only a matching module can narrow an otherwise unscoped rule.
+        menu_code = headers.get(b"x-finbase-module", b"").decode("latin-1")
+        if menu_code and rbac_scope is None:
+            from app.services.navigation import CATALOG
+            menu = next((entry for entry in CATALOG if entry["code"] == menu_code), None)
+            if menu and menu["permission_module"] == module:
+                rbac_scope = menu_code
         auth = headers.get(b"authorization", b"").decode("latin-1")
 
         async with async_session() as db:

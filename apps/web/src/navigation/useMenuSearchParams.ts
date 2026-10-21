@@ -1,5 +1,5 @@
 import { useContext, useMemo } from "react";
-import { useNavigate, useSearchParams as useRouterSearchParams, type SetURLSearchParams } from "react-router-dom";
+import { createSearchParams, useNavigate, useSearchParams as useRouterSearchParams, type SetURLSearchParams } from "react-router-dom";
 import { MenuViewContext, useNavigation } from "./NavigationContext";
 import { resolveViewChange, widgetSearch } from "./routes";
 
@@ -17,7 +17,7 @@ export function useMenuSearchParams(): ReturnType<typeof useRouterSearchParams> 
   }, [query, current]);
   const setParams: SetURLSearchParams = (next, options) => {
     if (!current) { setQuery(next, options); return; }
-    const desired = new URLSearchParams(typeof next === "function" ? next(params) : next);
+    const desired = createSearchParams(typeof next === "function" ? next(params) : next);
     const target = resolveViewChange(items, current, desired);
     const search = widgetSearch(desired).toString();
     navigate({ pathname: target.path, search: search ? `?${search}` : "" }, options);

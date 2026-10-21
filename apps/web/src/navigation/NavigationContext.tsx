@@ -1,4 +1,4 @@
-import { createContext, useCallback, useContext, useEffect, useState } from "react";
+import { createContext, useCallback, useContext, useEffect, useRef, useState } from "react";
 import { useAuth } from "../auth/AuthContext";
 import { api, formatApiError } from "../services/api";
 import type { NavigationModule, NavigationSnapshot } from "./types";
@@ -16,16 +16,21 @@ export const MenuViewContext = createContext<NavigationModule | null>(null);
 
 export function NavigationProvider({ children }: { children: React.ReactNode }) {
   const { user, loading: authLoading } = useAuth();
-  const [snapshot, setSnapshot] = useState<NavigationSnapshot | null>(null);
+  const [snapshot, setSnapshot] = useState<{ userId: number; data: NavigationSnapshot } | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const userId = user?.id;
+  const activeUser = useRef(userId);
+  activeUser.current = userId;
   const reload = useCallback(async () => {
     if (userId == null) { setSnapshot(null); setLoading(false); return; }
     setError("");
-    try { setSnapshot((await api.get<NavigationSnapshot>("/navigation")).data); }
-    catch (e) { setSnapshot(null); setError(formatApiError(e, "Não foi possível carregar os módulos.")); }
-    finally { setLoading(false); }
+    try {
+      const data = (await api.get<NavigationSnapshot>("/navigation")).data;
+      if (activeUser.current === userId) setSnapshot({ userId, data });
+    }
+    catch (e) { if (activeUser.current === userId) { setSnapshot(null); setError(formatApiError(e, "Não foi possível carregar os módulos.")); } }
+    finally { if (activeUser.current === userId) setLoading(false); }
   }, [userId]);
   useEffect(() => {
     if (authLoading) return;
@@ -37,6 +42,7 @@ export function NavigationProvider({ children }: { children: React.ReactNode }) 
     window.addEventListener("focus", refresh);
     return () => window.removeEventListener("focus", refresh);
   }, [reload, userId]);
-  return <NavigationContext.Provider value={{ items: snapshot?.items || [], customerId: snapshot?.customer_id ?? null, customerName: snapshot?.customer_name || "", loading: authLoading || loading, error, reload }}>{children}</NavigationContext.Provider>;
+  const current = snapshot?.userId === userId ? snapshot?.data : null;
+  return <NavigationContext.Provider value={{ items: current?.items || [], customerId: current?.customer_id ?? null, customerName: current?.customer_name || "", loading: authLoading || loading || (userId != null && !current && !error), error, reload }}>{children}</NavigationContext.Provider>;
 }
 export function useNavigation() { return useContext(NavigationContext); }
