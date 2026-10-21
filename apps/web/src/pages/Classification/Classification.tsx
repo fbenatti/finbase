@@ -1073,7 +1073,7 @@ export function TagsTab() {
           {/* Tenant Summary Cards */}
           <Box sx={{ display: "grid", gridTemplateColumns: { xs: "1fr", md: "repeat(auto-fit, minmax(320px, 1fr))" }, gap: 2, mb: 3 }}>
             {rows.map((t) => (
-              <Box key={t.connection_code} sx={{ p: 2, border: "1px solid #e0e0e0", borderRadius: 2, bgcolor: "#ffffff", boxShadow: "0 1px 3px rgba(0,0,0,0.05)" }}>
+              <Box key={t.connection_code} sx={{ p: 2, border: "1px solid #E2E5EE", borderRadius: 2, bgcolor: "#ffffff", boxShadow: "0 1px 3px rgba(0,0,0,0.05)" }}>
                 <Typography variant="subtitle1" fontWeight={700}>
                   {t.connection_name} <Chip size="small" color="primary" label={`${t.rule_count} regras`} sx={{ ml: 1 }} />
                 </Typography>
@@ -1260,7 +1260,7 @@ export function TagsTab() {
           Fluxo de policies — {policyFlowTitle(rows[selectedJsonTenantIndex])}
           <IconButton aria-label="Fechar fluxo de policies" onClick={() => setFlowDialogOpen(false)}><Close /></IconButton>
         </DialogTitle>
-        <DialogContent sx={{ p: 3, bgcolor: "#f8fafc" }}>
+        <DialogContent sx={{ p: 3, bgcolor: "#FAFBFD" }}>
           <PolicyFlow tenant={rows[selectedJsonTenantIndex]} />
         </DialogContent>
       </Dialog>

@@ -50,7 +50,7 @@ export default function Governance() {
   const rulesTab: RulesTabId | undefined = allowedRulesTabs.find((item) => item.id === requestedRulesTab)?.id ?? allowedRulesTabs[0]?.id;
 
   return (
-    <Box sx={{ mx: -3, mt: -3, pb: 3, minHeight: "calc(100vh - 64px)", bgcolor: "#f8fafc" }}>
+    <Box sx={{ mx: -3, mt: -3, pb: 3, minHeight: "calc(100vh - 64px)", bgcolor: "#FAFBFD" }}>
       {/* Faixa de contexto branca */}
       <Box sx={{ px: 3, pt: 3, bgcolor: "background.paper", borderBottom: "1px solid", borderColor: "divider" }}>
         <Box sx={{ mb: 2 }}>

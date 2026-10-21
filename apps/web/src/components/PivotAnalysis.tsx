@@ -508,7 +508,7 @@ export default function PivotAnalysis({ destinations, initialTableId, showSearch
         : Object.entries(parsed as Record<string, unknown>).sort(([left], [right]) => columnNameCompare.compare(left, right));
       return <Stack spacing={0.75} sx={{ pl: 1.25, my: 0.5, borderLeft: "2px solid #c7d2fe" }}>{entries.map(([name, child]) => <Box key={name} sx={{ display: "grid", gridTemplateColumns: "minmax(120px, 30%) minmax(0, 1fr)", gap: 1, alignItems: "start", px: 1, py: 0.75, bgcolor: "#f8faff", borderRadius: 1.5 }}><Typography variant="caption" sx={{ color: "#4338ca", fontWeight: 700, fontFamily: '"SFMono-Regular", Consolas, monospace', overflowWrap: "anywhere" }}>{name}</Typography><Box sx={{ minWidth: 0 }}>{renderDetailValue(child)}</Box></Box>)}</Stack>;
     }
-    if (parsed == null) return <Typography component="span" sx={{ color: "#94a3b8", fontFamily: '"SFMono-Regular", Consolas, monospace', fontSize: 13 }}>null</Typography>;
+    if (parsed == null) return <Typography component="span" sx={{ color: "#8A93A8", fontFamily: '"SFMono-Regular", Consolas, monospace', fontSize: 13 }}>null</Typography>;
     if (typeof parsed === "boolean") return <Typography component="span" sx={{ color: parsed ? "#15803d" : "#be123c", fontWeight: 650, fontFamily: '"SFMono-Regular", Consolas, monospace', fontSize: 13 }}>{String(parsed)}</Typography>;
     if (typeof parsed === "number") return <Typography component="span" sx={{ color: "#0369a1", fontWeight: 650, fontFamily: '"SFMono-Regular", Consolas, monospace', fontSize: 13 }}>{String(parsed)}</Typography>;
     return <Typography component="span" variant="body2" sx={{ whiteSpace: "pre-wrap", overflowWrap: "anywhere", color: "#047857", fontFamily: '"SFMono-Regular", Consolas, monospace', fontSize: 13, lineHeight: 1.65 }}>{String(parsed)}</Typography>;
@@ -551,11 +551,11 @@ export default function PivotAnalysis({ destinations, initialTableId, showSearch
             const childValue = parseJsonValue(child);
             const nested = childValue !== null && typeof childValue === "object";
             const childEntries = nested ? (Array.isArray(childValue) ? childValue : Object.values(childValue as Record<string, unknown>)) : [];
-            return <Paper key={`${depth}-${name}`} variant="outlined" sx={{ overflow: "hidden", borderColor: nested ? palette.border : "#e2e8f0", borderRadius: 1.5, boxShadow: "none" }}>
+            return <Paper key={`${depth}-${name}`} variant="outlined" sx={{ overflow: "hidden", borderColor: nested ? palette.border : "#E2E5EE", borderRadius: 1.5, boxShadow: "none" }}>
               {nested ? <>
                 <Box sx={{ display: "flex", alignItems: "center", gap: 1, flexWrap: "wrap", px: 1.25, py: 0.75, bgcolor: palette.surface }}>
                   <Chip size="small" label={array ? `#${Number(name) + 1}` : name} sx={{ height: 24, maxWidth: "100%", bgcolor: "white", color: palette.text, border: `1px solid ${palette.border}`, fontWeight: 700, fontFamily: '"Segoe UI", sans-serif', "& .MuiChip-label": { overflowWrap: "anywhere" } }} />
-                  <Typography variant="caption" sx={{ color: "#64748b" }}>{Array.isArray(childValue) ? `${childEntries.length} ${childEntries.length === 1 ? "item" : "itens"}` : `${childEntries.length} ${childEntries.length === 1 ? "campo" : "campos"}`}</Typography>
+                  <Typography variant="caption" sx={{ color: "#5A6378" }}>{Array.isArray(childValue) ? `${childEntries.length} ${childEntries.length === 1 ? "item" : "itens"}` : `${childEntries.length} ${childEntries.length === 1 ? "campo" : "campos"}`}</Typography>
                 </Box>
                 <Box sx={{ p: 1.25 }}>{renderValue(child, depth + 1)}</Box>
               </> : <Box sx={{ display: "grid", gridTemplateColumns: { xs: "minmax(0, 1fr)", sm: "minmax(130px, 30%) minmax(0, 1fr)" }, gap: { xs: 0.5, sm: 1.25 }, alignItems: "center", px: 1.25, py: 0.9, bgcolor: "#fff" }}>
@@ -568,7 +568,7 @@ export default function PivotAnalysis({ destinations, initialTableId, showSearch
       }
       return renderDetailValue(current);
     };
-    return <Box sx={{ p: 1.25, border: "1px solid #e2e8f0", borderRadius: 2, bgcolor: "#fff", boxShadow: "0 2px 8px rgba(15,23,42,.04)" }}>{renderValue(parsed)}</Box>;
+    return <Box sx={{ p: 1.25, border: "1px solid #E2E5EE", borderRadius: 2, bgcolor: "#fff", boxShadow: "0 2px 8px rgba(15,23,42,.04)" }}>{renderValue(parsed)}</Box>;
   };
   const renderDecomposedFieldValue = (name: string, value: unknown): React.ReactNode => {
     const parsed = parseJsonValue(value);
@@ -817,7 +817,7 @@ export default function PivotAnalysis({ destinations, initialTableId, showSearch
       </Box>
     </Drawer>
     <Dialog open={!!selectedDrillRow} onClose={() => setSelectedDrillRow(null)} fullScreen>
-      <DialogTitle sx={{ borderBottom: 1, borderColor: "divider", px: { xs: 2, md: 4 }, py: 2.5, background: "linear-gradient(120deg, #f8fafc 0%, #eef4ff 100%)" }}>
+      <DialogTitle sx={{ borderBottom: 1, borderColor: "divider", px: { xs: 2, md: 4 }, py: 2.5, background: "linear-gradient(120deg, #FAFBFD 0%, #eef4ff 100%)" }}>
         <Stack direction="row" alignItems="center" justifyContent="space-between" gap={2}>
           <Box>
             <Typography variant="h5" sx={{ fontWeight: 750, letterSpacing: "-0.03em", color: "#172554" }}>Decomposição do registro</Typography>
@@ -832,13 +832,13 @@ export default function PivotAnalysis({ destinations, initialTableId, showSearch
       </DialogTitle>
       <DialogContent sx={{ bgcolor: "#f5f7fb", p: { xs: 1.5, md: 4 } }}>
         {selectedDrillRow && <Stack spacing={2} sx={{ maxWidth: 1200, mx: "auto", mt: 1 }}>
-          <Paper elevation={0} sx={{ overflow: "hidden", borderRadius: 3, border: "1px solid #e2e8f0", boxShadow: "0 12px 36px rgba(15, 23, 42, 0.06)" }}>
-            <Stack direction="row" sx={{ px: 3, py: 1.75, bgcolor: "#f8fafc", borderBottom: 1, borderColor: "divider" }}>
+          <Paper elevation={0} sx={{ overflow: "hidden", borderRadius: 3, border: "1px solid #E2E5EE", boxShadow: "0 12px 36px rgba(15, 23, 42, 0.06)" }}>
+            <Stack direction="row" sx={{ px: 3, py: 1.75, bgcolor: "#FAFBFD", borderBottom: 1, borderColor: "divider" }}>
               <Typography variant="overline" sx={{ width: { xs: "38%", md: "30%" }, color: "text.secondary", fontWeight: 750, letterSpacing: ".12em" }}>CAMPO</Typography>
               <Typography variant="overline" sx={{ color: "text.secondary", fontWeight: 750, letterSpacing: ".12em" }}>VALOR</Typography>
             </Stack>
             {selectedRowEntries.map(([name, value], index) => <Box key={name} sx={{ display: "grid", gridTemplateColumns: { xs: "minmax(0, 1fr)", sm: "minmax(180px, 30%) minmax(0, 1fr)" }, gap: { xs: 0.5, sm: 2 }, alignItems: "start", px: 3, py: 1.75, borderBottom: index < selectedRowEntries.length - 1 ? 1 : 0, borderColor: "divider", bgcolor: index % 2 ? "#fcfdff" : "background.paper", transition: "background-color .15s", "&:hover": { bgcolor: "#f3f7ff" } }}>
-              <Typography component="span" variant="body2" sx={{ minWidth: 0, color: "#64748b", fontWeight: 600, fontFamily: '"Segoe UI", sans-serif', overflowWrap: "anywhere" }}>{name}</Typography>
+              <Typography component="span" variant="body2" sx={{ minWidth: 0, color: "#5A6378", fontWeight: 600, fontFamily: '"Segoe UI", sans-serif', overflowWrap: "anywhere" }}>{name}</Typography>
               <Box sx={{ minWidth: 0 }}>{renderDecomposedFieldValue(name, value)}</Box>
             </Box>)}
           </Paper>
@@ -852,17 +852,17 @@ export default function PivotAnalysis({ destinations, initialTableId, showSearch
           <IconButton aria-label="Fechar relação com a origem" onClick={() => setRelationDialogOpen(false)}><Close /></IconButton>
         </Stack>
       </DialogTitle>
-      <DialogContent sx={{ bgcolor: "#f8fafc", p: { xs: 1.5, md: 3 } }}>
+      <DialogContent sx={{ bgcolor: "#FAFBFD", p: { xs: 1.5, md: 3 } }}>
         {sourceDetailLoading && <Box sx={{ minHeight: 180, display: "flex", alignItems: "center", justifyContent: "center", gap: 1.5 }}><CircularProgress size={22} /><Typography>Buscando a linha de origem na base de origem...</Typography></Box>}
         {!sourceDetailLoading && sourceDetail && !sourceDetail.available && <Alert severity="info" sx={{ mt: 2 }}>{dataDisplayText(sourceDetail.reason)}</Alert>}
         {!sourceDetailLoading && sourceDetail?.available && <Stack spacing={2} sx={{ maxWidth: 1100, mx: "auto", mt: 1 }}>
           <Paper variant="outlined" sx={{ p: 2, borderRadius: 2, bgcolor: "white" }}><Typography variant="subtitle1" fontWeight={750}>{sourceDetail.connection_name}</Typography><Typography variant="caption" color="text.secondary">{sourceDetail.blob_path || "Arquivo de origem identificado pelo registro"}</Typography></Paper>
           <Box sx={{ display: "grid", gridTemplateColumns: { xs: "1fr", md: "1fr 56px 1fr" }, alignItems: "center", gap: 1 }}>
-            <Typography variant="overline" color="#0369a1" fontWeight={800}>DADOS DE ORIGEM</Typography><CompareArrows sx={{ display: { xs: "none", md: "block" }, color: "#64748b", mx: "auto" }} /><Typography variant="overline" color="#6d28d9" fontWeight={800}>DADOS PREPARADOS</Typography>
+            <Typography variant="overline" color="#0369a1" fontWeight={800}>DADOS DE ORIGEM</Typography><CompareArrows sx={{ display: { xs: "none", md: "block" }, color: "#5A6378", mx: "auto" }} /><Typography variant="overline" color="#6d28d9" fontWeight={800}>DADOS PREPARADOS</Typography>
           </Box>
           {(sourceDetail.pairs || []).map((pair, index) => <Box key={`${pair.source_key}-${pair.destination_key}-${index}`} sx={{ display: "grid", gridTemplateColumns: { xs: "1fr", md: "1fr 56px 1fr" }, gap: 1, alignItems: "stretch" }}>
             <Paper variant="outlined" sx={{ p: 1.5, borderRadius: 2, bgcolor: "#f0f9ff", borderColor: "#bae6fd", minWidth: 0 }}><Typography variant="caption" fontWeight={750} color="#0369a1" display="block" mb={0.5}>{pair.source_key}</Typography>{renderDetailValue(pair.source_value)}</Paper>
-            <Typography sx={{ display: { xs: "none", md: "grid" }, placeItems: "center", color: "#94a3b8", fontSize: 22 }}>→</Typography>
+            <Typography sx={{ display: { xs: "none", md: "grid" }, placeItems: "center", color: "#8A93A8", fontSize: 22 }}>→</Typography>
             <Paper variant="outlined" sx={{ p: 1.5, borderRadius: 2, bgcolor: "#f5f3ff", borderColor: "#ddd6fe", minWidth: 0 }}><Typography variant="caption" fontWeight={750} color="#6d28d9" display="block" mb={0.5}>{pair.destination_key}</Typography>{renderDetailValue(selectedRowValuesByLowerName.get(pair.destination_key.toLowerCase()))}</Paper>
           </Box>)}
           {Object.keys(sourceDetail.source_unmatched || {}).length > 0 && <Paper variant="outlined" sx={{ p: 2, borderRadius: 2, bgcolor: "#fffbeb", borderColor: "#fde68a" }}><Typography variant="subtitle2" fontWeight={750} color="#92400e" mb={1}>Campos de origem sem correspondência ({Object.keys(sourceDetail.source_unmatched || {}).length})</Typography><Stack spacing={0.75}>{Object.entries(sourceDetail.source_unmatched || {}).sort(([a], [b]) => columnNameCompare.compare(a, b)).map(([name, value]) => <Box key={name} sx={{ display: "grid", gridTemplateColumns: { xs: "1fr", sm: "minmax(160px, 30%) minmax(0,1fr)" }, gap: 1, p: 1, bgcolor: "white", borderRadius: 1.5 }}><Typography variant="caption" fontWeight={750} color="#a16207">{name}</Typography><Box>{renderDetailValue(value)}</Box></Box>)}</Stack></Paper>}

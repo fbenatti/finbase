@@ -1015,7 +1015,7 @@ export default function Extraction({ embedded = false }: { embedded?: boolean })
                   <TableHead>
                     <TableRow>
                       {previewData.columns.map((column) => (
-                        <TableCell key={column} sx={{ fontWeight: 700, fontFamily: "monospace", bgcolor: "#f8fafc" }}>{column}</TableCell>
+                        <TableCell key={column} sx={{ fontWeight: 700, fontFamily: "monospace", bgcolor: "#FAFBFD" }}>{column}</TableCell>
                       ))}
                     </TableRow>
                   </TableHead>

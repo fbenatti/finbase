@@ -1,22 +1,18 @@
 # Finbase.cloud — inventário de navegação
 
-Atualizado em 21/10/2026, branch `layot_carbon`.
+Atualizado em 21/10/2026, branch `redesign/shell-theme` (base `layot_carbon`).
 
 O catálogo do backend é a fonte única dos menus e rotas. A disponibilidade por cliente pode ser alterada em **Administração → Módulos**.
 
 Implementação e inclusão de novos menus: [menu-catalog.md](menu-catalog.md). Vocabulário dos dados: [finbase-data-language.md](finbase-data-language.md).
 
-Os layouts Finbase e Carbon compartilham o catálogo. IA e Unit Economics permanecem fora dos menus. As rotas de favoritos anteriores redirecionam para os endereços abaixo.
+O shell tem um trilho de domínios à esquerda e, ao lado, o painel com os menus do domínio escolhido. Cada aba do catálogo é um menu com rota, e o domínio não gera item "Visão geral". Os módulos de IA e Unit Economics saíram da interface. Rotas de favoritos antigas caem na página padrão do cliente. Detalhes em [identidade-visual-frontend.md](identidade-visual-frontend.md).
 
 ## Panorama
-
-Visão geral: `/panorama`.
 
 - **Resumo de custos**: `/custos/resumo`.
 
 ## Alertas
-
-Visão geral: `/alertas/inicio`.
 
 - **Visão geral de alertas**: `/alertas/visao-geral`.
 - **Impacto financeiro**: `/alertas/impacto-financeiro`.
@@ -28,8 +24,6 @@ Visão geral: `/alertas/inicio`.
 - **Configuração de alertas**: `/alertas/configuracao`.
 
 ## Planejamento
-
-Visão geral: `/planejamento/inicio`.
 
 - **Histórico do orçamento**: `/planejamento/historico-do-orcamento`.
 - **História dos contratos**: `/planejamento/historia-dos-contratos`.
@@ -47,8 +41,6 @@ Visão geral: `/planejamento/inicio`.
 
 ## Otimização
 
-Visão geral: `/otimizacao/inicio`.
-
 - **Oportunidades**: `/otimizacao/oportunidades`.
 - **Compromissos e compras**: `/otimizacao/compromissos-e-compras`.
 - **Desligamento · painel**: `/otimizacao/desligamento/painel`.
@@ -58,8 +50,6 @@ Visão geral: `/otimizacao/inicio`.
 - **Recursos · economia gerada**: `/otimizacao/economia-gerada`.
 
 ## Dados e operação
-
-Visão geral: `/dados/inicio`.
 
 - **Fontes de dados**: `/dados/fontes`.
 - **Catálogo de dados**: `/dados/catalogo/tabelas`.
@@ -84,8 +74,6 @@ Visão geral: `/dados/inicio`.
 
 ## Governança
 
-Visão geral: `/governanca/inicio`.
-
 - **Organização**: `/governanca/organizacao`.
 - **Classificação de projetos**: `/governanca/classificacao-de-projetos`.
 - **Regras de ajustes**: `/governanca/regras-de-ajuste`.
@@ -94,8 +82,6 @@ Visão geral: `/governanca/inicio`.
 - **Cubos analíticos**: `/governanca/cubos`.
 
 ## Administração
-
-Visão geral: `/administracao/inicio`.
 
 - **Pessoas e acessos**: `/administracao/pessoas`.
 - **Grupos**: `/administracao/grupos`.

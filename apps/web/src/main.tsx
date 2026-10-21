@@ -6,7 +6,6 @@ import App from "./App";
 import { ConfirmationProvider } from "./context/ConfirmationContext";
 import theme from "./theme/theme";
 import "./index.css";
-import "@carbon/styles/css/styles.css";
 import { NotificationProvider } from "./context/NotificationContext";
 
 ReactDOM.createRoot(document.getElementById("root")!).render(

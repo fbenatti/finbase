@@ -520,7 +520,7 @@ export function NotificationProvider({ children }: { children: React.ReactNode }
               const isActive = item.status === "QUEUED" || item.status === "RUNNING";
               const color = item.status === "COMPLETED" ? "success" : item.status === "FAILED" || item.status === "CANCELLED" ? "error" : "info";
               return (
-                <Box key={item.id} sx={{ p: 1.5, bgcolor: "#f8fafc", borderRadius: 1, border: "1px solid #e2e8f0" }}>
+                <Box key={item.id} sx={{ p: 1.5, bgcolor: "#FAFBFD", borderRadius: 1, border: "1px solid #E2E5EE" }}>
                   <Box sx={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 1 }}>
                     <Box sx={{ flex: 1, minWidth: 0 }}>
                       <Typography variant="body2" fontWeight={600} noWrap>

@@ -522,7 +522,7 @@ export default function OrphanedResources() {
                 <Box>
                   <Typography variant="overline" color="text.secondary">Tags</Typography>
                   <Box component="pre" sx={{
-                    bgcolor: "#f8fafc", border: "1px solid", borderColor: "divider", borderRadius: 1,
+                    bgcolor: "#FAFBFD", border: "1px solid", borderColor: "divider", borderRadius: 1,
                     p: 1.5, m: 0, maxHeight: 220, overflow: "auto", fontSize: 12,
                     fontFamily: "monospace", whiteSpace: "pre-wrap", wordBreak: "break-word",
                   }}>

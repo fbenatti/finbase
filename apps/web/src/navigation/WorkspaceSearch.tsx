@@ -1,6 +1,6 @@
 import { useEffect, useRef } from "react";
 import { Box, IconButton, InputAdornment, TextField, Tooltip, Typography } from "@mui/material";
-import { Search, Close } from "@carbon/react/icons";
+import { CloseOutlined, SearchOutlined } from "@mui/icons-material";
 
 type Props = {
   value: string; onChange: (value: string) => void; expanded: boolean;
@@ -10,15 +10,15 @@ type Props = {
 export default function WorkspaceSearch({ value, onChange, expanded, count, focusToken, onOpen, onEnter }: Props) {
   const input = useRef<HTMLInputElement>(null);
   useEffect(() => { if (expanded && focusToken > 0) input.current?.focus(); }, [focusToken, expanded]);
-  if (!expanded) return <Box sx={{ display: "flex", justifyContent: "center", py: 1 }}><Tooltip title="Buscar menus (Ctrl/Cmd + K)"><IconButton aria-label="Buscar menus e submenus" onClick={onOpen}><Search size={20} /></IconButton></Tooltip></Box>;
+  if (!expanded) return <Box sx={{ display: "flex", justifyContent: "center", py: 1 }}><Tooltip title="Buscar menus (Ctrl/Cmd + K)"><IconButton aria-label="Buscar menus e submenus" onClick={onOpen}><SearchOutlined fontSize="small" /></IconButton></Tooltip></Box>;
   return <Box component="form" role="search" aria-label="Busca de menus do workspace" onSubmit={event => { event.preventDefault(); onEnter(); }} sx={{ px: 1.5, py: 1.5 }}>
     <TextField
       inputRef={input} fullWidth size="small" label="Buscar menus" placeholder="Nome do menu ou submenu"
       value={value} onChange={event => onChange(event.target.value)}
       onKeyDown={event => { if (event.key === "Escape") { event.stopPropagation(); onChange(""); } }}
       slotProps={{ input: {
-        startAdornment: <InputAdornment position="start"><Search size={18} /></InputAdornment>,
-        endAdornment: value ? <InputAdornment position="end"><IconButton size="small" aria-label="Limpar busca de menus" onClick={() => onChange("")} sx={{ width: 28, height: 28 }}><Close size={16} /></IconButton></InputAdornment> : undefined,
+        startAdornment: <InputAdornment position="start"><SearchOutlined fontSize="small" /></InputAdornment>,
+        endAdornment: value ? <InputAdornment position="end"><IconButton size="small" aria-label="Limpar busca de menus" onClick={() => onChange("")} sx={{ width: 28, height: 28 }}><CloseOutlined sx={{ fontSize: 16 }} /></IconButton></InputAdornment> : undefined,
       }, htmlInput: { autoComplete: "off", "aria-keyshortcuts": "Control+k Meta+k" } }}
     />
     <Typography component="p" variant="caption" color="text.secondary" aria-live="polite" sx={{ mt: 0.75, lineHeight: 1.4 }}>

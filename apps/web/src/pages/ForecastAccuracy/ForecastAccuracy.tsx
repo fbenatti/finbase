@@ -314,7 +314,7 @@ export default function ForecastAccuracy({ embedded = false }: { embedded?: bool
         name: "Projetado",
         x: records.map(item => item.dimension_value),
         y: records.map(item => Number(item.forecast_value || 0)),
-        marker: { color: "#2563eb" },
+        marker: { color: "#4338CA" },
       },
       {
         type: "bar" as const,
@@ -601,7 +601,7 @@ export default function ForecastAccuracy({ embedded = false }: { embedded?: bool
                               </TableRow>
                               {isOffenderLeaf(item) && subcatOpen && (
                                 <TableRow>
-                                  <TableCell colSpan={7} sx={{ bgcolor: "#f8fafc" }}>
+                                  <TableCell colSpan={7} sx={{ bgcolor: "#FAFBFD" }}>
                                     {offenderSubcatLoading && !subcats ? (
                                       <LinearProgress sx={{ m: 1 }} />
                                     ) : subcats && subcats.length > 0 ? (
@@ -808,7 +808,7 @@ export default function ForecastAccuracy({ embedded = false }: { embedded?: bool
                         name: "Projetado (rate diário)",
                         x: seriesDialog.data.points.map(p => p.day),
                         y: seriesDialog.data.points.map(p => p.forecast_rate),
-                        line: { color: "#2563eb", dash: "dash", width: 2 },
+                        line: { color: "#4338CA", dash: "dash", width: 2 },
                       },
                       ...(seriesDialog.data.daily_deviation_day != null ? [{
                         type: "scatter" as const,

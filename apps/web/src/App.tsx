@@ -28,11 +28,8 @@ const ForecastAccuracy = lazy(() => import("./pages/ForecastAccuracy/ForecastAcc
 const SharedCostHistory = lazy(() => import("./pages/Reprocess/SharedCostHistory"));
 const CloneRules = lazy(() => import("./pages/CloneRules/CloneRules"));
 const Tables = lazy(() => import("./pages/Tables/Tables"));
-const DashboardsIA = lazy(() => import("./pages/Dashboards/DashboardsIA"));
-const GitHubCopilotDashboard = lazy(() => import("./pages/GitHubCopilotDashboard/GitHubCopilotDashboard"));
 const FinancialPlanning = lazy(() => import("./pages/Planning/FinancialPlanning"));
 const Savings = lazy(() => import("./pages/Savings/Savings"));
-const AzurePtuOps = lazy(() => import("./pages/AzurePTU/AzurePtuOps"));
 const GoldDashboard = lazy(() => import("./pages/GoldDashboard/GoldDashboard"));
 const GoldDashboardV2 = lazy(() => import("./pages/GoldDashboard/GoldDashboardV2"));
 const Admin = lazy(() => import("./pages/Admin/Admin"));
@@ -111,9 +108,6 @@ function ApplicationRoutes() {
         {/* Rotas canônicas finbase.cloud */}
         <Route path="custos" element={<CatalogLegacyRedirect />} />
         <Route path="custos/avancado" element={<GoldDashboardV2 />} />
-        <Route path="ia/capacidade" element={<AzurePtuOps />} />
-        <Route path="ia/adocao" element={<DashboardsIA />} />
-        <Route path="ia/github" element={<GitHubCopilotDashboard />} />
         <Route path="alertas" element={<CatalogLegacyRedirect />} />
         <Route path="planejamento" element={<CatalogLegacyRedirect />} />
         <Route path="projecoes" element={<CatalogLegacyRedirect />} />
@@ -149,10 +143,6 @@ function ApplicationRoutes() {
         <Route path="anomalies" element={<LegacyRedirect to="/alertas" />} />
         <Route path="gold-dashboard" element={<LegacyRedirect to="/custos" />} />
         <Route path="gold-dashboard-v2" element={<LegacyRedirect to="/custos/avancado" />} />
-        <Route path="visoes-consumo-ia" element={<LegacyRedirect to="/ia/capacidade" />} />
-        <Route path="dashboards-ia" element={<LegacyRedirect to="/ia/adocao" />} />
-        <Route path="github-copilot" element={<LegacyRedirect to="/ia/github" />} />
-        <Route path="azure-ptu-ops" element={<LegacyRedirect to="/ia/capacidade" />} />
         <Route path="financial-planning" element={<LegacyRedirect to="/planejamento" />} />
         <Route path="forecast" element={<LegacyRedirect to="/projecoes" />} />
         <Route path="forecast-accuracy" element={<LegacyRedirect to="/projecoes/acuracia" />} />

@@ -278,7 +278,7 @@ export default function DestinationPartitionSettings({
               key={`${extra.column}-${index}`}
               sx={{
                 display: "flex", flexWrap: "wrap", gap: 1, alignItems: "center",
-                p: 1, borderRadius: 1, bgcolor: "#fff", border: "1px solid #e0e0e0",
+                p: 1, borderRadius: 1, bgcolor: "#fff", border: "1px solid #E2E5EE",
               }}
             >
               <Chip label={extra.column} size="small" color="primary" variant="outlined" />

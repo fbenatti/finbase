@@ -121,7 +121,7 @@ function FragmentRow({ item, color, open, onToggle, subcats, subcatLoading, onAc
       </TableRow>
       {open && (
         <TableRow>
-          <TableCell colSpan={7} sx={{ bgcolor: "#f8fafc" }}>
+          <TableCell colSpan={7} sx={{ bgcolor: "#FAFBFD" }}>
             {subcatLoading ? <LinearProgress sx={{ m: 1 }} /> : subcats && subcats.length > 0 ? (
               <Table size="small">
                 <TableHead>
@@ -430,7 +430,7 @@ export default function DesviosTab({ runId, targetMonth, department }: { runId: 
                         name: "Projetado (rate diário)",
                         x: seriesDialog.data.points.map(p => p.day),
                         y: seriesDialog.data.points.map(p => p.forecast_rate),
-                        line: { color: "#2563eb", dash: "dash", width: 2 },
+                        line: { color: "#4338CA", dash: "dash", width: 2 },
                       },
                       ...(seriesDialog.data.daily_deviation_day != null ? [{
                         type: "scatter" as const,

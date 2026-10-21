@@ -2,18 +2,20 @@
 
 ## Fonte do padrão
 
-`apps/web/src/theme/theme.ts` concentra os tokens e estilos de controles, tabelas e DataGrid.
-`Layout.tsx` aplica o tema escolhido também ao conteúdo dos módulos e aos diálogos.
+Os tokens de cor, fonte e raio ficam em `apps/web/src/theme/tokens.ts`. O tema MUI (`theme/theme.ts`),
+os gráficos (`theme/chartTheme.ts`) e o shell (`layout/Layout.tsx`) leem desse arquivo. Não use cores
+fixas nos componentes: importe `colors` de `theme/tokens.ts`.
 
-| Elemento | Finbase | Carbon |
+| Elemento | Valor atual | Token |
 | --- | --- | --- |
-| Fonte | Inter | IBM Plex Sans |
-| Ação principal | #1B5878 | #0F62FE |
-| Fundo | #F4F7FA | #F4F4F4 |
-| Texto | #1D2D3F | #161616 |
-| Bordas | #E4EAF0 | #E0E0E0 |
-| Controles | 40 px | 40 px |
-| Ícones de ação | 20 px | 20 px |
+| Fonte do texto | Inter | `fontFamily.body` |
+| Fonte de títulos | Manrope | `fontFamily.heading` |
+| Ação principal | #4338CA | `colors.brand` |
+| Fundo | #F5F6FA | `colors.canvas` |
+| Texto | #161B2E | `colors.text` |
+| Bordas | #E2E5EE | `colors.border` |
+| Controles | 40 px | `radius.control` = 8 px |
+| Ícones de ação | 20 px | Material Icons |
 | Linhas e cabeçalho da grade | 48 px | 48 px |
 
 Os ícones de ordenação usam 16 px. A hierarquia usa controles de expansão de 32 px.
@@ -61,7 +63,7 @@ Foi instalada `frontend-design`, de `anthropics/skills`, em
 - Formulários usam identificação antes das credenciais, campos em português,
   duas colunas quando houver espaço e rodapé cancelar/validar/salvar.
 - Fontes Azure, serviços auxiliares e importação CSV usam os mesmos ícones
-  Carbon por meio de `ConnectionIcons.tsx`, com cores e dimensões do tema.
+  Material por meio de `ConnectionIcons.tsx`, com cores e dimensões do tema.
 
 ## Estrutura compartilhada das grades
 
@@ -71,7 +73,7 @@ seletores e hooks continuam disponíveis diretamente pelo pacote.
 
 A estrutura inclui controles de colunas, filtros, densidade, exportação CSV,
 contagem de registros, cabeçalho de 48 px, linhas de 48 px na densidade padrão,
-foco de teclado visível e ícones Carbon. Cada módulo preserva os callbacks de
+foco de teclado visível e ícones Material. Cada módulo preserva os callbacks de
 consulta, paginação, filtros e edição, além dos destaques semânticos das linhas.
 Em grades com paginação no servidor, a opção CSV informa que exporta a página
 atual. A opção de impressão automática está oculta. `SortableTable.tsx` utiliza

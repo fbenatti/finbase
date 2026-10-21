@@ -679,7 +679,7 @@ export default function BudgetDefensePanel({
               do herdado, o projeto aparece como linha individual na defesa e só muda de linha na
               publicação.
             </Alert>
-            <Box sx={{ p: 1.5, borderRadius: 2, bgcolor: "#f8fafc", border: "1px solid", borderColor: "divider" }}>
+            <Box sx={{ p: 1.5, borderRadius: 2, bgcolor: "#FAFBFD", border: "1px solid", borderColor: "divider" }}>
               <Typography variant="caption" color="text.secondary">Projeto selecionado</Typography>
               <Typography variant="body2" fontWeight={700}>{selectedDepartment?.path || "—"}</Typography>
               <Typography variant="caption" color="text.secondary">

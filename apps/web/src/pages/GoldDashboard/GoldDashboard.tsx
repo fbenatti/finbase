@@ -142,7 +142,7 @@ function nivelNum(field: string): number {
   return m ? Number(m[1]) : 0;
 }
 const PURPLE = "#660099", ORANGE = "#ff7a00", BLUE = "#155eef",
-      GREEN = "#10b981", RED = "#ef4444", YELLOW = "#f59e0b", INK = "#0f172a", MUT = "#64748b";
+      GREEN = "#10b981", RED = "#ef4444", YELLOW = "#f59e0b", INK = "#161B2E", MUT = "#5A6378";
 
 const DIM_LABELS: Record<string, string> = {
   _billing_period: "Mês",
@@ -387,7 +387,7 @@ function RankBars({ title, rows, measure, currency = "BRL", limit = 8, color = P
                 <Tooltip title={esc(r[label])}><Typography variant="caption" sx={{ fontWeight: 850, maxWidth: "62%", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{i + 1}. {esc(r[label])}</Typography></Tooltip>
                 <Typography variant="caption" sx={{ fontWeight: 900, whiteSpace: "nowrap" }}>{unit ? `${num(val)} ${unit}` : money(val, currency)} · {pct(Math.abs(val) / (total || 1) * 100, 0)}</Typography>
               </Stack>
-              <Box sx={{ height: 9, borderRadius: 99, background: "#e2e8f0", overflow: "hidden", mt: 0.4 }}>
+              <Box sx={{ height: 9, borderRadius: 99, background: "#E2E5EE", overflow: "hidden", mt: 0.4 }}>
                 <Box sx={{ height: "100%", width: `${w}%`, borderRadius: 99, background: `linear-gradient(90deg, ${color}, ${color}cc)` }} />
               </Box>
             </Box>
@@ -686,7 +686,7 @@ export default function GoldDashboard() {
   };
 
   return (
-    <Box sx={{ mx: -3, mt: -3, pb: 3, minHeight: "calc(100vh - 64px)", bgcolor: "#f8fafc" }}>
+    <Box sx={{ mx: -3, mt: -3, pb: 3, minHeight: "calc(100vh - 64px)", bgcolor: "#FAFBFD" }}>
       <Box sx={{ px: 3, pt: 3, bgcolor: "background.paper", borderBottom: "1px solid", borderColor: "divider" }}>
       <Stack direction="row" justifyContent="space-between" alignItems="flex-start" flexWrap="wrap" gap={2} mb={2}>
         <Box>
@@ -703,7 +703,7 @@ export default function GoldDashboard() {
       {error && <Alert severity="error" sx={{ mb: 2 }}>{dataDisplayText(error)}</Alert>}
 
       {/* ── Filtros globais ── */}
-      <Paper variant="outlined" sx={{ p: 1.5, mb: 2, borderRadius: "18px", borderColor: "#e2e7f0", boxShadow: "0 6px 20px rgba(24, 39, 75, 0.035)" }}>
+      <Paper variant="outlined" sx={{ p: 1.5, mb: 2, borderRadius: "18px", borderColor: "#E2E5EE", boxShadow: "0 6px 20px rgba(24, 39, 75, 0.035)" }}>
         <Stack direction="row" flexWrap="wrap" gap={1.2} alignItems="center">
           <Box sx={{ width: { xs: "100%", md: 330 }, minWidth: { xs: 0, md: 330 }, flex: { xs: "1 1 100%", md: "0 0 330px" } }}>
             <Typography variant="caption" color="text.secondary">Período</Typography>
@@ -711,7 +711,7 @@ export default function GoldDashboard() {
               {labelDateRange(dateFrom, dateTo)}
             </Button>
           </Box>
-          <Popover open={Boolean(dateAnchor)} anchorEl={dateAnchor} onClose={() => setDateAnchor(null)} anchorOrigin={{ vertical: "bottom", horizontal: "left" }} transformOrigin={{ vertical: "top", horizontal: "left" }} PaperProps={{ sx: { mt: .5, borderRadius: "14px", border: "1px solid #e2e7f0", boxShadow: "0 16px 44px rgba(24,39,75,.16)" } }}>
+          <Popover open={Boolean(dateAnchor)} anchorEl={dateAnchor} onClose={() => setDateAnchor(null)} anchorOrigin={{ vertical: "bottom", horizontal: "left" }} transformOrigin={{ vertical: "top", horizontal: "left" }} PaperProps={{ sx: { mt: .5, borderRadius: "14px", border: "1px solid #E2E5EE", boxShadow: "0 16px 44px rgba(24,39,75,.16)" } }}>
             <Stack direction={{ xs: "column", sm: "row" }} sx={{ p: 2 }} gap={2}>
               <Box sx={{ minWidth: 180 }}><Typography variant="overline" color="text.secondary" fontWeight={800}>Períodos rápidos</Typography><Stack spacing={.25} mt={.5}>
                 <Button size="small" onClick={() => applyPreset("this_month")} sx={{ justifyContent: "flex-start", textTransform: "none" }}>Este mês</Button>
@@ -722,7 +722,7 @@ export default function GoldDashboard() {
                 <Button size="small" onClick={() => applyPreset("this_year")} sx={{ justifyContent: "flex-start", textTransform: "none" }}>Este ano</Button>
                 <Button size="small" onClick={() => applyPreset("last_year")} sx={{ justifyContent: "flex-start", textTransform: "none" }}>Ano anterior</Button>
               </Stack></Box>
-              <Box sx={{ minWidth: { sm: 330 }, borderLeft: { sm: "1px solid #edf0f6" }, pl: { sm: 2 } }}><Typography variant="overline" color="text.secondary" fontWeight={800}>Intervalo personalizado · datas</Typography><Stack direction={{ xs: "column", sm: "row" }} gap={1} mt={1}><TextField size="small" type="date" label="Data inicial" value={draftFrom} onChange={(event) => setDraftFrom(event.target.value)} InputLabelProps={{ shrink: true }} /><TextField size="small" type="date" label="Data final" value={draftTo} onChange={(event) => setDraftTo(event.target.value)} InputLabelProps={{ shrink: true }} /></Stack>{draftFrom > draftTo && <Typography variant="caption" color="error" display="block" mt={.5}>A data inicial deve ser anterior ou igual à data final.</Typography>}<Stack direction="row" justifyContent="flex-end" gap={1} mt={2}><Button size="small" onClick={() => setDateAnchor(null)}>Cancelar</Button><Button size="small" variant="contained" disabled={!draftFrom || !draftTo || draftFrom > draftTo} onClick={() => { setDateFrom(draftFrom); setDateTo(draftTo); setFilters((current) => ({ ...current, months: monthsInDateRange(draftFrom, draftTo) })); setDateAnchor(null); }} sx={{ bgcolor: "#6416dc" }}>Aplicar</Button></Stack></Box>
+              <Box sx={{ minWidth: { sm: 330 }, borderLeft: { sm: "1px solid #EEF0F7" }, pl: { sm: 2 } }}><Typography variant="overline" color="text.secondary" fontWeight={800}>Intervalo personalizado · datas</Typography><Stack direction={{ xs: "column", sm: "row" }} gap={1} mt={1}><TextField size="small" type="date" label="Data inicial" value={draftFrom} onChange={(event) => setDraftFrom(event.target.value)} InputLabelProps={{ shrink: true }} /><TextField size="small" type="date" label="Data final" value={draftTo} onChange={(event) => setDraftTo(event.target.value)} InputLabelProps={{ shrink: true }} /></Stack>{draftFrom > draftTo && <Typography variant="caption" color="error" display="block" mt={.5}>A data inicial deve ser anterior ou igual à data final.</Typography>}<Stack direction="row" justifyContent="flex-end" gap={1} mt={2}><Button size="small" onClick={() => setDateAnchor(null)}>Cancelar</Button><Button size="small" variant="contained" disabled={!draftFrom || !draftTo || draftFrom > draftTo} onClick={() => { setDateFrom(draftFrom); setDateTo(draftTo); setFilters((current) => ({ ...current, months: monthsInDateRange(draftFrom, draftTo) })); setDateAnchor(null); }} sx={{ bgcolor: "#6416dc" }}>Aplicar</Button></Stack></Box>
             </Stack>
           </Popover>
           <Box sx={{ minWidth: 280 }}>
@@ -987,7 +987,7 @@ function VisaoGeral({ table, filters, filterKey }: { table: string; filters: Fil
                 { x: mensal.map(r => monthLabel(r.month)), y: mensal.map(r => r.value), type: "bar", name: "Realizado (BRL)", marker: { color: PURPLE } },
                 { x: mensal.map(r => monthLabel(r.month)), y: monthlySeries(results.mensal, "billedcost").map(r => r.value), type: "scatter", mode: "lines+markers", name: "Billed Cost (USD)", yaxis: "y2", line: { color: ORANGE, width: 3 } },
               ]}
-              layout={{ height: 320, margin: { l: 56, r: 56, t: 8, b: 34 }, barmode: "group", legend: { orientation: "h", y: -0.22 }, yaxis: { title: { text: "BRL" }, gridcolor: "#eef0f6" }, yaxis2: { title: { text: "USD" }, overlaying: "y", side: "right", showgrid: false } }}
+              layout={{ height: 320, margin: { l: 56, r: 56, t: 8, b: 34 }, barmode: "group", legend: { orientation: "h", y: -0.22 }, yaxis: { title: { text: "BRL" }, gridcolor: "#EEF0F7" }, yaxis2: { title: { text: "USD" }, overlaying: "y", side: "right", showgrid: false } }}
               config={{ displayModeBar: false }} style={{ width: "100%" }} />
           </ChartCard>
         </Grid>
@@ -1082,7 +1082,7 @@ function Evolucao({ table, filters, filterKey }: { table: string; filters: Filte
                 { x: billed.map(r => monthLabel(r.month)), y: billed.map(r => r.value), type: "scatter", mode: "lines", name: "Billed Cost (USD)", line: { color: ORANGE, width: 3 } },
                 { x: qty.map(r => monthLabel(r.month)), y: qty.map(r => r.value), type: "scatter", mode: "lines+markers", name: "Quantidade", yaxis: "y2", line: { color: GREEN, width: 2, dash: "dot" } },
               ]}
-              layout={{ height: 340, margin: { l: 56, r: 56, t: 8, b: 34 }, legend: { orientation: "h", y: -0.22 }, yaxis: { title: { text: "Valor" }, gridcolor: "#eef0f6" }, yaxis2: { title: { text: "Quantidade" }, overlaying: "y", side: "right", showgrid: false } }}
+              layout={{ height: 340, margin: { l: 56, r: 56, t: 8, b: 34 }, legend: { orientation: "h", y: -0.22 }, yaxis: { title: { text: "Valor" }, gridcolor: "#EEF0F7" }, yaxis2: { title: { text: "Quantidade" }, overlaying: "y", side: "right", showgrid: false } }}
               config={{ displayModeBar: false }} style={{ width: "100%" }} />
           </ChartCard>
         </Grid>
@@ -1102,7 +1102,7 @@ function Evolucao({ table, filters, filterKey }: { table: string; filters: Filte
                 text: deltas.slice(0, 12).map(d => `${d.delta >= 0 ? "+" : ""}${money(d.delta)}`),
                 textposition: "outside",
               }]}
-              layout={{ height: 320, margin: { l: 56, r: 24, t: 8, b: 90 }, xaxis: { tickangle: -35 }, yaxis: { title: { text: "Δ BRL" }, gridcolor: "#eef0f6" } }}
+              layout={{ height: 320, margin: { l: 56, r: 24, t: 8, b: 90 }, xaxis: { tickangle: -35 }, yaxis: { title: { text: "Δ BRL" }, gridcolor: "#EEF0F7" } }}
               config={{ displayModeBar: false }} style={{ width: "100%" }} />
           </ChartCard>
         </Grid>
@@ -1115,7 +1115,7 @@ function Evolucao({ table, filters, filterKey }: { table: string; filters: Filte
                     <Tooltip title={d.key}><Typography variant="caption" sx={{ fontWeight: 850, maxWidth: "60%", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{d.key}</Typography></Tooltip>
                     <Typography variant="caption" sx={{ fontWeight: 900 }}>{d.delta >= 0 ? "+" : ""}{money(d.delta)} · {totalDelta ? pct(Math.abs(d.delta) / Math.abs(totalDelta) * 100, 0) : "—"} do Δ</Typography>
                   </Stack>
-                  <Box sx={{ height: 9, borderRadius: 99, background: "#e2e8f0", overflow: "hidden", mt: 0.4 }}>
+                  <Box sx={{ height: 9, borderRadius: 99, background: "#E2E5EE", overflow: "hidden", mt: 0.4 }}>
                     <Box sx={{ height: "100%", width: `${Math.max(2, Math.min(100, Math.abs(d.delta) / (Math.max(...deltas.slice(0, 10).map(x => Math.abs(x.delta)), 1)) * 100))}%`, borderRadius: 99, background: d.delta >= 0 ? RED : GREEN }} />
                   </Box>
                 </Box>
@@ -1422,7 +1422,7 @@ function Investigacao({ table, filters, filterKey }: { table: string; filters: F
                 text: sortedByAbs.map(d => `${d.delta >= 0 ? "+" : ""}${money(d.delta)}`),
                 textposition: "outside",
               }]}
-              layout={{ height: 320, margin: { l: 56, r: 24, t: 8, b: 100 }, xaxis: { tickangle: -40 }, yaxis: { title: { text: "Δ BRL" }, gridcolor: "#eef0f6" } }}
+              layout={{ height: 320, margin: { l: 56, r: 24, t: 8, b: 100 }, xaxis: { tickangle: -40 }, yaxis: { title: { text: "Δ BRL" }, gridcolor: "#EEF0F7" } }}
               config={{ displayModeBar: false }} style={{ width: "100%" }} />
           </ChartCard>
         </Grid>
@@ -1455,7 +1455,7 @@ function Investigacao({ table, filters, filterKey }: { table: string; filters: F
                   data={[
                     { x: paretoRows.slice(0, 30).map(r => esc(r[dim])), y: paretoRows.slice(0, 30).map(r => Number(r.realizado) || 0), type: "bar", name: "Realizado", marker: { color: PURPLE } },
                   ]}
-                  layout={{ height: 260, margin: { l: 56, r: 20, t: 8, b: 100 }, xaxis: { tickangle: -45, tickfont: { size: 9 } }, yaxis: { title: { text: "BRL" }, gridcolor: "#eef0f6" } }}
+                  layout={{ height: 260, margin: { l: 56, r: 20, t: 8, b: 100 }, xaxis: { tickangle: -45, tickfont: { size: 9 } }, yaxis: { title: { text: "BRL" }, gridcolor: "#EEF0F7" } }}
                   config={{ displayModeBar: false }} style={{ width: "100%" }} />
                 <Typography variant="caption" color="text.secondary" sx={{ display: "block", mt: 0.5 }}>
                   <b>{paretoCount}</b> de {paretoRows.length} itens concentram ≥ 80% do custo ({pct(paretoTotal ? cum / paretoTotal * 100 : 0, 0)} acumulado).
@@ -1743,7 +1743,7 @@ function Decisao({ table, filters, filterKey, setFilters }: {
   const qColor = (cost: number, growth: number) =>
     cost >= matrix.mc && growth >= matrix.mg ? "#dc2626" :
     cost < matrix.mc && growth >= matrix.mg ? "#d97706" :
-    cost >= matrix.mc ? "#2563eb" : "#64748b";
+    cost >= matrix.mc ? "#4338CA" : "#5A6378";
 
   // ── waterfall executivo de variação ──
   const waterfall = useMemo(() => {
@@ -1981,7 +1981,7 @@ function Decisao({ table, filters, filterKey, setFilters }: {
               </Grid>
               <Box sx={{ mt: 1 }}>
                 {actions.length ? actions.slice(0, 3).map((a, i) => (
-                  <Box key={i} sx={{ display: "flex", gap: 1, alignItems: "flex-start", borderLeft: `4px solid ${i === 0 ? RED : YELLOW}`, bgcolor: "#f8fafc", borderRadius: 1, p: 1, mb: 0.6 }}>
+                  <Box key={i} sx={{ display: "flex", gap: 1, alignItems: "flex-start", borderLeft: `4px solid ${i === 0 ? RED : YELLOW}`, bgcolor: "#FAFBFD", borderRadius: 1, p: 1, mb: 0.6 }}>
                     <Box component="span" sx={{ bgcolor: i === 0 ? RED : YELLOW, color: "#fff", borderRadius: 99, px: 0.9, py: 0.15, fontSize: 10, fontWeight: 950, whiteSpace: "nowrap" }}>{i === 0 ? "AÇÃO IMEDIATA" : "MONITORAR"}</Box>
                     <Box>
                       <Typography variant="body2" sx={{ fontWeight: 950, color: INK }}>{a[0]} · {a[1]}</Typography>
@@ -2027,13 +2027,13 @@ function Decisao({ table, filters, filterKey, setFilters }: {
                     increasing: { marker: { color: "#d92d20" } },
                     decreasing: { marker: { color: "#0b9f6e" } },
                     totals: { marker: { color: "#344054" } },
-                    connector: { line: { color: "#cbd5e1", dash: "dot" } },
+                    connector: { line: { color: "#CDD2DF", dash: "dot" } },
                     text: waterfall.map(s => compact(s.value)),
                     textposition: "outside",
                     customdata: waterfall.map(s => s.contrib != null ? `Contribuição: ${pct(s.contrib)} do MoM` : ""),
                     hovertemplate: "%{x}<br>%{y}<br>%{customdata}<extra></extra>",
                   }]}
-                  layout={{ height: 360, margin: { l: 66, r: 20, t: 20, b: 110 }, xaxis: { tickangle: -30, automargin: true }, yaxis: { title: { text: "BRL" }, gridcolor: "#eef0f6" }, showlegend: false }}
+                  layout={{ height: 360, margin: { l: 66, r: 20, t: 20, b: 110 }, xaxis: { tickangle: -30, automargin: true }, yaxis: { title: { text: "BRL" }, gridcolor: "#EEF0F7" }, showlegend: false }}
                   config={{ displayModeBar: false }} style={{ width: "100%" }} />
               )}
               <Typography variant="caption" sx={{ color: MUT, fontWeight: 700 }}>“Outros drivers” reconcilia a diferença residual entre os top 7 e a variação total — não é uma categoria real da fonte.</Typography>
@@ -2061,11 +2061,11 @@ function Decisao({ table, filters, filterKey, setFilters }: {
                   increasing: { marker: { color: ORANGE } },
                   decreasing: { marker: { color: RED } },
                   totals: { marker: { color: INK } },
-                  connector: { line: { color: "#cbd5e1", dash: "dot" } },
+                  connector: { line: { color: "#CDD2DF", dash: "dot" } },
                   text: bridgeSteps.map(s => compact(s.value)),
                   textposition: "outside",
                 }]}
-                layout={{ height: 300, margin: { l: 66, r: 20, t: 20, b: 40 }, yaxis: { title: { text: "BRL" }, gridcolor: "#eef0f6" }, showlegend: false }}
+                layout={{ height: 300, margin: { l: 66, r: 20, t: 20, b: 40 }, yaxis: { title: { text: "BRL" }, gridcolor: "#EEF0F7" }, showlegend: false }}
                 config={{ displayModeBar: false }} style={{ width: "100%" }} />
             </Grid>
             <Grid item xs={12} md={4}>
@@ -2184,7 +2184,7 @@ function Decisao({ table, filters, filterKey, setFilters }: {
               {oppDim.length ? oppDim.map((x, i) => (
                 <Box key={i} sx={{ mb: 0.6 }}>
                   <Stack direction="row" justifyContent="space-between"><Typography variant="caption" sx={{ fontWeight: 900 }}>{i + 1}. {x.key}</Typography><Typography variant="caption" sx={{ fontWeight: 950, color: ORANGE }}>Gap {compact(x.gap)}</Typography></Stack>
-                  <Box sx={{ height: 8, borderRadius: 99, bgcolor: "#eef0f6", overflow: "hidden" }}><Box sx={{ height: "100%", width: `${Math.max(2, Math.min(100, (Math.abs(x.gap) / Math.max(1, Math.abs(oppDim[0].gap))) * 100))}%`, bgcolor: i < 3 ? ORANGE : PURPLE }} /></Box>
+                  <Box sx={{ height: 8, borderRadius: 99, bgcolor: "#EEF0F7", overflow: "hidden" }}><Box sx={{ height: "100%", width: `${Math.max(2, Math.min(100, (Math.abs(x.gap) / Math.max(1, Math.abs(oppDim[0].gap))) * 100))}%`, bgcolor: i < 3 ? ORANGE : PURPLE }} /></Box>
                 </Box>
               )) : <Typography variant="body2" color="text.secondary">Nenhum gap positivo no escopo.</Typography>}
               <Typography variant="subtitle2" sx={{ fontWeight: 950, mb: 0.5, mt: 2 }}>Maiores gaps por Serviço</Typography>
@@ -2197,7 +2197,7 @@ function Decisao({ table, filters, filterKey, setFilters }: {
               {biasRows.slice(0, 5).map((x, i) => (
                 <Box key={i} sx={{ mb: 0.6 }}>
                   <Stack direction="row" justifyContent="space-between"><Typography variant="caption" sx={{ fontWeight: 900 }}>{i + 1}. {x.key}</Typography><Typography variant="caption" sx={{ fontWeight: 950, color: x.accuracy < 70 ? RED : x.accuracy < 90 ? YELLOW : GREEN }}>{pct(x.accuracy)} · erro {compact(x.absErr)}</Typography></Stack>
-                  <Box sx={{ height: 8, borderRadius: 99, bgcolor: "#eef0f6", overflow: "hidden" }}><Box sx={{ height: "100%", width: `${Math.max(2, Math.min(100, 100 - x.accuracy))}%`, bgcolor: x.accuracy < 70 ? RED : x.accuracy < 90 ? YELLOW : GREEN }} /></Box>
+                  <Box sx={{ height: 8, borderRadius: 99, bgcolor: "#EEF0F7", overflow: "hidden" }}><Box sx={{ height: "100%", width: `${Math.max(2, Math.min(100, 100 - x.accuracy))}%`, bgcolor: x.accuracy < 70 ? RED : x.accuracy < 90 ? YELLOW : GREEN }} /></Box>
                 </Box>
               ))}
               {!biasRows.length && <Typography variant="body2" color="text.secondary">Sem pares Forecast/Realizado.</Typography>}
@@ -2232,7 +2232,7 @@ function Decisao({ table, filters, filterKey, setFilters }: {
                       <TableCell sx={{ fontSize: 12 }}>{pct(x.rowPct)}</TableCell>
                       <TableCell sx={{ fontSize: 12, fontWeight: 900 }}>{pct(x.spendPct)}</TableCell>
                       <TableCell sx={{ fontSize: 12, fontWeight: 900 }}>{money(x.missingSpend)}</TableCell>
-                      <TableCell sx={{ minWidth: 120 }}><Box sx={{ height: 8, borderRadius: 99, bgcolor: "#eef0f6", overflow: "hidden" }}><Box sx={{ height: "100%", width: `${Math.min(100, x.spendPct)}%`, bgcolor: sevColor }} /></Box></TableCell>
+                      <TableCell sx={{ minWidth: 120 }}><Box sx={{ height: 8, borderRadius: 99, bgcolor: "#EEF0F7", overflow: "hidden" }}><Box sx={{ height: "100%", width: `${Math.min(100, x.spendPct)}%`, bgcolor: sevColor }} /></Box></TableCell>
                     </TableRow>
                   );
                 })}
@@ -2272,7 +2272,7 @@ function Decisao({ table, filters, filterKey, setFilters }: {
                     { x: entA.series.map(s => monthLabel(s[0])), y: entA.series.map(s => s[1]), type: "scatter", mode: "lines+markers", name: aKey, line: { color: "#5b00cb", width: 3 }, marker: { size: 4 } },
                     { x: entB.series.map(s => monthLabel(s[0])), y: entB.series.map(s => s[1]), type: "scatter", mode: "lines+markers", name: bKey, line: { color: "#155eef", width: 3 }, marker: { size: 4 } },
                   ]}
-                  layout={{ height: 300, margin: { l: 60, r: 20, t: 12, b: 36 }, yaxis: { title: { text: "BRL" }, gridcolor: "#eef0f6" }, legend: { orientation: "h", y: 1.05 } }}
+                  layout={{ height: 300, margin: { l: 60, r: 20, t: 12, b: 36 }, yaxis: { title: { text: "BRL" }, gridcolor: "#EEF0F7" }, legend: { orientation: "h", y: 1.05 } }}
                   config={{ displayModeBar: false }} style={{ width: "100%" }} />
               ) : <Typography variant="body2" color="text.secondary">Sem entidades disponíveis no escopo.</Typography>}
             </Grid>
@@ -2395,7 +2395,7 @@ function Drilldown({ table, filters, filterKey }: { table: string; filters: Filt
               <ChartCard title="Evolução do escopo selecionado">
                 <Chart
                   data={[{ x: months.map(r => monthLabel(r.month)), y: months.map(r => r.value), type: "bar", marker: { color: BLUE } }]}
-                  layout={{ height: 280, margin: { l: 56, r: 20, t: 8, b: 34 }, yaxis: { title: { text: "BRL" }, gridcolor: "#eef0f6" } }}
+                  layout={{ height: 280, margin: { l: 56, r: 20, t: 8, b: 34 }, yaxis: { title: { text: "BRL" }, gridcolor: "#EEF0F7" } }}
                   config={{ displayModeBar: false }} style={{ width: "100%" }} />
                 <Stack direction="row" spacing={2} mt={1}>
                   <Typography variant="caption" fontWeight={900}>Total: {money(childTotal)}</Typography>

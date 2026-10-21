@@ -253,32 +253,32 @@ export default function DesligueProgramado({ embedded }: { embedded?: boolean })
           <Grid container spacing={1.5} mb={2}>
             <Grid item xs={6} md={2.4}>
               <Paper variant="outlined" sx={{ p: 2, height: "100%" }}>
-                <Typography variant="caption" sx={{ color: "#64748b", fontWeight: 900 }}>SAVING ESTIMADO</Typography>
+                <Typography variant="caption" sx={{ color: "#5A6378", fontWeight: 900 }}>SAVING ESTIMADO</Typography>
                 <Typography variant="h6" sx={{ fontWeight: 950, color: PURPLE }}>{money(totals.totalSaving)}</Typography>
                 <Typography variant="caption">{moneyFull(totals.totalSaving)}{monthly.length ? ` · acumulado ${monthLabel(monthly[0].billing_period)}–${monthLabel(monthly[monthly.length - 1].billing_period)}` : ""}</Typography>
               </Paper>
             </Grid>
             <Grid item xs={6} md={2.4}>
               <Paper variant="outlined" sx={{ p: 2, height: "100%" }}>
-                <Typography variant="caption" sx={{ color: "#64748b", fontWeight: 900 }}>HORAS ECONOMIZADAS</Typography>
+                <Typography variant="caption" sx={{ color: "#5A6378", fontWeight: 900 }}>HORAS ECONOMIZADAS</Typography>
                 <Typography variant="h6" sx={{ fontWeight: 950, color: GREEN }}>{num(totals.totalSavedHours)} h</Typography>
               </Paper>
             </Grid>
             <Grid item xs={6} md={2.4}>
               <Paper variant="outlined" sx={{ p: 2, height: "100%" }}>
-                <Typography variant="caption" sx={{ color: "#64748b", fontWeight: 900 }}>VMs ÚNICAS COM DESLIGUE</Typography>
+                <Typography variant="caption" sx={{ color: "#5A6378", fontWeight: 900 }}>VMs ÚNICAS COM DESLIGUE</Typography>
                 <Typography variant="h6" sx={{ fontWeight: 950, color: BLUE }}>{totals.vmCount}</Typography>
               </Paper>
             </Grid>
             <Grid item xs={6} md={2.4}>
               <Paper variant="outlined" sx={{ p: 2, height: "100%" }}>
-                <Typography variant="caption" sx={{ color: "#64748b", fontWeight: 900 }}>COM AUTOMAÇÃO</Typography>
+                <Typography variant="caption" sx={{ color: "#5A6378", fontWeight: 900 }}>COM AUTOMAÇÃO</Typography>
                 <Typography variant="h6" sx={{ fontWeight: 950, color: ORANGE }}>{totals.automated}</Typography>
               </Paper>
             </Grid>
             <Grid item xs={6} md={2.4}>
               <Paper variant="outlined" sx={{ p: 2, height: "100%" }}>
-                <Typography variant="caption" sx={{ color: "#64748b", fontWeight: 900 }}>CUSTO DAS EXCEÇÕES</Typography>
+                <Typography variant="caption" sx={{ color: "#5A6378", fontWeight: 900 }}>CUSTO DAS EXCEÇÕES</Typography>
                 <Typography variant="h6" sx={{ fontWeight: 950, color: RED }}>{money(totals.totalExceptionCost)}</Typography>
                 <Typography variant="caption">{moneyFull(totals.totalExceptionCost)}</Typography>
               </Paper>
@@ -321,18 +321,18 @@ export default function DesligueProgramado({ embedded }: { embedded?: boolean })
                           <Box
                             onClick={() => selectPadrao(p.padrao)}
                             sx={{
-                              border: p.desligue_programado ? `1.5px solid ${GREEN}` : "1px solid #e2e8f0",
-                              borderRadius: 2, px: 1.5, py: 1, bgcolor: p.desligue_programado ? "#f0fdf4" : "#f8fafc",
+                              border: p.desligue_programado ? `1.5px solid ${GREEN}` : "1px solid #E2E5EE",
+                              borderRadius: 2, px: 1.5, py: 1, bgcolor: p.desligue_programado ? "#f0fdf4" : "#FAFBFD",
                               cursor: "pointer",
                               outline: padraoSelected === p.padrao ? `2px solid ${PURPLE}` : "none",
                               "&:hover": { boxShadow: 1 },
                             }}
                           >
-                            <Typography variant="caption" sx={{ fontWeight: 900, color: p.desligue_programado ? GREEN : "#64748b" }}>
+                            <Typography variant="caption" sx={{ fontWeight: 900, color: p.desligue_programado ? GREEN : "#5A6378" }}>
                               {p.padrao.replace(/_/g, " ")}
                             </Typography>
                             <Typography variant="body2" sx={{ fontWeight: 950 }}>{num(p.resources)} VMs</Typography>
-                            <Typography variant="caption" sx={{ color: "#64748b" }}>{num(p.saved_hours)}h · {money(p.saving_brl)}</Typography>
+                            <Typography variant="caption" sx={{ color: "#5A6378" }}>{num(p.saved_hours)}h · {money(p.saving_brl)}</Typography>
                           </Box>
                         </Tooltip>
                       ))}
@@ -404,8 +404,8 @@ export default function DesligueProgramado({ embedded }: { embedded?: boolean })
                       paper_bgcolor: "transparent",
                       plot_bgcolor: "transparent",
                       font: { family: "Inter, system-ui, sans-serif", size: 12, color: "#334155" },
-                      xaxis: { title: "Mês", gridcolor: "#e2e8f0" },
-                      yaxis: { title: "Saving (BRL)", gridcolor: "#e2e8f0", tickformat: ".2s" },
+                      xaxis: { title: "Mês", gridcolor: "#E2E5EE" },
+                      yaxis: { title: "Saving (BRL)", gridcolor: "#E2E5EE", tickformat: ".2s" },
                     }}
                     config={{ displayModeBar: false }}
                     style={{ width: "100%" }}
@@ -461,8 +461,8 @@ export default function DesligueProgramado({ embedded }: { embedded?: boolean })
                       paper_bgcolor: "transparent",
                       plot_bgcolor: "transparent",
                       font: { family: "Inter, system-ui, sans-serif", size: 12, color: "#334155" },
-                      xaxis: { title: "Saving (BRL)", gridcolor: "#e2e8f0", tickformat: ".2s", zeroline: false },
-                      yaxis: { gridcolor: "#e2e8f0", automargin: true, zeroline: false },
+                      xaxis: { title: "Saving (BRL)", gridcolor: "#E2E5EE", tickformat: ".2s", zeroline: false },
+                      yaxis: { gridcolor: "#E2E5EE", automargin: true, zeroline: false },
                       showlegend: false,
                     }}
                     config={{ displayModeBar: false }}
@@ -488,25 +488,25 @@ export default function DesligueProgramado({ embedded }: { embedded?: boolean })
           <Grid container spacing={1.5} mb={2}>
             <Grid item xs={6} md={3}>
               <Paper variant="outlined" sx={{ p: 1.5 }}>
-                <Typography variant="caption" sx={{ color: "#64748b", fontWeight: 900 }}>REMOVIDAS DO SCHEDULE</Typography>
+                <Typography variant="caption" sx={{ color: "#5A6378", fontWeight: 900 }}>REMOVIDAS DO SCHEDULE</Typography>
                 <Typography variant="h6" sx={{ fontWeight: 950, color: RED }}>{delta?.total_removed ?? 0}</Typography>
               </Paper>
             </Grid>
             <Grid item xs={6} md={3}>
               <Paper variant="outlined" sx={{ p: 1.5 }}>
-                <Typography variant="caption" sx={{ color: "#64748b", fontWeight: 900 }}>DESABILITADAS</Typography>
+                <Typography variant="caption" sx={{ color: "#5A6378", fontWeight: 900 }}>DESABILITADAS</Typography>
                 <Typography variant="h6" sx={{ fontWeight: 950, color: "#f59e0b" }}>{delta?.total_disabled ?? 0}</Typography>
               </Paper>
             </Grid>
             <Grid item xs={6} md={3}>
               <Paper variant="outlined" sx={{ p: 1.5 }}>
-                <Typography variant="caption" sx={{ color: "#64748b", fontWeight: 900 }}>ADICIONADAS</Typography>
+                <Typography variant="caption" sx={{ color: "#5A6378", fontWeight: 900 }}>ADICIONADAS</Typography>
                 <Typography variant="h6" sx={{ fontWeight: 950, color: GREEN }}>{delta?.total_added ?? 0}</Typography>
               </Paper>
             </Grid>
             <Grid item xs={6} md={3}>
               <Paper variant="outlined" sx={{ p: 1.5 }}>
-                <Typography variant="caption" sx={{ color: "#64748b", fontWeight: 900 }}>CUSTO DESDE A SAÍDA</Typography>
+                <Typography variant="caption" sx={{ color: "#5A6378", fontWeight: 900 }}>CUSTO DESDE A SAÍDA</Typography>
                 <Typography variant="h6" sx={{ fontWeight: 950, color: RED }}>{money(delta?.total_cost_since_removal ?? 0)}</Typography>
               </Paper>
             </Grid>
@@ -581,25 +581,25 @@ export default function DesligueProgramado({ embedded }: { embedded?: boolean })
           <Grid container spacing={1.5} mb={1.5}>
             <Grid item xs={3}>
               <Paper variant="outlined" sx={{ p: 1.5 }}>
-                <Typography variant="caption" sx={{ color: "#64748b", fontWeight: 900 }}>RECURSOS NO SNAPSHOT</Typography>
+                <Typography variant="caption" sx={{ color: "#5A6378", fontWeight: 900 }}>RECURSOS NO SNAPSHOT</Typography>
                 <Typography variant="h6" sx={{ fontWeight: 950, color: BLUE }}>{tagDelta?.total_resources ?? 0}</Typography>
               </Paper>
             </Grid>
             <Grid item xs={3}>
               <Paper variant="outlined" sx={{ p: 1.5 }}>
-                <Typography variant="caption" sx={{ color: "#64748b", fontWeight: 900 }}>COM shutdown=auto</Typography>
+                <Typography variant="caption" sx={{ color: "#5A6378", fontWeight: 900 }}>COM shutdown=auto</Typography>
                 <Typography variant="h6" sx={{ fontWeight: 950, color: GREEN }}>{tagDelta?.total_with_tag ?? 0}</Typography>
               </Paper>
             </Grid>
             <Grid item xs={3}>
               <Paper variant="outlined" sx={{ p: 1.5 }}>
-                <Typography variant="caption" sx={{ color: "#64748b", fontWeight: 900 }}>SAÍRAM DA AUTOMAÇÃO</Typography>
+                <Typography variant="caption" sx={{ color: "#5A6378", fontWeight: 900 }}>SAÍRAM DA AUTOMAÇÃO</Typography>
                 <Typography variant="h6" sx={{ fontWeight: 950, color: RED }}>{tagDelta?.total_exited ?? 0}</Typography>
               </Paper>
             </Grid>
             <Grid item xs={3}>
               <Paper variant="outlined" sx={{ p: 1.5 }}>
-                <Typography variant="caption" sx={{ color: "#64748b", fontWeight: 900 }}>CUSTO DESDE A SAÍDA</Typography>
+                <Typography variant="caption" sx={{ color: "#5A6378", fontWeight: 900 }}>CUSTO DESDE A SAÍDA</Typography>
                 <Typography variant="h6" sx={{ fontWeight: 950, color: RED }}>{money(tagDelta?.total_cost_since_removal ?? 0)}</Typography>
               </Paper>
             </Grid>
@@ -678,20 +678,20 @@ export default function DesligueProgramado({ embedded }: { embedded?: boolean })
           <Grid container spacing={1.5} mb={1.5}>
             <Grid item xs={4}>
               <Paper variant="outlined" sx={{ p: 1.5 }}>
-                <Typography variant="caption" sx={{ color: "#64748b", fontWeight: 900 }}>OPORTUNIDADE TOTAL</Typography>
+                <Typography variant="caption" sx={{ color: "#5A6378", fontWeight: 900 }}>OPORTUNIDADE TOTAL</Typography>
                 <Typography variant="h6" sx={{ fontWeight: 950, color: PURPLE }}>{money(opp?.total_opportunity_brl ?? 0)}</Typography>
                 <Typography variant="caption">{opp?.billing_period || ""}</Typography>
               </Paper>
             </Grid>
             <Grid item xs={4}>
               <Paper variant="outlined" sx={{ p: 1.5 }}>
-                <Typography variant="caption" sx={{ color: "#64748b", fontWeight: 900 }}>VMs</Typography>
+                <Typography variant="caption" sx={{ color: "#5A6378", fontWeight: 900 }}>VMs</Typography>
                 <Typography variant="h6" sx={{ fontWeight: 950, color: BLUE }}>{opp?.vm_count ?? 0}</Typography>
               </Paper>
             </Grid>
             <Grid item xs={4}>
               <Paper variant="outlined" sx={{ p: 1.5 }}>
-                <Typography variant="caption" sx={{ color: "#64748b", fontWeight: 900 }}>VMSS</Typography>
+                <Typography variant="caption" sx={{ color: "#5A6378", fontWeight: 900 }}>VMSS</Typography>
                 <Typography variant="h6" sx={{ fontWeight: 950, color: ORANGE }}>{opp?.vmss_count ?? 0}</Typography>
               </Paper>
             </Grid>
@@ -852,7 +852,7 @@ export default function DesligueProgramado({ embedded }: { embedded?: boolean })
                       paper_bgcolor: "transparent",
                       plot_bgcolor: "transparent",
                       xaxis: { title: { text: "Dia" }, dtick: 2 },
-                      yaxis: { title: { text: "Horas faturadas" }, gridcolor: "#e2e8f0", zeroline: false },
+                      yaxis: { title: { text: "Horas faturadas" }, gridcolor: "#E2E5EE", zeroline: false },
                       showlegend: true,
                       legend: { orientation: "h", y: -0.18 },
                     }}

@@ -806,7 +806,7 @@ export default function Relationship({ embedded }: { embedded?: boolean } = {}) 
           pl: nested ? 2.5 : 1,
           cursor: "grab",
           bgcolor: isMapped ? "#e8f5e9" : dragging === col.name ? "#e3f2fd" : nested ? "#fafafa" : "#fff",
-          border: isMapped ? "1px solid #a5d6a7" : "1px solid #e0e0e0",
+          border: isMapped ? "1px solid #a5d6a7" : "1px solid #E2E5EE",
           opacity: dragging === col.name ? 0.7 : 1,
           userSelect: "none",
           transition: "all 0.15s",
@@ -1058,7 +1058,7 @@ export default function Relationship({ embedded }: { embedded?: boolean } = {}) 
           <Paper
             sx={{
               flexGrow: 1, maxHeight: "calc(100vh - 280px)", overflowY: "auto",
-              p: 1, border: "2px solid #e0e0e0", borderRadius: 2,
+              p: 1, border: "2px solid #E2E5EE", borderRadius: 2,
             }}
           >
             <Typography variant="subtitle2" sx={{ mb: 1, px: 1, color: "text.secondary" }}>
@@ -1088,7 +1088,7 @@ export default function Relationship({ embedded }: { embedded?: boolean } = {}) 
                       ? "1px solid #a5d6a7"
                       : isDropTarget
                         ? "2px dashed #42a5f5"
-                        : "1px solid #e8e8e8",
+                        : "1px solid #E7E9FB",
                     transition: "all 0.15s",
                     cursor: isDragging ? "copy" : "default",
                     "&:hover": isDragging ? { borderColor: "#90caf9", bgcolor: "#f5f9ff" } : {},

@@ -516,7 +516,7 @@ export default function ExpectedViewV2({
           type: "scatter",
           mode: "lines+markers",
           name: "Orçamento",
-          line: { color: "#64748B", width: 3 },
+          line: { color: "#5A6378", width: 3 },
           marker: { size: 5 },
         }] : []),
         ...(sharedOn
@@ -624,7 +624,7 @@ export default function ExpectedViewV2({
           type: "scatter",
           mode: "lines+markers",
           name: "Orçamento",
-          line: { color: "#64748B", width: 3 },
+          line: { color: "#5A6378", width: 3 },
           marker: { size: 6 },
         }] : []),
       ];
@@ -688,7 +688,7 @@ export default function ExpectedViewV2({
         type: "scatter",
         mode: "lines+markers",
         name: "Orçamento",
-        line: { color: "#64748B", width: 3 },
+        line: { color: "#5A6378", width: 3 },
         marker: { size: 5 },
       }]
     : [];
@@ -809,7 +809,7 @@ export default function ExpectedViewV2({
             connector: { line: { color: "#9CA3AF" } },
             increasing: { marker: { color: "#EF4444" } },
             decreasing: { marker: { color: "#16A34A" } },
-            totals: { marker: { color: "#64748B" } },
+            totals: { marker: { color: "#5A6378" } },
             name: "Drivers da variação",
           },
         ];
@@ -880,7 +880,7 @@ export default function ExpectedViewV2({
       sx={{
         flex: 1,
         minWidth: 190,
-        border: "1px solid #e2e7f0",
+        border: "1px solid #E2E5EE",
         borderRadius: "16px",
         borderTop: `3px solid ${color}`,
         boxShadow: "0 8px 24px rgba(24, 39, 75, 0.045)",
@@ -1199,7 +1199,7 @@ export default function ExpectedViewV2({
             {card("Realizado", actual, "#F2A900", () => { setDrillTipo("realizado"); setDrillLabelsManualForecast(false); setDrillPeriod(undefined); setDrillOpen(true); })}
             {card("Forecast", forecastOnly, "#7C3AED", () => { setDrillTipo("forecast"); setDrillLabelsManualForecast(false); setDrillPeriod(undefined); setDrillOpen(true); }, `Realizado / orçamento: ${realizedBudgetPct} · horizonte até ${filteredRows[filteredRows.length - 1] ? monthLong(filteredRows[filteredRows.length - 1].period) : "—"}`)}
             {card("Forecast Manual", budgetAvailable ? forecastManual : "Sem forecast manual para este filtro", "#0EA5E9", undefined, "Planejamento manual consolidado")}
-            {card("Orçamento", budgetAvailable ? budget : "Sem orçamento para este filtro", "#64748B")}
+            {card("Orçamento", budgetAvailable ? budget : "Sem orçamento para este filtro", "#5A6378")}
             {card(
               "Total projetado",
               forecast,
@@ -1217,7 +1217,7 @@ export default function ExpectedViewV2({
                   p: 2,
                   borderRadius: "18px",
                   bgcolor: "#fff",
-                  border: "1px solid #e2e7f0",
+                  border: "1px solid #E2E5EE",
                   boxShadow: "0 8px 24px rgba(24, 39, 75, 0.045)",
                 }}
               >
@@ -1282,21 +1282,21 @@ export default function ExpectedViewV2({
 
           <Grid container spacing={2} sx={{ mt: 0.5 }}>
             <Grid item xs={12} md={6}>
-              <Paper elevation={0} sx={{ p: 2, height: "100%", borderRadius: "18px", bgcolor: "#fff", border: "1px solid #e2e7f0", boxShadow: "0 8px 24px rgba(24, 39, 75, 0.045)" }}>
+              <Paper elevation={0} sx={{ p: 2, height: "100%", borderRadius: "18px", bgcolor: "#fff", border: "1px solid #E2E5EE", boxShadow: "0 8px 24px rgba(24, 39, 75, 0.045)" }}>
                 <Typography variant="h6">{sharedOn ? "Rateio por departamento" : "Drivers da variação"}</Typography>
                 <Typography variant="caption" color="text.secondary">{sharedOn ? "Laranja empilhado no filho que recebe o custo · clique para abrir" : "Filhos do departamento selecionado · clique na barra para abrir o subnível"}</Typography>
                 <Plot useResizeHandler style={{ width: "100%", height: 360, cursor: "pointer" }} data={waterfallData} layout={{ ...waterfallLayout, height: 360 }} config={{ responsive: true, displaylogo: false }} onClick={(event) => openDriver(String(event.points?.[0]?.x ?? ""))} />
               </Paper>
             </Grid>
             <Grid item xs={12} md={6}>
-              <Paper variant="outlined" sx={{ p: 2, height: "100%", borderRadius: "18px", borderColor: "#e2e7f0", boxShadow: "0 8px 24px rgba(24, 39, 75, 0.045)" }}>
+              <Paper variant="outlined" sx={{ p: 2, height: "100%", borderRadius: "18px", borderColor: "#E2E5EE", boxShadow: "0 8px 24px rgba(24, 39, 75, 0.045)" }}>
                 <Typography variant="overline" color="primary" fontWeight={800} sx={{ letterSpacing: ".08em" }}>TENDÊNCIA</Typography>
                 <Typography variant="h6" fontWeight={750} sx={{ color: "#111b4e" }}>Tendência mensal · Forecast × Realizado</Typography>
                 <Typography variant="caption" color="text.secondary">Consumo realizado e projeção por competência; a série começa no primeiro valor disponível, sem preencher meses iniciais com zero.</Typography>
                 <Plot useResizeHandler style={{ width: "100%", height: 320 }} data={[
                   { x: trendActual.map((point) => point.period), y: trendActual.map((point) => point.value), type: "scatter", mode: "lines+markers", name: "Realizado", line: { color: "#6416dc", width: 3 }, marker: { color: "#6416dc", size: 7 } },
                   { x: trendForecast.map((point) => point.period), y: trendForecast.map((point) => point.value), type: "scatter", mode: "lines+markers", name: "Forecast", line: { color: "#9c4dff", width: 3, dash: "dash" }, marker: { color: "#9c4dff", size: 7 } },
-                ] as any} layout={{ height: 320, autosize: true, margin: { l: 75, r: 20, t: 15, b: 75 }, yaxis: { tickprefix: "R$ ", separatethousands: true, gridcolor: "#edf0f6" }, xaxis: { gridcolor: "#fff", tickangle: -35 }, legend: { orientation: "h", x: 0, y: -0.28, yanchor: "top" }, paper_bgcolor: "transparent", plot_bgcolor: "transparent" }} config={{ responsive: true, displaylogo: false }} />
+                ] as any} layout={{ height: 320, autosize: true, margin: { l: 75, r: 20, t: 15, b: 75 }, yaxis: { tickprefix: "R$ ", separatethousands: true, gridcolor: "#EEF0F7" }, xaxis: { gridcolor: "#fff", tickangle: -35 }, legend: { orientation: "h", x: 0, y: -0.28, yanchor: "top" }, paper_bgcolor: "transparent", plot_bgcolor: "transparent" }} config={{ responsive: true, displaylogo: false }} />
               </Paper>
             </Grid>
           </Grid>
@@ -1344,7 +1344,7 @@ export default function ExpectedViewV2({
         mt: -3,
         pb: 3,
         minHeight: "calc(100vh - 64px)",
-        bgcolor: "#f8fafc",
+        bgcolor: "#FAFBFD",
       }}
     >
       <Box
@@ -1371,7 +1371,7 @@ export default function ExpectedViewV2({
             p: { xs: 2, md: 2.5 },
             borderRadius: "18px",
             bgcolor: "#fff",
-            border: "1px solid #e2e7f0",
+            border: "1px solid #E2E5EE",
             boxShadow: "0 8px 24px rgba(24, 39, 75, 0.045)",
           }}
         >

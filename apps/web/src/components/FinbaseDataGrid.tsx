@@ -35,7 +35,7 @@ const gridStyle: SxProps<Theme> = theme => ({
   backgroundColor: theme.palette.background.paper,
   borderColor: theme.palette.divider,
   "& .MuiDataGrid-columnHeader": {
-    backgroundColor: theme.palette.primary.main === "#0f62fe" ? "#e0e0e0" : "#EDF2F6",
+    backgroundColor: theme.palette.primary.main === "#4338CA" ? "#E2E5EE" : "#EEF0F7",
     color: theme.palette.text.primary, padding: "0 16px",
   },
   "& .MuiDataGrid-columnHeaderTitle, & .MuiDataGrid-columnHeader .MuiTypography-root": { fontWeight: 600, fontSize: "0.875rem" },

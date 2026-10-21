@@ -63,7 +63,7 @@ export default function AnomalyCaseScope({ kase, series, currency }: {
   const safeToDrill = members.length > 0 && members.every(member => Boolean(member.items?.length));
 
   return <Box>
-    <Paper variant="outlined" sx={{ mt: 2, p: { xs: 2, sm: 2.5 }, borderRadius: 3, borderColor: "#dce5ef", background: "linear-gradient(120deg,#fff,#f7faff)" }}>
+    <Paper variant="outlined" sx={{ mt: 2, p: { xs: 2, sm: 2.5 }, borderRadius: 3, borderColor: "#E2E5EE", background: "linear-gradient(120deg,#fff,#f7faff)" }}>
       <Typography variant="overline" color="text.secondary">{monthlyCase ? "Acumulado do mês até" : "O que aconteceu"} · {day(kase.event_date)}</Typography>
       <Typography sx={{ mt: .5, fontSize: { xs: 25, sm: 30 }, lineHeight: 1.2, fontWeight: 800, letterSpacing: "-.03em", color: delta != null && delta > 0 && !withinBand ? "#c53d4b" : "#203047" }}>
         {headline}
@@ -81,7 +81,7 @@ export default function AnomalyCaseScope({ kase, series, currency }: {
       </Box>}
       {!monthlyCase && focus?.above_band && excessDays.length > 0 && <Typography variant="body2" color="text.secondary" sx={{ mt: 1 }}>Primeiro excesso: {day(excessDays[0].event_date)} · {excessDays.length} {excessDays.length === 1 ? "dia" : "dias"} acima da faixa até {day(kase.event_date)}</Typography>}
       {latest && latest.event_date > kase.event_date && <Typography variant="caption" color="text.secondary" sx={{ display: "block", mt: .75 }}>Último dado ({day(latest.event_date)}): {money(latest.observed_cloud, currency)}{latest.above_band === true ? " · acima da faixa" : latest.above_band === false ? " · não supera o limite de alerta" : " · sem comparação disponível"}</Typography>}
-      <Stack direction={{ xs: "column", sm: "row" }} justifyContent="space-between" alignItems={{ sm: "center" }} spacing={1.5} sx={{ mt: 2, pt: 1.5, borderTop: "1px solid #e2e8f0" }}>
+      <Stack direction={{ xs: "column", sm: "row" }} justifyContent="space-between" alignItems={{ sm: "center" }} spacing={1.5} sx={{ mt: 2, pt: 1.5, borderTop: "1px solid #E2E5EE" }}>
         <Box>
           <Typography variant="body2" fontWeight={700}>Investigue primeiro {leading ? leading.value : label}</Typography>
           <Typography variant="caption" color="text.secondary">{leading ? `${pct(share(leading.delta ?? 0))} dos aumentos · ` : ""}{kase.cause_hypothesis || "Confirme com a área se a mudança foi planejada."}</Typography>
@@ -106,7 +106,7 @@ export default function AnomalyCaseScope({ kase, series, currency }: {
           <Typography variant="caption" fontWeight={700} color="text.secondary">CAMINHO DO GASTO</Typography>
           <Chip size="small" variant="outlined" label={filters.length ? `Forecast no nível: ${forecastScopeLabel}` : "Forecast e desvio neste ramo"} sx={{ maxWidth: "70%", "& .MuiChip-label": { overflow: "hidden", textOverflow: "ellipsis" } }} />
         </Stack>
-        <Box sx={{ mt: 1, pl: 1.5, position: "relative", "&:before": { content: '""', position: "absolute", left: 5, top: 10, bottom: 10, width: 2, bgcolor: "#dce5ef" } }}>
+        <Box sx={{ mt: 1, pl: 1.5, position: "relative", "&:before": { content: '""', position: "absolute", left: 5, top: 10, bottom: 10, width: 2, bgcolor: "#E2E5EE" } }}>
           {lineageNodes.map((node, index) => {
             const terminal = index === lineageNodes.length - 1;
             return <Stack key={node.field} direction="row" alignItems="stretch" gap={1.25} sx={{ position: "relative", mb: index === lineageNodes.length - 1 ? 0 : .75 }}>
@@ -136,9 +136,9 @@ export default function AnomalyCaseScope({ kase, series, currency }: {
           {rawDetailSelected && <Typography variant="caption" color="text.secondary" sx={{ display: "block", mt: .5 }}>Desvio calculado em {forecastScopeLabel}; detalhe abaixo é custo observado no dia do evento.</Typography>}
           {filters.length > 0 && rootDelta != null && rootDelta > 0 && delta != null && <Typography variant="caption" color="text.secondary">{pct(delta / rootDelta * 100)} do desvio líquido do caso</Typography>}
         </Box>
-        <Box sx={{ pl: { xs: 1.5, md: 2.5 }, borderLeft: "2px solid #dce5ef", minWidth: 0 }}>
+        <Box sx={{ pl: { xs: 1.5, md: 2.5 }, borderLeft: "2px solid #E2E5EE", minWidth: 0 }}>
           {dimension && <Typography variant="overline" color="text.secondary">{dimension.label}</Typography>}
-          {groups.map((group, index) => <ButtonBase key={group.value} disabled={sourceOnly ? !(series.detail_items?.length) : !safeToDrill} onClick={() => setFilters([...filters, { field: dimension!.field, value: group.value }])} sx={{ display: "block", width: "100%", textAlign: "left", p: 1.5, my: 1, border: "1px solid #dce5ef", borderRadius: 2, position: "relative", "&:before": { content: '""', position: "absolute", width: { xs: 12, md: 22 }, height: 2, bgcolor: "#dce5ef", left: { xs: -13, md: -23 }, top: "50%" }, "&:hover": { bgcolor: "#f5f8fd", borderColor: "#8caee1" } }}>
+          {groups.map((group, index) => <ButtonBase key={group.value} disabled={sourceOnly ? !(series.detail_items?.length) : !safeToDrill} onClick={() => setFilters([...filters, { field: dimension!.field, value: group.value }])} sx={{ display: "block", width: "100%", textAlign: "left", p: 1.5, my: 1, border: "1px solid #E2E5EE", borderRadius: 2, position: "relative", "&:before": { content: '""', position: "absolute", width: { xs: 12, md: 22 }, height: 2, bgcolor: "#E2E5EE", left: { xs: -13, md: -23 }, top: "50%" }, "&:hover": { bgcolor: "#f5f8fd", borderColor: "#8caee1" } }}>
             <Stack direction="row" justifyContent="space-between" alignItems="start" spacing={1}>
               <Typography variant="body2" fontWeight={750}>{group.value}</Typography>
               <Typography fontWeight={800} sx={{ color: group.sourceOnly ? "#315e91" : group.delta != null && group.delta > 0 ? branchColors[index % branchColors.length] : "#087e6e", whiteSpace: "nowrap" }}>{group.sourceOnly ? money(group.actual, currency) : <>{group.delta != null && group.delta > 0 ? "+" : ""}{money(group.delta, currency)}</>}</Typography>

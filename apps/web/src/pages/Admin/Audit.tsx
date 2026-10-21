@@ -250,7 +250,7 @@ export default function Audit() {
   };
 
   return (
-    <Box sx={{ mx: -3, mt: -3, pb: 3, minHeight: "calc(100vh - 64px)", bgcolor: "#f8fafc" }}>
+    <Box sx={{ mx: -3, mt: -3, pb: 3, minHeight: "calc(100vh - 64px)", bgcolor: "#FAFBFD" }}>
       <Box sx={{ px: 3, pt: 3, bgcolor: "background.paper", borderBottom: "1px solid", borderColor: "divider" }}>
         <Typography variant="h4" sx={{ mb: 0.5 }}>Auditoria</Typography>
         <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>

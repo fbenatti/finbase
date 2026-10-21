@@ -525,7 +525,7 @@ export default function ExpectedView({
           type: "scatter",
           mode: "lines+markers",
           name: "Orçamento",
-          line: { color: "#64748B", width: 3 },
+          line: { color: "#5A6378", width: 3 },
           marker: { size: 5 },
         },
         ...(sharedOn
@@ -633,7 +633,7 @@ export default function ExpectedView({
           type: "scatter",
           mode: "lines+markers",
           name: "Orçamento",
-          line: { color: "#64748B", width: 3 },
+          line: { color: "#5A6378", width: 3 },
           marker: { size: 6 },
         },
       ];
@@ -855,7 +855,7 @@ export default function ExpectedView({
             connector: { line: { color: "#9CA3AF" } },
             increasing: { marker: { color: "#EF4444" } },
             decreasing: { marker: { color: "#16A34A" } },
-            totals: { marker: { color: "#64748B" } },
+            totals: { marker: { color: "#5A6378" } },
             name: "Drivers da variação",
           },
         ];
@@ -1360,7 +1360,7 @@ export default function ExpectedView({
               () => openConsumptionDetails("ambos", true),
               "Total projetado",
             )}
-            {card("Orçamento", budget, "#64748B")}
+            {card("Orçamento", budget, "#5A6378")}
             {card("Variação", variance, variance >= 0 ? "#16A34A" : "#EF4444")}
           </Stack>
           <Grid container spacing={2}>
@@ -1625,7 +1625,7 @@ export default function ExpectedView({
         mt: -3,
         pb: 3,
         minHeight: "calc(100vh - 64px)",
-        bgcolor: "#f8fafc",
+        bgcolor: "#FAFBFD",
       }}
     >
       <Box

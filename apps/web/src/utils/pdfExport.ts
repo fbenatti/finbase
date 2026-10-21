@@ -9,10 +9,10 @@ export function exportDashboardPdf(dashboardId: string): void {
   const previousTitle = document.title;
   const date = new Date().toISOString().slice(0, 10);
   document.title = `visoes-consumo-ia-${dashboardId}-${date}`;
-  document.body.classList.add("azure-ptu-print-mode");
+  document.body.classList.add("finops-print-mode");
 
   const cleanup = () => {
-    document.body.classList.remove("azure-ptu-print-mode");
+    document.body.classList.remove("finops-print-mode");
     document.title = previousTitle;
     window.removeEventListener("afterprint", cleanup);
   };
@@ -34,10 +34,10 @@ export type AzurePtuPrintMeta = {
 export function exportAzurePtuPdf(meta: AzurePtuPrintMeta): void {
   const previousTitle = document.title;
   document.title = azurePtuPdfFilename(meta.periodId);
-  document.body.classList.add("azure-ptu-print-mode");
+  document.body.classList.add("finops-print-mode");
 
   const cleanup = () => {
-    document.body.classList.remove("azure-ptu-print-mode");
+    document.body.classList.remove("finops-print-mode");
     document.title = previousTitle;
     window.removeEventListener("afterprint", cleanup);
   };

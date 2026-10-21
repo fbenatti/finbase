@@ -1,55 +1,51 @@
-import { SvgIcon, type SvgIconProps } from "@mui/material";
-import type { ElementType } from "react";
 import {
-  Add as CarbonAdd, Cloud as CarbonCloud, DataBase, Download as CarbonDownload,
-  Book, Application, Store, Search as CarbonSearch, Renew, Edit as CarbonEdit,
-  TrashCan, Time, ConnectionSignal, Filter, OverflowMenuVertical, ChevronDown,
-  Play, Upload, Save as CarbonSave, CheckmarkOutline, ArrowsHorizontal, Copy, Maximize, Table, View, StopFilled, Restart, Checkmark, CloseOutline, MisuseOutline, ChevronRight as CarbonChevronRight, Subtract, ThumbsUp, Undo as CarbonUndo, ArrowLeft,
-} from "@carbon/react/icons";
+  AddOutlined, ArrowBackOutlined, AutorenewOutlined, CableOutlined, CancelOutlined, CheckCircleOutlineOutlined, CheckOutlined,
+  ChevronRightOutlined, CloseOutlined, ContentCopyOutlined, DeleteOutlineOutlined, EditOutlined, ExpandMoreOutlined,
+  FileDownloadOutlined, FileUploadOutlined, FilterListOutlined, HistoryOutlined, MenuBookOutlined, MoreVertOutlined,
+  OpenInFullOutlined, PlayArrowOutlined, RemoveOutlined, RestartAltOutlined, SaveOutlined, SearchOutlined, StopCircleOutlined,
+  StorageOutlined, StorefrontOutlined, SwapHorizOutlined, TableChartOutlined, ThumbUpOutlined, UndoOutlined, VisibilityOutlined,
+  AppsOutlined, CloudOutlined,
+} from "@mui/icons-material";
 
-// Preserve MUI sizing, colors and focus styling while using one Carbon icon family.
-const icon = (Component: ElementType) => function FinbaseIcon(props: SvgIconProps) {
-  return <SvgIcon component={Component} inheritViewBox {...props} />;
-};
-export const Add = icon(CarbonAdd);
-export const Cloud = icon(CarbonCloud);
-export const Storage = icon(DataBase);
+export const Add = AddOutlined;
+export const Cloud = CloudOutlined;
+export const Storage = StorageOutlined;
 export const Dataset = Storage;
-export const Download = icon(CarbonDownload);
-export const MenuBook = icon(Book);
-export const AutoAwesome = icon(Application);
+export const Download = FileDownloadOutlined;
+export const MenuBook = MenuBookOutlined;
+export const AutoAwesome = AppsOutlined;
 export const Psychology = AutoAwesome;
 export const SmartToy = AutoAwesome;
-export const Storefront = icon(Store);
-export const Search = icon(CarbonSearch);
-export const Refresh = icon(Renew);
-export const Edit = icon(CarbonEdit);
-export const Delete = icon(TrashCan);
-export const History = icon(Time);
-export const Cable = icon(ConnectionSignal);
-export const FilterAlt = icon(Filter);
-export const More = icon(OverflowMenuVertical);
-export const ExpandMore = icon(ChevronDown);
-export const PlayArrow = icon(Play);
-export const CloudUpload = icon(Upload);
-export const Save = icon(CarbonSave);
-export const Validate = icon(CheckmarkOutline);
+export const Storefront = StorefrontOutlined;
+export const Search = SearchOutlined;
+export const Refresh = AutorenewOutlined;
+export const Edit = EditOutlined;
+export const Delete = DeleteOutlineOutlined;
+export const History = HistoryOutlined;
+export const Cable = CableOutlined;
+export const FilterAlt = FilterListOutlined;
+export const More = MoreVertOutlined;
+export const ExpandMore = ExpandMoreOutlined;
+export const PlayArrow = PlayArrowOutlined;
+export const CloudUpload = FileUploadOutlined;
+export const Save = SaveOutlined;
+export const Validate = CheckCircleOutlineOutlined;
 
-export const Close = icon(CloseOutline);
-export const CompareArrows = icon(ArrowsHorizontal);
-export const ContentCopy = icon(Copy);
-export const OpenInFull = icon(Maximize);
-export const TableChart = icon(Table);
-export const Visibility = icon(View);
-export const Stop = icon(StopFilled);
-export const Replay = icon(Restart);
-export const Check = icon(Checkmark);
-export const Block = icon(MisuseOutline);
-export const Cancel = icon(CloseOutline);
-export const ChevronRight = icon(CarbonChevronRight);
-export const Remove = icon(Subtract);
-export const ThumbUp = icon(ThumbsUp);
+export const Close = CloseOutlined;
+export const CompareArrows = SwapHorizOutlined;
+export const ContentCopy = ContentCopyOutlined;
+export const OpenInFull = OpenInFullOutlined;
+export const TableChart = TableChartOutlined;
+export const Visibility = VisibilityOutlined;
+export const Stop = StopCircleOutlined;
+export const Replay = RestartAltOutlined;
+export const Check = CheckOutlined;
+export const Block = CancelOutlined;
+export const Cancel = CloseOutlined;
+export const ChevronRight = ChevronRightOutlined;
+export const Remove = RemoveOutlined;
+export const ThumbUp = ThumbUpOutlined;
 export const DeleteForever = Delete;
-export const Undo = icon(CarbonUndo);
+export const Undo = UndoOutlined;
 export const Schedule = History;
-export const ArrowBack = icon(ArrowLeft);
+export const ArrowBack = ArrowBackOutlined;

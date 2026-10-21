@@ -29,13 +29,13 @@ const FUNCTIONS = new Set([
 
 const COLORS = {
   keyword: "#7c3aed",
-  function: "#2563eb",
+  function: "#4338CA",
   string: "#059669",
   number: "#d97706",
-  comment: "#94a3b8",
+  comment: "#8A93A8",
   identifier: "#0e7490",
   operator: "#475569",
-  default: "#0f172a",
+  default: "#161B2E",
 };
 
 function escapeHtml(s: string): string {
@@ -118,8 +118,8 @@ export default function SqlEditor({
         position: "relative",
         width: "100%",
         borderRadius: 2,
-        border: "1px solid #cbd5e1",
-        bgcolor: "#0f172a",
+        border: "1px solid #CDD2DF",
+        bgcolor: "#161B2E",
         "&:focus-within": { borderColor: "#7c3aed", boxShadow: "0 0 0 3px rgba(124,58,237,0.15)" },
         overflow: "hidden",
       }}
@@ -137,7 +137,7 @@ export default function SqlEditor({
           lineHeight: 1.65,
           whiteSpace: "pre-wrap",
           wordBreak: "break-word",
-          color: "#e2e8f0",
+          color: "#E2E5EE",
           minHeight: rows * 21.45,
           overflow: "hidden",
           pointerEvents: "none",
@@ -163,7 +163,7 @@ export default function SqlEditor({
           outline: "none",
           background: "transparent",
           color: "transparent",
-          caretColor: "#f8fafc",
+          caretColor: "#FAFBFD",
           fontFamily: '"JetBrains Mono", "Fira Code", Consolas, Menlo, monospace',
           fontSize: 13,
           lineHeight: 1.65,

@@ -115,10 +115,10 @@ export default function CommitmentsDashboard() {
   const totalSaving = Number(selected.ri_saving || 0) + Number(selected.savingplan_saving || 0);
   const totalSavingPct = totalBaseline ? totalSaving / totalBaseline * 100 : 0;
   const currencyAxis = { tickprefix: "R$ ", separatethousands: true, automargin: true };
-  const chartLayout = { height: 290, margin: { l: 76, r: 20, t: 12, b: 48 }, paper_bgcolor: "white", plot_bgcolor: "white", yaxis: { ...currencyAxis, zerolinecolor: "#cbd5e1", gridcolor: "#e2e8f0" }, xaxis: { gridcolor: "#f1f5f9" }, showlegend: false };
+  const chartLayout = { height: 290, margin: { l: 76, r: 20, t: 12, b: 48 }, paper_bgcolor: "white", plot_bgcolor: "white", yaxis: { ...currencyAxis, zerolinecolor: "#CDD2DF", gridcolor: "#E2E5EE" }, xaxis: { gridcolor: "#EEF0F7" }, showlegend: false };
 
   return (
-    <Box sx={{ p: 3, bgcolor: "#f8fafc", minHeight: "calc(100vh - 180px)" }}>
+    <Box sx={{ p: 3, bgcolor: "#FAFBFD", minHeight: "calc(100vh - 180px)" }}>
       <Stack direction={{ xs: "column", md: "row" }} justifyContent="space-between" alignItems={{ md: "center" }} gap={2} mb={2}>
         <Box>
           <Typography variant="h5">Compra de RIs e SavingPlan</Typography>

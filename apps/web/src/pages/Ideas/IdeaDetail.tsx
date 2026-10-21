@@ -161,8 +161,8 @@ export default function IdeaDetail({ ideaId, open, onClose, onUpdated }: Props) 
                 {timeline.intervals.map((iv) => (
                   <Box key={iv.id} sx={{ display: "flex", alignItems: "center", gap: 1 }}>
                     <Box sx={{ minWidth: 140 }}><Chip size="small" label={STATUS_LABELS[iv.status as IdeaStatus] || iv.status} /></Box>
-                    <Box sx={{ flex: 1, height: 8, bgcolor: "#e2e8f0", borderRadius: 1, overflow: "hidden" }}>
-                      <Box sx={{ width: `${Math.min(100, iv.duration_days * 8)}%`, height: "100%", bgcolor: "#0A8FDC" }} />
+                    <Box sx={{ flex: 1, height: 8, bgcolor: "#E2E5EE", borderRadius: 1, overflow: "hidden" }}>
+                      <Box sx={{ width: `${Math.min(100, iv.duration_days * 8)}%`, height: "100%", bgcolor: "#4338CA" }} />
                     </Box>
                     <Typography variant="caption" sx={{ minWidth: 48 }}>{iv.duration_days}d</Typography>
                   </Box>
@@ -180,7 +180,7 @@ export default function IdeaDetail({ ideaId, open, onClose, onUpdated }: Props) 
           <Divider />
           <Typography variant="subtitle1">Comentários</Typography>
           {comments.map((c) => (
-            <Box key={c.id} sx={{ p: 1, bgcolor: "#f8fafc", borderRadius: 1 }}>
+            <Box key={c.id} sx={{ p: 1, bgcolor: "#FAFBFD", borderRadius: 1 }}>
               <Typography variant="caption" color="text.secondary">
                 {c.author.full_name || c.author.username} · {c.created_at ? new Date(c.created_at).toLocaleString("pt-BR") : ""}
               </Typography>

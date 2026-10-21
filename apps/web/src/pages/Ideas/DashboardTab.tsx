@@ -95,7 +95,7 @@ export default function DashboardTab({ onOpen, refreshKey }: Props) {
                 x: data.dwell_by_status.map((d) => STATUS_LABELS[d.status as keyof typeof STATUS_LABELS] || d.status),
                 y: data.dwell_by_status.map((d) => d.avg_days || 0),
                 type: "bar" as const,
-                marker: { color: "#0A8FDC" },
+                marker: { color: "#4338CA" },
               }]}
               layout={{ height: 300, margin: { l: 40, r: 20, t: 20, b: 80 }, paper_bgcolor: "white", plot_bgcolor: "white" }}
               config={{ displayModeBar: false }}

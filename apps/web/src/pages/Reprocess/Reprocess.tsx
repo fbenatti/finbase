@@ -45,7 +45,7 @@ export default function Reprocess() {
         Extração, consolidação, projeções e custo compartilhado no mesmo lugar. Acompanhe as execuções no sino de notificações.
         </Typography>
       </Box>
-      <Box sx={{ bgcolor: "#f8fafc", p: { xs: 2, md: 4 }, minHeight: "calc(100vh - 150px)" }}>
+      <Box sx={{ bgcolor: "#FAFBFD", p: { xs: 2, md: 4 }, minHeight: "calc(100vh - 150px)" }}>
         <Paper variant="outlined" sx={{ p: { xs: 1.5, md: 2.5 }, bgcolor: "background.paper" }}>
           {tab === "data" && <ReprocessDataTab />}
           {tab === "forecast" && <ReprocessForecastTab />}

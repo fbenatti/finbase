@@ -42,7 +42,7 @@ export default function Tables() {
 
       <Box
         sx={{
-          bgcolor: "#f8fafc",
+          bgcolor: "#FAFBFD",
           p: { xs: 2, md: 4 },
           minHeight: "calc(100vh - 150px)",
         }}

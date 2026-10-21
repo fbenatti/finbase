@@ -32,14 +32,14 @@ const TAB_KEYS = ["executivo", "catalogo", "recomendacoes", "fontes"] as const;
 const STATUS_COLOR: Record<string, string> = {
   Succeeded: "#16a34a",
   Active: "#16a34a",
-  Expired: "#64748b",
+  Expired: "#5A6378",
   Cancelled: "#dc2626",
   Pending: "#f59e0b",
 };
 const STATUS_BG: Record<string, string> = {
   Succeeded: "#dcfce7",
   Active: "#dcfce7",
-  Expired: "#f1f5f9",
+  Expired: "#EEF0F7",
   Cancelled: "#fee2e2",
   Pending: "#fef3c7",
 };
@@ -57,7 +57,7 @@ const ADVISOR_CATEGORY_COLORS: Record<string, string> = {
   Cost: "#16a34a",
   Security: "#dc2626",
   HighAvailability: "#f59e0b",
-  Performance: "#2563eb",
+  Performance: "#4338CA",
   OperationalExcellence: "#7c3aed",
 };
 const ADVISOR_CATEGORY_BG: Record<string, string> = {
@@ -75,7 +75,7 @@ function statusChip(status?: string | null) {
       size="small"
       label={key}
       sx={{
-        bgcolor: STATUS_BG[key] || "#f1f5f9",
+        bgcolor: STATUS_BG[key] || "#EEF0F7",
         color: STATUS_COLOR[key] || "#334155",
         fontWeight: 600,
         fontSize: 11,
@@ -454,7 +454,7 @@ export default function Reservations() {
                         type: "bar",
                         x: expiryBuckets.map((b) => b.label),
                         y: expiryBuckets.map((b) => b.n),
-                        marker: { color: ["#dc2626", "#f59e0b", "#facc15", "#16a34a", "#64748b"] as string[] },
+                        marker: { color: ["#dc2626", "#f59e0b", "#facc15", "#16a34a", "#5A6378"] as string[] },
                         text: expiryBuckets.map((b) => String(b.n)),
                         textposition: "outside",
                       }]}

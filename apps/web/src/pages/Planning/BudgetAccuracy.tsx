@@ -356,7 +356,7 @@ export default function BudgetAccuracy() {
             <Metric
               label="Orçamento vigente"
               value={money(totals?.budget_value || 0)}
-              color="#2563eb"
+              color="#4338CA"
             />
             {period === "annual" ? (
               <Metric
@@ -599,7 +599,7 @@ export default function BudgetAccuracy() {
                       <Metric
                         label="Orçamento anual"
                         value={money(detailBudget)}
-                        color="#2563eb"
+                        color="#4338CA"
                       />
                       <Metric
                         label="Realizado + Forecast"
@@ -685,7 +685,7 @@ export default function BudgetAccuracy() {
                                 type: "scatter",
                                 mode: "lines+markers",
                                 name: "Orçamento",
-                                line: { color: "#64748B", width: 3 },
+                                line: { color: "#5A6378", width: 3 },
                               },
                             ]}
                             layout={{
@@ -757,7 +757,7 @@ export default function BudgetAccuracy() {
                                   name: item.name,
                                   marker: {
                                     color: [
-                                      "#2563EB",
+                                      "#4338CA",
                                       "#0F766E",
                                       "#F2A900",
                                       "#7C3AED",
@@ -775,7 +775,7 @@ export default function BudgetAccuracy() {
                                         y: detail.others_monthly,
                                         type: "bar",
                                         name: "Outros",
-                                        marker: { color: "#94A3B8" },
+                                        marker: { color: "#8A93A8" },
                                         hovertemplate:
                                           "Outros<br>%{x}: R$ %{y:,.0f}<extra></extra>",
                                       },

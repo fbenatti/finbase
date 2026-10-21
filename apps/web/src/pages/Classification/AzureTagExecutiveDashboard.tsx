@@ -23,7 +23,7 @@ import {
 
 const fmt = (value: number) => new Intl.NumberFormat("pt-BR").format(value);
 const adherenceLevel = (value: number | null) => {
-  if (value === null) return { label: "Sem dado", color: "#94a3b8", background: "#f1f5f9" };
+  if (value === null) return { label: "Sem dado", color: "#8A93A8", background: "#EEF0F7" };
   if (value < 25) return { label: "0–24%", color: "#dc2626", background: "#fef2f2" };
   if (value < 50) return { label: "25–49%", color: "#ea580c", background: "#fff7ed" };
   if (value < 75) return { label: "50–74%", color: "#ca8a04", background: "#fefce8" };
@@ -337,7 +337,7 @@ export default function AzureTagExecutiveDashboard() {
               <Box sx={{ position: "relative", px: { xs: 0.5, sm: 2 }, py: 2.5, overflowX: "auto" }}>
                 <Box sx={{ minWidth: Math.max(560, timelinePoints.length * 155), position: "relative" }}>
                   <Box sx={{ position: "absolute", left: 24, right: 24, top: 18, height: 6, borderRadius: 4, bgcolor: "#dbe5f3" }} />
-                  <Box sx={{ position: "absolute", left: 24, width: timelinePoints.length > 1 ? `calc((100% - 48px) * ${(timelinePoints.length - 1) / timelinePoints.length})` : 0, top: 18, height: 6, borderRadius: 4, background: "linear-gradient(90deg, #2563eb, #06b6d4)" }} />
+                  <Box sx={{ position: "absolute", left: 24, width: timelinePoints.length > 1 ? `calc((100% - 48px) * ${(timelinePoints.length - 1) / timelinePoints.length})` : 0, top: 18, height: 6, borderRadius: 4, background: "linear-gradient(90deg, #4338CA, #06b6d4)" }} />
                   <Box sx={{ display: "grid", gridTemplateColumns: `repeat(${timelinePoints.length}, minmax(130px, 1fr))`, position: "relative" }}>
                     {timelinePoints.map((point, index) => {
                       const previousPoint = timelinePoints.slice(0, index).reverse().find((candidate) => candidate.value !== null);

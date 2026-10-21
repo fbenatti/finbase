@@ -12,7 +12,7 @@ import {
 } from "../../services/api";
 
 // ── Helpers (autocontidos) ──
-const PURPLE = "#660099", ORANGE = "#ff7a00", GREEN = "#10b981", RED = "#ef4444", INK = "#0f172a", MUT = "#64748b";
+const PURPLE = "#660099", ORANGE = "#ff7a00", GREEN = "#10b981", RED = "#ef4444", INK = "#161B2E", MUT = "#5A6378";
 const COMPACT_BRL = new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL", notation: "compact", maximumFractionDigits: 1 });
 const FULL_BRL = new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL", maximumFractionDigits: 0 });
 

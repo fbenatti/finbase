@@ -143,22 +143,22 @@ export default function GoldDashboardV2() {
     return path.slice(0, 6).map((value, index) => ({ column: `organograma_nivel_${levels[index] || index + 1}`, operator: "IN" as const, values: [value] }));
   }).filter((group) => group.length > 0), [selectedNodes, directorView]);
   const filterContextKey = JSON.stringify({ monthFrom, monthTo, nodes: selectedNodes.map((n) => n.id), directorView, filters, sharedCost, refresh });
-  const highlightsWidget = <Paper variant="outlined" sx={{ p: 2, mt: 2, borderRadius: "18px", borderColor: "#e2e7f0", boxShadow: "0 6px 20px rgba(24, 39, 75, 0.035)" }}>
+  const highlightsWidget = <Paper variant="outlined" sx={{ p: 2, mt: 2, borderRadius: "18px", borderColor: "#E2E5EE", boxShadow: "0 6px 20px rgba(24, 39, 75, 0.035)" }}>
     <Typography variant="overline" color="primary" fontWeight={800} sx={{ letterSpacing: ".08em" }}>EXECUTIVE HIGHLIGHTS</Typography>
     <Typography variant="caption" color="text.secondary" display="block">Anotações administrativas ativas no intervalo e nos caminhos de organograma selecionados; filtros dimensionais sem campo no cadastro não alteram esta lista.</Typography>
     {highlightsLoading ? <Typography display="block" color="text.secondary" mt={1}>Carregando registros do período…</Typography> : highlights.length ? <Stack spacing={1} mt={1}>{[...highlights].sort((a, b) => Number(a.ordem ?? 999) - Number(b.ordem ?? 999) || severityRank(a.severity) - severityRank(b.severity) || String(a.registered_at || a.created_at).localeCompare(String(b.registered_at || b.created_at))).map((ack) => <Alert key={ack.id} severity={ack.severity?.toLocaleLowerCase().includes("crít") ? "error" : ack.severity?.toLocaleLowerCase().includes("perigo") ? "warning" : "info"}><b>{ack.target_month} · {ack.department_name} · {ack.category}</b><br />{ack.department_path.join(" > ")}<br />{ack.reason}<Typography variant="caption" display="block">{ack.registered_at ? new Date(ack.registered_at).toLocaleDateString("pt-BR") : ""}</Typography></Alert>)}</Stack> : <Typography display="block" color="text.secondary" mt={1}>Nenhum highlight ativo nos meses e caminhos selecionados.</Typography>}
   </Paper>;
 
-  return <Box sx={{ mx: -3, mt: -3, pb: 3, minHeight: "calc(100vh - 64px)", bgcolor: "#f8fafc" }}>
+  return <Box sx={{ mx: -3, mt: -3, pb: 3, minHeight: "calc(100vh - 64px)", bgcolor: "#FAFBFD" }}>
     <Box sx={{ px: 3, pt: 3, pb: 2, bgcolor: "background.paper", borderBottom: "1px solid", borderColor: "divider" }}>
       <Stack direction="row" justifyContent="space-between" alignItems="center" flexWrap="wrap" gap={1}>
         <Box><Typography variant="h4">FinOps Intelligence v2 <Chip label="BETA" size="small" color="warning" sx={{ verticalAlign: "middle", ml: .75, fontWeight: 900 }} /></Typography><Typography color="text.secondary">Visão Executiva · versão beta</Typography></Box>
         <Button startIcon={<Refresh />} onClick={() => setRefresh((value) => value + 1)}>Atualizar</Button>
       </Stack>
     </Box>
-    <Box sx={{ p: { xs: 1.5, md: 3 } }}><Paper elevation={0} sx={{ p: { xs: 1.5, md: 2.5 }, borderRadius: "20px", border: "1px solid #e2e7f0", bgcolor: "#fff", boxShadow: "0 8px 28px rgba(24, 39, 75, 0.045)" }}>
+    <Box sx={{ p: { xs: 1.5, md: 3 } }}><Paper elevation={0} sx={{ p: { xs: 1.5, md: 2.5 }, borderRadius: "20px", border: "1px solid #E2E5EE", bgcolor: "#fff", boxShadow: "0 8px 28px rgba(24, 39, 75, 0.045)" }}>
       {error && <Alert severity="error" sx={{ mb: 2 }}>{dataDisplayText(error)}</Alert>}
-      <Paper variant="outlined" sx={{ p: 1.5, mb: 2, borderRadius: "18px", borderColor: "#e2e7f0", boxShadow: "0 6px 20px rgba(24, 39, 75, 0.035)" }}>
+      <Paper variant="outlined" sx={{ p: 1.5, mb: 2, borderRadius: "18px", borderColor: "#E2E5EE", boxShadow: "0 6px 20px rgba(24, 39, 75, 0.035)" }}>
         <Stack direction="row" flexWrap="wrap" gap={1.2} alignItems="flex-end">
           <Box sx={{ width: { xs: "100%", md: 330 }, minWidth: { xs: 0, md: 330 }, flex: { xs: "1 1 100%", md: "0 0 330px" } }}>
             <Typography variant="caption" color="text.secondary">Período · mensal</Typography>
@@ -169,7 +169,7 @@ export default function GoldDashboardV2() {
           <FormControlLabel sx={{ pb: .35, m: 0 }} control={<Switch checked={sharedCost} onChange={(_, checked) => setSharedCost(checked)} />} label="Custo compartilhado" />
           <Button startIcon={<FilterAltOff />} onClick={clear}>Limpar</Button>
         </Stack>
-        <Popover open={Boolean(dateAnchor)} anchorEl={dateAnchor} onClose={() => setDateAnchor(null)} anchorOrigin={{ vertical: "bottom", horizontal: "left" }} transformOrigin={{ vertical: "top", horizontal: "left" }} PaperProps={{ sx: { mt: .5, borderRadius: "14px", border: "1px solid #e2e7f0", boxShadow: "0 16px 44px rgba(24,39,75,.16)" } }}>
+        <Popover open={Boolean(dateAnchor)} anchorEl={dateAnchor} onClose={() => setDateAnchor(null)} anchorOrigin={{ vertical: "bottom", horizontal: "left" }} transformOrigin={{ vertical: "top", horizontal: "left" }} PaperProps={{ sx: { mt: .5, borderRadius: "14px", border: "1px solid #E2E5EE", boxShadow: "0 16px 44px rgba(24,39,75,.16)" } }}>
           <Stack direction={{ xs: "column", sm: "row" }} sx={{ p: 2 }} gap={2}>
             <Box sx={{ minWidth: 180 }}><Typography variant="overline" color="text.secondary" fontWeight={800}>Períodos rápidos</Typography><Stack spacing={.25} mt={.5}>
               <Button size="small" onClick={() => applyPreset("this_month")} sx={{ justifyContent: "flex-start", textTransform: "none" }}>Este mês</Button>
@@ -180,7 +180,7 @@ export default function GoldDashboardV2() {
               <Button size="small" onClick={() => applyPreset("this_year")} sx={{ justifyContent: "flex-start", textTransform: "none" }}>Este ano</Button>
               <Button size="small" onClick={() => applyPreset("last_year")} sx={{ justifyContent: "flex-start", textTransform: "none" }}>Ano anterior</Button>
             </Stack></Box>
-            <Box sx={{ minWidth: { sm: 330 }, borderLeft: { sm: "1px solid #edf0f6" }, pl: { sm: 2 } }}><Typography variant="overline" color="text.secondary" fontWeight={800}>Intervalo personalizado · mensal</Typography><Stack direction={{ xs: "column", sm: "row" }} gap={1} mt={1}><TextField size="small" type="month" label="Mês inicial" value={draftFrom} onChange={(event) => setDraftFrom(event.target.value)} InputLabelProps={{ shrink: true }} /><TextField size="small" type="month" label="Mês final" value={draftTo} onChange={(event) => setDraftTo(event.target.value)} InputLabelProps={{ shrink: true }} /></Stack>{draftFrom > draftTo && <Typography variant="caption" color="error" display="block" mt={.5}>O mês inicial deve ser anterior ou igual ao mês final.</Typography>}<Stack direction="row" justifyContent="flex-end" gap={1} mt={2}><Button size="small" onClick={() => setDateAnchor(null)}>Cancelar</Button><Button size="small" variant="contained" disabled={!draftFrom || !draftTo || draftFrom > draftTo} onClick={() => { setMonthFrom(draftFrom); setMonthTo(draftTo); setDateAnchor(null); }} sx={{ bgcolor: "#6416dc" }}>Aplicar</Button></Stack></Box>
+            <Box sx={{ minWidth: { sm: 330 }, borderLeft: { sm: "1px solid #EEF0F7" }, pl: { sm: 2 } }}><Typography variant="overline" color="text.secondary" fontWeight={800}>Intervalo personalizado · mensal</Typography><Stack direction={{ xs: "column", sm: "row" }} gap={1} mt={1}><TextField size="small" type="month" label="Mês inicial" value={draftFrom} onChange={(event) => setDraftFrom(event.target.value)} InputLabelProps={{ shrink: true }} /><TextField size="small" type="month" label="Mês final" value={draftTo} onChange={(event) => setDraftTo(event.target.value)} InputLabelProps={{ shrink: true }} /></Stack>{draftFrom > draftTo && <Typography variant="caption" color="error" display="block" mt={.5}>O mês inicial deve ser anterior ou igual ao mês final.</Typography>}<Stack direction="row" justifyContent="flex-end" gap={1} mt={2}><Button size="small" onClick={() => setDateAnchor(null)}>Cancelar</Button><Button size="small" variant="contained" disabled={!draftFrom || !draftTo || draftFrom > draftTo} onClick={() => { setMonthFrom(draftFrom); setMonthTo(draftTo); setDateAnchor(null); }} sx={{ bgcolor: "#6416dc" }}>Aplicar</Button></Stack></Box>
           </Stack>
         </Popover>
         {selectedNodes.length > 0 && <Stack direction="row" flexWrap="wrap" gap={.5} mt={1}>{selectedNodes.map((node) => <Chip key={node.id} label={node.path} onDelete={() => setSelectedNodes((current) => current.filter((item) => item.id !== node.id))} />)}</Stack>}

@@ -688,7 +688,7 @@ export default function Rules({ embedded = false }: { embedded?: boolean } = {})
                     </Box>
                   )}
 
-                  <Box sx={{ display: "flex", gap: 1, alignItems: "center", mb: 1, bgcolor: "#fff", p: 1, borderRadius: 1, border: "1px solid #e0e0e0" }}>
+                  <Box sx={{ display: "flex", gap: 1, alignItems: "center", mb: 1, bgcolor: "#fff", p: 1, borderRadius: 1, border: "1px solid #E2E5EE" }}>
                     <Autocomplete
                       freeSolo
                       size="small"

@@ -5,7 +5,7 @@ import {
   type DialogProps, type DialogTitleProps, type DialogContentProps, type DialogActionsProps,
 } from "@mui/material";
 import { Close } from "./FinbaseIcons";
-import { useInterfaceTheme } from "../theme/useInterfaceTheme";
+import { useTheme } from "@mui/material/styles";
 const CloseContext = createContext<Pick<DialogProps, "onClose" | "disableEscapeKeyDown">>({});
 
 const hasCloseControl = (children: ReactNode): boolean => Children.toArray(children).some(child => {
@@ -15,7 +15,7 @@ const hasCloseControl = (children: ReactNode): boolean => Children.toArray(child
 });
 
 export const Dialog = forwardRef<HTMLDivElement, DialogProps>(function FinbaseDialog({ sx, children, ...props }, ref) {
-  const theme = useInterfaceTheme();
+  const theme = useTheme();
   return <ThemeProvider theme={theme}><CloseContext.Provider value={{ onClose: props.onClose, disableEscapeKeyDown: props.disableEscapeKeyDown }}>
     <MuiDialog fullWidth maxWidth="sm" {...props} ref={ref} sx={[
       ...(Array.isArray(sx) ? sx : sx ? [sx] : []),

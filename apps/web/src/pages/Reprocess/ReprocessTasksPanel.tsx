@@ -111,7 +111,7 @@ export default function ReprocessTasksPanel() {
             : "Origem processada · preparando publicação dos dados"
           : task.phase || task.status;
         return (
-          <Box key={task.id} sx={{ mb: 1.5, p: 1.25, bgcolor: "#f8fafc", borderRadius: 1 }}>
+          <Box key={task.id} sx={{ mb: 1.5, p: 1.25, bgcolor: "#FAFBFD", borderRadius: 1 }}>
             <Box sx={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 1, flexWrap: "wrap" }}>
               <Box>
                 <Typography variant="body2" fontWeight={600}>{dataDisplayText(label(task))}</Typography>

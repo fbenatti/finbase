@@ -4,10 +4,10 @@ import { dataDisplayText } from "../../utils/dataPresentation";
 import { ChangeEvent, useEffect, useMemo, useRef, useState } from "react";
 import { Alert, Box, Button, Chip, FormControl, InputLabel, InputAdornment, IconButton, Menu, MenuItem, Paper, Select, Stack, TextField, Tooltip, Typography } from "@mui/material";
 import {
-  Add, Download as CloudDownload, Edit, ChevronUp as ExpandLess,
-  ChevronDown as ExpandMore, Reset as Restore, Save,
-  Upload as UploadFile, Search,
-} from "@carbon/react/icons";
+  AddOutlined as Add, FileDownloadOutlined as CloudDownload, EditOutlined as Edit, ExpandLessOutlined as ExpandLess,
+  ExpandMoreOutlined as ExpandMore, RestartAltOutlined as Restore, SaveOutlined as Save,
+  FileUploadOutlined as UploadFile, SearchOutlined as Search,
+} from "@mui/icons-material";
 import { GridColDef } from "@mui/x-data-grid";
 import * as XLSX from "xlsx";
 import {
@@ -539,7 +539,7 @@ export default function Planning({
         <Tooltip title={editable ? "Editar valores" : "Versão somente leitura"}>
           <span>
             <IconButton aria-label={`Editar valores de ${row.name}`} disabled={!editable || loading || saving} onClick={() => openEdit(row)}>
-              <Edit size={20} />
+              <Edit fontSize="small" />
             </IconButton>
           </span>
         </Tooltip>
@@ -568,7 +568,7 @@ export default function Planning({
               })
             }
           >
-            {expanded.has(row.department_id) ? <ExpandLess size={16} /> : <ExpandMore size={16} />}
+            {expanded.has(row.department_id) ? <ExpandLess fontSize="small" /> : <ExpandMore fontSize="small" />}
           </IconButton>
           <Tooltip title={row.name}>
             <Typography variant="body2" noWrap fontWeight={row.depth < 2 ? 600 : 400}>
@@ -693,7 +693,7 @@ export default function Planning({
                 </Select>
               </FormControl>
               <Tooltip title="Adicionar ano">
-                <IconButton aria-label="Adicionar ano" onClick={() => { setNewYear(String(year + 1)); setAddYearOpen(true); }}><Add size={20} /></IconButton>
+                <IconButton aria-label="Adicionar ano" onClick={() => { setNewYear(String(year + 1)); setAddYearOpen(true); }}><Add fontSize="small" /></IconButton>
               </Tooltip>
             </Stack>
             <FormControl sx={{ minWidth: 240, flex: { xs: 1, md: "0 1 320px" } }}>
@@ -764,13 +764,13 @@ export default function Planning({
                   label="Buscar departamento"
                   value={search}
                   onChange={e => setSearch(e.target.value)}
-                  InputProps={{ startAdornment: <InputAdornment position="start"><Search size={20} /></InputAdornment> }}
+                  InputProps={{ startAdornment: <InputAdornment position="start"><Search fontSize="small" /></InputAdornment> }}
                   sx={{ width: { xs: "100%", lg: 300 }, bgcolor: "background.paper" }}
                 />
                 <Stack direction="row" gap={1} flexWrap="wrap" alignItems="center">
-                  <Button variant="outlined" startIcon={<UploadFile size={20} />} disabled={!editable || !gridReady || loading || saving} onClick={() => fileInput.current?.click()}>Importar</Button>
-                  <Button variant="outlined" startIcon={<CloudDownload size={20} />} endIcon={<ExpandMore size={16} />} aria-controls={exportAnchor ? "planning-export-menu" : undefined} aria-haspopup="menu" aria-expanded={Boolean(exportAnchor)} onClick={e => setExportAnchor(e.currentTarget)}>Exportar</Button>
-                  <Button variant="contained" startIcon={<Save size={20} />} disabled={!editable || !gridReady || loading || saving} onClick={() => startPublish("save")}>{isDefense ? "Salvar alterações" : "Publicar versão"}</Button>
+                  <Button variant="outlined" startIcon={<UploadFile fontSize="small" />} disabled={!editable || !gridReady || loading || saving} onClick={() => fileInput.current?.click()}>Importar</Button>
+                  <Button variant="outlined" startIcon={<CloudDownload fontSize="small" />} endIcon={<ExpandMore fontSize="small" />} aria-controls={exportAnchor ? "planning-export-menu" : undefined} aria-haspopup="menu" aria-expanded={Boolean(exportAnchor)} onClick={e => setExportAnchor(e.currentTarget)}>Exportar</Button>
+                  <Button variant="contained" startIcon={<Save fontSize="small" />} disabled={!editable || !gridReady || loading || saving} onClick={() => startPublish("save")}>{isDefense ? "Salvar alterações" : "Publicar versão"}</Button>
                 </Stack>
               </Stack>
               <Menu id="planning-export-menu" anchorEl={exportAnchor} open={Boolean(exportAnchor)} onClose={() => setExportAnchor(null)}>
@@ -838,7 +838,7 @@ export default function Planning({
           )}
           <Stack direction="row" gap={2} flexWrap="wrap" sx={{ px: 2, py: 1.5, borderTop: 1, borderColor: "divider" }}>
             <Typography variant="caption" color="text.secondary">Composição dos valores</Typography>
-            {[{ color: "#e0e0e0", label: "Somente filhos" }, { color: "#24a148", label: "Valor próprio" }, { color: "#f1c21b", label: "Próprio + filhos" }].map(item => (
+            {[{ color: "#E2E5EE", label: "Somente filhos" }, { color: "#24a148", label: "Valor próprio" }, { color: "#f1c21b", label: "Próprio + filhos" }].map(item => (
               <Stack key={item.label} direction="row" alignItems="center" gap={0.75}>
                 <Box sx={{ width: 8, height: 8, bgcolor: item.color }} />
                 <Typography variant="caption" color="text.secondary">{item.label}</Typography>

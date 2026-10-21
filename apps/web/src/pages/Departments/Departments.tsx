@@ -548,7 +548,7 @@ export default function Departments({ embedded = false }: { embedded?: boolean }
         mt: embedded ? 0 : -3,
         pb: 3,
         minHeight: "calc(100vh - 64px)",
-        bgcolor: "#f8fafc",
+        bgcolor: "#FAFBFD",
       }}
     >
       {/* Faixa de contexto branca */}

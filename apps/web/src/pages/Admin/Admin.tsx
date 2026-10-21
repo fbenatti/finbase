@@ -420,7 +420,7 @@ export default function Admin() {
   const [params] = useSearchParams();
   const tab = ({ users: 0, groups: 1, roles: 2 } as Record<string, number>)[params.get("tab") || "users"] ?? 0;
   return (
-    <Box sx={{ mx: -3, mt: -3, pb: 3, minHeight: "calc(100vh - 64px)", bgcolor: "#f8fafc" }}>
+    <Box sx={{ mx: -3, mt: -3, pb: 3, minHeight: "calc(100vh - 64px)", bgcolor: "#FAFBFD" }}>
       <Box sx={{ px: 3, pt: 3, bgcolor: "background.paper", borderBottom: "1px solid", borderColor: "divider" }}>
         <Typography variant="h4" sx={{ mb: 0.5 }}>Administração</Typography>
         <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>

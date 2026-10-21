@@ -12,156 +12,8 @@ body {
   font-family: "Inter", "Segoe UI", "Helvetica Neue", Arial, sans-serif;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
-  color: #1d2d3f;
-  background: #f4f7fa;
-}
-
-html[data-finbase-layout="carbon"],
-html[data-finbase-layout="carbon"] body,
-html[data-finbase-layout="carbon"] #root {
-  background: #f4f4f4;
-}
-
-.finbase-carbon-theme {
-  display: flex;
-  min-height: 100%;
-  flex: 1;
-}
-
-.finbase-carbon-shell {
-  width: 100%;
-  min-height: 100vh;
-  background: #f4f4f4;
-  color: #161616;
-  font-family: "IBM Plex Sans", "Helvetica Neue", Arial, sans-serif;
-}
-
-.finbase-carbon-shell .cds--header {
-  z-index: 1201;
-}
-
-.finbase-carbon-shell .cds--header__name {
-  font-weight: 600;
-  letter-spacing: 0.01em;
-}
-
-.finbase-carbon-shell .cds--side-nav {
-  top: 3rem;
-  height: calc(100vh - 3rem);
-  z-index: 1200;
-}
-
-.finbase-carbon-shell .cds--side-nav__items {
-  padding-top: 0.75rem;
-}
-
-.finbase-carbon-layout-switch {
-  display: flex;
-  align-items: center;
-  height: 3rem;
-  padding: 0 0.75rem;
-  border-left: 1px solid #393939;
-  border-right: 1px solid #393939;
-}
-
-.finbase-carbon-layout-switch button {
-  min-height: 2rem;
-  padding: 0.4rem 0.7rem;
-  border: 1px solid #8d8d8d;
-  background: transparent;
-  color: #525252;
-  font: inherit;
-  font-size: 0.75rem;
-  cursor: pointer;
-}
-
-.finbase-carbon-layout-switch button:first-child {
-  border-right: 0;
-}
-
-.finbase-carbon-layout-switch button[aria-pressed="true"] {
-  background: #e0e0e0;
-  color: #161616;
-}
-
-.finbase-carbon-layout-switch button:focus-visible {
-  outline: 2px solid #78a9ff;
-  outline-offset: 2px;
-}
-
-.finbase-carbon-notification-count {
-  position: absolute;
-  top: 0.35rem;
-  right: 0.35rem;
-  display: inline-flex;
-  min-width: 1rem;
-  height: 1rem;
-  align-items: center;
-  justify-content: center;
-  padding: 0 0.2rem;
-  border-radius: 1rem;
-  background: #da1e28;
-  color: #fff;
-  font-size: 0.625rem;
-  line-height: 1;
-}
-
-.finbase-carbon-main {
-  flex: 1;
-  min-width: 0;
-  padding: 1.5rem 2rem 2rem;
-  background: #f4f4f4;
-}
-
-.finbase-carbon-page-title {
-  margin: 0 0 1.25rem;
-  color: #161616;
-  font-size: 1.75rem;
-  font-weight: 400;
-  letter-spacing: 0;
-  line-height: 1.25;
-}
-
-.finbase-carbon-main .MuiPaper-root {
-  border-radius: 0;
-}
-
-.finbase-carbon-footer {
-  display: flex;
-  min-height: 2.75rem;
-  align-items: center;
-  justify-content: space-between;
-  gap: 1rem;
-  padding: 0.5rem 2rem;
-  border-top: 1px solid #e0e0e0;
-  background: #fff;
-  color: #525252;
-  font-size: 0.75rem;
-}
-
-@media (max-width: 672px) {
-  .finbase-carbon-layout-switch {
-    height: auto;
-    padding: 0 0.35rem;
-    border-left: 0;
-  }
-
-  .finbase-carbon-layout-switch button {
-    padding: 0.3rem 0.45rem;
-  }
-
-  .finbase-carbon-main {
-    padding: 1rem;
-  }
-
-  .finbase-carbon-footer {
-    justify-content: center;
-    padding: 0.5rem 1rem;
-  }
-
-  .finbase-carbon-footer span:last-child {
-    display: none;
-  }
+  color: #161b2e;
+  background: #f5f6fa;
 }
 
 [data-print-only] {
@@ -169,16 +21,16 @@ html[data-finbase-layout="carbon"] #root {
 }
 
 @media print {
-  body.azure-ptu-print-mode * {
+  body.finops-print-mode * {
     visibility: hidden;
   }
 
-  body.azure-ptu-print-mode .azure-ptu-export-root,
-  body.azure-ptu-print-mode .azure-ptu-export-root * {
+  body.finops-print-mode .finops-export-root,
+  body.finops-print-mode .finops-export-root * {
     visibility: visible;
   }
 
-  body.azure-ptu-print-mode .azure-ptu-export-root {
+  body.finops-print-mode .finops-export-root {
     position: absolute;
     left: 0;
     top: 0;
@@ -187,35 +39,35 @@ html[data-finbase-layout="carbon"] #root {
     background: #fff;
   }
 
-  body.azure-ptu-print-mode [data-print-hide] {
+  body.finops-print-mode [data-print-hide] {
     display: none !important;
   }
 
-  body.azure-ptu-print-mode [data-print-only] {
+  body.finops-print-mode [data-print-only] {
     display: block !important;
     visibility: visible;
   }
 
-  body.azure-ptu-print-mode .azure-ptu-print-meta {
+  body.finops-print-mode .finops-print-meta {
     margin-bottom: 16px;
     padding-bottom: 12px;
     border-bottom: 1px solid #e5e7eb;
     page-break-after: avoid;
   }
 
-  body.azure-ptu-print-mode .azure-ptu-print-meta h1 {
+  body.finops-print-mode .finops-print-meta h1 {
     margin: 0 0 8px;
     font-size: 20px;
     font-weight: 700;
   }
 
-  body.azure-ptu-print-mode .azure-ptu-print-meta p {
+  body.finops-print-mode .finops-print-meta p {
     margin: 2px 0;
     font-size: 11px;
     color: #374151;
   }
 
-  body.azure-ptu-print-mode .azure-ptu-print-card {
+  body.finops-print-mode .finops-print-card {
     break-inside: avoid;
     page-break-inside: avoid;
     box-shadow: none !important;
@@ -223,41 +75,41 @@ html[data-finbase-layout="carbon"] #root {
     margin-bottom: 12px;
   }
 
-  body.azure-ptu-print-mode .js-plotly-plot,
-  body.azure-ptu-print-mode .plot-container {
+  body.finops-print-mode .js-plotly-plot,
+  body.finops-print-mode .plot-container {
     max-width: 100% !important;
     overflow: visible !important;
   }
 
-  body.azure-ptu-print-mode .MuiChip-root {
+  body.finops-print-mode .MuiChip-root {
     border: 1px solid #d1d5db;
   }
 
-  body.azure-ptu-print-mode table {
+  body.finops-print-mode table {
     font-size: 9px;
   }
 
-  body.azure-ptu-print-mode .MuiTableCell-root {
+  body.finops-print-mode .MuiTableCell-root {
     padding: 4px 6px;
   }
 
   /* ── Relatório PDF — Azure PTU Operação (todos os painéis) ─────────── */
-  body.azure-ptu-print-mode .azure-ptu-ops-report {
+  body.finops-print-mode .azure-ptu-ops-report {
     font-size: 11px;
-    color: #111827;
+    color: #161B2E;
   }
 
-  body.azure-ptu-print-mode .azure-ptu-ops-report h6,
-  body.azure-ptu-print-mode .azure-ptu-ops-report .MuiTypography-h6 {
+  body.finops-print-mode .azure-ptu-ops-report h6,
+  body.finops-print-mode .azure-ptu-ops-report .MuiTypography-h6 {
     font-size: 12px;
     margin-top: 0;
   }
 
-  body.azure-ptu-print-mode .azure-ptu-ops-section {
+  body.finops-print-mode .azure-ptu-ops-section {
     margin-bottom: 20px;
   }
 
-  body.azure-ptu-print-mode .azure-ptu-ops-section-head {
+  body.finops-print-mode .azure-ptu-ops-section-head {
     display: flex;
     align-items: center;
     gap: 10px;
@@ -267,13 +119,13 @@ html[data-finbase-layout="carbon"] #root {
     page-break-after: avoid;
   }
 
-  body.azure-ptu-print-mode .azure-ptu-ops-section-head .MuiTypography-root {
+  body.finops-print-mode .azure-ptu-ops-section-head .MuiTypography-root {
     font-size: 15px;
     font-weight: 700;
     margin: 0;
   }
 
-  body.azure-ptu-print-mode .azure-ptu-kpi-note {
+  body.finops-print-mode .azure-ptu-kpi-note {
     display: block;
     margin-top: 4px;
     font-size: 8px;
@@ -282,20 +134,20 @@ html[data-finbase-layout="carbon"] #root {
     font-style: italic;
   }
 
-  body.azure-ptu-print-mode .azure-ptu-ops-report table thead {
+  body.finops-print-mode .azure-ptu-ops-report table thead {
     display: table-header-group;
   }
 
-  body.azure-ptu-print-mode .azure-ptu-ops-report .MuiTableRow-root {
+  body.finops-print-mode .azure-ptu-ops-report .MuiTableRow-root {
     break-inside: avoid;
     page-break-inside: avoid;
   }
 
-  body.azure-ptu-print-mode .azure-ptu-ops-report .MuiTableRow-root:nth-of-type(even) {
+  body.finops-print-mode .azure-ptu-ops-report .MuiTableRow-root:nth-of-type(even) {
     background: #f9fafb;
   }
 
-  body.azure-ptu-print-mode .azure-ptu-ops-report .MuiAlert-root {
+  body.finops-print-mode .azure-ptu-ops-report .MuiAlert-root {
     break-inside: avoid;
     page-break-inside: avoid;
     font-size: 10px;
@@ -303,19 +155,19 @@ html[data-finbase-layout="carbon"] #root {
     margin-bottom: 10px;
   }
 
-  body.azure-ptu-print-mode .azure-ptu-ops-report .MuiAlert-message {
+  body.finops-print-mode .azure-ptu-ops-report .MuiAlert-message {
     font-size: 10px;
   }
 
-  body.azure-ptu-print-mode .azure-ptu-ops-report .MuiAlert-message .MuiTypography-root {
+  body.finops-print-mode .azure-ptu-ops-report .MuiAlert-message .MuiTypography-root {
     font-size: 10px;
   }
 
-  body.azure-ptu-print-mode .azure-ptu-ops-report .MuiGrid-container {
+  body.finops-print-mode .azure-ptu-ops-report .MuiGrid-container {
     margin-top: 0 !important;
   }
 
-  body.azure-ptu-print-mode .azure-ptu-ops-report .MuiCardContent-root {
+  body.finops-print-mode .azure-ptu-ops-report .MuiCardContent-root {
     padding: 10px 12px;
   }
 

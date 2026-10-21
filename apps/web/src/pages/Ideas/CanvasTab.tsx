@@ -37,9 +37,9 @@ function DroppableColumn({ status, ideas, onOpen, canDrag }: { status: IdeaStatu
   return (
     <Box ref={setNodeRef} sx={{
       minWidth: 240, maxWidth: 280, flex: "0 0 240px",
-      bgcolor: isOver ? "#e0f2fe" : "#f1f5f9",
+      bgcolor: isOver ? "#e0f2fe" : "#EEF0F7",
       borderRadius: 2, p: 1, maxHeight: "calc(100vh - 280px)", overflowY: "auto",
-      border: isOver ? "2px dashed #0A8FDC" : "2px solid transparent",
+      border: isOver ? "2px dashed #4338CA" : "2px solid transparent",
     }}>
       <Stack direction="row" justifyContent="space-between" alignItems="center" sx={{ mb: 1, px: 0.5 }}>
         <Typography variant="subtitle2">{STATUS_LABELS[status]}</Typography>

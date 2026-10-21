@@ -1,5 +1,5 @@
-import { useInterfaceTheme } from "../../theme/useInterfaceTheme";
-import { CHART_COLORS } from "../../theme/chartTheme";
+import { useTheme } from "@mui/material/styles";
+import { chartSemantic } from "../../theme/tokens";
 import { dataDisplayText } from "../../utils/dataPresentation";
 import { useEffect, useId, useMemo, useState } from "react";
 import { Alert, Box, Button, Chip, CircularProgress, Stack, Typography } from "@mui/material";
@@ -210,7 +210,7 @@ export default function HierarchicalDecompTree({
   /** Marca como Forecast Manual as linhas forecast-manual sem nível organizacional. */
   labelManualForecast?: boolean;
 }) {
-  const theme = useInterfaceTheme();
+  const theme = useTheme();
   const ACCENT = theme.palette.primary.main;
   const svgId = useId().replace(/:/g, "");
   const [treePath, setTreePath] = useState<DecompPathStep[]>([]);
@@ -352,10 +352,10 @@ export default function HierarchicalDecompTree({
   return (
     <Box>
       <Stack direction="row" gap={1} flexWrap="wrap" alignItems="center" justifyContent="flex-end" sx={{ mb: 1 }}>
-        <Box sx={{ display: "inline-flex", border: "1px solid #d8dce7", borderRadius: 1.5, p: 0.3, bgcolor: "#f8fafc" }}>
+        <Box sx={{ display: "inline-flex", border: "1px solid #d8dce7", borderRadius: 1.5, p: 0.3, bgcolor: "#FAFBFD" }}>
           {(["cost", "share", "mom"] as const).map(m => (
             <Button key={m} size="small" onClick={() => setTreeMetric(m)}
-              sx={{ minWidth: 0, px: 1.2, py: 0.4, borderRadius: 1.2, fontWeight: 950, fontSize: 11, textTransform: "none", color: treeMetric === m ? "#fff" : theme.palette.text.secondary, bgcolor: treeMetric === m ? "#111827" : "transparent", "&:hover": { bgcolor: treeMetric === m ? "#111827" : "#eef0f4" } }}>
+              sx={{ minWidth: 0, px: 1.2, py: 0.4, borderRadius: 1.2, fontWeight: 950, fontSize: 11, textTransform: "none", color: treeMetric === m ? "#fff" : theme.palette.text.secondary, bgcolor: treeMetric === m ? "#161B2E" : "transparent", "&:hover": { bgcolor: treeMetric === m ? "#161B2E" : "#eef0f4" } }}>
               {m === "cost" ? "Custo" : m === "share" ? "Share" : "MoM"}
             </Button>
           ))}
@@ -389,22 +389,22 @@ export default function HierarchicalDecompTree({
         <Box sx={{ display: "grid", gridTemplateColumns: { xs: "1fr 1fr", md: "repeat(4,1fr)" }, gap: 1, p: 1.6, borderBottom: "1px solid", borderColor: "divider" }}>
           <Box sx={{ border: "1px solid", borderColor: "divider", borderRadius: 2, p: 1.2, minWidth: 0 }}>
             <Typography variant="caption" sx={{ display: "block", fontSize: 9, fontWeight: 950, textTransform: "uppercase", letterSpacing: 0.65, color: theme.palette.text.secondary }}>Custo no nó atual</Typography>
-            <Typography variant="h6" sx={{ mt: 0.4, fontWeight: 950, color: "#111827", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{compact(nodeTotal)}</Typography>
+            <Typography variant="h6" sx={{ mt: 0.4, fontWeight: 950, color: "#161B2E", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{compact(nodeTotal)}</Typography>
             <Typography variant="caption" sx={{ color: theme.palette.text.secondary, fontWeight: 800, display: "block", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{treePath.length ? treePath[treePath.length - 1].value : "TOTAL"}</Typography>
           </Box>
           <Box sx={{ border: "1px solid", borderColor: "divider", borderRadius: 2, p: 1.2, minWidth: 0 }}>
             <Typography variant="caption" sx={{ display: "block", fontSize: 9, fontWeight: 950, textTransform: "uppercase", letterSpacing: 0.65, color: theme.palette.text.secondary }}>Share do total</Typography>
-            <Typography variant="h6" sx={{ mt: 0.4, fontWeight: 950, color: "#111827" }}>{pct(shareTotal)}</Typography>
+            <Typography variant="h6" sx={{ mt: 0.4, fontWeight: 950, color: "#161B2E" }}>{pct(shareTotal)}</Typography>
             <Typography variant="caption" sx={{ color: theme.palette.text.secondary, fontWeight: 800 }}>{shareCaption}</Typography>
           </Box>
           <Box sx={{ border: "1px solid", borderColor: "divider", borderRadius: 2, p: 1.2, minWidth: 0 }}>
             <Typography variant="caption" sx={{ display: "block", fontSize: 9, fontWeight: 950, textTransform: "uppercase", letterSpacing: 0.65, color: theme.palette.text.secondary }}>Maior filho</Typography>
-            <Typography variant="h6" sx={{ mt: 0.4, fontWeight: 950, color: "#111827", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{treeChildren[0] ? treeChildren[0].key : "N/A"}</Typography>
+            <Typography variant="h6" sx={{ mt: 0.4, fontWeight: 950, color: "#161B2E", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{treeChildren[0] ? treeChildren[0].key : "N/A"}</Typography>
             <Typography variant="caption" sx={{ color: theme.palette.text.secondary, fontWeight: 800 }}>{treeChildren[0] ? `${pct(topShare)} do nó atual` : "sem próximo nível"}</Typography>
           </Box>
           <Box sx={{ border: "1px solid", borderColor: "divider", borderRadius: 2, p: 1.2, minWidth: 0 }}>
             <Typography variant="caption" sx={{ display: "block", fontSize: 9, fontWeight: 950, textTransform: "uppercase", letterSpacing: 0.65, color: theme.palette.text.secondary }}>Concentração Top 3</Typography>
-            <Typography variant="h6" sx={{ mt: 0.4, fontWeight: 950, color: "#111827" }}>{pct(top3Share)}</Typography>
+            <Typography variant="h6" sx={{ mt: 0.4, fontWeight: 950, color: "#161B2E" }}>{pct(top3Share)}</Typography>
             <Typography variant="caption" sx={{ color: theme.palette.text.secondary, fontWeight: 800 }}>{nextLabel || "fim da hierarquia"}</Typography>
           </Box>
         </Box>
@@ -436,7 +436,7 @@ export default function HierarchicalDecompTree({
               const y = top + idx * childGap, cy = y + nodeH / 2;
               const share = nodeTotal ? (Math.abs(it.cost) / Math.abs(nodeTotal)) * 100 : 0;
               const sw = Math.max(2, Math.min(15, 2 + share / 7));
-              const col = it.mom == null ? ACCENT : it.mom >= 0 ? CHART_COLORS.red : CHART_COLORS.green;
+              const col = it.mom == null ? ACCENT : it.mom >= 0 ? chartSemantic.negative : chartSemantic.positive;
               return (
                 <path key={`bl${idx}`} d={`M ${left + (pathCount - 1) * (nodeW + stageGap) + nodeW} ${pathY + nodeH / 2} C ${left + (pathCount - 1) * (nodeW + stageGap) + nodeW + 34} ${pathY + nodeH / 2}, ${branchX - 34} ${cy}, ${branchX} ${cy}`} stroke={col} strokeWidth={sw} fill="none" strokeLinecap="round" opacity={0.42}>
                   <title>{`${it.key} · ${pct(share)} do nó atual`}</title>
@@ -479,7 +479,7 @@ export default function HierarchicalDecompTree({
                   const barW = Math.max(3, (nodeW - 26) * Math.min(1, share / Math.max(topShare, 1)));
                   const clickable = it.key !== EMPTY_DIMENSION_LABEL && !it.__manualForecast;
                   const metric = treeMetricText(it, nodeTotal);
-                  const metricColor = treeMetric === "mom" && it.mom != null ? (it.mom >= 0 ? CHART_COLORS.red : CHART_COLORS.green) : ACCENT;
+                  const metricColor = treeMetric === "mom" && it.mom != null ? (it.mom >= 0 ? chartSemantic.negative : chartSemantic.positive) : ACCENT;
                   return (
                     <g key={`cn${idx}`} className="node" style={{ cursor: clickable || it.__other ? "pointer" : "default" }} onClick={it.__other ? () => setShowOtherChildren(true) : clickable && nextField ? () => selectTreeNode(treeStart, nextField, it.key) : undefined}>
                       <rect x={x} y={y} width={nodeW} height={nodeH} rx={theme.shape.borderRadius === 0 ? 0 : 6} fill="#fff" stroke={theme.palette.divider} strokeWidth={1} />
@@ -501,8 +501,8 @@ export default function HierarchicalDecompTree({
           <Box><Typography component="span" sx={{ color: theme.palette.text.primary, fontWeight: 900 }}>Como ler:</Typography> a espessura das conexões representa o share do custo no nó pai. Clique em um filho para aprofundar até ServiceSubcategory e Sub Serviço (SKU name). Clique em “Outros” para listar os demais filhos.</Box>
           <Stack direction="row" gap={1.5} alignItems="center">
             <Box><Box component="span" sx={{ display: "inline-block", width: 9, height: 9, borderRadius: 99, bgcolor: ACCENT, mr: 0.6 }} />estrutura / share</Box>
-            <Box><Box component="span" sx={{ display: "inline-block", width: 9, height: 9, borderRadius: 99, bgcolor: CHART_COLORS.red, mr: 0.6 }} />MoM positivo</Box>
-            <Box><Box component="span" sx={{ display: "inline-block", width: 9, height: 9, borderRadius: 99, bgcolor: CHART_COLORS.green, mr: 0.6 }} />MoM negativo</Box>
+            <Box><Box component="span" sx={{ display: "inline-block", width: 9, height: 9, borderRadius: 99, bgcolor: chartSemantic.negative, mr: 0.6 }} />MoM positivo</Box>
+            <Box><Box component="span" sx={{ display: "inline-block", width: 9, height: 9, borderRadius: 99, bgcolor: chartSemantic.positive, mr: 0.6 }} />MoM negativo</Box>
           </Stack>
         </Stack>
       </Box>

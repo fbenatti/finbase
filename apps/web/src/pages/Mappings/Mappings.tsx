@@ -434,7 +434,7 @@ export default function Mappings() {
                     onDrop={() => handleDropOnTarget(tgt)}
                     sx={{
                       mb: 1.5, p: 1.5, borderRadius: 2,
-                      border: dragSrc ? "2px dashed #1976d2" : "1px solid #e0e0e0",
+                      border: dragSrc ? "2px dashed #1976d2" : "1px solid #E2E5EE",
                       bgcolor: dragSrc ? "#e3f2fd" : "#fafafa",
                       transition: "all 0.2s",
                     }}
@@ -460,7 +460,7 @@ export default function Mappings() {
                           display: "flex", alignItems: "center", gap: 0.5,
                           py: 0.5, px: 1, mb: 0.5, borderRadius: 1,
                           bgcolor: d.active ? "#fff" : "grey.100",
-                          border: "1px solid #e0e0e0",
+                          border: "1px solid #E2E5EE",
                         }}>
                           {/* Source */}
                           {d.source_column ? (

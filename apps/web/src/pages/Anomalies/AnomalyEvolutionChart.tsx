@@ -7,7 +7,7 @@ import OpenInNewIcon from "@mui/icons-material/OpenInNew";
 import Plot from "@/components/Plot";
 import type { AnomalyCase, AnomalySeries, AnomalySeriesPoint } from "../../services/anomaliesApi";
 
-const colors = { actual: "#149683", history: "#94a3b8", excess: "#ed5959", forecast: "#306ce5", band: "rgba(48,108,229,0.09)" };
+const colors = { actual: "#149683", history: "#8A93A8", excess: "#ed5959", forecast: "#306ce5", band: "rgba(48,108,229,0.09)" };
 const money = (value: number | null | undefined, currency: string) => value == null ? "—"
   : value.toLocaleString("pt-BR", { style: "currency", currency, maximumFractionDigits: 2 });
 const dateLabel = (day: string | null | undefined) => {
@@ -59,7 +59,7 @@ export default function AnomalyEvolutionChart({ series, kase, currency }: {
   const warnings = series.warnings?.length ? series.warnings : series.note ? [series.note] : [];
   const canCompare = expected != null;
 
-  return <Paper variant="outlined" sx={{ p: { xs: 1.5, sm: 2.5 }, borderRadius: 3, borderColor: "#e2e8f0", mt: 1.5 }}>
+  return <Paper variant="outlined" sx={{ p: { xs: 1.5, sm: 2.5 }, borderRadius: 3, borderColor: "#E2E5EE", mt: 1.5 }}>
     <Stack direction={{ xs: "column", sm: "row" }} justifyContent="space-between" spacing={1.5} alignItems={{ sm: "center" }}>
       <Box>
         <Typography variant="h6" sx={{ fontWeight: 750, letterSpacing: "-.025em" }}>{monthly ? "Compras e forecast do mês" : `Realizado × ${expectedLabel.toLowerCase()}`}</Typography>
@@ -104,14 +104,14 @@ export default function AnomalyEvolutionChart({ series, kase, currency }: {
           autosize: true, height: 410, barmode: "relative", bargap: .25,
           margin: { l: 72, r: 18, t: 50, b: 85 },
           paper_bgcolor: "transparent", plot_bgcolor: "transparent",
-          font: { family: "inherit", color: "#64748b", size: 11 },
+          font: { family: "inherit", color: "#5A6378", size: 11 },
           xaxis: { type: "date", range: x.length ? [`${dayOffset(x[0], -1)}T12:00:00Z`, `${x[x.length - 1]}T12:00:00Z`] : undefined, tickformat: "%d/%m", hoverformat: "%d/%m/%Y", nticks: 9, showgrid: false, zeroline: false, fixedrange: true },
-          yaxis: { rangemode: "tozero", tickprefix: `${currencySymbol} `, tickformat: ",.0f", gridcolor: "#e8edf3", zerolinecolor: "#cbd5e1", fixedrange: true },
+          yaxis: { rangemode: "tozero", tickprefix: `${currencySymbol} `, tickformat: ",.0f", gridcolor: "#e8edf3", zerolinecolor: "#CDD2DF", fixedrange: true },
           hovermode: "x unified", separators: ",.", showlegend: true,
           legend: { orientation: "h", y: -.22, x: 0, font: { size: 11 }, traceorder: "normal" },
           shapes: [
             ...(future.length ? [{ type: "rect" as const, xref: "x" as const, yref: "paper" as const, x0: `${dataEnd}T12:00:00Z`, x1: `${dayOffset(x[x.length - 1], 1)}T00:00:00Z`, y0: 0, y1: 1, fillcolor: "rgba(48,108,229,0.045)", line: { width: 0 }, layer: "below" as const }] : []),
-            { type: "line", xref: "x", yref: "paper", x0: `${dataEnd}T12:00:00Z`, x1: `${dataEnd}T12:00:00Z`, y0: 0, y1: 1, line: { color: "#94a3b8", width: 1, dash: "dot" } },
+            { type: "line", xref: "x", yref: "paper", x0: `${dataEnd}T12:00:00Z`, x1: `${dataEnd}T12:00:00Z`, y0: 0, y1: 1, line: { color: "#8A93A8", width: 1, dash: "dot" } },
             ...(kase.event_date <= dataEnd ? [{ type: "line" as const, xref: "x" as const, yref: "paper" as const, x0: kase.event_date, x1: kase.event_date, y0: 0, y1: 1, line: { color: "#d64c4c", width: 1, dash: "dot" as const } }] : []),
           ],
           annotations: [
