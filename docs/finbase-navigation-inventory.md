@@ -67,6 +67,39 @@ Os grupos abaixo são as seções da navegação. Cada item listado é uma entra
 
 Além do menu, a aplicação preserva rotas de detalhe e histórico que são alcançadas a partir de uma linha, execução ou ação contextual: exploração de conexão (`/dados/fontes/:connectionId/explorar`), detalhe de execução de projeção (`/projecoes/execucoes/:runId`), custo compartilhado (`/operacoes/custos-compartilhados/:runId`) e extração (`/operacoes/extracoes/:taskId/historico`).
 
+As rotas canônicas usam nomes novos em português. Endereços antigos continuam registrados como aliases e redirecionam para os destinos canônicos, preservando query strings, hash e identificadores dinâmicos:
+
+| Rota antiga | Rota canônica |
+| --- | --- |
+| `/login` | `/entrar` |
+| `/gold-dashboard` | `/custos` |
+| `/gold-dashboard-v2` | `/custos/avancado` |
+| `/visoes-consumo-ia` | `/ia/capacidade` |
+| `/dashboards-ia` | `/ia/adocao` |
+| `/github-copilot` | `/ia/github` |
+| `/anomalies` | `/alertas` |
+| `/financial-planning` | `/planejamento` |
+| `/forecast` | `/projecoes` |
+| `/forecast-accuracy` | `/projecoes/acuracia` |
+| `/forecast/history/:runId` | `/projecoes/execucoes/:runId` |
+| `/savings` | `/otimizacao` |
+| `/connections` | `/dados/fontes` |
+| `/explorer/:connectionId` | `/dados/fontes/:connectionId/explorar` |
+| `/mappings` | `/dados/mapeamentos` |
+| `/tables` | `/dados/catalogo` |
+| `/analysis` | `/dados/explorador` |
+| `/pipeline` | `/dados/fluxos` |
+| `/reprocess` | `/operacoes/execucoes` |
+| `/reprocess/shared-cost/history/:runId` | `/operacoes/custos-compartilhados/:runId` |
+| `/extraction/history/:taskId` | `/operacoes/extracoes/:taskId/historico` |
+| `/governance` | `/governanca` |
+| `/admin` | `/administracao/acessos` |
+| `/admin/sso` | `/administracao/identidade` |
+| `/admin/audit` | `/administracao/auditoria` |
+| `/ideas` | `/iniciativas` |
+
+Outros aliases de compatibilidade, como `/budgets`, `/reservations` e `/expected-view`, também apontam para as novas rotas.
+
 O componente legado `apps/web/src/pages/AzurePTU/AzurePTU.tsx` não é registrado em `App.tsx`; suas visões foram mantidas acessíveis como seletor interno no código legado, enquanto a rota ativa é `/ia/capacidade`. A navegação principal e o mapa acima descrevem as rotas realmente montadas.
 
 ## Sequência de nomes proposta
