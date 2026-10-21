@@ -1,0 +1,1153 @@
+[
+  {
+    "code": "section_panorama",
+    "parent_code": null,
+    "label": "Panorama",
+    "path": "/panorama",
+    "renderer": "ModuleIndex",
+    "view_params": {},
+    "permission_module": null,
+    "position": 0,
+    "icon": "DashboardOutlined",
+    "required": false,
+    "development_only": false,
+    "legacy_path": null,
+    "api_prefixes": []
+  },
+  {
+    "code": "custos_resumo",
+    "parent_code": "section_panorama",
+    "label": "Resumo de custos",
+    "path": "/custos/resumo",
+    "renderer": "GoldDashboard",
+    "view_params": {
+      "tab": "visao-executiva"
+    },
+    "permission_module": "gold",
+    "position": 1,
+    "icon": "QueryStatsOutlined",
+    "required": false,
+    "development_only": false,
+    "legacy_path": "/custos",
+    "api_prefixes": []
+  },
+  {
+    "code": "section_alertas",
+    "parent_code": null,
+    "label": "Alertas",
+    "path": "/alertas/inicio",
+    "renderer": "ModuleIndex",
+    "view_params": {},
+    "permission_module": null,
+    "position": 100,
+    "icon": "WarningAmberOutlined",
+    "required": false,
+    "development_only": true,
+    "legacy_path": null,
+    "api_prefixes": []
+  },
+  {
+    "code": "alertas_visao_geral",
+    "parent_code": "section_alertas",
+    "label": "Visão geral de alertas",
+    "path": "/alertas/visao-geral",
+    "renderer": "Anomalies",
+    "view_params": {
+      "tab": "0"
+    },
+    "permission_module": "anomalies",
+    "position": 101,
+    "icon": "WarningAmberOutlined",
+    "required": false,
+    "development_only": true,
+    "legacy_path": "/alertas",
+    "api_prefixes": []
+  },
+  {
+    "code": "alertas_impacto_financeiro",
+    "parent_code": "section_alertas",
+    "label": "Impacto financeiro",
+    "path": "/alertas/impacto-financeiro",
+    "renderer": "Anomalies",
+    "view_params": {
+      "tab": "1"
+    },
+    "permission_module": "anomalies",
+    "position": 102,
+    "icon": "PaidOutlined",
+    "required": false,
+    "development_only": true,
+    "legacy_path": "/alertas",
+    "api_prefixes": []
+  },
+  {
+    "code": "alertas_investigacoes",
+    "parent_code": "section_alertas",
+    "label": "Casos em investigação",
+    "path": "/alertas/investigacoes",
+    "renderer": "Anomalies",
+    "view_params": {
+      "tab": "2"
+    },
+    "permission_module": "anomalies",
+    "position": 103,
+    "icon": "QueryStatsOutlined",
+    "required": false,
+    "development_only": true,
+    "legacy_path": "/alertas",
+    "api_prefixes": []
+  },
+  {
+    "code": "alertas_eventos_esperados",
+    "parent_code": "section_alertas",
+    "label": "Eventos esperados",
+    "path": "/alertas/eventos-esperados",
+    "renderer": "Anomalies",
+    "view_params": {
+      "tab": "3"
+    },
+    "permission_module": "anomalies",
+    "position": 104,
+    "icon": "ScheduleOutlined",
+    "required": false,
+    "development_only": true,
+    "legacy_path": "/alertas",
+    "api_prefixes": []
+  },
+  {
+    "code": "alertas_saude_do_modelo",
+    "parent_code": "section_alertas",
+    "label": "Saúde do modelo",
+    "path": "/alertas/saude-do-modelo",
+    "renderer": "Anomalies",
+    "view_params": {
+      "tab": "4"
+    },
+    "permission_module": "anomalies",
+    "position": 105,
+    "icon": "ScienceOutlined",
+    "required": false,
+    "development_only": true,
+    "legacy_path": "/alertas",
+    "api_prefixes": []
+  },
+  {
+    "code": "alertas_retrospectivas",
+    "parent_code": "section_alertas",
+    "label": "Retrospectivas",
+    "path": "/alertas/retrospectivas",
+    "renderer": "Anomalies",
+    "view_params": {
+      "tab": "5"
+    },
+    "permission_module": "anomalies",
+    "position": 106,
+    "icon": "HistoryOutlined",
+    "required": false,
+    "development_only": true,
+    "legacy_path": "/alertas",
+    "api_prefixes": []
+  },
+  {
+    "code": "alertas_confirmados",
+    "parent_code": "section_alertas",
+    "label": "Anomalias confirmadas",
+    "path": "/alertas/confirmados",
+    "renderer": "Anomalies",
+    "view_params": {
+      "tab": "6"
+    },
+    "permission_module": "anomalies",
+    "position": 107,
+    "icon": "FactCheckOutlined",
+    "required": false,
+    "development_only": true,
+    "legacy_path": "/alertas",
+    "api_prefixes": []
+  },
+  {
+    "code": "alertas_configuracao",
+    "parent_code": "section_alertas",
+    "label": "Configuração de alertas",
+    "path": "/alertas/configuracao",
+    "renderer": "Anomalies",
+    "view_params": {
+      "tab": "7"
+    },
+    "permission_module": "anomalies",
+    "position": 108,
+    "icon": "SettingsOutlined",
+    "required": false,
+    "development_only": true,
+    "legacy_path": "/alertas",
+    "api_prefixes": []
+  },
+  {
+    "code": "section_planejamento",
+    "parent_code": null,
+    "label": "Planejamento",
+    "path": "/planejamento/inicio",
+    "renderer": "ModuleIndex",
+    "view_params": {},
+    "permission_module": null,
+    "position": 200,
+    "icon": "AccountBalanceWalletOutlined",
+    "required": false,
+    "development_only": false,
+    "legacy_path": null,
+    "api_prefixes": []
+  },
+  {
+    "code": "planejamento_historico_do_orcamento",
+    "parent_code": "section_planejamento",
+    "label": "Histórico do orçamento",
+    "path": "/planejamento/historico-do-orcamento",
+    "renderer": "FinancialPlanning",
+    "view_params": {
+      "tab": "dashboard",
+      "executive": "orcamento"
+    },
+    "permission_module": "planning",
+    "position": 201,
+    "icon": "AccountBalanceWalletOutlined",
+    "required": false,
+    "development_only": false,
+    "legacy_path": "/planejamento",
+    "api_prefixes": []
+  },
+  {
+    "code": "planejamento_historia_dos_contratos",
+    "parent_code": "section_planejamento",
+    "label": "História dos contratos",
+    "path": "/planejamento/historia-dos-contratos",
+    "renderer": "FinancialPlanning",
+    "view_params": {
+      "tab": "dashboard",
+      "executive": "historia-contrato"
+    },
+    "permission_module": "planning",
+    "position": 202,
+    "icon": "HistoryOutlined",
+    "required": false,
+    "development_only": false,
+    "legacy_path": "/planejamento",
+    "api_prefixes": [
+      "/planning/contract-story"
+    ]
+  },
+  {
+    "code": "planejamento_consumo_de_compromissos",
+    "parent_code": "section_planejamento",
+    "label": "Consumo de compromissos",
+    "path": "/planejamento/consumo-de-compromissos",
+    "renderer": "FinancialPlanning",
+    "view_params": {
+      "tab": "dashboard",
+      "executive": "compromisso"
+    },
+    "permission_module": "planning",
+    "position": 203,
+    "icon": "ReceiptLongOutlined",
+    "required": false,
+    "development_only": false,
+    "legacy_path": "/planejamento",
+    "api_prefixes": []
+  },
+  {
+    "code": "planejamento_orcamentos",
+    "parent_code": "section_planejamento",
+    "label": "Orçamentos",
+    "path": "/planejamento/orcamentos",
+    "renderer": "FinancialPlanning",
+    "view_params": {
+      "tab": "orcamento"
+    },
+    "permission_module": "planning",
+    "position": 204,
+    "icon": "PaidOutlined",
+    "required": false,
+    "development_only": false,
+    "legacy_path": "/planejamento",
+    "api_prefixes": []
+  },
+  {
+    "code": "planejamento_acuracia_do_orcamento",
+    "parent_code": "section_planejamento",
+    "label": "Acurácia do orçamento",
+    "path": "/planejamento/acuracia-do-orcamento",
+    "renderer": "FinancialPlanning",
+    "view_params": {
+      "tab": "acuracia-orcamento"
+    },
+    "permission_module": "planning",
+    "position": 205,
+    "icon": "AutoGraphOutlined",
+    "required": false,
+    "development_only": false,
+    "legacy_path": "/planejamento",
+    "api_prefixes": []
+  },
+  {
+    "code": "planejamento_projecoes_manuais",
+    "parent_code": "section_planejamento",
+    "label": "Projeções manuais",
+    "path": "/planejamento/projecoes-manuais",
+    "renderer": "FinancialPlanning",
+    "view_params": {
+      "tab": "forecast-manual"
+    },
+    "permission_module": "planning",
+    "position": 206,
+    "icon": "TrendingUpOutlined",
+    "required": false,
+    "development_only": false,
+    "legacy_path": "/planejamento",
+    "api_prefixes": []
+  },
+  {
+    "code": "planejamento_evolucao_do_dolar",
+    "parent_code": "section_planejamento",
+    "label": "Evolução do dólar",
+    "path": "/planejamento/evolucao-do-dolar",
+    "renderer": "FinancialPlanning",
+    "view_params": {
+      "tab": "visao-contabil",
+      "subview": "evolucao-dolar"
+    },
+    "permission_module": "planning",
+    "position": 207,
+    "icon": "CurrencyExchangeOutlined",
+    "required": false,
+    "development_only": false,
+    "legacy_path": "/planejamento",
+    "api_prefixes": []
+  },
+  {
+    "code": "projecoes_acuracia_visao",
+    "parent_code": "section_planejamento",
+    "label": "Acurácia · visão",
+    "path": "/projecoes/acuracia/visao",
+    "renderer": "ForecastAccuracy",
+    "view_params": {
+      "aba": "visao"
+    },
+    "permission_module": "forecast",
+    "position": 208,
+    "icon": "AutoGraphOutlined",
+    "required": false,
+    "development_only": false,
+    "legacy_path": "/projecoes/acuracia",
+    "api_prefixes": []
+  },
+  {
+    "code": "projecoes_acuracia_desvios",
+    "parent_code": "section_planejamento",
+    "label": "Acurácia · desvios",
+    "path": "/projecoes/acuracia/desvios",
+    "renderer": "ForecastAccuracy",
+    "view_params": {
+      "aba": "desvios"
+    },
+    "permission_module": "forecast",
+    "position": 209,
+    "icon": "WarningAmberOutlined",
+    "required": false,
+    "development_only": false,
+    "legacy_path": "/projecoes/acuracia",
+    "api_prefixes": []
+  },
+  {
+    "code": "projecoes_acuracia_justificativas",
+    "parent_code": "section_planejamento",
+    "label": "Acurácia · justificativas",
+    "path": "/projecoes/acuracia/justificativas",
+    "renderer": "ForecastAccuracy",
+    "view_params": {
+      "aba": "acks"
+    },
+    "permission_module": "forecast",
+    "position": 210,
+    "icon": "FactCheckOutlined",
+    "required": false,
+    "development_only": false,
+    "legacy_path": "/projecoes/acuracia",
+    "api_prefixes": []
+  },
+  {
+    "code": "projecoes_configuracao",
+    "parent_code": "section_planejamento",
+    "label": "Configuração e execução",
+    "path": "/projecoes/configuracao",
+    "renderer": "Forecast",
+    "view_params": {
+      "tab": "config"
+    },
+    "permission_module": "forecast",
+    "position": 211,
+    "icon": "SettingsOutlined",
+    "required": false,
+    "development_only": false,
+    "legacy_path": "/projecoes",
+    "api_prefixes": []
+  },
+  {
+    "code": "projecoes_regras",
+    "parent_code": "section_planejamento",
+    "label": "Regras de projeção",
+    "path": "/projecoes/regras",
+    "renderer": "Forecast",
+    "view_params": {
+      "tab": "rules"
+    },
+    "permission_module": "forecast",
+    "position": 212,
+    "icon": "RuleOutlined",
+    "required": false,
+    "development_only": false,
+    "legacy_path": "/projecoes",
+    "api_prefixes": []
+  },
+  {
+    "code": "projecoes_historico",
+    "parent_code": "section_planejamento",
+    "label": "Histórico de projeções",
+    "path": "/projecoes/historico",
+    "renderer": "Forecast",
+    "view_params": {
+      "tab": "history"
+    },
+    "permission_module": "forecast",
+    "position": 213,
+    "icon": "HistoryOutlined",
+    "required": false,
+    "development_only": false,
+    "legacy_path": "/projecoes",
+    "api_prefixes": []
+  },
+  {
+    "code": "section_otimizacao",
+    "parent_code": null,
+    "label": "Otimização",
+    "path": "/otimizacao/inicio",
+    "renderer": "ModuleIndex",
+    "view_params": {},
+    "permission_module": null,
+    "position": 300,
+    "icon": "SavingsOutlined",
+    "required": false,
+    "development_only": false,
+    "legacy_path": null,
+    "api_prefixes": []
+  },
+  {
+    "code": "otimizacao_oportunidades",
+    "parent_code": "section_otimizacao",
+    "label": "Oportunidades",
+    "path": "/otimizacao/oportunidades",
+    "renderer": "Savings",
+    "view_params": {},
+    "permission_module": "savings",
+    "position": 301,
+    "icon": "SavingsOutlined",
+    "required": false,
+    "development_only": false,
+    "legacy_path": "/otimizacao",
+    "api_prefixes": []
+  },
+  {
+    "code": "otimizacao_compromissos_e_compras",
+    "parent_code": "section_otimizacao",
+    "label": "Compromissos e compras",
+    "path": "/otimizacao/compromissos-e-compras",
+    "renderer": "Savings",
+    "view_params": {
+      "tab": "compras-compromissos"
+    },
+    "permission_module": "savings",
+    "position": 302,
+    "icon": "EventAvailableOutlined",
+    "required": false,
+    "development_only": false,
+    "legacy_path": "/otimizacao",
+    "api_prefixes": []
+  },
+  {
+    "code": "otimizacao_desligamento_painel",
+    "parent_code": "section_otimizacao",
+    "label": "Desligamento · painel",
+    "path": "/otimizacao/desligamento/painel",
+    "renderer": "Savings",
+    "view_params": {
+      "tab": "desligue",
+      "subview": "dashboard"
+    },
+    "permission_module": "savings",
+    "position": 303,
+    "icon": "DashboardOutlined",
+    "required": false,
+    "development_only": false,
+    "legacy_path": "/otimizacao",
+    "api_prefixes": []
+  },
+  {
+    "code": "otimizacao_desligamento_governanca",
+    "parent_code": "section_otimizacao",
+    "label": "Desligamento · governança",
+    "path": "/otimizacao/desligamento/governanca",
+    "renderer": "Savings",
+    "view_params": {
+      "tab": "desligue",
+      "subview": "governance"
+    },
+    "permission_module": "savings",
+    "position": 304,
+    "icon": "RuleOutlined",
+    "required": false,
+    "development_only": false,
+    "legacy_path": "/otimizacao",
+    "api_prefixes": []
+  },
+  {
+    "code": "otimizacao_desligamento_excecoes",
+    "parent_code": "section_otimizacao",
+    "label": "Desligamento · exceções",
+    "path": "/otimizacao/desligamento/excecoes",
+    "renderer": "Savings",
+    "view_params": {
+      "tab": "desligue",
+      "subview": "exceptions"
+    },
+    "permission_module": "savings",
+    "position": 305,
+    "icon": "FactCheckOutlined",
+    "required": false,
+    "development_only": false,
+    "legacy_path": "/otimizacao",
+    "api_prefixes": []
+  },
+  {
+    "code": "otimizacao_recursos_orfaos",
+    "parent_code": "section_otimizacao",
+    "label": "Recursos · órfãos atuais",
+    "path": "/otimizacao/recursos-orfaos",
+    "renderer": "Savings",
+    "view_params": {
+      "tab": "orfaos",
+      "subview": "current"
+    },
+    "permission_module": "savings",
+    "position": 306,
+    "icon": "StorageOutlined",
+    "required": false,
+    "development_only": false,
+    "legacy_path": "/otimizacao",
+    "api_prefixes": []
+  },
+  {
+    "code": "otimizacao_economia_gerada",
+    "parent_code": "section_otimizacao",
+    "label": "Recursos · economia gerada",
+    "path": "/otimizacao/economia-gerada",
+    "renderer": "Savings",
+    "view_params": {
+      "tab": "orfaos",
+      "subview": "savings"
+    },
+    "permission_module": "savings",
+    "position": 307,
+    "icon": "SavingsOutlined",
+    "required": false,
+    "development_only": false,
+    "legacy_path": "/otimizacao",
+    "api_prefixes": []
+  },
+  {
+    "code": "section_dados",
+    "parent_code": null,
+    "label": "Dados e operação",
+    "path": "/dados/inicio",
+    "renderer": "ModuleIndex",
+    "view_params": {},
+    "permission_module": null,
+    "position": 400,
+    "icon": "StorageOutlined",
+    "required": false,
+    "development_only": false,
+    "legacy_path": null,
+    "api_prefixes": []
+  },
+  {
+    "code": "dados_fontes",
+    "parent_code": "section_dados",
+    "label": "Fontes de dados",
+    "path": "/dados/fontes",
+    "renderer": "Connections",
+    "view_params": {
+      "view": "connections"
+    },
+    "permission_module": "connections",
+    "position": 401,
+    "icon": "CloudOutlined",
+    "required": false,
+    "development_only": false,
+    "legacy_path": "/dados/fontes",
+    "api_prefixes": []
+  },
+  {
+    "code": "dados_catalogo_tabelas",
+    "parent_code": "section_dados",
+    "label": "Catálogo de dados",
+    "path": "/dados/catalogo/tabelas",
+    "renderer": "Tables",
+    "view_params": {
+      "tab": "destinations"
+    },
+    "permission_module": "destinations",
+    "position": 402,
+    "icon": "TableChartOutlined",
+    "required": false,
+    "development_only": false,
+    "legacy_path": "/dados/catalogo",
+    "api_prefixes": []
+  },
+  {
+    "code": "dados_catalogo_relacionamentos",
+    "parent_code": "section_dados",
+    "label": "Relacionamentos",
+    "path": "/dados/catalogo/relacionamentos",
+    "renderer": "Tables",
+    "view_params": {
+      "tab": "relationship"
+    },
+    "permission_module": "destinations",
+    "position": 403,
+    "icon": "AccountTreeOutlined",
+    "required": false,
+    "development_only": false,
+    "legacy_path": "/dados/catalogo",
+    "api_prefixes": []
+  },
+  {
+    "code": "dados_fluxos",
+    "parent_code": "section_dados",
+    "label": "Fluxos de dados",
+    "path": "/dados/fluxos",
+    "renderer": "PipelineBuilder",
+    "view_params": {},
+    "permission_module": "etl",
+    "position": 404,
+    "icon": "AccountTreeOutlined",
+    "required": false,
+    "development_only": false,
+    "legacy_path": "/dados/fluxos",
+    "api_prefixes": []
+  },
+  {
+    "code": "operacoes_dados",
+    "parent_code": "section_dados",
+    "label": "Execuções de dados",
+    "path": "/operacoes/dados",
+    "renderer": "Reprocess",
+    "view_params": {
+      "tab": "data"
+    },
+    "permission_module": "etl",
+    "position": 405,
+    "icon": "SyncOutlined",
+    "required": false,
+    "development_only": false,
+    "legacy_path": "/operacoes/execucoes",
+    "api_prefixes": []
+  },
+  {
+    "code": "operacoes_projecoes",
+    "parent_code": "section_dados",
+    "label": "Execuções de forecast",
+    "path": "/operacoes/projecoes",
+    "renderer": "Reprocess",
+    "view_params": {
+      "tab": "forecast",
+      "subtab": "forecast"
+    },
+    "permission_module": "etl",
+    "position": 406,
+    "icon": "TrendingUpOutlined",
+    "required": false,
+    "development_only": false,
+    "legacy_path": "/operacoes/execucoes",
+    "api_prefixes": []
+  },
+  {
+    "code": "operacoes_acuracia",
+    "parent_code": "section_dados",
+    "label": "Acurácia do forecast",
+    "path": "/operacoes/acuracia",
+    "renderer": "Reprocess",
+    "view_params": {
+      "tab": "forecast",
+      "subtab": "accuracy"
+    },
+    "permission_module": "etl",
+    "position": 407,
+    "icon": "AutoGraphOutlined",
+    "required": false,
+    "development_only": false,
+    "legacy_path": "/operacoes/execucoes",
+    "api_prefixes": []
+  },
+  {
+    "code": "operacoes_rateios",
+    "parent_code": "section_dados",
+    "label": "Custo compartilhado",
+    "path": "/operacoes/rateios",
+    "renderer": "Reprocess",
+    "view_params": {
+      "tab": "shared"
+    },
+    "permission_module": "etl",
+    "position": 408,
+    "icon": "PaidOutlined",
+    "required": false,
+    "development_only": false,
+    "legacy_path": "/operacoes/execucoes",
+    "api_prefixes": []
+  },
+  {
+    "code": "operacoes_cubos",
+    "parent_code": "section_dados",
+    "label": "Materialização de cubos",
+    "path": "/operacoes/cubos",
+    "renderer": "Reprocess",
+    "view_params": {
+      "tab": "cubos",
+      "subtab": "cubes"
+    },
+    "permission_module": "etl",
+    "position": 409,
+    "icon": "DataObjectOutlined",
+    "required": false,
+    "development_only": false,
+    "legacy_path": "/operacoes/execucoes",
+    "api_prefixes": []
+  },
+  {
+    "code": "operacoes_extracoes",
+    "parent_code": "section_dados",
+    "label": "Extrações",
+    "path": "/operacoes/extracoes",
+    "renderer": "Reprocess",
+    "view_params": {
+      "tab": "extraction"
+    },
+    "permission_module": "etl",
+    "position": 410,
+    "icon": "CloudOutlined",
+    "required": false,
+    "development_only": false,
+    "legacy_path": "/operacoes/execucoes",
+    "api_prefixes": []
+  },
+  {
+    "code": "operacoes_agendamentos",
+    "parent_code": "section_dados",
+    "label": "Agendamentos",
+    "path": "/operacoes/agendamentos",
+    "renderer": "Reprocess",
+    "view_params": {
+      "tab": "schedules"
+    },
+    "permission_module": "etl",
+    "position": 411,
+    "icon": "ScheduleOutlined",
+    "required": false,
+    "development_only": false,
+    "legacy_path": "/operacoes/execucoes",
+    "api_prefixes": []
+  },
+  {
+    "code": "operacoes_historico",
+    "parent_code": "section_dados",
+    "label": "Histórico de execuções",
+    "path": "/operacoes/historico",
+    "renderer": "Reprocess",
+    "view_params": {
+      "tab": "logs"
+    },
+    "permission_module": "etl",
+    "position": 412,
+    "icon": "HistoryOutlined",
+    "required": false,
+    "development_only": false,
+    "legacy_path": "/operacoes/execucoes",
+    "api_prefixes": []
+  },
+  {
+    "code": "dados_explorador_destinos",
+    "parent_code": "section_dados",
+    "label": "Explorador · tabelas de destino",
+    "path": "/dados/explorador/destinos",
+    "renderer": "Analysis",
+    "view_params": {
+      "tab": "destino"
+    },
+    "permission_module": "analysis",
+    "position": 413,
+    "icon": "TableChartOutlined",
+    "required": false,
+    "development_only": false,
+    "legacy_path": "/dados/explorador",
+    "api_prefixes": []
+  },
+  {
+    "code": "dados_explorador_fontes",
+    "parent_code": "section_dados",
+    "label": "Explorador · fontes de origem",
+    "path": "/dados/explorador/fontes",
+    "renderer": "Analysis",
+    "view_params": {
+      "tab": "fontes"
+    },
+    "permission_module": "analysis",
+    "position": 414,
+    "icon": "CloudOutlined",
+    "required": false,
+    "development_only": false,
+    "legacy_path": "/dados/explorador",
+    "api_prefixes": []
+  },
+  {
+    "code": "dados_explorador_origem",
+    "parent_code": "section_dados",
+    "label": "Base de origem",
+    "path": "/dados/explorador/origem",
+    "renderer": "Analysis",
+    "view_params": {
+      "tab": "acervo",
+      "etapa": "origem"
+    },
+    "permission_module": "analysis",
+    "position": 415,
+    "icon": "StorageOutlined",
+    "required": false,
+    "development_only": false,
+    "legacy_path": "/dados/explorador",
+    "api_prefixes": []
+  },
+  {
+    "code": "dados_explorador_preparados",
+    "parent_code": "section_dados",
+    "label": "Base preparada",
+    "path": "/dados/explorador/preparados",
+    "renderer": "Analysis",
+    "view_params": {
+      "tab": "acervo",
+      "etapa": "preparacao"
+    },
+    "permission_module": "analysis",
+    "position": 416,
+    "icon": "DataObjectOutlined",
+    "required": false,
+    "development_only": false,
+    "legacy_path": "/dados/explorador",
+    "api_prefixes": []
+  },
+  {
+    "code": "dados_explorador_consolidados",
+    "parent_code": "section_dados",
+    "label": "Base consolidada",
+    "path": "/dados/explorador/consolidados",
+    "renderer": "Analysis",
+    "view_params": {
+      "tab": "acervo",
+      "etapa": "consolidacao"
+    },
+    "permission_module": "analysis",
+    "position": 417,
+    "icon": "PaidOutlined",
+    "required": false,
+    "development_only": false,
+    "legacy_path": "/dados/explorador",
+    "api_prefixes": []
+  },
+  {
+    "code": "dados_explorador_temporarios",
+    "parent_code": "section_dados",
+    "label": "Área temporária",
+    "path": "/dados/explorador/temporarios",
+    "renderer": "Analysis",
+    "view_params": {
+      "tab": "temporarios"
+    },
+    "permission_module": "analysis",
+    "position": 418,
+    "icon": "DeleteSweepOutlined",
+    "required": false,
+    "development_only": false,
+    "legacy_path": "/dados/explorador",
+    "api_prefixes": []
+  },
+  {
+    "code": "dados_explorador_tabelas_dinamicas",
+    "parent_code": "section_dados",
+    "label": "Explorador · tabelas dinâmicas",
+    "path": "/dados/explorador/tabelas-dinamicas",
+    "renderer": "Analysis",
+    "view_params": {
+      "tab": "pivot"
+    },
+    "permission_module": "analysis",
+    "position": 419,
+    "icon": "AutoGraphOutlined",
+    "required": false,
+    "development_only": false,
+    "legacy_path": "/dados/explorador",
+    "api_prefixes": []
+  },
+  {
+    "code": "dados_explorador_busca",
+    "parent_code": "section_dados",
+    "label": "Explorador · busca na fonte",
+    "path": "/dados/explorador/busca",
+    "renderer": "Analysis",
+    "view_params": {
+      "tab": "busca"
+    },
+    "permission_module": "analysis",
+    "position": 420,
+    "icon": "ScienceOutlined",
+    "required": false,
+    "development_only": false,
+    "legacy_path": "/dados/explorador",
+    "api_prefixes": []
+  },
+  {
+    "code": "section_governanca",
+    "parent_code": null,
+    "label": "Governança",
+    "path": "/governanca/inicio",
+    "renderer": "ModuleIndex",
+    "view_params": {},
+    "permission_module": null,
+    "position": 500,
+    "icon": "RuleOutlined",
+    "required": false,
+    "development_only": false,
+    "legacy_path": null,
+    "api_prefixes": []
+  },
+  {
+    "code": "governanca_organizacao",
+    "parent_code": "section_governanca",
+    "label": "Organização",
+    "path": "/governanca/organizacao",
+    "renderer": "Governance",
+    "view_params": {
+      "tab": "organization"
+    },
+    "permission_module": "planning",
+    "position": 501,
+    "icon": "CorporateFareOutlined",
+    "required": false,
+    "development_only": false,
+    "legacy_path": "/governanca",
+    "api_prefixes": []
+  },
+  {
+    "code": "governanca_classificacao_de_projetos",
+    "parent_code": "section_governanca",
+    "label": "Classificação de projetos",
+    "path": "/governanca/classificacao-de-projetos",
+    "renderer": "Governance",
+    "view_params": {
+      "tab": "classification"
+    },
+    "permission_module": "rules",
+    "position": 502,
+    "icon": "LocalOfferOutlined",
+    "required": false,
+    "development_only": false,
+    "legacy_path": "/governanca",
+    "api_prefixes": []
+  },
+  {
+    "code": "governanca_regras_de_ajuste",
+    "parent_code": "section_governanca",
+    "label": "Regras de ajustes",
+    "path": "/governanca/regras-de-ajuste",
+    "renderer": "Governance",
+    "view_params": {
+      "tab": "rules",
+      "subtab": "adjustments"
+    },
+    "permission_module": "rules",
+    "position": 503,
+    "icon": "SettingsOutlined",
+    "required": false,
+    "development_only": false,
+    "legacy_path": "/governanca",
+    "api_prefixes": []
+  },
+  {
+    "code": "governanca_compromissos",
+    "parent_code": "section_governanca",
+    "label": "Reservas e Savings Plans",
+    "path": "/governanca/compromissos",
+    "renderer": "Governance",
+    "view_params": {
+      "tab": "rules",
+      "subtab": "clone-rules"
+    },
+    "permission_module": "reservations",
+    "position": 504,
+    "icon": "SavingsOutlined",
+    "required": false,
+    "development_only": false,
+    "legacy_path": "/governanca",
+    "api_prefixes": []
+  },
+  {
+    "code": "governanca_contratos",
+    "parent_code": "section_governanca",
+    "label": "Contratos e compromissos",
+    "path": "/governanca/contratos",
+    "renderer": "Governance",
+    "view_params": {
+      "tab": "financial-contracts"
+    },
+    "permission_module": "rules",
+    "position": 505,
+    "icon": "ReceiptLongOutlined",
+    "required": false,
+    "development_only": false,
+    "legacy_path": "/governanca",
+    "api_prefixes": []
+  },
+  {
+    "code": "governanca_cubos",
+    "parent_code": "section_governanca",
+    "label": "Cubos analíticos",
+    "path": "/governanca/cubos",
+    "renderer": "Governance",
+    "view_params": {
+      "tab": "cost-relationship"
+    },
+    "permission_module": "gold",
+    "position": 506,
+    "icon": "DataObjectOutlined",
+    "required": false,
+    "development_only": false,
+    "legacy_path": "/governanca",
+    "api_prefixes": []
+  },
+  {
+    "code": "section_administracao",
+    "parent_code": null,
+    "label": "Administração",
+    "path": "/administracao/inicio",
+    "renderer": "ModuleIndex",
+    "view_params": {},
+    "permission_module": null,
+    "position": 600,
+    "icon": "ManageAccountsOutlined",
+    "required": true,
+    "development_only": false,
+    "legacy_path": null,
+    "api_prefixes": []
+  },
+  {
+    "code": "administracao_pessoas",
+    "parent_code": "section_administracao",
+    "label": "Pessoas e acessos",
+    "path": "/administracao/pessoas",
+    "renderer": "Admin",
+    "view_params": {
+      "tab": "users"
+    },
+    "permission_module": "users",
+    "position": 601,
+    "icon": "ManageAccountsOutlined",
+    "required": false,
+    "development_only": false,
+    "legacy_path": "/administracao/acessos",
+    "api_prefixes": []
+  },
+  {
+    "code": "administracao_grupos",
+    "parent_code": "section_administracao",
+    "label": "Grupos",
+    "path": "/administracao/grupos",
+    "renderer": "Admin",
+    "view_params": {
+      "tab": "groups"
+    },
+    "permission_module": "groups",
+    "position": 602,
+    "icon": "CorporateFareOutlined",
+    "required": false,
+    "development_only": false,
+    "legacy_path": "/administracao/acessos",
+    "api_prefixes": []
+  },
+  {
+    "code": "administracao_funcoes",
+    "parent_code": "section_administracao",
+    "label": "Funções e permissões",
+    "path": "/administracao/funcoes",
+    "renderer": "Admin",
+    "view_params": {
+      "tab": "roles"
+    },
+    "permission_module": "roles",
+    "position": 603,
+    "icon": "VpnKeyOutlined",
+    "required": false,
+    "development_only": false,
+    "legacy_path": "/administracao/acessos",
+    "api_prefixes": []
+  },
+  {
+    "code": "administracao_auditoria",
+    "parent_code": "section_administracao",
+    "label": "Trilha de auditoria",
+    "path": "/administracao/auditoria",
+    "renderer": "Audit",
+    "view_params": {},
+    "permission_module": "audit",
+    "position": 604,
+    "icon": "FactCheckOutlined",
+    "required": false,
+    "development_only": false,
+    "legacy_path": "/administracao/auditoria",
+    "api_prefixes": []
+  },
+  {
+    "code": "administracao_identidade",
+    "parent_code": "section_administracao",
+    "label": "Login corporativo",
+    "path": "/administracao/identidade",
+    "renderer": "SsoProviders",
+    "view_params": {},
+    "permission_module": "auth",
+    "position": 605,
+    "icon": "VpnKeyOutlined",
+    "required": false,
+    "development_only": false,
+    "legacy_path": "/administracao/identidade",
+    "api_prefixes": []
+  },
+  {
+    "code": "administracao_modulos",
+    "parent_code": "section_administracao",
+    "label": "Módulos",
+    "path": "/administracao/modulos",
+    "renderer": "Modules",
+    "view_params": {},
+    "permission_module": "modules",
+    "position": 699,
+    "icon": "SettingsOutlined",
+    "required": true,
+    "development_only": false,
+    "legacy_path": null,
+    "api_prefixes": []
+  }
+]
