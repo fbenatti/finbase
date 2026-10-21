@@ -91,7 +91,7 @@ export default function Login() {
     >
       <Card sx={{ width: 400 }}>
         <CardContent sx={{ p: 4 }}>
-          <Typography variant="h5" gutterBottom>OpenFinops</Typography>
+          <Box component="img" src="/brand/finbase-logo.svg" alt="finbase.cloud" sx={{ display: "block", width: 240, maxWidth: "100%", height: "auto", mb: 3 }} />
           <Typography variant="body2" color="text.secondary" sx={{ mb: 3 }}>
             Entre com seu usuário local ou e-mail corporativo
           </Typography>

@@ -170,8 +170,8 @@ export default function Layout() {
   const drawerContent = (
     <Box sx={{ height: "100%", display: "flex", flexDirection: "column", bgcolor: "#fff" }}>
       <Box sx={{ height: 72, display: "flex", alignItems: "center", justifyContent: expanded ? "space-between" : "center", px: expanded ? 2 : 1 }}>
-        {expanded && <Box component="img" src="/brand/finbase-logo.svg" alt="finbase.cloud" sx={{ display: "block", width: 196, height: "auto" }} />}
-        {!expanded && <Box component="img" src="/brand/finbase-logo.svg" alt="finbase.cloud" sx={{ width: 42, height: 42, objectFit: "cover", objectPosition: "left", borderRadius: 2 }} />}
+        {expanded && <Box component="img" src="/brand/finbase-logo.svg" alt="finbase.cloud" sx={{ display: "block", width: 194, height: "auto" }} />}
+        {!expanded && <Box component="img" src="/brand/finbase-symbol.svg" alt="finbase.cloud" sx={{ width: 32, height: 32, objectFit: "contain", flexShrink: 0 }} />}
         {!isMobile && <Tooltip title={expanded ? "Recolher navegação" : "Expandir navegação"}><IconButton size="small" onClick={() => setExpanded(value => !value)} aria-label={expanded ? "Recolher navegação" : "Expandir navegação"}>{expanded ? <ChevronLeftIcon /> : <MenuIcon />}</IconButton></Tooltip>}
       </Box>
       <Divider />
@@ -254,7 +254,7 @@ export default function Layout() {
         <Box className="finbase-carbon-shell" sx={{ display: "flex", flexDirection: "column", height: "100%" }}>
           <CarbonHeader aria-label="Finbase Cloud">
             <CarbonHeaderMenuButton aria-label={(isMobile ? mobileOpen : expanded) ? "Recolher menu" : "Abrir menu"} isActive={isMobile ? mobileOpen : expanded} onClick={() => isMobile ? setMobileOpen(value => !value) : setExpanded(value => !value)} />
-            <CarbonHeaderName href="/" prefix="">finbase.cloud</CarbonHeaderName>
+            <CarbonHeaderName href="/" prefix="" aria-label="finbase.cloud — início"><Box component="img" src="/brand/finbase-logo.svg" alt="finbase.cloud" sx={{ display: "block", width: { xs: 148, sm: 180 }, height: "auto" }} /></CarbonHeaderName>
             <CarbonHeaderGlobalBar>
               <Box className="finbase-carbon-layout-switch" role="group" aria-label="Escolher layout">
                 <button type="button" aria-pressed={!isCarbon} onClick={() => setLayoutMode("finbase")}>Finbase</button>
