@@ -128,6 +128,8 @@ const MENU_GROUPS: MenuGroup[] = [
       { path: "/governance?tab=organization", label: "Organização", icon: <CorporateFareOutlined /> },
       { path: "/governance?tab=classification", label: "Classificação de projetos", icon: <LocalOfferOutlined /> },
       { path: "/governance?tab=rules", label: "Regras financeiras", icon: <RuleOutlined /> },
+      { path: "/governance?tab=rules&subtab=adjustments", label: "Regras de ajustes", icon: <SettingsOutlined /> },
+      { path: "/governance?tab=rules&subtab=clone-rules", label: "Reservas e Savings Plans", icon: <SavingsOutlined /> },
       { path: "/governance?tab=financial-contracts", label: "Contratos e compromissos", icon: <ReceiptLongOutlined /> },
       { path: "/governance?tab=cost-relationship", label: "Cubos analíticos", icon: <DataObjectOutlined /> },
       { path: "/governance?tab=tags", label: "Políticas de tags", icon: <LocalOfferOutlined /> },
