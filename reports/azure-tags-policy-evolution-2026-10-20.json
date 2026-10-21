@@ -1,0 +1,362 @@
+{
+  "generated_on": "2026-10-20",
+  "method": "Tag adherence = fully tagged taggable inventory items / all taggable inventory items, with active keys projeto, diretoria, centro-de-custos. Policy scope determined from Azure Resource Graph policy assignment resources name of-asg* at subscription scope; 25 assignments across 15 subscriptions. The fixed retrospective policy cohort consists of subscriptions with assignments whose names start with of-asg; 25 assignments across 16 subscriptions were found in Azure Resource Graph on 2026-10-20.",
+  "assignments": [
+    {
+      "createdOn": "2026-10-15T17:01:38.8415179Z",
+      "name": "of-asg-2-45-resource-a993996314b9",
+      "policyDefinitionId": "/subscriptions/f08b1fe3-f4f7-4c0a-bb51-d6a47cf1a81c/providers/Microsoft.Authorization/policyDefinitions/of-def-2-45-resource-a993996314b9",
+      "scope": "/subscriptions/f08b1fe3-f4f7-4c0a-bb51-d6a47cf1a81c",
+      "subscriptionId": "f08b1fe3-f4f7-4c0a-bb51-d6a47cf1a81c"
+    },
+    {
+      "createdOn": "2026-10-15T17:00:37.4164005Z",
+      "name": "of-asg-2-45-rg-38c79d2f75a6",
+      "policyDefinitionId": "/subscriptions/f08b1fe3-f4f7-4c0a-bb51-d6a47cf1a81c/providers/Microsoft.Authorization/policyDefinitions/of-def-2-45-rg-38c79d2f75a6",
+      "scope": "/subscriptions/f08b1fe3-f4f7-4c0a-bb51-d6a47cf1a81c",
+      "subscriptionId": "f08b1fe3-f4f7-4c0a-bb51-d6a47cf1a81c"
+    },
+    {
+      "createdOn": "2026-10-15T17:26:28.1846837Z",
+      "name": "of-asg-2-57-resource-3cdf8cfa8845",
+      "policyDefinitionId": "/subscriptions/d9f34e0b-3b91-4749-a1ba-bd1b1cd8407f/providers/Microsoft.Authorization/policyDefinitions/of-def-2-57-resource-3cdf8cfa8845",
+      "scope": "/subscriptions/d9f34e0b-3b91-4749-a1ba-bd1b1cd8407f",
+      "subscriptionId": "d9f34e0b-3b91-4749-a1ba-bd1b1cd8407f"
+    },
+    {
+      "createdOn": "2026-10-15T17:25:35.0244394Z",
+      "name": "of-asg-2-57-rg-e8b4d47601ca",
+      "policyDefinitionId": "/subscriptions/d9f34e0b-3b91-4749-a1ba-bd1b1cd8407f/providers/Microsoft.Authorization/policyDefinitions/of-def-2-57-rg-e8b4d47601ca",
+      "scope": "/subscriptions/d9f34e0b-3b91-4749-a1ba-bd1b1cd8407f",
+      "subscriptionId": "d9f34e0b-3b91-4749-a1ba-bd1b1cd8407f"
+    },
+    {
+      "createdOn": "2026-10-16T00:45:51.711543Z",
+      "name": "of-asg-2-58-resource-5fb50535d9bc",
+      "policyDefinitionId": "/subscriptions/0641c338-26cb-464a-8bf7-b49d171b681e/providers/Microsoft.Authorization/policyDefinitions/of-def-2-58-resource-5fb50535d9bc",
+      "scope": "/subscriptions/0641c338-26cb-464a-8bf7-b49d171b681e",
+      "subscriptionId": "0641c338-26cb-464a-8bf7-b49d171b681e"
+    },
+    {
+      "createdOn": "2026-10-16T00:48:31.2426624Z",
+      "name": "of-asg-2-58-resource-b8e30e8dedc9",
+      "policyDefinitionId": "/subscriptions/77851502-10d3-40bc-b021-16d3d17aea4e/providers/Microsoft.Authorization/policyDefinitions/of-def-2-58-resource-b8e30e8dedc9",
+      "scope": "/subscriptions/77851502-10d3-40bc-b021-16d3d17aea4e",
+      "subscriptionId": "77851502-10d3-40bc-b021-16d3d17aea4e"
+    },
+    {
+      "createdOn": "2026-10-16T00:45:26.1605035Z",
+      "name": "of-asg-2-58-rg-9e43cb79f7c7",
+      "policyDefinitionId": "/subscriptions/0641c338-26cb-464a-8bf7-b49d171b681e/providers/Microsoft.Authorization/policyDefinitions/of-def-2-58-rg-9e43cb79f7c7",
+      "scope": "/subscriptions/0641c338-26cb-464a-8bf7-b49d171b681e",
+      "subscriptionId": "0641c338-26cb-464a-8bf7-b49d171b681e"
+    },
+    {
+      "createdOn": "2026-10-16T00:48:05.5346795Z",
+      "name": "of-asg-2-58-rg-d9ff0f0711eb",
+      "policyDefinitionId": "/subscriptions/77851502-10d3-40bc-b021-16d3d17aea4e/providers/Microsoft.Authorization/policyDefinitions/of-def-2-58-rg-d9ff0f0711eb",
+      "scope": "/subscriptions/77851502-10d3-40bc-b021-16d3d17aea4e",
+      "subscriptionId": "77851502-10d3-40bc-b021-16d3d17aea4e"
+    },
+    {
+      "createdOn": "2026-10-15T14:24:51.8828664Z",
+      "name": "of-asg-2-78-resource-2200555412a0",
+      "policyDefinitionId": "/subscriptions/63dbc6fc-93d8-4ac1-9745-253f6b502240/providers/Microsoft.Authorization/policyDefinitions/of-def-2-78-resource-2200555412a0",
+      "scope": "/subscriptions/63dbc6fc-93d8-4ac1-9745-253f6b502240",
+      "subscriptionId": "63dbc6fc-93d8-4ac1-9745-253f6b502240"
+    },
+    {
+      "createdOn": "2026-10-15T17:01:09.0430205Z",
+      "name": "of-asg-2-78-resource-8ef9acc4bdce",
+      "policyDefinitionId": "/subscriptions/f08b1fe3-f4f7-4c0a-bb51-d6a47cf1a81c/providers/Microsoft.Authorization/policyDefinitions/of-def-2-78-resource-8ef9acc4bdce",
+      "scope": "/subscriptions/f08b1fe3-f4f7-4c0a-bb51-d6a47cf1a81c",
+      "subscriptionId": "f08b1fe3-f4f7-4c0a-bb51-d6a47cf1a81c"
+    },
+    {
+      "createdOn": "2026-10-15T17:26:00.9823723Z",
+      "name": "of-asg-2-78-resource-ae93241cf0a4",
+      "policyDefinitionId": "/subscriptions/d9f34e0b-3b91-4749-a1ba-bd1b1cd8407f/providers/Microsoft.Authorization/policyDefinitions/of-def-2-78-resource-ae93241cf0a4",
+      "scope": "/subscriptions/d9f34e0b-3b91-4749-a1ba-bd1b1cd8407f",
+      "subscriptionId": "d9f34e0b-3b91-4749-a1ba-bd1b1cd8407f"
+    },
+    {
+      "createdOn": "2026-10-15T17:24:16.5828313Z",
+      "name": "of-asg-2-78-rg-4865b2780e65",
+      "policyDefinitionId": "/subscriptions/d9f34e0b-3b91-4749-a1ba-bd1b1cd8407f/providers/Microsoft.Authorization/policyDefinitions/of-def-2-78-rg-4865b2780e65",
+      "scope": "/subscriptions/d9f34e0b-3b91-4749-a1ba-bd1b1cd8407f",
+      "subscriptionId": "d9f34e0b-3b91-4749-a1ba-bd1b1cd8407f"
+    },
+    {
+      "createdOn": "2026-10-15T14:15:53.9978178Z",
+      "name": "of-asg-2-78-rg-7750aa7cbe85",
+      "policyDefinitionId": "/subscriptions/63dbc6fc-93d8-4ac1-9745-253f6b502240/providers/Microsoft.Authorization/policyDefinitions/of-def-2-78-rg-7750aa7cbe85",
+      "scope": "/subscriptions/63dbc6fc-93d8-4ac1-9745-253f6b502240",
+      "subscriptionId": "63dbc6fc-93d8-4ac1-9745-253f6b502240"
+    },
+    {
+      "createdOn": "2026-10-15T16:59:58.3480618Z",
+      "name": "of-asg-2-78-rg-ae131b3c2f0d",
+      "policyDefinitionId": "/subscriptions/f08b1fe3-f4f7-4c0a-bb51-d6a47cf1a81c/providers/Microsoft.Authorization/policyDefinitions/of-def-2-78-rg-ae131b3c2f0d",
+      "scope": "/subscriptions/f08b1fe3-f4f7-4c0a-bb51-d6a47cf1a81c",
+      "subscriptionId": "f08b1fe3-f4f7-4c0a-bb51-d6a47cf1a81c"
+    },
+    {
+      "createdOn": "2026-10-16T16:44:42.1655532Z",
+      "name": "of-asg-set-2-22929a19de13",
+      "policyDefinitionId": "/subscriptions/6b3a8f0b-2135-411e-8c28-bd2b75184a3b/providers/Microsoft.Authorization/policySetDefinitions/of-set-2-22929a19de13",
+      "scope": "/subscriptions/6b3a8f0b-2135-411e-8c28-bd2b75184a3b",
+      "subscriptionId": "6b3a8f0b-2135-411e-8c28-bd2b75184a3b"
+    },
+    {
+      "createdOn": "2026-10-16T16:48:27.9349488Z",
+      "name": "of-asg-set-2-4256665bbf6b",
+      "policyDefinitionId": "/subscriptions/b3536f22-445a-4cb5-9164-4fc71f5292e1/providers/Microsoft.Authorization/policySetDefinitions/of-set-2-4256665bbf6b",
+      "scope": "/subscriptions/b3536f22-445a-4cb5-9164-4fc71f5292e1",
+      "subscriptionId": "b3536f22-445a-4cb5-9164-4fc71f5292e1"
+    },
+    {
+      "createdOn": "2026-10-16T16:43:11.6114897Z",
+      "name": "of-asg-set-2-4ec3ae4acba3",
+      "policyDefinitionId": "/subscriptions/affa4164-f872-477e-b604-49f789ad1bca/providers/Microsoft.Authorization/policySetDefinitions/of-set-2-4ec3ae4acba3",
+      "scope": "/subscriptions/affa4164-f872-477e-b604-49f789ad1bca",
+      "subscriptionId": "affa4164-f872-477e-b604-49f789ad1bca"
+    },
+    {
+      "createdOn": "2026-10-16T16:50:23.3452961Z",
+      "name": "of-asg-set-2-4f3f66beae97",
+      "policyDefinitionId": "/subscriptions/32ddc892-9789-40e6-af83-a04d005cef58/providers/Microsoft.Authorization/policySetDefinitions/of-set-2-4f3f66beae97",
+      "scope": "/subscriptions/32ddc892-9789-40e6-af83-a04d005cef58",
+      "subscriptionId": "32ddc892-9789-40e6-af83-a04d005cef58"
+    },
+    {
+      "createdOn": "2026-10-16T16:51:11.2271554Z",
+      "name": "of-asg-set-2-52a0b434c1b7",
+      "policyDefinitionId": "/subscriptions/fb95ed88-6679-4984-83cd-2bc23c15229c/providers/Microsoft.Authorization/policySetDefinitions/of-set-2-52a0b434c1b7",
+      "scope": "/subscriptions/fb95ed88-6679-4984-83cd-2bc23c15229c",
+      "subscriptionId": "fb95ed88-6679-4984-83cd-2bc23c15229c"
+    },
+    {
+      "createdOn": "2026-10-16T19:10:06.4538592Z",
+      "name": "of-asg-set-2-6a081d8e60a4",
+      "policyDefinitionId": "/subscriptions/76461b8e-edbd-464c-ad30-b13ba994709c/providers/Microsoft.Authorization/policySetDefinitions/of-set-2-6a081d8e60a4",
+      "scope": "/subscriptions/76461b8e-edbd-464c-ad30-b13ba994709c",
+      "subscriptionId": "76461b8e-edbd-464c-ad30-b13ba994709c"
+    },
+    {
+      "createdOn": "2026-10-16T16:43:57.517793Z",
+      "name": "of-asg-set-2-73c3bd4910fe",
+      "policyDefinitionId": "/subscriptions/dd31861a-39f0-4898-b4c2-b2cf7aa10e04/providers/Microsoft.Authorization/policySetDefinitions/of-set-2-73c3bd4910fe",
+      "scope": "/subscriptions/dd31861a-39f0-4898-b4c2-b2cf7aa10e04",
+      "subscriptionId": "dd31861a-39f0-4898-b4c2-b2cf7aa10e04"
+    },
+    {
+      "createdOn": "2026-10-16T16:09:43.0124142Z",
+      "name": "of-asg-set-2-74c8deaf8d46",
+      "policyDefinitionId": "/subscriptions/cd4ed2c4-eb6d-48d7-98b7-e6db50218b71/providers/Microsoft.Authorization/policySetDefinitions/of-set-2-74c8deaf8d46",
+      "scope": "/subscriptions/cd4ed2c4-eb6d-48d7-98b7-e6db50218b71",
+      "subscriptionId": "cd4ed2c4-eb6d-48d7-98b7-e6db50218b71"
+    },
+    {
+      "createdOn": "2026-10-16T16:49:32.9140782Z",
+      "name": "of-asg-set-2-a83ff547fe2b",
+      "policyDefinitionId": "/subscriptions/ebd821da-3f85-467b-9851-80cdb639a741/providers/Microsoft.Authorization/policySetDefinitions/of-set-2-a83ff547fe2b",
+      "scope": "/subscriptions/ebd821da-3f85-467b-9851-80cdb639a741",
+      "subscriptionId": "ebd821da-3f85-467b-9851-80cdb639a741"
+    },
+    {
+      "createdOn": "2026-10-16T16:42:28.1488924Z",
+      "name": "of-asg-set-2-b596276ec084",
+      "policyDefinitionId": "/subscriptions/b9be1dc6-fc14-46af-a3f4-8dbb8c366f51/providers/Microsoft.Authorization/policySetDefinitions/of-set-2-b596276ec084",
+      "scope": "/subscriptions/b9be1dc6-fc14-46af-a3f4-8dbb8c366f51",
+      "subscriptionId": "b9be1dc6-fc14-46af-a3f4-8dbb8c366f51"
+    },
+    {
+      "createdOn": "2026-10-16T16:41:46.647945Z",
+      "name": "of-asg-set-2-e15672981e6b",
+      "policyDefinitionId": "/subscriptions/657e0c41-6044-48f8-84e6-fe0a659fdf13/providers/Microsoft.Authorization/policySetDefinitions/of-set-2-e15672981e6b",
+      "scope": "/subscriptions/657e0c41-6044-48f8-84e6-fe0a659fdf13",
+      "subscriptionId": "657e0c41-6044-48f8-84e6-fe0a659fdf13"
+    }
+  ],
+  "target_subscriptions": [
+    {
+      "id": "0641c338-26cb-464a-8bf7-b49d171b681e",
+      "name": "Terra-Parceiros-Dev",
+      "first_assignment": "2026-10-16T00:45:26.1605035Z"
+    },
+    {
+      "id": "32ddc892-9789-40e6-af83-a04d005cef58",
+      "name": "Sandbox-OSS",
+      "first_assignment": "2026-10-16T16:50:23.3452961Z"
+    },
+    {
+      "id": "63dbc6fc-93d8-4ac1-9745-253f6b502240",
+      "name": "Fundação Telefônica",
+      "first_assignment": "2026-10-15T14:15:53.9978178Z"
+    },
+    {
+      "id": "657e0c41-6044-48f8-84e6-fe0a659fdf13",
+      "name": "Vertical - B2C Telco – Dev/Pre",
+      "first_assignment": "2026-10-16T16:41:46.647945Z"
+    },
+    {
+      "id": "6b3a8f0b-2135-411e-8c28-bd2b75184a3b",
+      "name": "Sandbox-B2C-Beatrix",
+      "first_assignment": "2026-10-16T16:44:42.1655532Z"
+    },
+    {
+      "id": "76461b8e-edbd-464c-ad30-b13ba994709c",
+      "name": "Development",
+      "first_assignment": "2026-10-16T19:10:06.4538592Z"
+    },
+    {
+      "id": "77851502-10d3-40bc-b021-16d3d17aea4e",
+      "name": "Terra-Parceiros-Test",
+      "first_assignment": "2026-10-16T00:48:05.5346795Z"
+    },
+    {
+      "id": "affa4164-f872-477e-b604-49f789ad1bca",
+      "name": "Terra-Mexico-Dev",
+      "first_assignment": "2026-10-16T16:43:11.6114897Z"
+    },
+    {
+      "id": "b3536f22-445a-4cb5-9164-4fc71f5292e1",
+      "name": "Sandbox-Infra",
+      "first_assignment": "2026-10-16T16:48:27.9349488Z"
+    },
+    {
+      "id": "b9be1dc6-fc14-46af-a3f4-8dbb8c366f51",
+      "name": "Vertical - B2C Varejo – Dev/Pre",
+      "first_assignment": "2026-10-16T16:42:28.1488924Z"
+    },
+    {
+      "id": "cd4ed2c4-eb6d-48d7-98b7-e6db50218b71",
+      "name": "Test",
+      "first_assignment": "2026-10-16T16:09:43.0124142Z"
+    },
+    {
+      "id": "d9f34e0b-3b91-4749-a1ba-bd1b1cd8407f",
+      "name": "Terra-Mexico-Test",
+      "first_assignment": "2026-10-15T17:24:16.5828313Z"
+    },
+    {
+      "id": "dd31861a-39f0-4898-b4c2-b2cf7aa10e04",
+      "name": "Sandbox-Arquitetura",
+      "first_assignment": "2026-10-16T16:43:57.517793Z"
+    },
+    {
+      "id": "ebd821da-3f85-467b-9851-80cdb639a741",
+      "name": "Sandbox-OCS-BSS-Pre",
+      "first_assignment": "2026-10-16T16:49:32.9140782Z"
+    },
+    {
+      "id": "f08b1fe3-f4f7-4c0a-bb51-d6a47cf1a81c",
+      "name": "Terra-Brasil-Dev",
+      "first_assignment": "2026-10-15T16:59:58.3480618Z"
+    },
+    {
+      "id": "fb95ed88-6679-4984-83cd-2bc23c15229c",
+      "name": "Sandbox-Vivo_na_Cloud",
+      "first_assignment": "2026-10-16T16:51:11.2271554Z"
+    }
+  ],
+  "snapshots": [
+    {
+      "date": "2026-10-15",
+      "collected_at": "2026-10-15T22:23:48.101041+00:00",
+      "all_items": 25941,
+      "all_complete": 3279,
+      "all_pct": 12.6,
+      "policy_items": 10827,
+      "policy_complete": 2057,
+      "policy_pct": 19.0,
+      "sub_count": 16
+    },
+    {
+      "date": "2026-10-16",
+      "collected_at": "2026-10-16T21:22:01.047505+00:00",
+      "all_items": 25949,
+      "all_complete": 7394,
+      "all_pct": 28.5,
+      "policy_items": 10816,
+      "policy_complete": 6172,
+      "policy_pct": 57.1,
+      "sub_count": 16
+    },
+    {
+      "date": "2026-10-17",
+      "collected_at": "2026-10-17T07:16:36.587486+00:00",
+      "all_items": 25568,
+      "all_complete": 7478,
+      "all_pct": 29.2,
+      "policy_items": 10608,
+      "policy_complete": 6239,
+      "policy_pct": 58.8,
+      "sub_count": 16
+    },
+    {
+      "date": "2026-10-19",
+      "collected_at": "2026-10-19T20:53:42.274267+00:00",
+      "all_items": 25915,
+      "all_complete": 10548,
+      "all_pct": 40.7,
+      "policy_items": 10759,
+      "policy_complete": 9339,
+      "policy_pct": 86.8,
+      "sub_count": 16
+    },
+    {
+      "date": "2026-10-20",
+      "collected_at": "2026-10-20T13:18:28.514691+00:00",
+      "all_items": 25953,
+      "all_complete": 10712,
+      "all_pct": 41.3,
+      "policy_items": 10849,
+      "policy_complete": 9487,
+      "policy_pct": 87.4,
+      "sub_count": 16
+    }
+  ],
+  "development": [
+    {
+      "date": "2026-10-15",
+      "items": 4931,
+      "complete": 439,
+      "partial": 3464,
+      "without": 1028,
+      "adherence_percent": 8.9
+    },
+    {
+      "date": "2026-10-16",
+      "items": 4939,
+      "complete": 477,
+      "partial": 3441,
+      "without": 1021,
+      "adherence_percent": 9.7
+    },
+    {
+      "date": "2026-10-17",
+      "items": 4805,
+      "complete": 567,
+      "partial": 3232,
+      "without": 1006,
+      "adherence_percent": 11.8
+    },
+    {
+      "date": "2026-10-19",
+      "items": 4875,
+      "complete": 3563,
+      "partial": 1071,
+      "without": 241,
+      "adherence_percent": 73.1
+    },
+    {
+      "date": "2026-10-20",
+      "items": 4939,
+      "complete": 3715,
+      "partial": 1036,
+      "without": 188,
+      "adherence_percent": 75.2
+    }
+  ]
+}
