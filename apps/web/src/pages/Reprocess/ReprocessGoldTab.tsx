@@ -1,12 +1,12 @@
 import { useEffect, useState } from "react";
-import { Alert, Box, Button, Checkbox, Chip, Stack, Tab, Tabs, Typography } from "@mui/material";
+import { Alert, Box, Button, Checkbox, Chip, Stack, Typography } from "@mui/material";
 import { useSearchParams } from "react-router-dom";
 import { CheckBox, CheckBoxOutlineBlank, PlayArrow, Refresh } from "@mui/icons-material";
 import { GoldCubeRule, formatApiError, getGoldCubeRules, reprocessGoldCubes } from "../../services/api";
 import ReprocessAICostRelationshipsTab from "./ReprocessAICostRelationshipsTab";
 
 export default function ReprocessGoldTab() {
-  const [params, setParams] = useSearchParams();
+  const [params] = useSearchParams();
   const subtab = params.get("subtab") === "ai-cost" ? "ai-cost" : "cubes";
   const [rules, setRules] = useState<GoldCubeRule[]>([]);
   const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());
@@ -68,15 +68,6 @@ export default function ReprocessGoldTab() {
   };
 
   return <Stack spacing={2}>
-    <Tabs value={subtab} onChange={(_, value) => {
-      const next = new URLSearchParams(params);
-      next.set("tab", "gold");
-      if (value === "cubes") next.delete("subtab"); else next.set("subtab", value);
-      setParams(next, { replace: true });
-    }} aria-label="Processos Gold">
-      <Tab value="cubes" label="Cubos Gold" />
-      <Tab value="ai-cost" label="Relacionamentos de custo IA" />
-    </Tabs>
     {subtab === "ai-cost" ? <ReprocessAICostRelationshipsTab /> : <>
     <Typography variant="h6">Materialização Gold</Typography>
     <Typography color="text.secondary">Lê a Silver (FOCUS, planejamento/forecast/rateio...), aplica os filtros das regras e publica cubos agregados no namespace iceberg.gold. Escolha reprocessar <b>todas</b> ou apenas uma regra/fonte.</Typography>

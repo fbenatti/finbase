@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { useNotifications } from "../../context/NotificationContext";
 import {
-  Alert, Box, Button, Card, CardContent, CircularProgress, Stack, Tab, Tabs, Typography,
+  Alert, Box, Button, Card, CardContent, CircularProgress, Stack, Typography,
 } from "@mui/material";
 import { useSearchParams } from "react-router-dom";
 import { PlayArrow } from "@mui/icons-material";
@@ -11,7 +11,7 @@ import {
 import ReprocessAccuracyTab from "./ReprocessAccuracyTab";
 
 export default function ReprocessForecastTab() {
-  const [params, setParams] = useSearchParams();
+  const [params] = useSearchParams();
   const subtab = params.get("subtab") === "accuracy" ? "accuracy" : "forecast";
   const [configs, setConfigs] = useState<ForecastConfig[]>([]);
   const [error, setError] = useState("");
@@ -31,13 +31,6 @@ export default function ReprocessForecastTab() {
     if (subtab === "forecast") void load();
   }, [subtab, load]);
 
-  const setSubtab = (value: string) => {
-    const next = new URLSearchParams(params);
-    next.set("tab", "forecast");
-    if (value === "accuracy") next.set("subtab", "accuracy");
-    else next.delete("subtab");
-    setParams(next, { replace: true });
-  };
 
   const run = async (configId: number) => {
     setRunningConfig(configId);
@@ -56,10 +49,6 @@ export default function ReprocessForecastTab() {
 
   return (
     <Box>
-      <Tabs value={subtab} onChange={(_, value) => setSubtab(value)} aria-label="Forecast e acurácia" sx={{ mb: 2 }}>
-        <Tab value="forecast" label="Forecast" />
-        <Tab value="accuracy" label="Acurácia" />
-      </Tabs>
       {subtab === "accuracy" ? <ReprocessAccuracyTab /> : <>
       <Alert severity="info" sx={{ mb: 2 }}>
         Reprocessa o forecast da tabela Gold configurada. Na sequência, o worker também publica o rateio
