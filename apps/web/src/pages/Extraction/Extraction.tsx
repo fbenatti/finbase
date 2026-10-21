@@ -520,7 +520,7 @@ export default function Extraction({ embedded = false }: { embedded?: boolean })
         <Alert severity={destProcessResult.startsWith("OK") ? "success" : "error"} sx={{ mb: 2 }} onClose={() => setDestProcessResult("")}>
           {destProcessResult}
         </Alert>
-      </>
+      )}
 
       {error && <Alert severity="error" sx={{ mb: 2 }} onClose={() => setError("")}>{error}</Alert>}
       {sourceResetMessage && <Alert severity="success" sx={{ mb: 2 }} onClose={() => setSourceResetMessage("")}>{sourceResetMessage}</Alert>}
@@ -1052,8 +1052,7 @@ export default function Extraction({ embedded = false }: { embedded?: boolean })
           <Button onClick={() => setPreviewOpen(false)}>Fechar</Button>
         </DialogActions>
       </Dialog>
-        </>
-      )}
+      </>
 
     </Box>
   );
