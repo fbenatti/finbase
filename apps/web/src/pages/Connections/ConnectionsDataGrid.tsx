@@ -3,6 +3,7 @@ import {
   Box,
   Chip,
   Divider,
+  ListItemIcon,
   IconButton,
   Menu,
   MenuItem,
@@ -15,8 +16,8 @@ import {
   Delete,
   Edit,
   History,
-  FilterAlt,
-} from "@mui/icons-material";
+  FilterAlt, More,
+} from "./ConnectionIcons";
 import { DataGrid, GridColDef, GridFilterModel, GridPaginationModel, GridSortModel, useGridApiRef } from "@mui/x-data-grid";
 import { SourceConnection } from "../../services/api";
 
@@ -141,6 +142,7 @@ export default function ConnectionsDataGrid({
   onQuery,
 }: Props) {
   const apiRef = useGridApiRef();
+  const [rowMenu, setRowMenu] = useState<{ anchor: HTMLElement; connection: SourceConnection } | null>(null);
   const [paginationModel, setPaginationModel] = useState<GridPaginationModel>({ page: 0, pageSize: 25 });
   const [sortModel, setSortModel] = useState<GridSortModel>([]);
   const [filterModel, setFilterModel] = useState<GridFilterModel>({ items: [] });
@@ -150,7 +152,7 @@ export default function ConnectionsDataGrid({
 
   const filteredHeader = (label: string, field: string) => (
     <Stack direction="row" alignItems="center" gap={0.5} sx={{ overflow: "hidden" }}>
-      <Typography component="span" variant="inherit" noWrap>{label}</Typography>
+      <Typography component="span" variant="inherit" fontWeight={600} noWrap>{label}</Typography>
       {activeFilters[field] && <Tooltip title="Esta coluna possui um filtro ativo"><FilterAlt fontSize="small" color="primary" /></Tooltip>}
     </Stack>
   );
@@ -159,7 +161,7 @@ export default function ConnectionsDataGrid({
       field: "name",
       headerName: "Conexão",
       renderHeader: () => filteredHeader("Conexão", "name"),
-      minWidth: 230,
+      minWidth: 220,
       flex: 1.15,
       renderCell: ({ row }: { row: SourceConnection }) => (
         <Stack justifyContent="center" sx={{ minWidth: 0, height: "100%" }}>
@@ -173,16 +175,16 @@ export default function ConnectionsDataGrid({
       field: "provider",
       headerName: "Provedor",
       renderHeader: () => filteredHeader("Provedor", "provider"),
-      minWidth: 145,
+      minWidth: 130,
       flex: 0.7,
       valueGetter: (_, row: SourceConnection) => getProviderLabel(row.cloud_scope),
       renderCell: ({ row }: { row: SourceConnection }) => <Chip label={getProviderLabel(row.cloud_scope)} size="small" variant="outlined" />,
     },
     {
       field: "connector_type",
-      headerName: "Tipo",
-      renderHeader: () => filteredHeader("Tipo", "connector_type"),
-      minWidth: 185,
+      headerName: "Tipo de conexão",
+      renderHeader: () => filteredHeader("Tipo de conexão", "connector_type"),
+      minWidth: 180,
       flex: 0.9,
       valueGetter: (_, row: SourceConnection) => connectorLabels[row.connector_type] || row.connector_type,
       renderCell: ({ row }: { row: SourceConnection }) => (
@@ -217,7 +219,7 @@ export default function ConnectionsDataGrid({
     },
     {
       field: "test_status",
-      headerName: "Último teste",
+      headerName: "Validação",
       minWidth: 135,
       sortable: false,
       filterable: false,
@@ -228,8 +230,8 @@ export default function ConnectionsDataGrid({
         } : undefined;
         const message = testMessages[row.id] || persistedMessage;
         if (testingId === row.id) return <Chip label="Testando…" size="small" color="info" />;
-        if (!message) return <Typography color="text.secondary">—</Typography>;
-        const label = message.severity === "success" ? "Conectado" : message.severity === "warning" ? "Pendente" : "Falhou";
+        if (!message) return <Typography variant="caption" color="text.secondary">Não validada</Typography>;
+        const label = message.severity === "success" ? "Validada" : message.severity === "warning" ? "Pendente" : "Falhou";
         const color = message.severity === "success" ? "success" : message.severity === "warning" ? "warning" : "error";
         const testedAt = row.last_tested_at ? formatUpdatedAt(row.last_tested_at) : "Agora";
         return (
@@ -245,7 +247,7 @@ export default function ConnectionsDataGrid({
     {
       field: "actions",
       headerName: "Ações",
-      width: 158,
+      width: 104,
       sortable: false,
       filterable: false,
       align: "center",
@@ -255,21 +257,13 @@ export default function ConnectionsDataGrid({
           <Tooltip title="Editar conexão">
             <IconButton size="small" aria-label={`Editar ${row.name}`} onClick={() => onEdit(row)}><Edit fontSize="small" /></IconButton>
           </Tooltip>
-          <Tooltip title="Histórico de alterações">
-            <IconButton size="small" aria-label={`Histórico ${row.name}`} onClick={() => onHistory(row)}><History fontSize="small" /></IconButton>
-          </Tooltip>
-          <Tooltip title="Testar conexão">
-            <span>
-              <IconButton size="small" disabled={testingId === row.id} aria-label={`Testar ${row.name}`} onClick={() => onTest(row)}><Cable fontSize="small" /></IconButton>
-            </span>
-          </Tooltip>
-          <Tooltip title="Excluir conexão">
-            <IconButton size="small" color="error" aria-label={`Excluir ${row.name}`} onClick={() => onDelete(row)}><Delete fontSize="small" /></IconButton>
+          <Tooltip title="Mais ações">
+            <IconButton aria-label={`Mais ações de ${row.name}`} aria-haspopup="menu" onClick={event => setRowMenu({ anchor: event.currentTarget, connection: row })}><More /></IconButton>
           </Tooltip>
         </Stack>
       ),
     },
-  ], [activeFilters, testMessages, testingId]);
+  ].sort((left, right) => ["name", "provider", "connector_type", "test_status", "actions", "code", "origin", "updated_at"].indexOf(left.field) - ["name", "provider", "connector_type", "test_status", "actions", "code", "origin", "updated_at"].indexOf(right.field)), [activeFilters, testMessages, testingId, onEdit]);
 
   const query = (next: Partial<{ offset: number; limit: number; sort: { field: string; direction: "asc" | "desc" }; filters: ConnectionGridFilter[] }> = {}) => {
     const currentSort = sortModel[0]?.sort ? { field: sortModel[0].field, direction: sortModel[0].sort } : undefined;
@@ -354,9 +348,11 @@ export default function ConnectionsDataGrid({
 
   return (
     <>
-      <Box sx={{ height: 570, width: "100%" }} onContextMenu={onCellContextMenu}>
+      <Box sx={{ height: 560, width: "100%" }} onContextMenu={onCellContextMenu}>
         <DataGrid
+          aria-label="Conexões de fontes de dados"
           apiRef={apiRef}
+          initialState={{ columns: { columnVisibilityModel: { code: false, origin: false, updated_at: false } } }}
           rows={connections}
           columns={columns}
           loading={loading}
@@ -378,14 +374,19 @@ export default function ConnectionsDataGrid({
             setHeaderContext({ mouseX: event.clientX - 2, mouseY: event.clientY - 4, field: params.field });
           }}
           sx={{
-            border: "1px solid",
-            borderColor: "divider",
-            borderRadius: 2,
+            border: 0,
+            borderRadius: 0,
             bgcolor: "background.paper",
             "& .MuiDataGrid-columnHeaders": { bgcolor: "background.default", borderBottomColor: "divider" },
           }}
         />
       </Box>
+      <Menu anchorEl={rowMenu?.anchor} open={Boolean(rowMenu)} onClose={() => setRowMenu(null)}>
+        <MenuItem disabled={testingId === rowMenu?.connection.id} onClick={() => { if (rowMenu) onTest(rowMenu.connection); setRowMenu(null); }}><ListItemIcon><Cable /></ListItemIcon>Validar conexão</MenuItem>
+        <MenuItem onClick={() => { if (rowMenu) onHistory(rowMenu.connection); setRowMenu(null); }}><ListItemIcon><History /></ListItemIcon>Ver histórico de alterações</MenuItem>
+        <Divider />
+        <MenuItem sx={{ color: "error.main" }} onClick={() => { if (rowMenu) onDelete(rowMenu.connection); setRowMenu(null); }}><ListItemIcon><Delete color="error" /></ListItemIcon>Excluir conexão</MenuItem>
+      </Menu>
       <Menu
         open={context !== null}
         onClose={() => setContext(null)}
