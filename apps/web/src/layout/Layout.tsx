@@ -2,6 +2,8 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { Outlet, useNavigate, useLocation } from "react-router-dom";
 import {
   Box,
+  ToggleButton,
+  ToggleButtonGroup,
   Drawer,
   AppBar,
   Toolbar,
@@ -402,7 +404,7 @@ export default function Layout() {
       <CarbonTheme theme="white" className="finbase-carbon-theme">
         <Box className="finbase-carbon-shell" sx={{ display: "flex", flexDirection: "column", height: "100%" }}>
           <CarbonHeader aria-label="Finbase Cloud">
-            <CarbonHeaderMenuButton aria-label={mobileOpen ? "Fechar menu" : "Abrir menu"} isActive={mobileOpen} onClick={() => setMobileOpen(value => !value)} />
+            <CarbonHeaderMenuButton aria-label={(isMobile ? mobileOpen : expanded) ? "Recolher menu" : "Abrir menu"} isActive={isMobile ? mobileOpen : expanded} onClick={() => isMobile ? setMobileOpen(value => !value) : setExpanded(value => !value)} />
             <CarbonHeaderName href="/" prefix="">finbase.cloud</CarbonHeaderName>
             <CarbonHeaderGlobalBar>
               <Box className="finbase-carbon-layout-switch" role="group" aria-label="Escolher layout">
@@ -449,6 +451,10 @@ export default function Layout() {
               <Typography variant="caption" color="text.secondary" sx={{ display: { xs: "none", sm: "block" } }}>finbase.cloud</Typography>
             </Box>
             <Box sx={{ flexGrow: 1 }} />
+            <ToggleButtonGroup size="small" exclusive value={layoutMode} onChange={(_, value: "finbase" | "carbon" | null) => value && setLayoutMode(value)} aria-label="Escolher layout" sx={{ mr: 1, "& .MuiToggleButton-root": { px: 1, py: 0.35, fontSize: 11 } }}>
+              <ToggleButton value="finbase" aria-label="Layout Finbase">Finbase</ToggleButton>
+              <ToggleButton value="carbon" aria-label="Layout Carbon">Carbon</ToggleButton>
+            </ToggleButtonGroup>
             <NotificationBell />
             <Typography variant="body2" noWrap sx={{ ml: 1.5, mr: 0.5, maxWidth: 180, color: "text.secondary", display: { xs: "none", sm: "block" } }}>{user?.username}</Typography>
             <Tooltip title="Sair"><IconButton onClick={() => logout()} size="small" aria-label="Sair"><LogoutIcon fontSize="small" /></IconButton></Tooltip>
