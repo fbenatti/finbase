@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { Alert, Box, Button, ButtonGroup, FormControl, InputLabel, MenuItem, Paper, Select, Stack, Tab, Tabs, Typography } from "@mui/material";
+import { Alert, Box, Button, ButtonGroup, FormControl, InputLabel, MenuItem, Paper, Select, Stack, ToggleButton, ToggleButtonGroup, Typography } from "@mui/material";
 import Plot from "@/components/Plot";
 import { GoldInfo, GoldQueryFilter, GoldQueryResult, queryDimonTable } from "../../services/api";
 
@@ -93,12 +93,15 @@ export default function ExecutiveWidgetsV2({ table, info, filters, filterGroups,
   const heatValues = (name: string, month: string) => Number(annualRows.find((row) => String(fieldValue(row, lens) ?? "Não informado") === name && String(fieldValue(row, "_billing_period")) === month)?.realizado || 0);
 
   return <Paper variant="outlined" sx={{ p: 2, mt: 2, borderRadius: "20px", borderColor: "#e2e7f0", bgcolor: "#fff", boxShadow: "0 8px 28px rgba(24, 39, 75, 0.045)" }}>
-    <Typography variant="overline" sx={{ color: "#6416dc", letterSpacing: ".08em" }} fontWeight={800}>COST CONCENTRATION</Typography>
+    <Typography variant="overline" color="secondary.dark" sx={{ letterSpacing: ".08em" }} fontWeight={800}>ANÁLISE DE CUSTOS</Typography>
     <Stack direction={{ xs: "column", md: "row" }} alignItems={{ xs: "stretch", md: "flex-start" }} justifyContent="space-between" gap={2}>
       <Box flex={1} minWidth={0}>
-        <Typography variant="h6" fontWeight={750} sx={{ color: "#111b4e" }}>Onde o dinheiro está concentrado?</Typography>
+        <Typography variant="h6" fontWeight={750} color="text.primary">Onde o custo se concentra?</Typography>
         <Typography variant="caption" color="text.secondary">Troque a dimensão sem sair da página. O período segue os filtros executivos globais.</Typography>
-        <Tabs value={tab} onChange={(_, value) => setTab(value)} sx={{ mt: 1, "& .MuiTabs-indicator": { bgcolor: "#6416dc", height: 3, borderRadius: 3 }, "& .MuiTab-root": { color: "#64708b", fontWeight: 750, minHeight: 42 }, "& .Mui-selected": { color: "#6416dc !important" } }}><Tab label="Cost Concentration" /><Tab label="FinOps Heatmap" /></Tabs>
+        <ToggleButtonGroup exclusive size="small" value={tab} onChange={(_, value: number | null) => { if (value !== null) setTab(value); }} sx={{ mt: 1, "& .MuiToggleButton-root": { textTransform: "none", fontWeight: 600 } }}>
+          <ToggleButton value={0}>Concentração de custos</ToggleButton>
+          <ToggleButton value={1}>Mapa FinOps</ToggleButton>
+        </ToggleButtonGroup>
       </Box>
       {tab === 0 && <ButtonGroup size="small" sx={{ flexWrap: "wrap", gap: .5, "& .MuiButtonGroup-grouped": { border: "1px solid #dce2ee !important", borderRadius: "9px !important", textTransform: "none", fontSize: 12, fontWeight: 700, color: "#44506c" } }}>{availableLenses.map((item) => <Button key={item.field} variant={lens === item.field ? "contained" : "outlined"} onClick={() => { setLens(item.field); setShowAll(false); }} sx={lens === item.field ? { bgcolor: "#f2eaff", color: "#6416dc", borderColor: "#c8aaff !important", boxShadow: "none", "&:hover": { bgcolor: "#eadcff", boxShadow: "none" } } : { bgcolor: "#fff" }}>{item.label}</Button>)}</ButtonGroup>}
     </Stack>
