@@ -18,9 +18,25 @@ ROUTERS_DIR = ROOT / "app" / "routers"
 PREFIX_RE = re.compile(r'APIRouter\(\s*prefix="([^"]+)"', re.S)
 
 
+MAIN_INCLUDE_RE = re.compile(r"include_router\(\s*(\w+)\.router")
+
+
+def _registered_router_files() -> set[str]:
+    """Arquivos de router que o main.py realmente registra (alias *_router → arquivo)."""
+    names: set[str] = set()
+    for alias in MAIN_INCLUDE_RE.findall((ROOT / "app" / "main.py").read_text(encoding="utf-8")):
+        base = alias[: -len("_router")] if alias.endswith("_router") else alias
+        names.add(base)
+    return names
+
+
 def _router_prefixes() -> dict[str, str]:
+    """Prefixos dos routers registrados no main.py. Routers sem registro não contam."""
+    registered = _registered_router_files()
     found: dict[str, str] = {}
     for path in ROUTERS_DIR.glob("*.py"):
+        if path.stem not in registered:
+            continue
         for prefix in PREFIX_RE.findall(path.read_text(encoding="utf-8")):
             found[prefix] = path.name
     return found
@@ -51,3 +67,10 @@ def test_audit_continua_nomeando_por_primeiro_segmento():
     from app.core.audit_middleware import audit_module_for
     assert audit_module_for("/financial-contracts/12") == "financial-contracts"
     assert _authz_module_for("/financial-contracts/12") == "rules"
+
+
+def test_routers_registrados_existem_como_arquivo():
+    registered = _registered_router_files()
+    missing = {name for name in registered if not (ROUTERS_DIR / f"{name}.py").exists()}
+    # `modules`, `rules` etc. usam o nome do módulo; só falha se faltar o arquivo.
+    assert not missing, f"main.py registra routers inexistentes: {missing}"

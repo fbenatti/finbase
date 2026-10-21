@@ -315,3 +315,29 @@ def test_subarvore_expandida_gera_filtro_de_igualdade_por_id():
     sql, params = compile_postgres(d.row_filter)
     assert "LIKE" not in sql
     assert sorted(params["acl_1"]) == ["10", "11", "12"]
+
+
+# ---- expansão por mapa de filhos dentro da decisão ----
+
+def test_subarvore_com_condicao_subtree_expande_pelo_mapa():
+    children = {"10": ["11", "12"], "11": ["111"]}
+    grants = [Grant("table", "fact_cost", "read", "allow", (Condition("department_id", HIER, "subtree"),))]
+    d = decide(grants, "read", "table", "fact_cost", [ScopeValue(HIER, "10", "subtree")], children=children)
+    (pred,) = d.row_filter.clauses[0]
+    assert pred.equal_to == ("10", "11", "111", "12")
+
+
+def test_condicao_exact_nao_expande_descendentes():
+    children = {"10": ["11"]}
+    grants = [Grant("table", "fact_cost", "read", "allow", (Condition("department_id", HIER, "exact"),))]
+    d = decide(grants, "read", "table", "fact_cost", [ScopeValue(HIER, "10", "subtree")], children=children)
+    (pred,) = d.row_filter.clauses[0]
+    assert pred.equal_to == ("10",)
+
+
+def test_escopo_exact_do_usuario_nao_expande_mesmo_com_condicao_subtree():
+    children = {"10": ["11"]}
+    grants = [Grant("table", "fact_cost", "read", "allow", (Condition("department_id", HIER, "subtree"),))]
+    d = decide(grants, "read", "table", "fact_cost", [ScopeValue(HIER, "10", "exact")], children=children)
+    (pred,) = d.row_filter.clauses[0]
+    assert pred.equal_to == ("10",)

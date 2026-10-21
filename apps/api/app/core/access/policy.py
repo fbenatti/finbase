@@ -83,15 +83,41 @@ def _validate_request(resource_type: str, operation: str) -> None:
         raise ValueError(f"operação inválida: {operation}")
 
 
-def _predicate_for(condition: Condition, scopes: list[ScopeValue]) -> Predicate | None:
+def _closure(value: str, children: dict[str, list[str]]) -> set[str]:
+    """Nó e todos os descendentes. Ciclos são ignorados."""
+    seen: set[str] = set()
+    stack = [value]
+    while stack:
+        node = stack.pop()
+        if node in seen:
+            continue
+        seen.add(node)
+        stack.extend(children.get(node, []))
+    return seen
+
+
+def _predicate_for(
+    condition: Condition,
+    scopes: list[ScopeValue],
+    children: dict[str, list[str]] | None,
+) -> Predicate | None:
     """Monta o predicado de uma condição a partir dos escopos do usuário.
 
-    Um valor do usuário com `subtree` só vale como subárvore quando a condição
-    da ACL também pede subárvore. Caso contrário vale só a igualdade.
+    Com `children` (hierarquia em árvore de ids), escopo `subtree` com condição
+    `subtree` vira a lista de ids da subárvore. Condição `exact` nunca expande.
+    Sem `children`, usa o caminho textual (LIKE 'valor/%').
     """
     matching = [s for s in scopes if s.scope_type == condition.scope_type]
     if not matching:
         return None
+    if children is not None:
+        values: set[str] = set()
+        for scope in matching:
+            if condition.match_mode == "subtree" and scope.match_mode == "subtree":
+                values |= _closure(scope.value, children)
+            else:
+                values.add(scope.value)
+        return Predicate(condition.column, condition.scope_type, tuple(sorted(values)))
     equal_to = tuple(s.value for s in matching)
     under: tuple[str, ...] = ()
     if condition.match_mode == "subtree":
@@ -105,8 +131,12 @@ def decide(
     resource_type: str,
     resource: str,
     scopes: list[ScopeValue] | None = None,
+    children: dict[str, list[str]] | None = None,
 ) -> Decision:
-    """Decide se o usuário pode executar `operation` em `resource`."""
+    """Decide se o usuário pode executar `operation` em `resource`.
+
+    `children` mapeia id do nó para ids dos filhos, para expandir subárvores.
+    """
     _validate_request(resource_type, operation)
     scopes = scopes or []
     matching = [
@@ -126,7 +156,7 @@ def decide(
 
     clauses: list[tuple[Predicate, ...]] = []
     for grant in allows:
-        predicates = [_predicate_for(c, scopes) for c in grant.conditions]
+        predicates = [_predicate_for(c, scopes, children) for c in grant.conditions]
         if any(p is None for p in predicates):
             continue
         clauses.append(tuple(p for p in predicates if p is not None))

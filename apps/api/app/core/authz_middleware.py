@@ -22,7 +22,6 @@ from app.models.identity import User
 
 # maior prefixo primeiro; (prefixo, módulo)
 PATH_MODULE: list[tuple[str, str]] = [
-    ("/visoes-consumo-ia/provider", "ai_provider_dashboards"),
     ("/modules", "modules"),
     ("/integrations", "connections"),
     ("/etl/periods", "periods"),
@@ -34,8 +33,6 @@ PATH_MODULE: list[tuple[str, str]] = [
     ("/classifications", "rules"),
     ("/departments", "rules"),
     ("/analysis", "analysis"),
-    ("/ai-dashboards", "ai_dashboards"),
-    ("/ai-copilot", "ai_copilot"),
     ("/visoes-consumo-ia", "azure_ptu"),
     ("/destinations", "destinations"),
     ("/schema", "schema"),
@@ -75,9 +72,6 @@ METHOD_ACTION = {
 # documentada ao mapeamento HTTP→ação: POST→create). Valem para leitores.
 READ_POST_PREFIXES: list[tuple[str, str]] = [
     ("/visoes-consumo-ia/dashboard/", "azure_ptu"),
-    ("/visoes-consumo-ia/provider/", "ai_provider_dashboards"),
-    ("/ai-copilot/", "ai_copilot"),
-    ("/ai-dashboards/", "ai_dashboards"),
     ("/gold/query", "gold"),
     ("/gold/info", "gold"),
     ("/analysis/query", "analysis"),
@@ -127,6 +121,7 @@ AUTHZ_EXTRA_MODULES: list[tuple[str, str]] = [
     ("/connector-visibility", "connections"),
     ("/audit", "audit"),
     ("/sso/providers", "auth"),
+    ("/access", "users"),
 ]
 
 
