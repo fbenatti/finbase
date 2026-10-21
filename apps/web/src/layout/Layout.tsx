@@ -72,18 +72,22 @@ const MENU_GROUPS: MenuGroup[] = [
     icon: <DashboardOutlined fontSize="small" />,
     items: [
       { path: "/gold-dashboard?tab=visao-executiva", label: "Resumo de custos", icon: <QueryStatsOutlined /> },
-      { path: "/gold-dashboard?tab=geral", label: "Custos gerais", icon: <PaidOutlined /> },
-      { path: "/gold-dashboard?tab=evolucao", label: "Evolução de custos", icon: <TrendingUpOutlined /> },
-      { path: "/gold-dashboard?tab=organizacao", label: "Custos por organização", icon: <CorporateFareOutlined /> },
-      { path: "/gold-dashboard?tab=servicos", label: "Custos por serviço", icon: <CloudOutlined /> },
-      { path: "/gold-dashboard?tab=investigacao", label: "Investigar variações", icon: <QueryStatsOutlined /> },
-      { path: "/gold-dashboard?tab=decisao", label: "Decisões", icon: <FactCheckOutlined /> },
-      { path: "/gold-dashboard?tab=drilldown", label: "Detalhamento", icon: <DataObjectOutlined /> },
-      { path: "/gold-dashboard?tab=data-quality", label: "Qualidade dos dados", icon: <ScienceOutlined /> },
+    ],
+  },
+  {
+    label: "Operação de IA",
+    icon: <SmartToyOutlined fontSize="small" />,
+    items: [
       { path: "/visoes-consumo-ia?view=0&tab=0", label: "IA · resumo de capacidade", icon: <SmartToyOutlined /> },
       { path: "/visoes-consumo-ia?view=0&tab=1", label: "IA · consumo de tokens", icon: <QueryStatsOutlined /> },
       { path: "/visoes-consumo-ia?view=0&tab=2", label: "IA · capacidade e operação", icon: <SettingsOutlined /> },
       { path: "/visoes-consumo-ia?view=0&tab=3", label: "IA · recomendações", icon: <LightbulbOutlined /> },
+    ],
+  },
+  {
+    label: "Provedores de IA",
+    icon: <SmartToyOutlined fontSize="small" />,
+    items: [
       { path: "/visoes-consumo-ia?view=1", label: "IA · GitHub Copilot", icon: <SmartToyOutlined /> },
       { path: "/visoes-consumo-ia?view=2&providerTab=executive", label: "IA · Claude executivo", icon: <DashboardOutlined /> },
       { path: "/visoes-consumo-ia?view=2&providerTab=technical", label: "IA · Claude técnico", icon: <ScienceOutlined /> },
@@ -94,10 +98,21 @@ const MENU_GROUPS: MenuGroup[] = [
       { path: "/visoes-consumo-ia?view=6", label: "IA · Sinfonia", icon: <SmartToyOutlined /> },
       { path: "/visoes-consumo-ia?view=7", label: "IA · Datamesh", icon: <SmartToyOutlined /> },
       { path: "/visoes-consumo-ia?view=8", label: "IA · Wisper", icon: <SmartToyOutlined /> },
+    ],
+  },
+  {
+    label: "Adoção de IA",
+    icon: <AutoGraphOutlined fontSize="small" />,
+    items: [
       { path: "/dashboards-ia?tab=0", label: "IA · visão executiva", icon: <DashboardOutlined /> },
       { path: "/dashboards-ia?tab=1", label: "IA · eficiência FinOps", icon: <AutoGraphOutlined /> },
       { path: "/dashboards-ia?tab=2", label: "IA · uso por pessoa", icon: <ManageAccountsOutlined /> },
-      { path: "/savings", label: "Oportunidades", icon: <SavingsOutlined /> },
+    ],
+  },
+  {
+    label: "Alertas",
+    icon: <WarningAmberOutlined fontSize="small" />,
+    items: [
       { path: "/anomalies?tab=0", label: "Visão geral de alertas", icon: <WarningAmberOutlined /> },
       { path: "/anomalies?tab=1", label: "Impacto financeiro", icon: <PaidOutlined /> },
       { path: "/anomalies?tab=2", label: "Casos em investigação", icon: <QueryStatsOutlined /> },
@@ -137,7 +152,7 @@ const MENU_GROUPS: MenuGroup[] = [
     label: "Otimização",
     icon: <SavingsOutlined fontSize="small" />,
     items: [
-      { path: "/savings?tab=calcular", label: "Ações de economia", icon: <SavingsOutlined /> },
+      { path: "/savings", label: "Oportunidades", icon: <SavingsOutlined /> },
       { path: "/savings?tab=compras-compromissos", label: "Compromissos e compras", icon: <EventAvailableOutlined /> },
       { path: "/savings?tab=desligue&subview=dashboard", label: "Desligamento · painel", icon: <DashboardOutlined /> },
       { path: "/savings?tab=desligue&subview=governance", label: "Desligamento · governança", icon: <RuleOutlined /> },
@@ -236,7 +251,7 @@ export default function Layout() {
   const location = useLocation();
   const [expanded, setExpanded] = useState(true);
   const [mobileOpen, setMobileOpen] = useState(false);
-  const [openGroups, setOpenGroups] = useState<string[]>(["Panorama"]);
+  const [openGroups, setOpenGroups] = useState<string[]>([]);
   const drawerWidth = expanded ? DRAWER_WIDTH : COLLAPSED_WIDTH;
   const skipRouteCancelRef = useRef(true);
 
@@ -250,7 +265,12 @@ export default function Layout() {
 
   const currentLabel = visibleMenuGroups.flatMap(group => group.items).find(item => {
     return matchesMenuPath(item.path, location.pathname, location.search);
-  })?.label ?? "Workspace";
+  })?.label ?? visibleMenuGroups.flatMap(group => group.items).find(item => menuPath(item.path).pathname === location.pathname)?.label ?? "Workspace";
+  const activeGroupLabel = visibleMenuGroups.find(group => group.items.some(item => menuPath(item.path).pathname === location.pathname))?.label;
+
+  useEffect(() => {
+    if (activeGroupLabel) setOpenGroups([activeGroupLabel]);
+  }, [activeGroupLabel]);
 
   const toggleGroup = (label: string) => setOpenGroups(current =>
     current.includes(label) ? current.filter(item => item !== label) : [...current, label],
