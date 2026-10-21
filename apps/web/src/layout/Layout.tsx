@@ -56,7 +56,7 @@ import {
 } from "@mui/icons-material";
 import { cancelPendingAnalysisRequests } from "../services/api";
 import { useAuth } from "../auth/AuthContext";
-import { permissionTargetsForLocation, permissionTargetsForPath } from "../auth/moduleMap";
+import { permissionTargetsForLocation } from "../auth/moduleMap";
 import LogoutIcon from "@mui/icons-material/Logout";
 import { NotificationBell } from "../context/NotificationContext";
 
