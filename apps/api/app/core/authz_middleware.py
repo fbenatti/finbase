@@ -117,6 +117,36 @@ def _module_for(path: str) -> str | None:
     return None
 
 
+# Routers que a autorização precisa cobrir, mas que a auditoria ainda nomeia pelo
+# primeiro segmento (ver audit_module_for). Por isso ficam fora do PATH_MODULE.
+AUTHZ_EXTRA_MODULES: list[tuple[str, str]] = [
+    ("/financial-contracts", "rules"),
+    ("/azure-sources", "connections"),
+    ("/mca-commitment", "reservations"),
+    ("/processing-logs", "etl"),
+    ("/connector-visibility", "connections"),
+    ("/audit", "audit"),
+    ("/sso/providers", "auth"),
+]
+
+
+def _authz_module_for(path: str) -> str | None:
+    """Módulo de autorização: PATH_MODULE primeiro, depois AUTHZ_EXTRA_MODULES."""
+    module = _module_for(path)
+    if module is not None:
+        return module
+    for prefix, extra_module in AUTHZ_EXTRA_MODULES:
+        if path == prefix or path.startswith(prefix + "/"):
+            return extra_module
+    return None
+
+
+async def _audit_denied(scope: Scope, status: int, user) -> None:
+    # Import tardio: audit_middleware importa deste módulo (evita ciclo).
+    from app.core.audit_middleware import record_denied_attempt
+    await record_denied_attempt(scope, status, user)
+
+
 async def _respond(send: Send, status: int, detail: str) -> None:
     body = json.dumps({"detail": detail}).encode()
     await send({
@@ -141,10 +171,9 @@ class RBACMiddleware:
             await self.app(scope, receive, send)
             return
 
-        module = _module_for(path)
-        if module is None:
-            await self.app(scope, receive, send)
-            return
+        module = _authz_module_for(path)
+        # Rota sem módulo RBAC: fecha por padrão. Exige token e depois nega.
+        unmapped = module is None
 
         action = METHOD_ACTION.get(scope.get("method", ""))
         if action is None:
@@ -218,11 +247,13 @@ class RBACMiddleware:
                         user = None
 
             if user is None:
+                await _audit_denied(scope, 401, None)
                 await _respond(send, 401, "Não autenticado")
                 return
 
             perms = await get_effective_permissions(db, user.id)
-            if not has_permission(perms, module, action, rbac_scope):
+            if unmapped or not has_permission(perms, module, action, rbac_scope):
+                await _audit_denied(scope, 403, user)
                 await _respond(send, 403, "Sem permissão para esta ação.")
                 return
 
