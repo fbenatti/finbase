@@ -19,7 +19,8 @@ import {
   Collapse,
   useMediaQuery,
 } from "@mui/material";
-import { useTheme } from "@mui/material/styles";
+import { ThemeProvider, useTheme } from "@mui/material/styles";
+import { createAppTheme } from "../theme/theme";
 import {
   Menu as MenuIcon,
   ChevronLeft as ChevronLeftIcon,
@@ -138,6 +139,7 @@ export default function Layout() {
   );
   const drawerWidth = expanded ? DRAWER_WIDTH : COLLAPSED_WIDTH;
   const isCarbon = layoutMode === "carbon";
+  const pageTheme = useMemo(() => createAppTheme(layoutMode), [layoutMode]);
   const skipRouteCancelRef = useRef(true);
 
   useEffect(() => {
@@ -268,14 +270,14 @@ export default function Layout() {
           {!isMobile && carbonNavigation}
           {isMobile && mobileOpen && carbonNavigation}
           <CarbonContent id="main-content" className="finbase-carbon-main">
-            <Box className="finbase-carbon-page-title">{currentLabel}</Box>
+            <Box className="finbase-carbon-page-title" sx={{ fontSize: "0.875rem", color: "#525252", mb: 2 }}>{currentLabel}</Box>
             {(() => {
               const targets = currentModule ? null : permissionTargetsForLocation(location.pathname, location.search);
               if (targets && !targets.some(target => hasPerm(target.module, "read", target.scope))) {
                 const modules = targets.map(target => target.scope ? `${moduleDisplayName(target.module)}: ${dataDisplayText(target.scope)}` : moduleDisplayName(target.module)).join(" / ");
                 return <Box sx={{ p: 6, textAlign: "center" }}><Typography variant="h6" sx={{ mb: 1 }}>Acesso negado</Typography><Typography color="text.secondary">Você não tem permissão de leitura no módulo <b>{modules}</b>. Solicite acesso ao administrador se precisar utilizá-lo.</Typography></Box>;
               }
-              return <Outlet />;
+              return <ThemeProvider theme={pageTheme}><Outlet /></ThemeProvider>;
             })()}
           </CarbonContent>
           <Box component="footer" className="finbase-carbon-footer">
@@ -316,7 +318,7 @@ export default function Layout() {
               const modules = targets.map(target => target.scope ? `${moduleDisplayName(target.module)}: ${dataDisplayText(target.scope)}` : moduleDisplayName(target.module)).join(" / ");
               return <Box sx={{ p: 6, textAlign: "center" }}><Typography variant="h6" sx={{ mb: 1 }}>Acesso negado</Typography><Typography color="text.secondary">Você não tem permissão de leitura no módulo <b>{modules}</b>. Solicite acesso ao administrador se precisar utilizá-lo.</Typography></Box>;
             }
-            return <Outlet />;
+            return <ThemeProvider theme={pageTheme}><Outlet /></ThemeProvider>;
           })()}
         </Box>
         <Box component="footer" sx={{ minHeight: 44, display: "flex", alignItems: "center", justifyContent: "space-between", gap: 1, px: { xs: 2, md: 3 }, borderTop: "1px solid", borderColor: "divider", bgcolor: "#fff" }}>
