@@ -1,8 +1,9 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import { useSearchParams } from "react-router-dom";
 import Plot from "@/components/Plot";
 import {
   Alert, Box, Button, Card, Chip, CircularProgress, FormControl,
-  Grid, InputLabel, MenuItem, Select, Stack, Tab, Tabs, Table, TableBody,
+  Grid, InputLabel, MenuItem, Select, Stack, Table, TableBody,
   TableCell, TableHead, TableRow, Tooltip, Typography,
 } from "@mui/material";
 import RefreshIcon from "@mui/icons-material/Refresh";
@@ -26,7 +27,6 @@ const num1 = new Intl.NumberFormat("pt-BR", { maximumFractionDigits: 1 });
 const pct = new Intl.NumberFormat("pt-BR", { style: "percent", maximumFractionDigits: 1 });
 
 const TAB_KEYS = ["executivo", "catalogo", "recomendacoes", "fontes"] as const;
-const TAB_LABELS = ["Visão executiva", "Catálogo de benefícios", "Recomendações", "Fontes de coleta"];
 
 const STATUS_COLOR: Record<string, string> = {
   Succeeded: "#16a34a",
@@ -129,7 +129,16 @@ const CATEGORY_LABELS: Record<string, string> = {
 };
 
 export default function Reservations() {
-  const [tab, setTab] = useState(0);
+  const [searchParams, setSearchParams] = useSearchParams();
+  const tab = Math.max(0, TAB_KEYS.indexOf((searchParams.get("subtab") as typeof TAB_KEYS[number]) || "executivo"));
+  const setTab = (next: number) => {
+    const key = TAB_KEYS[next];
+    if (!key) return;
+    const updated = new URLSearchParams(searchParams);
+    updated.set("tab", "reservas");
+    updated.set("subtab", key);
+    setSearchParams(updated, { replace: true });
+  };
   const [dash, setDash] = useState<any>(null);
   const [catalog, setCatalog] = useState<any>(null);
   const [sources, setSources] = useState<any>(null);
@@ -347,9 +356,6 @@ export default function Reservations() {
         </Alert>
       )}
 
-      <Tabs value={tab} onChange={(_, v) => setTab(v)} sx={{ mb: 2 }} variant="scrollable" scrollButtons="auto">
-        {TAB_KEYS.map((k, i) => <Tab key={k} label={TAB_LABELS[i]} />)}
-      </Tabs>
 
       {tab === 0 && (
         <Box>
