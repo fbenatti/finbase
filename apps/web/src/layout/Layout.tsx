@@ -1,3 +1,5 @@
+import WorkspaceSearch from "../navigation/WorkspaceSearch";
+import { searchWorkspaceMenus } from "../navigation/workspaceSearch";
 import { useNavigation } from "../navigation/NavigationContext";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Outlet, useNavigate, useLocation } from "react-router-dom";
@@ -89,6 +91,7 @@ import {
   Tag as CarbonTag,
   UserMultiple as CarbonUserMultiple,
   Cloud as CarbonCloud,
+  Search as CarbonSearch,
 } from "@carbon/react/icons";
 
 const DRAWER_WIDTH = 268;
@@ -131,6 +134,8 @@ export default function Layout() {
   const navigate = useNavigate();
   const location = useLocation();
   const currentModule = catalogItems.find(item => item.path === location.pathname);
+  const [menuSearch, setMenuSearch] = useState("");
+  const [searchFocusToken, setSearchFocusToken] = useState(0);
   const [expanded, setExpanded] = useState(true);
   const [mobileOpen, setMobileOpen] = useState(false);
   const [openGroups, setOpenGroups] = useState<string[]>([]);
@@ -140,6 +145,22 @@ export default function Layout() {
   const drawerWidth = expanded ? DRAWER_WIDTH : COLLAPSED_WIDTH;
   const isCarbon = layoutMode === "carbon";
   const pageTheme = useMemo(() => createAppTheme(layoutMode), [layoutMode]);
+  const searchMatches = useMemo(() => searchWorkspaceMenus(catalogItems, menuSearch), [catalogItems, menuSearch]);
+  const matchedPaths = useMemo(() => new Set(searchMatches.map(item => item.path)), [searchMatches]);
+  const displayedMenuGroups = useMemo(() => visibleMenuGroups.map(group => ({ ...group, items: group.items.filter(item => matchedPaths.has(item.path)) })).filter(group => group.items.length > 0), [visibleMenuGroups, matchedPaths]);
+  const searching = Boolean(menuSearch.trim());
+  const openMenuSearch = () => { setExpanded(true); if (isMobile) setMobileOpen(true); setSearchFocusToken(value => value + 1); };
+  const openMenu = (path: string) => { navigate(path); setMenuSearch(""); setMobileOpen(false); };
+  useEffect(() => {
+    const onShortcut = (event: KeyboardEvent) => {
+      if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "k") {
+        event.preventDefault(); setExpanded(true); if (isMobile) setMobileOpen(true); setSearchFocusToken(value => value + 1);
+      }
+    };
+    window.addEventListener("keydown", onShortcut);
+    return () => window.removeEventListener("keydown", onShortcut);
+  }, [isMobile]);
+  const workspaceSearch = <ThemeProvider theme={pageTheme}><WorkspaceSearch value={menuSearch} onChange={setMenuSearch} expanded={isMobile ? mobileOpen : expanded} focusToken={searchFocusToken} count={searchMatches.length} onOpen={openMenuSearch} onEnter={() => { const first = searchMatches.find(item => item.parent_code) || searchMatches[0]; if (first) openMenu(first.path); }} /></ThemeProvider>;
   const skipRouteCancelRef = useRef(true);
 
   useEffect(() => {
@@ -176,9 +197,10 @@ export default function Layout() {
       </Box>
       <Divider />
       <Typography variant="overline" sx={{ px: 2.5, pt: 2, pb: 0.75, color: "text.secondary", fontWeight: 700, letterSpacing: 1.1, display: expanded ? "block" : "none" }}>Workspace</Typography>
+      {workspaceSearch}
       <Box sx={{ flex: 1, overflowY: "auto", px: 1, pb: 1 }}>
-        {visibleMenuGroups.map(group => {
-          const isOpen = openGroups.includes(group.label);
+        {displayedMenuGroups.map(group => {
+          const isOpen = searching || openGroups.includes(group.label);
           const groupActive = group.items.some(item => location.pathname === menuPath(item.path).pathname);
           return <Box key={group.label} sx={{ mb: 0.5 }}>
             <Tooltip title={expanded ? "" : group.label} placement="right">
@@ -194,7 +216,7 @@ export default function Layout() {
               <List disablePadding sx={{ mt: 0.25, mb: 1 }}>
                 {group.items.map(item => {
                   const active = matchesMenuPath(item.path, location.pathname, location.search);
-                  return <ListItemButton key={item.path} selected={active} onClick={() => { navigate(item.path); setMobileOpen(false); }}
+                  return <ListItemButton key={item.path} selected={active} onClick={() => { openMenu(item.path); }}
                     sx={{ minHeight: 38, pl: 2, pr: 1.25, ml: 2.1, borderRadius: 1.4, borderLeft: "2px solid", borderColor: active ? "secondary.main" : "transparent", color: active ? "primary.dark" : "text.secondary", "&.Mui-selected": { bgcolor: "#EAF5F3", color: "#0D6B63" }, "&.Mui-selected:hover": { bgcolor: "#E1F0ED" }, "&:hover": { bgcolor: "#F3F7F8" } }}>
                     <ListItemIcon sx={{ minWidth: 30, color: "inherit" }}>{item.icon}</ListItemIcon>
                     <ListItemText primary={item.label} primaryTypographyProps={{ fontSize: 12.5, fontWeight: active ? 700 : 500, noWrap: true }} />
@@ -215,7 +237,8 @@ export default function Layout() {
   const carbonNavigation = (
     <CarbonSideNav aria-label="Navegação principal" expanded={isMobile ? mobileOpen : expanded} isPersistent={!isMobile} isChildOfHeader>
       <CarbonSideNavItems isSideNavExpanded={isMobile ? mobileOpen : expanded}>
-        {visibleMenuGroups.map(group => {
+        <li className="finbase-workspace-search">{workspaceSearch}</li>
+        {displayedMenuGroups.map(group => {
           const activeGroup = group.items.some(item => menuPath(item.path).pathname === location.pathname);
           const groupIcon = group.label === "Panorama" ? CarbonDashboard
             : group.label === "Alertas" ? CarbonWarning
@@ -228,16 +251,16 @@ export default function Layout() {
           return group.items.length === 1 ? (
             <CarbonSideNavLink key={group.label} href={group.items[0].path} renderIcon={groupIcon}
               isActive={matchesMenuPath(group.items[0].path, location.pathname, location.search)}
-              onClick={() => { navigate(group.items[0].path); setMobileOpen(false); }}>
+              onClick={() => { openMenu(group.items[0].path); }}>
               {group.label}
             </CarbonSideNavLink>
           ) : (
-            <CarbonSideNavMenu key={group.label} title={group.label} renderIcon={groupIcon} isActive={activeGroup}
-              isSideNavExpanded={isMobile ? mobileOpen : expanded} defaultExpanded={openGroups.includes(group.label)}>
+            <CarbonSideNavMenu key={`${group.label}:${menuSearch}`} title={group.label} renderIcon={groupIcon} isActive={activeGroup}
+              isSideNavExpanded={isMobile ? mobileOpen : expanded} defaultExpanded={searching || openGroups.includes(group.label)}>
               {group.items.map(item => (
                 <CarbonSideNavMenuItem key={item.path} href={item.path} as="button"
                   isActive={matchesMenuPath(item.path, location.pathname, location.search)}
-                  onClick={() => { navigate(item.path); setMobileOpen(false); }}>
+                  onClick={() => { openMenu(item.path); }}>
                   {item.label}
                 </CarbonSideNavMenuItem>
               ))}
@@ -256,6 +279,7 @@ export default function Layout() {
             <CarbonHeaderMenuButton aria-label={(isMobile ? mobileOpen : expanded) ? "Recolher menu" : "Abrir menu"} isActive={isMobile ? mobileOpen : expanded} onClick={() => isMobile ? setMobileOpen(value => !value) : setExpanded(value => !value)} />
             <CarbonHeaderName href="/" prefix="" aria-label="finbase.cloud — início"><Box component="img" src="/brand/finbase-logo.svg" alt="finbase.cloud" sx={{ display: "block", width: { xs: 148, sm: 180 }, height: "auto" }} /></CarbonHeaderName>
             <CarbonHeaderGlobalBar>
+              <CarbonHeaderGlobalAction aria-label="Buscar menus e submenus (Ctrl/Cmd + K)" onClick={openMenuSearch}><CarbonSearch size={20} /></CarbonHeaderGlobalAction>
               <Box className="finbase-carbon-layout-switch" role="group" aria-label="Escolher layout">
                 <button type="button" aria-pressed={!isCarbon} onClick={() => setLayoutMode("finbase")}>Finbase</button>
                 <button type="button" aria-pressed={isCarbon} onClick={() => setLayoutMode("carbon")}>Carbon</button>
