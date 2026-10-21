@@ -13,7 +13,7 @@ Atualizado em 21/10/2026, branch `novo_layout`.
 
 ## Mapa completo do menu
 
-Os grupos abaixo são as seções expansíveis da navegação. Cada item listado é uma entrada de submenu com rota e estado próprios.
+Os grupos abaixo são as seções da navegação. Cada item listado é uma entrada de submenu com rota e estado próprios. **Unit Economics** fica como seção vazia, conforme solicitado.
 
 ### Panorama
 
@@ -27,8 +27,8 @@ Os grupos abaixo são as seções expansíveis da navegação. Cada item listado
 ### Planejamento
 
 - **Orçamento e contratos**: histórico do orçamento, história dos contratos e consumo de compromissos (`/financial-planning?tab=dashboard&executive=orcamento|historia-contrato|compromisso`).
-- **Gestão financeira**: orçamentos, acurácia do orçamento, projeções manuais, créditos e defesa orçamentária (`/financial-planning?tab=orcamento|acuracia-orcamento|forecast-manual|carta-credito|defesa-orcamentaria`).
-- **Contabilidade e moeda**: Pedidos SAP e Evolução do dólar (`tab=visao-contabil&subview=pedidos-sap|evolucao-dolar`).
+- **Gestão financeira**: orçamentos, acurácia do orçamento e projeções manuais (`/financial-planning?tab=orcamento|acuracia-orcamento|forecast-manual`). Carta de crédito e Defesa orçamentária foram retiradas do menu.
+- **Contabilidade e moeda**: Evolução do dólar (`tab=visao-contabil&subview=evolucao-dolar`). Pedidos SAP foi retirado do menu.
 - **Acurácia do forecast**: visão, desvios e justificativas (`/forecast-accuracy?aba=visao|desvios|acks`).
 - **Forecast**: configuração e execução, regras de projeção e histórico de projeções (`/forecast?tab=config|rules|history`).
 
@@ -37,7 +37,7 @@ Os grupos abaixo são as seções expansíveis da navegação. Cada item listado
 - **Savings**: ações de economia e compromissos e compras (`/savings?tab=calcular|compras-compromissos`).
 - **Desligamento programado**: painel, governança e exceções (`tab=desligue&subview=dashboard|governance|exceptions`).
 - **Recursos órfãos**: recursos atuais e economia gerada (`tab=orfaos&subview=current|savings`).
-- **Reservas**: visão executiva, catálogo, recomendações e fontes de coleta (`/governance?tab=reservas&subtab=executivo|catalogo|recomendacoes|fontes`).
+- As entradas de **Reservas Azure** foram retiradas do menu; as rotas continuam registradas e podem ser abertas diretamente.
 
 ### Dados e operação
 
@@ -49,11 +49,11 @@ Os grupos abaixo são as seções expansíveis da navegação. Cada item listado
 ### Governança
 
 - Organização (`/governance?tab=organization`), classificação de projetos (`tab=classification`), regras de ajustes (`tab=rules&subtab=adjustments`), reservas e Savings Plans (`tab=rules&subtab=clone-rules`), contratos e compromissos (`tab=financial-contracts`) e cubos analíticos (`tab=cost-relationship`).
-- **Tags**: painel executivo, políticas Azure e mapeamentos (`tab=tags&subtab=executive|policies|mapping`). Modos de formato/edição dentro da política permanecem controles locais.
+- As entradas de **Tags Automatizadas** foram retiradas do menu; suas rotas continuam registradas e podem ser abertas diretamente. Modos de formato/edição dentro da política permanecem controles locais.
 
 ### Administração
 
-- **Iniciativas**: portal de iniciativas, fila priorizada, canvas de entrega e resultados das iniciativas (`/ideas?tab=portal|backlog|canvas|dashboard`). Acesso condicionado à permissão de ideias.
+- **Ideias/Iniciativas** foram retiradas do menu. A rota `/ideas` continua registrada e protegida pela permissão de ideias.
 - **Acessos**: pessoas e acessos, grupos e funções/permissões (`/admin?tab=users|groups|roles`). Cada entrada respeita as permissões correspondentes.
 - **Auditoria e autenticação**: trilha de auditoria (`/admin/audit`) e login corporativo (`/admin/sso`).
 
