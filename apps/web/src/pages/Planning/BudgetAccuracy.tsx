@@ -293,11 +293,11 @@ export default function BudgetAccuracy() {
   return (
     <Box
       sx={{
-        mx: -3,
-        mt: -3,
-        p: 3,
-        minHeight: "calc(100vh - 64px)",
-        bgcolor: "#f8fafc",
+        
+        
+        minWidth: 0,
+        
+        
       }}
     >
       <Typography variant="h4">Acurácia de Orçamento</Typography>

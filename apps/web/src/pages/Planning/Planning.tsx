@@ -11,6 +11,9 @@ import {
   DialogTitle,
   FormControl,
   InputLabel,
+  InputAdornment,
+  IconButton,
+  Menu,
   MenuItem,
   Paper,
   Select,
@@ -20,15 +23,10 @@ import {
   Typography,
 } from "@mui/material";
 import {
-  Add,
-  CloudDownload,
-  Edit,
-  ExpandLess,
-  ExpandMore,
-  Restore,
-  Save,
-  UploadFile,
-} from "@mui/icons-material";
+  Add, Download as CloudDownload, Edit, ChevronUp as ExpandLess,
+  ChevronDown as ExpandMore, Reset as Restore, Save,
+  Upload as UploadFile, Search,
+} from "@carbon/react/icons";
 import { DataGrid, GridColDef } from "@mui/x-data-grid";
 import * as XLSX from "xlsx";
 import {
@@ -147,6 +145,7 @@ export default function Planning({
 }: PlanningModuleProps) {
   const currentYear = new Date().getFullYear();
   const fileInput = useRef<HTMLInputElement>(null);
+  const [exportAnchor, setExportAnchor] = useState<HTMLElement | null>(null);
   const { hasPerm } = useAuth();
   const isDefense = type === "defesa-orcamentaria";
   const canRequestDefense =
@@ -548,17 +547,19 @@ export default function Planning({
   const columns: GridColDef[] = [
     {
       field: "actions",
-      headerName: "",
-      width: 52,
+      headerName: "Ações",
+      width: 72,
+      align: "center",
+      headerAlign: "center",
       sortable: false,
       filterable: false,
       disableColumnMenu: true,
       renderCell: ({ row }: { row: DisplayRow }) => (
-        <Tooltip title={editable ? "Editar valores" : "Snapshot somente leitura"}>
+        <Tooltip title={editable ? "Editar valores" : "Versão somente leitura"}>
           <span>
-            <Button size="small" sx={{ minWidth: 36, px: 0 }} disabled={!editable} onClick={() => openEdit(row)}>
-              <Edit fontSize="small" />
-            </Button>
+            <IconButton aria-label={`Editar valores de ${row.name}`} disabled={!editable || loading || saving} onClick={() => openEdit(row)}>
+              <Edit size={20} />
+            </IconButton>
           </span>
         </Tooltip>
       ),
@@ -566,13 +567,15 @@ export default function Planning({
     {
       field: "name",
       headerName: "Hierarquia organizacional",
-      minWidth: 330,
+      minWidth: 320,
       flex: 1.2,
+      cellClassName: "planning-hierarchy",
       renderCell: ({ row }: { row: DisplayRow }) => (
-        <Stack direction="row" alignItems="center" sx={{ pl: row.depth * 2 }}>
-          <Button
-            size="small"
-            sx={{ minWidth: 30, px: 0 }}
+        <Stack direction="row" alignItems="center" sx={{ pl: row.depth * 1.5, minWidth: 0, width: "100%" }}>
+          <IconButton
+            aria-label={`${expanded.has(row.department_id) ? "Recolher" : "Expandir"} ${row.name}`}
+            aria-expanded={expanded.has(row.department_id)}
+            sx={{ flexShrink: 0, width: 32, height: 32, visibility: departments.some(item => item.parent_id === row.department_id) ? "visible" : "hidden" }}
             onClick={() =>
               setExpanded((value) => {
                 const next = new Set(value);
@@ -584,10 +587,10 @@ export default function Planning({
               })
             }
           >
-            {expanded.has(row.department_id) ? <ExpandLess /> : <ExpandMore />}
-          </Button>
+            {expanded.has(row.department_id) ? <ExpandLess size={16} /> : <ExpandMore size={16} />}
+          </IconButton>
           <Tooltip title={row.name}>
-            <Typography noWrap fontWeight={600}>
+            <Typography variant="body2" noWrap fontWeight={row.depth < 2 ? 600 : 400}>
               {row.name}
             </Typography>
           </Tooltip>
@@ -618,7 +621,7 @@ export default function Planning({
       (month, i): GridColDef => ({
         field: month,
         headerName: `${month} ${year}`,
-        width: 112,
+        width: 136,
         type: "number",
         valueGetter: (_value, row: DisplayRow) => row.accumulated[i],
         valueFormatter: (value) => money(Number(value)),
@@ -648,29 +651,15 @@ export default function Planning({
     XLSX.writeFile(workbook, `orcamento-${type}-${year}.xlsx`);
   };
   return (
-    <Box
-      sx={{
-        mx: -3,
-        mt: -3,
-        pb: 3,
-        minHeight: "calc(100vh - 64px)",
-        bgcolor: "#f8fafc",
-      }}
-    >
-      <Box
-        sx={{
-          px: 3,
-          pt: 3,
-          pb: 2,
-          bgcolor: "background.paper",
-          borderBottom: 1,
-          borderColor: "divider",
-        }}
-      >
-        <Typography variant="h4">{title}</Typography>
-        <Typography color="text.secondary">{help}</Typography>
-      </Box>
-      <Box sx={{ p: 3 }}>
+    <Box sx={{ minWidth: 0 }}>
+      <Stack direction="row" alignItems="center" justifyContent="space-between" gap={2} sx={{ mb: 3 }}>
+        <Box>
+          <Typography variant="h4" component="h1" sx={{ mb: 0.75 }}>{title}</Typography>
+          <Typography variant="body2" color="text.secondary">{help}</Typography>
+        </Box>
+        <Chip variant="outlined" label={snapshotId ? "Versão histórica" : "Versão atual"} />
+      </Stack>
+      <Box>
         {error && (
           <Alert severity="error" sx={{ mb: 2 }} onClose={() => setError("")}>
             {dataDisplayText(error)}
@@ -709,130 +698,38 @@ export default function Planning({
             }}
           />
         )}
-        <Paper variant="outlined" sx={{ p: 2 }}>
-          <Stack
-            direction="row"
-            justifyContent="space-between"
-            gap={2}
-            flexWrap="wrap"
-            sx={{ mb: 2 }}
-          >
-            <Stack direction="row" gap={1} flexWrap="wrap">
-              <FormControl sx={{ minWidth: 120 }}>
-                <InputLabel>Ano</InputLabel>
-                <Select
-                  label="Ano"
-                  value={String(year)}
-                  onChange={(e) => setYear(Number(e.target.value))}
-                >
-                  {years.map((value) => (
-                    <MenuItem key={value} value={String(value)}>
-                      {value}
-                    </MenuItem>
-                  ))}
+        <Paper variant="outlined" sx={{ overflow: "hidden" }}>
+          <Box sx={{ px: { xs: 2, md: 3 }, py: 2, borderBottom: 1, borderColor: "divider" }}>
+            <Typography variant="h6">Distribuição mensal</Typography>
+            <Typography variant="body2" color="text.secondary">Valores em reais por departamento. Expanda a hierarquia para consultar e editar cada nível.</Typography>
+          </Box>
+          <Stack direction={{ xs: "column", sm: "row" }} gap={2} flexWrap="wrap" sx={{ p: { xs: 2, md: 3 }, pb: 2 }}>
+            <Stack direction="row" gap={0.5} alignItems="center">
+              <FormControl sx={{ minWidth: 112 }}>
+                <InputLabel id="planning-year-label">Ano</InputLabel>
+                <Select labelId="planning-year-label" label="Ano" value={String(year)} onChange={(e) => setYear(Number(e.target.value))}>
+                  {years.map(value => <MenuItem key={value} value={String(value)}>{value}</MenuItem>)}
                 </Select>
               </FormControl>
-              <Button
-                startIcon={<Add />}
-                onClick={() => {
-                  setNewYear(String(year + 1));
-                  setAddYearOpen(true);
-                }}
-              >
-                Adicionar ano
-              </Button>
-              <FormControl sx={{ minWidth: 230 }}>
-                <InputLabel>Snapshot</InputLabel>
-                <Select
-                  label="Snapshot"
-                  value={snapshotId}
-                  onChange={(e) => setSnapshotId(String(e.target.value))}
-                >
-                  <MenuItem value="">
-                    Versão atual
-                    {currentVersion ? ` · v${currentVersion.version}` : ""}
-                  </MenuItem>
-                  {versions
-                    .filter((version) => !version.is_current)
-                    .map((version) => (
-                      <MenuItem key={version.id} value={String(version.id)}>
-                        v{version.version} · {version.title || version.source}
-                      </MenuItem>
-                    ))}
-                </Select>
-              </FormControl>
+              <Tooltip title="Adicionar ano">
+                <IconButton aria-label="Adicionar ano" onClick={() => { setNewYear(String(year + 1)); setAddYearOpen(true); }}><Add size={20} /></IconButton>
+              </Tooltip>
             </Stack>
-            <Stack direction="row" gap={1} flexWrap="wrap">
-              <Button
-                startIcon={<CloudDownload />}
-                onClick={async () => {
-                  const blob = await downloadPlanningTemplate(year),
-                    link = document.createElement("a");
-                  link.href = URL.createObjectURL(blob);
-                  link.download = `modelo-${type}-${year}.xlsx`;
-                  link.click();
-                }}
-              >
-                Modelo Excel
-              </Button>
-              {budget && (
-                <Button
-                  startIcon={<CloudDownload />}
-                  onClick={async () => {
-                    const blob = await downloadSimulatedBudget(year),
-                      link = document.createElement("a");
-                    link.href = URL.createObjectURL(blob);
-                    link.download = `forecast-simulado-${year}.xlsx`;
-                    link.click();
-                  }}
-                >
-                  Forecast simulado
-                </Button>
-              )}
-              <Button
-                startIcon={<UploadFile />}
-                disabled={!editable || !gridReady}
-                onClick={() => fileInput.current?.click()}
-              >
-                Importar
-              </Button>
-              <Button
-                startIcon={<CloudDownload />}
-                disabled={!gridReady || loading}
-                onClick={() => {
-                  setExportYear(year);
-                  setExportOpen(true);
-                }}
-              >
-                Exportar orçamento
-              </Button>
-              <Button
-                variant="contained"
-                startIcon={<Save />}
-                disabled={!editable || !gridReady}
-                onClick={() => startPublish("save")}
-              >
-                {isDefense ? "Salvar" : "Publicar"}
-              </Button>
-              <input
-                ref={fileInput}
-                hidden
-                type="file"
-                accept=".xlsx"
-                onChange={chooseFile}
-              />
-            </Stack>
+            <FormControl sx={{ minWidth: 240, flex: { xs: 1, md: "0 1 320px" } }}>
+              <InputLabel id="planning-version-label">Versão do planejamento</InputLabel>
+              <Select labelId="planning-version-label" label="Versão do planejamento" value={snapshotId} onChange={e => setSnapshotId(String(e.target.value))} displayEmpty>
+                <MenuItem value="">Versão atual{currentVersion ? ` · v${currentVersion.version}` : ""}</MenuItem>
+                {versions.filter(version => !version.is_current).map(version => <MenuItem key={version.id} value={String(version.id)}>v{version.version} · {version.title || version.source}</MenuItem>)}
+              </Select>
+            </FormControl>
           </Stack>
-          <Alert severity="info" sx={{ mb: 2 }}>
-            Legenda: <b>branco</b> = valores apenas de filhos · <b>verde</b> =
-            valor próprio · <b>laranja</b> = valor próprio somado aos filhos.
-          </Alert>
           {(type === "orcamento" || type === "defesa-orcamentaria") && (
-            <Stack direction="row" gap={1.5} sx={{ mb: 2 }} flexWrap="wrap">
-              <FormControl sx={{ minWidth: 180 }} disabled={Boolean(defenseRequest)}>
-                <InputLabel>Cloud</InputLabel>
+            <Stack direction="row" gap={1.5} sx={{ px: { xs: 2, md: 3 }, pb: 2 }} flexWrap="wrap">
+              <FormControl sx={{ minWidth: 180, flex: { xs: 1, md: "0 1 220px" } }} disabled={Boolean(defenseRequest)}>
+                <InputLabel id="planning-cloud-label">Provedor</InputLabel>
                 <Select
-                  label="Cloud"
+                  labelId="planning-cloud-label"
+                  label="Provedor"
                   value={cloudFilter}
                   onChange={(event) => {
                     setCloudFilter(String(event.target.value));
@@ -849,16 +746,17 @@ export default function Planning({
                   ))}
                 </Select>
               </FormControl>
-              <FormControl sx={{ minWidth: 220 }} disabled={!cloudFilter || Boolean(defenseRequest)}>
-                <InputLabel>ID Orçamento</InputLabel>
+              <FormControl sx={{ minWidth: 220, flex: { xs: 1, md: "0 1 320px" } }} disabled={!cloudFilter || Boolean(defenseRequest)}>
+                <InputLabel id="planning-budget-label">ID do orçamento</InputLabel>
                 <Select
-                  label="ID Orçamento"
+                  labelId="planning-budget-label"
+                  label="ID do orçamento"
                   value={idOrcamentoFilter}
                   onChange={(event) =>
                     setIdOrcamentoFilter(String(event.target.value))
                   }
                 >
-                  <MenuItem value="">Todos da Cloud</MenuItem>
+                  <MenuItem value="">Todos do provedor</MenuItem>
                   {Array.from(
                     new Set(
                       scopes
@@ -876,64 +774,43 @@ export default function Planning({
           )}
           {gridReady ? (
             <>
-              <Stack
-                direction="row"
-                gap={2}
-                flexWrap="wrap"
-                alignItems="center"
-                sx={{ mb: 2 }}
-              >
-                <Typography variant="body2" fontWeight={700} color="text.secondary">
-                  Legenda
-                </Typography>
-                {[
-                  {
-                    swatch: "#ffffff",
-                    border: "#cfd8e3",
-                    label: "Somente valores dos filhos",
-                  },
-                  {
-                    swatch: "#e8f5e9",
-                    border: "#a5d6a7",
-                    label: "Valor próprio do nó",
-                  },
-                  {
-                    swatch: "#fff3e0",
-                    border: "#ffcc80",
-                    label: "Valor próprio somado aos filhos",
-                  },
-                ].map((item) => (
-                  <Stack
-                    key={item.label}
-                    direction="row"
-                    alignItems="center"
-                    gap={0.75}
-                  >
-                    <Box
-                      sx={{
-                        width: 16,
-                        height: 16,
-                        borderRadius: "4px",
-                        bgcolor: item.swatch,
-                        border: `1px solid ${item.border}`,
-                        flexShrink: 0,
-                      }}
-                    />
-                    <Typography variant="body2" color="text.secondary">
-                      {item.label}
-                    </Typography>
-                  </Stack>
-                ))}
+              <Stack direction={{ xs: "column", lg: "row" }} justifyContent="space-between" gap={2} sx={{ p: 2, bgcolor: "background.default", borderTop: 1, borderBottom: 1, borderColor: "divider" }}>
+                <TextField
+                  label="Buscar departamento"
+                  value={search}
+                  onChange={e => setSearch(e.target.value)}
+                  InputProps={{ startAdornment: <InputAdornment position="start"><Search size={20} /></InputAdornment> }}
+                  sx={{ width: { xs: "100%", lg: 300 }, bgcolor: "background.paper" }}
+                />
+                <Stack direction="row" gap={1} flexWrap="wrap" alignItems="center">
+                  <Button variant="outlined" startIcon={<UploadFile size={20} />} disabled={!editable || !gridReady || loading || saving} onClick={() => fileInput.current?.click()}>Importar</Button>
+                  <Button variant="outlined" startIcon={<CloudDownload size={20} />} endIcon={<ExpandMore size={16} />} aria-controls={exportAnchor ? "planning-export-menu" : undefined} aria-haspopup="menu" aria-expanded={Boolean(exportAnchor)} onClick={e => setExportAnchor(e.currentTarget)}>Exportar</Button>
+                  <Button variant="contained" startIcon={<Save size={20} />} disabled={!editable || !gridReady || loading || saving} onClick={() => startPublish("save")}>{isDefense ? "Salvar alterações" : "Publicar versão"}</Button>
+                </Stack>
               </Stack>
-              <TextField
-                label="Buscar departamento"
-                value={search}
-                onChange={(e) => setSearch(e.target.value)}
-                sx={{ mb: 2, minWidth: 330 }}
-              />
+              <Menu id="planning-export-menu" anchorEl={exportAnchor} open={Boolean(exportAnchor)} onClose={() => setExportAnchor(null)}>
+                <MenuItem disabled={!gridReady || loading} onClick={() => { setExportAnchor(null); setExportYear(year); setExportOpen(true); }}>Exportar valores do orçamento</MenuItem>
+                <MenuItem onClick={async () => {
+                  setExportAnchor(null);
+                  try {
+                    const blob = await downloadPlanningTemplate(year);
+                    const url = URL.createObjectURL(blob), link = document.createElement("a");
+                    link.href = url; link.download = `modelo-${type}-${year}.xlsx`; link.click(); URL.revokeObjectURL(url);
+                  } catch (error) { setError(String(error)); }
+                }}>Baixar modelo Excel</MenuItem>
+                {budget && <MenuItem onClick={async () => {
+                  setExportAnchor(null);
+                  try {
+                    const blob = await downloadSimulatedBudget(year);
+                    const url = URL.createObjectURL(blob), link = document.createElement("a");
+                    link.href = url; link.download = `forecast-simulado-${year}.xlsx`; link.click(); URL.revokeObjectURL(url);
+                  } catch (error) { setError(String(error)); }
+                }}>Baixar projeção simulada</MenuItem>}
+              </Menu>
+              <input ref={fileInput} hidden type="file" accept=".xlsx" aria-label="Importar planilha de planejamento" onChange={chooseFile} />
               {snapshotId && (
                 <Alert severity="info" sx={{ mb: 2 }}>
-                  Snapshot histórico em modo somente leitura.
+                  Versão histórica em modo somente leitura.
                 </Alert>
               )}
               {!departments.length ? (
@@ -941,18 +818,20 @@ export default function Planning({
               ) : (
                 <Box
                   sx={{
-                    "& .planning-empty": { bgcolor: "#fff" },
-                    "& .planning-own": { bgcolor: "#e8f5e9" },
-                    "& .planning-mixed": { bgcolor: "#fff3e0" },
+                    height: 520,
+                    width: "100%",
+                    "& .planning-own .planning-hierarchy": { borderLeft: "3px solid #24a148", bgcolor: "#defbe6" },
+                    "& .planning-mixed .planning-hierarchy": { borderLeft: "3px solid #f1c21b", bgcolor: "#fff1c7" },
                   }}
                 >
                   <DataGrid
                     rows={scopedRows}
                     columns={columns}
                     loading={loading}
-                    autoHeight
-                    disableVirtualization
-                    hideFooter
+                    aria-label={`${title} por departamento e mês`}
+                    pageSizeOptions={[25, 50, 100]}
+                    initialState={{ pagination: { paginationModel: { page: 0, pageSize: 25 } } }}
+                    sx={{ border: 0, borderRadius: 0, "& .MuiDataGrid-cell:focus-within, & .MuiDataGrid-columnHeader:focus-within": { outline: "2px solid", outlineColor: "primary.main", outlineOffset: -2 } }}
                     getRowClassName={({ row }) => {
                       const item = row as DisplayRow;
                       return !item.hasOwn
@@ -972,9 +851,19 @@ export default function Planning({
               defesa. Você também pode escolher uma solicitação na lista acima.
             </Alert>
           )}
+          <Stack direction="row" gap={2} flexWrap="wrap" sx={{ px: 2, py: 1.5, borderTop: 1, borderColor: "divider" }}>
+            <Typography variant="caption" color="text.secondary">Composição dos valores</Typography>
+            {[{ color: "#e0e0e0", label: "Somente filhos" }, { color: "#24a148", label: "Valor próprio" }, { color: "#f1c21b", label: "Próprio + filhos" }].map(item => (
+              <Stack key={item.label} direction="row" alignItems="center" gap={0.75}>
+                <Box sx={{ width: 8, height: 8, bgcolor: item.color }} />
+                <Typography variant="caption" color="text.secondary">{item.label}</Typography>
+              </Stack>
+            ))}
+          </Stack>
         </Paper>
         <Paper variant="outlined" sx={{ mt: 2, p: 2 }}>
-          <Typography variant="h6">Linha do tempo do ano</Typography>
+          <Typography variant="h6">Histórico de versões</Typography>
+          <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>Publicações e revisões do planejamento de {year}.</Typography>
           {timeline.length === 0 ? (
             <Typography color="text.secondary" sx={{ mt: 1 }}>
               Ainda não há movimentações para {year}.

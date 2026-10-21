@@ -10,9 +10,9 @@ import DollarEvolution from "./DollarEvolution";
 
 const TABS = [
   { code: "dashboard", label: "Dashboard Executivo", title: "Dashboard Executivo", help: "Histórico consolidado do planejamento financeiro." },
-  { code: "orcamento", label: "Cadastro Orçamentário", title: "Orçamento", help: "Valores aprovados e carregados por departamento.", budget: true },
+  { code: "orcamento", label: "Cadastro Orçamentário", title: "Orçamentos", help: "Valores aprovados e carregados por departamento.", budget: true },
   { code: "acuracia-orcamento", label: "Acurácia de Orçamento", title: "Acurácia de Orçamento", help: "Orçamento vigente contra o realizado por mês." },
-  { code: "forecast-manual", label: "Forecast Manual", title: "Forecast Manual", help: "Projeções mensais inseridas manualmente." },
+  { code: "forecast-manual", label: "Forecast Manual", title: "Projeções manuais", help: "Projeções mensais inseridas manualmente." },
   // Temporariamente oculto na interface; implementação e rota permanecem disponíveis.
   // { code: "base-line-contratual", label: "Base Line Contratual", title: "Base Line Contratual", help: "Referência financeira contratual por departamento." },
   { code: "carta-credito", label: "Carta de Credito", title: "Carta de Credito", help: "Créditos planejados por departamento." },
@@ -32,12 +32,12 @@ export default function FinancialPlanning() {
   const executiveSubtab = legacyCommitmentTab ? "compromisso" : legacyStoryTab ? "historia-contrato" : searchParams.get("executive") || "orcamento";
 
   return (
-    <Box sx={{ mx: -3, mt: -3 }}>
-      <Box sx={{ m: 3 }}>
-        <Typography variant="h4" sx={{ mb: 0.5 }}>
+    <Box sx={{ minWidth: 0 }}>
+      <Box>
+        {active.code === "visao-contabil" && <><Typography variant="h4" sx={{ mb: 0.5 }}>
           {active.code === "dashboard" && executiveSubtab === "historia-contrato" ? "História dos contratos" : active.code === "dashboard" && executiveSubtab === "compromisso" ? "Consumo de compromissos" : active.title}
         </Typography>
-        <Typography color="text.secondary" sx={{ mb: 2 }}>{active.help}</Typography>
+        <Typography color="text.secondary" sx={{ mb: 2 }}>{active.help}</Typography></>}
         {active.code === "acuracia-orcamento" ? (
           <BudgetAccuracy />
         ) : active.code === "visao-contabil" ? (
