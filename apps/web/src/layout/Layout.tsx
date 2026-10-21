@@ -154,6 +154,14 @@ const menuPath = (target: string) => {
   const url = new URL(target, window.location.origin);
   return { pathname: url.pathname, search: url.search };
 };
+const matchesMenuPath = (target: string, pathname: string, search: string) => {
+  const route = menuPath(target);
+  if (pathname !== route.pathname) return false;
+  const expected = new URLSearchParams(route.search);
+  const actual = new URLSearchParams(search);
+  if (expected.size === 0) return actual.size === 0;
+  return Array.from(expected.entries()).every(([key, value]) => actual.get(key) === value);
+};
 
 export default function Layout() {
   const theme = useTheme();
@@ -191,8 +199,7 @@ export default function Layout() {
   }, [location.pathname]);
 
   const currentLabel = visibleMenuGroups.flatMap(group => group.items).find(item => {
-    const target = menuPath(item.path);
-    return location.pathname === target.pathname && (!target.search || location.search === target.search);
+    return matchesMenuPath(item.path, location.pathname, location.search);
   })?.label ?? "Workspace";
 
   const toggleGroup = (label: string) => setOpenGroups(current =>
@@ -224,8 +231,7 @@ export default function Layout() {
             <Collapse in={expanded && isOpen} timeout="auto" unmountOnExit>
               <List disablePadding sx={{ mt: 0.25, mb: 1 }}>
                 {group.items.map(item => {
-                  const target = menuPath(item.path);
-                  const active = location.pathname === target.pathname && (!target.search || location.search === target.search);
+                  const active = matchesMenuPath(item.path, location.pathname, location.search);
                   return <ListItemButton key={item.path} selected={active} onClick={() => { navigate(item.path); setMobileOpen(false); }}
                     sx={{ minHeight: 38, pl: 2, pr: 1.25, ml: 2.1, borderRadius: 1.4, borderLeft: "2px solid", borderColor: active ? "secondary.main" : "transparent", color: active ? "primary.dark" : "text.secondary", "&.Mui-selected": { bgcolor: "#EAF5F3", color: "#0D6B63" }, "&.Mui-selected:hover": { bgcolor: "#E1F0ED" }, "&:hover": { bgcolor: "#F3F7F8" } }}>
                     <ListItemIcon sx={{ minWidth: 30, color: "inherit" }}>{item.icon}</ListItemIcon>
