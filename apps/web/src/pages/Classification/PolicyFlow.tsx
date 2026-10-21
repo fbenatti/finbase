@@ -1,5 +1,6 @@
+import { Dialog, DialogContent, DialogTitle } from "../../components/FinbaseDialog";
 import { useMemo, useState, type CSSProperties } from "react";
-import { Accordion, AccordionDetails, AccordionSummary, Alert, Box, Chip, Dialog, DialogContent, DialogTitle, IconButton, Typography } from "@mui/material";
+import { Accordion, AccordionDetails, AccordionSummary, Alert, Box, Chip, IconButton, Typography } from "@mui/material";
 import { Close, ExpandMore } from "@mui/icons-material";
 import { Background, BackgroundVariant, Controls, MarkerType, MiniMap, ReactFlow, type Edge, type Node } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";

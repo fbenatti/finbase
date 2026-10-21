@@ -183,6 +183,7 @@ export default function Layout() {
   useEffect(() => {
     window.localStorage.setItem(LAYOUT_STORAGE_KEY, layoutMode);
     document.documentElement.dataset.finbaseLayout = layoutMode;
+    window.dispatchEvent(new Event("finbase:layout-change"));
   }, [layoutMode]);
 
   const toggleGroup = (label: string) => setOpenGroups(current =>

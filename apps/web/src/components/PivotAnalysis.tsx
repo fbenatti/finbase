@@ -1,11 +1,8 @@
+import { Dialog, DialogActions, DialogContent, DialogTitle } from "./FinbaseDialog";
 import DataGrid from "./FinbaseDataGrid";
 import { dataDisplayText } from "../utils/dataPresentation";
 import { DragEvent, useEffect, useMemo, useRef, useState } from "react";
-import {
-  Alert, Autocomplete, Box, Button, Chip, CircularProgress, Dialog, DialogActions, DialogContent, DialogTitle, Divider, Drawer, FormControl, IconButton, InputLabel,
-  MenuItem, Paper, Select, Stack, Table, TableBody, TableCell, TableContainer,
-  TableHead, TableRow, TextField, Typography,
-} from "@mui/material";
+import { Alert, Autocomplete, Box, Button, Chip, CircularProgress, Divider, Drawer, FormControl, IconButton, InputLabel, MenuItem, Paper, Select, Stack, Table, TableBody, TableCell, TableContainer, TableHead, TableRow, TextField, Typography } from "@mui/material";
 import { GridColDef, GridPaginationModel } from "@mui/x-data-grid";
 import { Add, Close, CompareArrows, ContentCopy, Delete, Download, OpenInFull, PlayArrow, Save, TableChart, Visibility } from "./FinbaseIcons";
 import * as XLSX from "xlsx";

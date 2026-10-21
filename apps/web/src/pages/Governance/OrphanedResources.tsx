@@ -1,11 +1,8 @@
+import { Dialog, DialogActions, DialogContent, DialogTitle } from "../../components/FinbaseDialog";
 import { dataDisplayText } from "../../utils/dataPresentation";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useMenuSearchParams as useSearchParams } from "../../navigation/useMenuSearchParams";
-import {
-  Alert, Box, Button, Chip, CircularProgress, Dialog, DialogActions, DialogContent,
-  DialogTitle, IconButton, Paper, Stack, Table, TableBody, TableCell, TableContainer,
-  TableHead, TableRow, Tooltip, Typography,
-} from "@mui/material";
+import { Alert, Box, Button, Chip, CircularProgress, IconButton, Paper, Stack, Table, TableBody, TableCell, TableContainer, TableHead, TableRow, Tooltip, Typography } from "@mui/material";
 import { ContentCopy, InfoOutlined, ManageSearch, Restore, VerifiedUser, Visibility } from "@mui/icons-material";
 import {
   getOrphans, getOrphanSavings, getOrphanSummary, setOrphanAnnotation,

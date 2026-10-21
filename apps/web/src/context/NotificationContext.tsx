@@ -1,23 +1,7 @@
+import { Dialog, DialogContent, DialogTitle } from "../components/FinbaseDialog";
 import { dataDisplayText } from "../utils/dataPresentation";
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
-import {
-  Alert,
-  AlertColor,
-  Badge,
-  Box,
-  Button,
-  Chip,
-  CircularProgress,
-  Dialog,
-  DialogContent,
-  DialogTitle,
-  Divider,
-  IconButton,
-  LinearProgress,
-  Snackbar,
-  Stack,
-  Typography,
-} from "@mui/material";
+import { Alert, AlertColor, Badge, Box, Button, Chip, CircularProgress, Divider, IconButton, LinearProgress, Snackbar, Stack, Typography } from "@mui/material";
 import { Close, DeleteOutline, Notifications, Stop } from "@mui/icons-material";
 import {
   cancelEtl,

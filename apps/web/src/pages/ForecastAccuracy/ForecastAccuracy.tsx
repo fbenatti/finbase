@@ -1,13 +1,9 @@
+import { Dialog, DialogActions, DialogContent, DialogTitle } from "../../components/FinbaseDialog";
 import { dataDisplayText } from "../../utils/dataPresentation";
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Plot from "@/components/Plot";
 import { useMenuSearchParams as useSearchParams } from "../../navigation/useMenuSearchParams";
-import {
-  Alert, Box, Breadcrumbs, Button, Chip, CircularProgress, Dialog, DialogActions, DialogContent, DialogTitle, FormControl, Grid, IconButton,
-  InputLabel, LinearProgress, Link, MenuItem,
-  Paper, Select, Stack, Table, TableBody, TableCell, TableContainer, TableHead,
-  TableRow, TextField, Typography,
-} from "@mui/material";
+import { Alert, Box, Breadcrumbs, Button, Chip, CircularProgress, FormControl, Grid, IconButton, InputLabel, LinearProgress, Link, MenuItem, Paper, Select, Stack, Table, TableBody, TableCell, TableContainer, TableHead, TableRow, TextField, Typography } from "@mui/material";
 import { Add, ArrowBack, Remove } from "@mui/icons-material";
 import DepartmentTreePicker, { flattenDepartments } from "../../components/DepartmentTreePicker";
 import DesviosTab from "./DesviosTab";

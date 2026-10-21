@@ -1,24 +1,8 @@
+import { Dialog, DialogActions, DialogContent, DialogTitle } from "../../components/FinbaseDialog";
 import DataGrid from "../../components/FinbaseDataGrid";
 import { dataDisplayText } from "../../utils/dataPresentation";
 import { useEffect, useMemo, useState } from "react";
-import {
-  Alert,
-  Box,
-  Button,
-  Chip,
-  Dialog,
-  DialogActions,
-  DialogContent,
-  DialogTitle,
-  FormControl,
-  InputLabel,
-  MenuItem,
-  Paper,
-  Select,
-  Stack,
-  TextField,
-  Typography,
-} from "@mui/material";
+import { Alert, Box, Button, Chip, FormControl, InputLabel, MenuItem, Paper, Select, Stack, TextField, Typography } from "@mui/material";
 import { CloudUpload, Delete, Save } from "./ConnectionIcons";
 import { GridColDef } from "@mui/x-data-grid";
 import {

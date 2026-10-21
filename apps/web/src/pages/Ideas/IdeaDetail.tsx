@@ -1,9 +1,7 @@
+import { Dialog, DialogActions, DialogContent, DialogTitle } from "../../components/FinbaseDialog";
 import { dataDisplayText } from "../../utils/dataPresentation";
 import { useEffect, useState } from "react";
-import {
-  Alert, Autocomplete, Box, Button, Chip, Dialog, DialogActions, DialogContent, DialogTitle,
-  Divider, FormControl, InputLabel, MenuItem, Select, Stack, TextField, Typography,
-} from "@mui/material";
+import { Alert, Autocomplete, Box, Button, Chip, Divider, FormControl, InputLabel, MenuItem, Select, Stack, TextField, Typography } from "@mui/material";
 import { ThumbDown, ThumbUp } from "@mui/icons-material";
 import RecordHistory from "../../components/RecordHistory";
 import { useAuth } from "../../auth/AuthContext";

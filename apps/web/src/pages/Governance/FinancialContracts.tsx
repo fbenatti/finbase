@@ -1,11 +1,7 @@
+import { Dialog, DialogActions, DialogContent, DialogTitle } from "../../components/FinbaseDialog";
 import { dataDisplayText } from "../../utils/dataPresentation";
 import { useEffect, useState } from "react";
-import {
-  Alert, Box, Button, Checkbox, Chip, Dialog, DialogActions, DialogContent,
-  DialogTitle, FormControl, InputLabel, ListItemText, MenuItem, OutlinedInput,
-  Select, Table, TableBody, TableCell, TableHead, TableRow, TextField,
-  FormHelperText, Typography,
-} from "@mui/material";
+import { Alert, Box, Button, Checkbox, Chip, FormControl, InputLabel, ListItemText, MenuItem, OutlinedInput, Select, Table, TableBody, TableCell, TableHead, TableRow, TextField, FormHelperText, Typography } from "@mui/material";
 import { Add } from "@mui/icons-material";
 import {
   createFinancialContract, FinancialContract, FinancialContractScope,

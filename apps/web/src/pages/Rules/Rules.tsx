@@ -1,11 +1,7 @@
+import { Dialog, DialogTitle, DialogContent, DialogActions } from "../../components/FinbaseDialog";
 import { dataDisplayText } from "../../utils/dataPresentation";
 import { useState, useEffect } from "react";
-import {
-  Box, Typography, Button, IconButton, Chip,
-  Dialog, DialogTitle, DialogContent, DialogActions, TextField,
-  Select, MenuItem, FormControl, InputLabel, Switch, FormControlLabel,
-  Alert, CircularProgress, Divider, Paper, Autocomplete,
-} from "@mui/material";
+import { Box, Typography, Button, IconButton, Chip, TextField, Select, MenuItem, FormControl, InputLabel, Switch, FormControlLabel, Alert, CircularProgress, Divider, Paper, Autocomplete } from "@mui/material";
 import { Add, Edit, Delete } from "@mui/icons-material";
 import {
   getBusinessRules, createBusinessRule, updateBusinessRule, deleteBusinessRule, BusinessRule,

@@ -1,3 +1,4 @@
+import { useConfirmation } from "../../context/ConfirmationContext";
 import { useLocation } from "react-router-dom";
 import React, { useState, useEffect, useMemo } from "react";
 import { useMenuSearchParams as useSearchParams } from "../../navigation/useMenuSearchParams";
@@ -98,6 +99,7 @@ const PREBUILT: Record<string, { label: string; sql: string }[]> = {
 };
 
 export default function Analysis() {
+  const confirm = useConfirmation();
   const [searchParams, setSearchParams] = useSearchParams();
   const routeLocation = useLocation();
   const publicTab = searchParams.get("tab");
@@ -190,10 +192,10 @@ export default function Analysis() {
 
   const removeStagingTable = async (item: AnalysisStagingTable) => {
     if (item.protected) return;
-    if (!window.confirm(
+    if (!(await confirm(
       `Excluir permanentemente a área temporária ${item.table_name}?\n\n` +
       "A ação remove somente a tabela temporária; a base consolidada publicada não será alterada."
-    )) return;
+    , { title: "Confirmar exclusão", confirmLabel: "Excluir", danger: true }))) return;
     setStagingLoading(true); setError("");
     try {
       await deleteAnalysisStagingTable(item.table_name);
@@ -210,7 +212,7 @@ export default function Analysis() {
   };
 
   const removeGoldTable = async (t: string) => {
-    if (!window.confirm('Excluir a tabela ' + t + "? A regra de consolidação associada (se houver) e a tabela armazenada serão removidas.")) return;
+    if (!(await confirm('Excluir a tabela ' + t + "? A regra de consolidação associada (se houver) e a tabela armazenada serão removidas.", { title: "Confirmar exclusão", confirmLabel: "Excluir", danger: true }))) return;
     setError("");
     try {
       await deleteGoldTable(t);

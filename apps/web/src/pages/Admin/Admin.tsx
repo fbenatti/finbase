@@ -1,12 +1,9 @@
+import { Dialog, DialogActions, DialogContent, DialogTitle } from "../../components/FinbaseDialog";
 import { dataDisplayText } from "../../utils/dataPresentation";
 import { moduleDisplayName } from "../../utils/dataPresentation";
 import React, { useEffect, useMemo, useState } from "react";
 import { useMenuSearchParams as useSearchParams } from "../../navigation/useMenuSearchParams";
-import {
-  Box, Button, Checkbox, Chip, Dialog, DialogActions, DialogContent, DialogTitle,
-  FormControl, IconButton, InputLabel, MenuItem, Paper, Select, Stack,
-  TextField, Tooltip, Typography, Alert, Switch, FormControlLabel, Grid,
-} from "@mui/material";
+import { Box, Button, Checkbox, Chip, FormControl, IconButton, InputLabel, MenuItem, Paper, Select, Stack, TextField, Tooltip, Typography, Alert, Switch, FormControlLabel, Grid } from "@mui/material";
 import { Add as AddIcon, Delete as DeleteIcon, Refresh as RefreshIcon, LockReset as LockResetIcon } from "@mui/icons-material";
 import {
   AdminGroup, AdminRole, AdminUser, AdminGrant, EffectivePermissions,

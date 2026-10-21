@@ -1,12 +1,8 @@
+import { Dialog, DialogTitle, DialogContent, DialogActions } from "../../components/FinbaseDialog";
 import { dataDisplayText } from "../../utils/dataPresentation";
 import { useState, useEffect, useMemo, useRef } from "react";
 import { useMenuSearchParams as useSearchParams } from "../../navigation/useMenuSearchParams";
-import {
-  Box, Typography, Button,
-  Dialog, DialogTitle, DialogContent, DialogActions, TextField, Divider,
-  Select, MenuItem, FormControl, InputLabel, Alert, CircularProgress,
-  FormControlLabel, Checkbox, Paper, InputAdornment, Stack, Snackbar, Chip,
-} from "@mui/material";
+import { Box, Typography, Button, TextField, Divider, Select, MenuItem, FormControl, InputLabel, Alert, CircularProgress, FormControlLabel, Checkbox, Paper, InputAdornment, Stack, Snackbar, Chip } from "@mui/material";
 import { Add, AutoAwesome, Cloud, Dataset, Download, MenuBook, Psychology, Search, SmartToy, Storage, Storefront, Refresh, Validate, Save } from "./ConnectionIcons";
 import {
   getConnections, createConnection, updateConnection,

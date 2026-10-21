@@ -1,12 +1,8 @@
+import { Dialog, DialogTitle, DialogContent, DialogActions } from "../../components/FinbaseDialog";
 import { dataDisplayText } from "../../utils/dataPresentation";
 import { DATA_LAYER_LABELS } from "../../utils/dataPresentation";
 import { useState, useEffect } from "react";
-import {
-  Box, Typography, Button, Chip, Alert, CircularProgress, Tooltip, Dialog,
-  DialogTitle, DialogContent, DialogActions, TextField, FormControl, InputLabel,
-  Select, MenuItem, FormHelperText, FormControlLabel, Switch, IconButton,
-  Checkbox,
-} from "@mui/material";
+import { Box, Typography, Button, Chip, Alert, CircularProgress, Tooltip, TextField, FormControl, InputLabel, Select, MenuItem, FormHelperText, FormControlLabel, Switch, IconButton, Checkbox } from "@mui/material";
 import { Schedule, Add, Edit, Delete, PlayArrow } from "@mui/icons-material";
 import {
   getSchedules, createSchedule, updateSchedule, deleteSchedule, runScheduleNow,

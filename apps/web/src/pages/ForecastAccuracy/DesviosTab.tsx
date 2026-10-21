@@ -1,11 +1,8 @@
+import { Dialog, DialogActions, DialogContent, DialogTitle } from "../../components/FinbaseDialog";
 import { dataDisplayText } from "../../utils/dataPresentation";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import Plot from "@/components/Plot";
-import {
-  Alert, Box, Button, Chip, CircularProgress, Dialog, DialogActions, DialogContent, DialogTitle,
-  FormControl, IconButton, InputLabel, LinearProgress, MenuItem, Paper, Select, Stack, Table, TableBody,
-  TableCell, TableContainer, TableHead, TableRow, TextField, Tooltip, Typography,
-} from "@mui/material";
+import { Alert, Box, Button, Chip, CircularProgress, FormControl, IconButton, InputLabel, LinearProgress, MenuItem, Paper, Select, Stack, Table, TableBody, TableCell, TableContainer, TableHead, TableRow, TextField, Tooltip, Typography } from "@mui/material";
 import { Add, Block, Edit, Remove } from "@mui/icons-material";
 import {
   ForecastAck, ForecastAccuracyDeltaSeries, ForecastDesvioItem, ForecastDesvios, ForecastDesvioSubcat,

@@ -1,33 +1,8 @@
+import { Dialog, DialogActions, DialogContent, DialogTitle } from "../../components/FinbaseDialog";
 import { dataDisplayText } from "../../utils/dataPresentation";
 import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import {
-  Alert,
-  Box,
-  Button,
-  Chip,
-  CircularProgress,
-  Dialog,
-  DialogActions,
-  DialogContent,
-  DialogTitle,
-  Divider,
-  FormControl,
-  FormControlLabel,
-  FormLabel,
-  IconButton,
-  InputAdornment,
-  Menu,
-  MenuItem,
-  Paper,
-  Radio,
-  RadioGroup,
-  Stack,
-  Switch,
-  TextField,
-  Tooltip,
-  Typography,
-} from "@mui/material";
+import { Alert, Box, Button, Chip, CircularProgress, Divider, FormControl, FormControlLabel, FormLabel, IconButton, InputAdornment, Menu, MenuItem, Paper, Radio, RadioGroup, Stack, Switch, TextField, Tooltip, Typography } from "@mui/material";
 import {
   Add,
   AccountBalance,

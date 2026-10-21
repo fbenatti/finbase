@@ -1,3 +1,4 @@
+import { Dialog, DialogActions, DialogContent, DialogTitle } from "../../components/FinbaseDialog";
 import { dataDisplayText } from "../../utils/dataPresentation";
 /**
  * Serviços auxiliares — Jev e itens futuros.
@@ -10,11 +11,7 @@ import { dataDisplayText } from "../../utils/dataPresentation";
  * exibir. Se o valor viesse para a tela, um print de suporte o vazaria.
  */
 import { useCallback, useEffect, useState } from "react";
-import {
-  Alert, Box, Button, Chip, CircularProgress, Dialog, DialogActions,
-  DialogContent, DialogTitle, FormControlLabel, IconButton, Link, Stack, Switch,
-  Table, TableBody, TableCell, TableHead, TableRow, TextField, Tooltip, Typography, TableContainer, Paper,
-} from "@mui/material";
+import { Alert, Box, Button, Chip, CircularProgress, FormControlLabel, IconButton, Link, Stack, Switch, Table, TableBody, TableCell, TableHead, TableRow, TextField, Tooltip, Typography, TableContainer, Paper } from "@mui/material";
 import { Delete as DeleteOutline, Edit, Validate, Save } from "./ConnectionIcons";
 import {
   deleteIntegration, IntegrationItem, getIntegrations, saveIntegration, testIntegration,

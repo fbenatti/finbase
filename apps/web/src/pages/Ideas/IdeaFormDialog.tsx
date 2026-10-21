@@ -1,8 +1,6 @@
+import { Dialog, DialogActions, DialogContent, DialogTitle } from "../../components/FinbaseDialog";
 import { useState } from "react";
-import {
-  Button, Dialog, DialogActions, DialogContent, DialogTitle,
-  FormControl, InputLabel, MenuItem, Select, Stack, TextField,
-} from "@mui/material";
+import { Button, FormControl, InputLabel, MenuItem, Select, Stack, TextField } from "@mui/material";
 import { createIdea, type IdeaCreateInput, type IdeaImpact, type IdeaType } from "../../services/ideasApi";
 import { IMPACT_LABELS, TYPE_LABELS } from "./constants";
 

@@ -1,3 +1,4 @@
+import { useConfirmation } from "../../context/ConfirmationContext";
 import { dataDisplayText } from "../../utils/dataPresentation";
 import { useEffect, useMemo, useState } from "react";
 import { Alert, Autocomplete, Box, Button, Checkbox, Chip, Divider, FormControl, FormControlLabel, Grid, IconButton, InputLabel, List, ListItemButton, ListItemText, MenuItem, Paper, Select, Stack, TextField, ToggleButton, ToggleButtonGroup, Typography } from "@mui/material";
@@ -20,6 +21,7 @@ function conditions(source: GoldCubeRuleSource): Condition[] {
 
 /** Gold — pivot-style editor: pick Golds, choose dimensions (GROUP BY) and measures (SUM). */
 export default function Gold({ embedded }: { embedded?: boolean } = {}) {
+  const confirm = useConfirmation();
   const { enqueueSnackbar } = useNotifications();
   const [rules, setRules] = useState<GoldCubeRule[]>([]);
   const [tables, setTables] = useState<GoldTable[]>([]);
@@ -121,7 +123,7 @@ export default function Gold({ embedded }: { embedded?: boolean } = {}) {
   const removeRule = async (ruleId: number) => {
     const rule = rules.find(r => r.id === ruleId);
     const label = rule?.code || '#' + ruleId;
-    if (!window.confirm('Excluir a regra "' + label + '"? A tabela física ' + (rule?.materialization_table || 'dest_dm_cost_...') + ' também será removida do acervo de dados.')) return;
+    if (!(await confirm('Excluir a regra "' + label + '"? A tabela física ' + (rule?.materialization_table || 'dest_dm_cost_...') + ' também será removida do acervo de dados.', { title: "Confirmar exclusão", confirmLabel: "Excluir", danger: true }))) return;
     setError("");
     try {
       await deleteGoldCubeRule(ruleId);

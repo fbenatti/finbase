@@ -1,12 +1,9 @@
+import { useConfirmation } from "../../context/ConfirmationContext";
+import { Dialog, DialogTitle, DialogContent, DialogActions } from "../../components/FinbaseDialog";
 import { dataDisplayText } from "../../utils/dataPresentation";
 import { useEffect, useMemo, useState } from "react";
 import { useMenuSearchParams as useSearchParams } from "../../navigation/useMenuSearchParams";
-import {
-  Box, Typography, Paper, Grid, Alert, CircularProgress, LinearProgress, Button, Checkbox, ListItemText,
-  Table, TableBody, TableCell, TableContainer, TableHead, TableRow, Chip, Tooltip,
-  TextField, Dialog, DialogTitle, DialogContent, DialogActions, FormControl,
-  InputLabel, Select, MenuItem, IconButton, Stack,
-} from "@mui/material";
+import { Box, Typography, Paper, Grid, Alert, CircularProgress, LinearProgress, Button, Checkbox, ListItemText, Table, TableBody, TableCell, TableContainer, TableHead, TableRow, Chip, Tooltip, TextField, FormControl, InputLabel, Select, MenuItem, IconButton, Stack } from "@mui/material";
 import { Refresh, Add, Delete, Edit } from "@mui/icons-material";
 import Plot from "@/components/Plot";
 // Wrapper: typings do react-plotly são rígidos para títulos/textos customizados.
@@ -70,6 +67,7 @@ const PADRAO_EXPLICACAO: Record<string, string> = {
 };
 
 export default function DesligueProgramado({ embedded }: { embedded?: boolean }) {
+  const confirm = useConfirmation();
   const [searchParams] = useSearchParams();
   const tab = ({ dashboard: 0, governance: 1, exceptions: 2 } as Record<string, number>)[searchParams.get("subview") || "dashboard"] ?? 0;
   const [data, setData] = useState<VmMonthSaving[]>([]);
@@ -194,7 +192,7 @@ export default function DesligueProgramado({ embedded }: { embedded?: boolean })
   };
 
   const removeException = async (id: number) => {
-    if (!window.confirm("Excluir regra de exceção?")) return;
+    if (!(await confirm("Excluir regra de exceção?", { title: "Confirmar exclusão", confirmLabel: "Excluir", danger: true }))) return;
     await deleteShutdownException(id);
     loadExceptions();
   };
@@ -212,7 +210,7 @@ export default function DesligueProgramado({ embedded }: { embedded?: boolean })
 
   const registerDeltaException = async (r: { resource_id?: string | null; vm?: string | null; connection_code?: string | null; subscription_id?: string | null }) => {
     if (!r.resource_id) return;
-    if (!window.confirm("Registrar este recurso como exceção (saiu do schedule de desligue)?")) return;
+    if (!(await confirm("Registrar este recurso como exceção (saiu do schedule de desligue)?", { title: "Registrar exceção", confirmLabel: "Registrar exceção" }))) return;
     try {
       await createExceptionFromDelta({
         resource_id: r.resource_id,

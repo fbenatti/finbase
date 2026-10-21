@@ -1,10 +1,7 @@
+import { Dialog, DialogActions, DialogContent, DialogTitle } from "../../components/FinbaseDialog";
 import { dataDisplayText } from "../../utils/dataPresentation";
 import React, { useEffect, useState } from "react";
-import {
-  Alert, Box, Button, Checkbox, Chip, Dialog, DialogActions, DialogContent, DialogTitle,
-  FormControl, FormControlLabel, IconButton, InputLabel, MenuItem, Paper, Select, Stack,
-  Switch, TextField, Tooltip, Typography,
-} from "@mui/material";
+import { Alert, Box, Button, Checkbox, Chip, FormControl, FormControlLabel, IconButton, InputLabel, MenuItem, Paper, Select, Stack, Switch, TextField, Tooltip, Typography } from "@mui/material";
 import { Add as AddIcon, Delete as DeleteIcon, Refresh as RefreshIcon, Science as ScienceIcon } from "@mui/icons-material";
 import { api } from "../../services/api";
 

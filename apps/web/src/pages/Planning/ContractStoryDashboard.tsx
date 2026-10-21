@@ -1,10 +1,7 @@
+import { Dialog, DialogActions, DialogContent, DialogTitle } from "../../components/FinbaseDialog";
 import { dataDisplayText } from "../../utils/dataPresentation";
 import { ChangeEvent, useEffect, useMemo, useRef, useState } from "react";
-import {
-  Alert, Box, Button, Card, CardContent, Chip, Dialog, DialogActions, DialogContent,
-  DialogTitle, Divider, FormControl, IconButton, InputLabel, Menu, MenuItem, Paper,
-  Select, Stack, TextField, Typography,
-} from "@mui/material";
+import { Alert, Box, Button, Card, CardContent, Chip, Divider, FormControl, IconButton, InputLabel, Menu, MenuItem, Paper, Select, Stack, TextField, Typography } from "@mui/material";
 import { Add, AutoGraph, CloudOutlined, EditOutlined, EventOutlined, FileUploadOutlined, MoreVert } from "@mui/icons-material";
 import PictureAsPdfOutlined from "@mui/icons-material/PictureAsPdfOutlined";
 import html2canvas from "html2canvas";

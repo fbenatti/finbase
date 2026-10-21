@@ -1,8 +1,6 @@
+import { Dialog, DialogActions, DialogContent, DialogTitle } from "../../components/FinbaseDialog";
 import { useEffect, useMemo, useState, type ReactElement } from "react";
-import {
-  Box, Button, Collapse, Dialog, DialogActions, DialogContent, DialogTitle, FormControl, IconButton,
-  InputLabel, ListItemButton, ListItemText, MenuItem, Select, Stack, TextField, Typography,
-} from "@mui/material";
+import { Box, Button, Collapse, FormControl, IconButton, InputLabel, ListItemButton, ListItemText, MenuItem, Select, Stack, TextField, Typography } from "@mui/material";
 import { ChevronRight, ExpandMore } from "@mui/icons-material";
 import { Department, createForecastAck, getDepartments } from "../../services/api";
 

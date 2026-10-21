@@ -1,12 +1,8 @@
+import { Dialog, DialogTitle, DialogContent, DialogActions } from "../../components/FinbaseDialog";
 import { dataDisplayText } from "../../utils/dataPresentation";
 import { useState, useEffect, useMemo, useCallback, memo, useRef } from "react";
 import { useMenuSearchParams as useSearchParams } from "../../navigation/useMenuSearchParams";
-import {
-  Box, Typography, Button, IconButton, Chip,
-  Dialog, DialogTitle, DialogContent, DialogActions, TextField,
-  Select, MenuItem, FormControl, InputLabel, Switch, Checkbox, FormControlLabel,
-  Alert, CircularProgress, Divider, Autocomplete, InputAdornment, Stack, ToggleButton, ToggleButtonGroup,
-} from "@mui/material";
+import { Box, Typography, Button, IconButton, Chip, TextField, Select, MenuItem, FormControl, InputLabel, Switch, Checkbox, FormControlLabel, Alert, CircularProgress, Divider, Autocomplete, InputAdornment, Stack, ToggleButton, ToggleButtonGroup } from "@mui/material";
 import { Add, Edit, Delete, Download, ContentCopy, Check, Code, Terminal, Search, Refresh, Clear, AccountTree, Close } from "@mui/icons-material";
 import {
   getClassifications, createClassification, updateClassification,

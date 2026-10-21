@@ -1,16 +1,6 @@
+import { Dialog, DialogActions, DialogContent, DialogTitle } from "../../components/FinbaseDialog";
 import { useEffect, useMemo, useState } from "react";
-import {
-  Button,
-  Checkbox,
-  Dialog,
-  DialogActions,
-  DialogContent,
-  DialogTitle,
-  FormControlLabel,
-  FormGroup,
-  Stack,
-  Typography,
-} from "@mui/material";
+import { Button, Checkbox, FormControlLabel, FormGroup, Stack, Typography } from "@mui/material";
 import { GoldQueryFilter } from "../../services/api";
 import HierarchicalDecompTree, {
   buildExecutiveDecompChain,

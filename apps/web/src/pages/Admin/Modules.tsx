@@ -1,6 +1,7 @@
+import { Dialog, DialogActions, DialogContent, DialogTitle } from "../../components/FinbaseDialog";
 import { moduleDisplayName } from "../../utils/dataPresentation";
 import { useEffect, useState } from "react";
-import { Alert, Accordion, AccordionDetails, AccordionSummary, Box, Button, Chip, CircularProgress, Dialog, DialogActions, DialogContent, DialogTitle, MenuItem, Paper, Stack, Switch, Table, TableBody, TableCell, TableHead, TableRow, TextField, Tooltip, Typography } from "@mui/material";
+import { Alert, Accordion, AccordionDetails, AccordionSummary, Box, Button, Chip, CircularProgress, MenuItem, Paper, Stack, Switch, Table, TableBody, TableCell, TableHead, TableRow, TextField, Tooltip, Typography } from "@mui/material";
 import { ExpandMore } from "@mui/icons-material";
 import { useAuth } from "../../auth/AuthContext";
 import { useNavigation } from "../../navigation/NavigationContext";
