@@ -17,8 +17,6 @@ import {
   Paper,
   Select,
   Stack,
-  Tab,
-  Tabs,
   TextField,
   Typography,
 } from "@mui/material";
@@ -59,7 +57,8 @@ export default function Forecast() {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   // Acurácia is the primary Forecast view; an explicit URL tab still wins.
-  const [tab, setTab] = useState(searchParams.get("tab") || "accuracy");
+  const requestedTab = searchParams.get("tab");
+  const tab = ["accuracy", "config", "rules", "history"].includes(requestedTab || "") ? requestedTab! : "accuracy";
   const [tables, setTables] = useState<DestinationTable[]>([]);
   const [configs, setConfigs] = useState<ForecastConfig[]>([]);
   const [error, setError] = useState("");
@@ -309,17 +308,6 @@ export default function Forecast() {
             Projeções de custo sobre as tabelas Gold, com regras de negócio e rateio por intervalo.
           </Typography>
         </Box>
-        <Tabs value={tab} onChange={(_, value: string) => {
-          setTab(value);
-          const url = new URLSearchParams(searchParams);
-          url.set("tab", value);
-          navigate(`/forecast?${url.toString()}`, { replace: true });
-        }} aria-label="Seções do Forecast" sx={{ mb: 0, minHeight: 42 }}>
-          <Tab value="accuracy" label="Acurácia" sx={{ minHeight: 42 }} />
-          <Tab value="config" label="Configurações e execução" sx={{ minHeight: 42 }} />
-          <Tab value="rules" label="Regras de negócio" sx={{ minHeight: 42 }} />
-          <Tab value="history" label="Histórico e resultados" sx={{ minHeight: 42 }} />
-        </Tabs>
       </Box>
 
       {/* Área de trabalho com campos simples de 40px */}
