@@ -3,22 +3,24 @@ import { createTheme } from "@mui/material/styles";
 const theme = createTheme({
   palette: {
     primary: {
-      main: "#0A8FDC",
-      light: "#3DA8E5",
-      dark: "#076CA5",
+      main: "#1B5878",
+      light: "#3B7895",
+      dark: "#123D59",
     },
     secondary: {
-      main: "#F04F47",
-      light: "#F3756E",
-      dark: "#C73B34",
+      main: "#168F83",
+      light: "#42B5A6",
+      dark: "#0D6B63",
     },
     background: {
-      default: "#F4F7FE",
+      default: "#F4F7FA",
       paper: "#FFFFFF",
     },
+    text: { primary: "#1D2D3F", secondary: "#617386" },
+    divider: "#E4EAF0",
   },
   typography: {
-    fontFamily: '"Be Vietnam Pro", "Roboto", "Helvetica", "Arial", sans-serif',
+    fontFamily: '"Inter", "Segoe UI", "Helvetica Neue", Arial, sans-serif',
     h4: {
       fontWeight: 600,
     },
@@ -30,7 +32,7 @@ const theme = createTheme({
     },
   },
   shape: {
-    borderRadius: 8,
+    borderRadius: 10,
   },
   components: {
     MuiButton: {
@@ -51,10 +53,15 @@ const theme = createTheme({
     MuiCard: {
       styleOverrides: {
         root: {
-          boxShadow: "0px 2px 8px rgba(0,0,0,0.08)",
+          boxShadow: "none",
+          border: "1px solid #E4EAF0",
+          backgroundImage: "none",
         },
       },
     },
+    MuiPaper: { styleOverrides: { outlined: { borderColor: "#E4EAF0" } } },
+    MuiTabs: { styleOverrides: { indicator: { height: 2, borderRadius: 2 } } },
+    MuiTab: { styleOverrides: { root: { minHeight: 42, textTransform: "none", fontWeight: 600, color: "#617386" } } },
   },
 });
 

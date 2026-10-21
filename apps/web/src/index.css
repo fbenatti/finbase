@@ -9,9 +9,11 @@ html, body, #root {
 }
 
 body {
-  font-family: "Be Vietnam Pro", "Roboto", "Helvetica", "Arial", sans-serif;
+  font-family: "Inter", "Segoe UI", "Helvetica Neue", Arial, sans-serif;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
+  color: #1d2d3f;
+  background: #f4f7fa;
 }
 
 [data-print-only] {
