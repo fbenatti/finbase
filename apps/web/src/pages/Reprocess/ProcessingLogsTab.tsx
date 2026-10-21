@@ -145,7 +145,7 @@ export default function ProcessingLogsTab() {
   }));
 
   return <Stack spacing={1.5}>
-    {error && <Alert severity="error" onClose={() => setError("")}>{error}</Alert>}
+    {error && <Alert severity="error" onClose={() => setError("")}>{dataDisplayText(error)}</Alert>}
     <Stack direction={{ xs: "column", md: "row" }} spacing={1}>
       <TextField size="small" label="Buscar" value={search} onChange={e => { setSearch(e.target.value); setPagination(p => ({ ...p, page: 0 })); }} sx={{ minWidth: 220 }} />
       <TextField select size="small" label="Tipo" value={processType} onChange={e => { setProcessType(e.target.value); setPagination(p => ({ ...p, page: 0 })); }} sx={{ minWidth: 230 }}>
@@ -167,7 +167,7 @@ export default function ProcessingLogsTab() {
       </DialogTitle>
       <DialogContent dividers>
         {detail && <Stack spacing={2}>
-          {detail.error && <Alert severity="error">{detail.error}</Alert>}
+          {detail.error && <Alert severity="error">{dataDisplayText(detail.error)}</Alert>}
           <Typography variant="subtitle2">Resumo</Typography>
           <Stack direction="row" gap={2} flexWrap="wrap">
             <Field label="Origem" value={sourceLabel(detail.source)} /><Field label="Destino" value={destinationLabel(detail.destination)} /><Field label="Partições / períodos" value={detail.partitions} />

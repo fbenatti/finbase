@@ -1,3 +1,4 @@
+import { dataDisplayText } from "../../utils/dataPresentation";
 import { DATA_LAYER_LABELS } from "../../utils/dataPresentation";
 import { useState, useEffect } from "react";
 import {
@@ -229,7 +230,7 @@ export default function SchedulesPanel({ connections }: { connections: SourceCon
         </Button>
       </Box>
 
-      {error && <Alert severity="error" sx={{ mb: 2 }} onClose={() => setError("")}>{error}</Alert>}
+      {error && <Alert severity="error" sx={{ mb: 2 }} onClose={() => setError("")}>{dataDisplayText(error)}</Alert>}
 
       {schedules.length === 0 ? (
         <Alert severity="info" sx={{ mb: 2 }}>

@@ -1,3 +1,4 @@
+import { dataDisplayText } from "../../utils/dataPresentation";
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Plot from "@/components/Plot";
 import { useSearchParams } from "react-router-dom";
@@ -418,7 +419,7 @@ export default function ForecastAccuracy({ embedded = false }: { embedded?: bool
       </Box>
 
       <Box sx={{ p: 3 }}>
-        {error && <Alert severity="error" sx={{ mb: 2 }} onClose={() => setError("")}>{error}</Alert>}
+        {error && <Alert severity="error" sx={{ mb: 2 }} onClose={() => setError("")}>{dataDisplayText(error)}</Alert>}
         {tab === "desvios" ? (
           <Paper elevation={0} sx={{ p: { xs: 1.5, md: 2 }, borderRadius: 2, border: "1px solid", borderColor: "divider" }}>
             <DesviosTab runId={selectedRun} targetMonth={selectedMonth} department={department} />
@@ -760,7 +761,7 @@ export default function ForecastAccuracy({ embedded = false }: { embedded?: bool
             </DialogTitle>
             <DialogContent dividers>
               {seriesDialog.loading && <LinearProgress sx={{ mb: 1.5, borderRadius: 1 }} />}
-              {seriesDialog.error && <Alert severity="error" sx={{ mb: 1.5 }}>{seriesDialog.error}</Alert>}
+              {seriesDialog.error && <Alert severity="error" sx={{ mb: 1.5 }}>{dataDisplayText(seriesDialog.error)}</Alert>}
               {seriesDialog.data && seriesDialog.data.points.length > 0 && (
                 <>
                   <Stack direction="row" spacing={3} sx={{ mb: 2 }} flexWrap="wrap">

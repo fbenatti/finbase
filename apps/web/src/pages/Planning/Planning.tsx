@@ -1,3 +1,4 @@
+import { dataDisplayText } from "../../utils/dataPresentation";
 import { ChangeEvent, useEffect, useMemo, useRef, useState } from "react";
 import {
   Alert,
@@ -672,7 +673,7 @@ export default function Planning({
       <Box sx={{ p: 3 }}>
         {error && (
           <Alert severity="error" sx={{ mb: 2 }} onClose={() => setError("")}>
-            {error}
+            {dataDisplayText(error)}
           </Alert>
         )}
         {message && (
@@ -681,7 +682,7 @@ export default function Planning({
             sx={{ mb: 2 }}
             onClose={() => setMessage("")}
           >
-            {message}
+            {dataDisplayText(message)}
           </Alert>
         )}
         {isDefense && (

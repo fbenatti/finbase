@@ -1,3 +1,4 @@
+import { dataDisplayText } from "../../utils/dataPresentation";
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
   Alert, Box, Card, CardContent, CircularProgress, FormControl, Grid, InputLabel,
@@ -121,7 +122,7 @@ export default function FinancialContractsDashboard() {
       </Select>
     </FormControl>
 
-    {error && <Alert severity="error" sx={{ mb: 2 }}>{error}</Alert>}
+    {error && <Alert severity="error" sx={{ mb: 2 }}>{dataDisplayText(error)}</Alert>}
     {loading && <Stack direction="row" spacing={1} alignItems="center" sx={{ mb: 2 }}><CircularProgress size={18} /><Typography variant="body2" color="text.secondary">Carregando liquidações...</Typography></Stack>}
     <Grid container spacing={2} sx={{ mb: 3 }}>
       <Grid item xs={12} sm={6} lg={3}><Metric label="Orçamento do período" value={amount(sum(selectedRows, "commitment"))} detail={period === "all" ? "Soma das competências exibidas" : periodLabel(period)} accent="#2563eb" /></Grid>

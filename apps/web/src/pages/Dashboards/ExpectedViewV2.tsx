@@ -1,3 +1,4 @@
+import { dataDisplayText } from "../../utils/dataPresentation";
 import { useEffect, useMemo, useState, type ReactElement } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import Plot from "@/components/Plot";
@@ -1171,7 +1172,7 @@ export default function ExpectedViewV2({
       </Alert>
       {error && (
         <Alert severity="error" sx={{ mb: 2 }}>
-          {error}
+          {dataDisplayText(error)}
           <Button
             size="small"
             sx={{ ml: 1 }}
@@ -1257,7 +1258,7 @@ export default function ExpectedViewV2({
                     </FormControl>
                   </Stack>
                 </Stack>
-                {chartQueryError && <Alert severity="error" sx={{ mt: 1 }}>{chartQueryError}</Alert>}
+                {chartQueryError && <Alert severity="error" sx={{ mt: 1 }}>{dataDisplayText(chartQueryError)}</Alert>}
                 {chartGranularity === "daily" && dailyGold?.available === false
                   ? <Alert severity="info" sx={{ mt: 1 }}>A fonte base preparada não disponibiliza uma data real de consumo para este recorte. Verifique a carga FOCUS de ChargePeriodStart.</Alert>
                   : chartQueryLoading

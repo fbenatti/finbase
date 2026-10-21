@@ -1,3 +1,4 @@
+import { dataDisplayText } from "../../utils/dataPresentation";
 import { useState, useEffect, useCallback } from "react";
 import {
   Box, Typography, Button, IconButton, Chip, Dialog, DialogTitle, DialogContent,
@@ -142,7 +143,7 @@ export default function Destinations({ embedded }: { embedded?: boolean } = {}) 
 
       {/* Right: Table Detail */}
       <Box sx={{ flexGrow: 1, overflow: "auto" }}>
-        {error && <Alert severity="error" sx={{ mb: 2 }} onClose={() => setError("")}>{error}</Alert>}
+        {error && <Alert severity="error" sx={{ mb: 2 }} onClose={() => setError("")}>{dataDisplayText(error)}</Alert>}
 
         {!selectedTable ? (
           <EmptyState message="Selecione uma tabela de destino para ver suas colunas e mapeamentos." />

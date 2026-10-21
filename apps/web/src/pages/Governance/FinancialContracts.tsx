@@ -1,3 +1,4 @@
+import { dataDisplayText } from "../../utils/dataPresentation";
 import { useEffect, useState } from "react";
 import {
   Alert, Box, Button, Checkbox, Chip, Dialog, DialogActions, DialogContent,
@@ -63,7 +64,7 @@ export default function FinancialContracts() {
   };
 
   return <Box>
-    {error && <Alert severity="error" sx={{ mb: 2 }} onClose={() => setError("")}>{error}</Alert>}
+    {error && <Alert severity="error" sx={{ mb: 2 }} onClose={() => setError("")}>{dataDisplayText(error)}</Alert>}
     <Box sx={{ display: "flex", justifyContent: "space-between", mb: 2 }}>
       <Box color="text.secondary">Contratos que optam pelo compromisso orçamentário por ID Orçamento.</Box>
       <Button variant="contained" startIcon={<Add />} onClick={() => { setEditingId(null); setForm(blank); setOpen(true); }}>Novo contrato</Button>
@@ -94,7 +95,7 @@ export default function FinancialContracts() {
         }}>{recalculating ? "Recalculando…" : "Recalcular contrato"}</Button>
       </Box>
       <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>Razão cronológico por contrato, cloud e ID Orçamento. Créditos compensam overages durante a vigência; no encerramento, o overage liquidado fica registrado e o saldo zera.</Typography>
-      {settlementMessage && <Alert severity="success" sx={{ my: 1 }}>{settlementMessage}</Alert>}
+      {settlementMessage && <Alert severity="success" sx={{ my: 1 }}>{dataDisplayText(settlementMessage)}</Alert>}
       <Table size="small"><TableHead><TableRow>{["Competência", "Cloud / ID", "Orçamento", "Consumo", "Realizado", "Ajuste (+ crédito / − overage)", "Crédito gerado", "Crédito usado", "Overage bruto", "Saldo de overage", "Overage liquidado", "Saldo de crédito", "Run / origem / data", "Versões orçamento"].map((label) => <TableCell key={label}>{label}</TableCell>)}</TableRow></TableHead><TableBody>{settlements.map((row, index) => <TableRow key={`${row.period}-${row.budget_id}-${index}`}><TableCell>{String(row.period || "—")}</TableCell><TableCell>{String(row.cloud_scope || "—")} / {String(row.budget_id || "—")}</TableCell><TableCell>{String(row.commitment || "0")}</TableCell><TableCell>{String(row.consumption || "0")}</TableCell><TableCell>{String(row.realized || "0")}</TableCell><TableCell>{String(row.contractual_adjustment || "0")}</TableCell><TableCell>{String(row.credit_generated || "0")}</TableCell><TableCell>{String(row.credit_used || "0")}</TableCell><TableCell>{String(row.gross_overage || "0")}</TableCell><TableCell>{String(row.closing_overage || "0")}</TableCell><TableCell>{String(row.settled_overage || "0")}</TableCell><TableCell>{String(row.closing_credit || "0")}</TableCell><TableCell>{`${String(row.run_id || "—")} / ${String(row.run_source || "—")} / ${String(row.run_finished_at || "—")}`}</TableCell><TableCell>{Array.isArray(row.budget_version_ids) ? row.budget_version_ids.map(String).join(", ") : "—"}</TableCell></TableRow>)}</TableBody></Table>
       {!settlements.length && <Typography color="text.secondary" sx={{ py: 2 }}>Nenhuma liquidação publicada para este contrato.</Typography>}
     </Box>}

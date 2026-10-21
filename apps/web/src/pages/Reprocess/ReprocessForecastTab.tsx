@@ -1,3 +1,4 @@
+import { dataDisplayText } from "../../utils/dataPresentation";
 import { useCallback, useEffect, useState } from "react";
 import { useNotifications } from "../../context/NotificationContext";
 import {
@@ -56,7 +57,7 @@ export default function ReprocessForecastTab() {
         (realizado + forecast + rateio) automaticamente. Acompanhe o andamento no sino de notificações
         (canto superior direito).
       </Alert>
-      {error && <Alert severity="error" sx={{ mb: 2 }} onClose={() => setError("")}>{error}</Alert>}
+      {error && <Alert severity="error" sx={{ mb: 2 }} onClose={() => setError("")}>{dataDisplayText(error)}</Alert>}
       <Card sx={{ mb: 2 }}>
         <CardContent>
           <Typography variant="h6">Configurações</Typography>

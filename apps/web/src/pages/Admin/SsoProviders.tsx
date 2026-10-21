@@ -1,3 +1,4 @@
+import { dataDisplayText } from "../../utils/dataPresentation";
 import React, { useEffect, useState } from "react";
 import {
   Alert, Box, Button, Checkbox, Chip, Dialog, DialogActions, DialogContent, DialogTitle,
@@ -132,8 +133,8 @@ export default function SsoProviders() {
         <Button size="small" variant="contained" startIcon={<AddIcon />} onClick={openCreate}>Novo provedor</Button>
         <IconButton size="small" onClick={load}><RefreshIcon /></IconButton>
       </Stack>
-      {error && <Alert severity="error" sx={{ mb: 2 }}>{error}</Alert>}
-      {msg && <Alert severity="success" sx={{ mb: 2 }}>{msg}</Alert>}
+      {error && <Alert severity="error" sx={{ mb: 2 }}>{dataDisplayText(error)}</Alert>}
+      {msg && <Alert severity="success" sx={{ mb: 2 }}>{dataDisplayText(msg)}</Alert>}
       {testResult && <Alert severity="info" sx={{ mb: 2 }}>{testResult}</Alert>}
 
       {providers.length === 0 && <Typography color="text.secondary">Nenhum provedor configurado.</Typography>}

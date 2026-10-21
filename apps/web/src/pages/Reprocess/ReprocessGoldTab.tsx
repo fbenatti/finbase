@@ -1,3 +1,4 @@
+import { dataDisplayText } from "../../utils/dataPresentation";
 import { useEffect, useState } from "react";
 import { Alert, Box, Button, Checkbox, Chip, Stack, Typography } from "@mui/material";
 import { useSearchParams } from "react-router-dom";
@@ -71,7 +72,7 @@ export default function ReprocessGoldTab() {
     {subtab === "ai-cost" ? <ReprocessAICostRelationshipsTab /> : <>
     <Typography variant="h6">Consolidação de dados</Typography>
     <Typography color="text.secondary">Lê os dados preparados de custos, planejamento, projeções e rateios, aplica os filtros das regras e publica cubos analíticos. Escolha reprocessar <b>todas</b> ou apenas uma regra/fonte.</Typography>
-    {error && <Alert severity="error">{error}</Alert>}
+    {error && <Alert severity="error">{dataDisplayText(error)}</Alert>}
 
     <Stack direction={{ xs: "column", sm: "row" }} spacing={1} alignItems={{ sm: "center" }}>
       <Button variant="outlined" startIcon={<PlayArrow />} disabled={running || selectedIds.size === 0} onClick={startSelected}>Reprocessar selecionadas ({selectedIds.size})</Button>

@@ -1,3 +1,4 @@
+import { dataDisplayText } from "../../utils/dataPresentation";
 import { useEffect, useMemo, useState } from "react";
 import {
   Alert,
@@ -415,12 +416,12 @@ export default function BudgetDefensePanel({
       )}
       {error && (
         <Alert severity="error" sx={{ mt: 1.5 }} onClose={() => setError("")}>
-          {error}
+          {dataDisplayText(error)}
         </Alert>
       )}
       {message && (
         <Alert severity="success" sx={{ mt: 1.5 }} onClose={() => setMessage("")}>
-          {message}
+          {dataDisplayText(message)}
         </Alert>
       )}
 

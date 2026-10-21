@@ -1,3 +1,4 @@
+import { dataDisplayText } from "../../utils/dataPresentation";
 import { useMemo, useState } from "react";
 import {
   Accordion, AccordionDetails, AccordionSummary, Alert, Box, Button, Chip, Paper, Stack, ToggleButton, ToggleButtonGroup, Typography,
@@ -69,7 +70,7 @@ export default function AnomalyEvolutionChart({ series, kase, currency }: {
       </ToggleButtonGroup>}
     </Stack>
 
-    {warnings.map((warning) => <Alert severity="warning" key={warning} sx={{ mt: 2 }}>{warning}</Alert>)}
+    {warnings.map((warning) => <Alert severity="warning" key={warning} sx={{ mt: 2 }}>{dataDisplayText(warning)}</Alert>)}
 
     {monthly && reference && reference.coverage_kind !== "FULL_MONTH" && <Typography variant="body2" color="text.secondary" sx={{ mt: 1 }}>
       Saldo registrado no forecast em {dateLabel(reference.data_cutoff)}: {money(reference.monthly_forecast_cloud, currency)}. A expectativa total anterior à compra não foi preservada nesta referência.

@@ -1,3 +1,4 @@
+import { dataDisplayText } from "../../utils/dataPresentation";
 import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import {
@@ -607,7 +608,7 @@ export default function Departments({ embedded = false }: { embedded?: boolean }
       >
         {error && (
           <Alert severity="error" sx={{ mb: 2 }} onClose={() => setError("")}>
-            {error}
+            {dataDisplayText(error)}
           </Alert>
         )}
         {success && (
@@ -616,7 +617,7 @@ export default function Departments({ embedded = false }: { embedded?: boolean }
             sx={{ mb: 2 }}
             onClose={() => setSuccess("")}
           >
-            {success}
+            {dataDisplayText(success)}
           </Alert>
         )}
 
@@ -779,7 +780,7 @@ export default function Departments({ embedded = false }: { embedded?: boolean }
           <Box sx={{ display: "flex", flexDirection: "column", gap: 2, mt: 1 }}>
             {deptDialogError && (
               <Alert severity="error" onClose={() => setDeptDialogError("")}>
-                {deptDialogError}
+                {dataDisplayText(deptDialogError)}
               </Alert>
             )}
             {!sharedLoaded && editingDept && (

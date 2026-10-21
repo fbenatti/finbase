@@ -1,3 +1,4 @@
+import { dataDisplayText } from "../../utils/dataPresentation";
 import { useCallback, useEffect, useState } from "react";
 import {
   DndContext, DragEndEvent, DragOverlay, DragStartEvent,
@@ -107,7 +108,7 @@ export default function CanvasTab({ onOpen, refreshKey }: Props) {
 
   return (
     <Box>
-      {error && <Alert severity="error" sx={{ mb: 2 }} onClose={() => setError("")}>{error}</Alert>}
+      {error && <Alert severity="error" sx={{ mb: 2 }} onClose={() => setError("")}>{dataDisplayText(error)}</Alert>}
       {!canUpdate && <Alert severity="info" sx={{ mb: 2 }}>Visualização do quadro. Arrastar cards exige permissão de atualização.</Alert>}
       <DndContext sensors={sensors} collisionDetection={closestCorners} onDragStart={onDragStart} onDragEnd={(e) => void onDragEnd(e)}>
         <Stack direction="row" spacing={1.5} sx={{ overflowX: "auto", pb: 2 }}>

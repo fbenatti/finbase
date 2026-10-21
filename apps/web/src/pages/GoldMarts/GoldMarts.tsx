@@ -1,3 +1,4 @@
+import { dataDisplayText } from "../../utils/dataPresentation";
 import { useEffect, useMemo, useState } from "react";
 import { Alert, Autocomplete, Box, Button, Checkbox, Chip, Divider, FormControl, FormControlLabel, Grid, IconButton, InputLabel, List, ListItemButton, ListItemText, MenuItem, Paper, Select, Stack, TextField, ToggleButton, ToggleButtonGroup, Typography } from "@mui/material";
 import { Add, ContentCopy, Delete, Save } from "@mui/icons-material";
@@ -199,7 +200,7 @@ export default function Gold({ embedded }: { embedded?: boolean } = {}) {
     <Typography variant="h4">Cubos de custo (base consolidada)</Typography>
     <Typography color="text.secondary" mb={2}>Escolha as bases consolidadas de origem, defina as dimensões de agrupamento (linhas do pivot) e as medidas a somar (valores). O reprocessamento gera uma tabela pré-agregada dest_dm_cost_&lt;code&gt; — os dashboards consultam apenas essas tabelas materializadas.</Typography>
     <Alert severity="info" sx={{ mb: 2 }}>Fluxo: Bases de origem + filtros → agrupamentos + medidas → <b>dest_dm_cost_&lt;code&gt;</b>. Salvar preserva a regra; o reprocessamento gera a base consolidada.</Alert>
-    {error && <Alert severity="error" sx={{ mb: 2 }}>{error}</Alert>}
+    {error && <Alert severity="error" sx={{ mb: 2 }}>{dataDisplayText(error)}</Alert>}
     <Grid container spacing={2}>
       <Grid item xs={12} md={4}><Paper variant="outlined" sx={{ p: 2, minHeight: 460 }}>
         <Stack direction="row" justifyContent="space-between" alignItems="center" mb={1}>
@@ -227,7 +228,7 @@ export default function Gold({ embedded }: { embedded?: boolean } = {}) {
           <ToggleButton value="pivot">Construtor visual</ToggleButton>
           <ToggleButton value="sql">SQL personalizado</ToggleButton>
         </ToggleButtonGroup>
-        {selected.materialization_error && <Alert severity="error" sx={{ mb: 2 }}>Falha na última materialização: {selected.materialization_error}</Alert>}
+        {selected.materialization_error && <Alert severity="error" sx={{ mb: 2 }}>Falha na última materialização: {dataDisplayText(selected.materialization_error)}</Alert>}
         <Stack spacing={2}>
           <TextField label="gold_code (nome da tabela)" value={selected.code || ""} onChange={e => setSelected({ ...selected, code: e.target.value })}
             helperText={`Tabela gerada: dest_dm_cost_${(selected.code || "code").toLowerCase().replace(/[^a-z0-9_\-]+/g, "_")}`} />
@@ -353,7 +354,7 @@ export default function Gold({ embedded }: { embedded?: boolean } = {}) {
     <Typography variant="h6" mb={1}>Histórico recente</Typography>
     {history.length === 0 ? <Typography color="text.secondary">Nenhuma execução registrada.</Typography> : history.map(item =>
       <Alert key={item.id} severity={item.status === "FAILED" ? "error" : item.status === "COMPLETED" ? "success" : "info"} sx={{ mb: 0.5 }}>
-        #{item.id} · {item.status} · {item.phase || "Sem detalhe"}{item.rows_destination != null ? ` · ${item.rows_destination} linhas` : ""}
+        #{item.id} · {item.status} · {dataDisplayText(item.phase || "Sem detalhe")}{item.rows_destination != null ? ` · ${item.rows_destination} linhas` : ""}
       </Alert>)}
   </Box>;
 }

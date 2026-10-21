@@ -1,3 +1,4 @@
+import { dataDisplayText } from "../../utils/dataPresentation";
 import { useEffect, useMemo, useState } from "react";
 import Plot from "@/components/Plot";
 import {
@@ -399,7 +400,7 @@ export default function WisperDashboard() {
 
   const bucketNames = useMemo(() => Object.keys(BUCKET_COLORS), []);
 
-  if (error) return <Alert severity="error">{error}</Alert>;
+  if (error) return <Alert severity="error">{dataDisplayText(error)}</Alert>;
   if (!data) return <Box p={5} textAlign="center"><CircularProgress /></Box>;
   if (data.empty) return <Alert severity="info">Sem dados financeiros para Wisper.</Alert>;
 

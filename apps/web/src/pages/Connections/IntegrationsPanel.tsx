@@ -1,3 +1,4 @@
+import { dataDisplayText } from "../../utils/dataPresentation";
 /**
  * Serviços auxiliares — Jev e itens futuros.
  *
@@ -161,7 +162,7 @@ export default function IntegrationsPanel() {
         gravado e nunca exibido de volta.
       </Typography>
 
-      {erro && <Alert severity="error" sx={{ mb: 2 }} onClose={() => setErro(null)}>{erro}</Alert>}
+      {erro && <Alert severity="error" sx={{ mb: 2 }} onClose={() => setErro(null)}>{dataDisplayText(erro)}</Alert>}
 
       <Table size="small">
         <TableHead>
@@ -254,7 +255,7 @@ export default function IntegrationsPanel() {
         <DialogTitle>Excluir serviço auxiliar?</DialogTitle>
         <DialogContent>
           {exclusaoErro ? (
-            <Alert severity="error">{exclusaoErro}</Alert>
+            <Alert severity="error">{dataDisplayText(exclusaoErro)}</Alert>
           ) : (
             <Typography>
               <strong>{excluindo?.name}</strong> e suas configurações e credenciais serão removidos deste ambiente.
@@ -311,7 +312,7 @@ export default function IntegrationsPanel() {
 
             {resultado && (
               <Alert severity={resultado.startsWith("OK") ? "success" : "warning"}>
-                {resultado}
+                {dataDisplayText(resultado)}
               </Alert>
             )}
           </Stack>

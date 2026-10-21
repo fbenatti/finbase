@@ -1,3 +1,4 @@
+import { dataDisplayText } from "../../utils/dataPresentation";
 import { Box, Paper, Typography } from "@mui/material";
 import { useSearchParams } from "react-router-dom";
 import { canonicalOperationsParams } from "../../utils/dataNavigation";
@@ -59,7 +60,7 @@ export default function Reprocess() {
                 Coleta automática diária de dados de cloud e ferramentas. Cada agendamento pode cobrir várias
                 conexões e dispara a extração na fila do worker.
               </Typography>
-              {schedulesError && <Alert severity="error" sx={{ mb: 2 }} onClose={() => setSchedulesError("")}>{schedulesError}</Alert>}
+              {schedulesError && <Alert severity="error" sx={{ mb: 2 }} onClose={() => setSchedulesError("")}>{dataDisplayText(schedulesError)}</Alert>}
               <SchedulesPanel connections={connections} />
             </>
           )}

@@ -1,3 +1,4 @@
+import { dataDisplayText } from "../../utils/dataPresentation";
 import { useEffect, useId, useMemo, useState } from "react";
 import { Alert, Box, Button, Chip, CircularProgress, Stack, Typography } from "@mui/material";
 import {
@@ -361,7 +362,7 @@ export default function HierarchicalDecompTree({
           <Button size="small" variant="contained" onClick={() => onApplyContext(treePath)}>Aplicar contexto</Button>
         )}
       </Stack>
-      {error && <Alert severity="error" sx={{ mb: 1 }}>{error}</Alert>}
+      {error && <Alert severity="error" sx={{ mb: 1 }}>{dataDisplayText(error)}</Alert>}
       <Box sx={{ border: "1px solid", borderColor: "divider", borderRadius: 2.5, overflow: "hidden", bgcolor: "#fff", position: "relative" }}>
         {loading && (
           <Stack alignItems="center" justifyContent="center" sx={{ position: "absolute", inset: 0, bgcolor: "rgba(255,255,255,.65)", zIndex: 2 }}>

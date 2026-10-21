@@ -1,3 +1,4 @@
+import { dataDisplayText } from "../../utils/dataPresentation";
 import React, { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import {
@@ -94,7 +95,7 @@ export default function Login() {
           <Typography variant="body2" color="text.secondary" sx={{ mb: 3 }}>
             Entre com seu usuário local ou e-mail corporativo
           </Typography>
-          {error && <Alert severity="error" sx={{ mb: 2 }}>{error}</Alert>}
+          {error && <Alert severity="error" sx={{ mb: 2 }}>{dataDisplayText(error)}</Alert>}
           <form onSubmit={submit}>
             <TextField
               label="Usuário ou e-mail corporativo" fullWidth margin="normal" autoFocus

@@ -1,3 +1,4 @@
+import { dataDisplayText } from "../../utils/dataPresentation";
 import { useEffect, useMemo, useRef, useState } from "react";
 import Plot from "@/components/Plot";
 import {
@@ -165,7 +166,7 @@ export default function ProjectCostDashboard({ project }: { project: "aura-brain
         </Alert>
       )}
 
-      {error && <Alert severity="error">{error}</Alert>}
+      {error && <Alert severity="error">{dataDisplayText(error)}</Alert>}
       {!error && !data && <Box p={5} textAlign="center"><CircularProgress /></Box>}
       {!error && data?.available === false && <Alert severity="warning">{data.error || "Dados indisponíveis."}</Alert>}
       {!error && data?.empty && <Alert severity="info">Nenhum mês com custo realizado na base consolidada para este projeto.</Alert>}

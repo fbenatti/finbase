@@ -1,3 +1,4 @@
+import { dataDisplayText } from "../../utils/dataPresentation";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import {
@@ -409,7 +410,7 @@ function ChartCard({ title, children, note }: { title: string; children: React.R
 
 function LoadingBlock({ loading, error, children }: { loading: boolean; error?: string; children: React.ReactNode }) {
   if (loading) return <Box sx={{ display: "flex", justifyContent: "center", p: 4 }}><CircularProgress size={26} /></Box>;
-  if (error) return <Alert severity="error">{error}</Alert>;
+  if (error) return <Alert severity="error">{dataDisplayText(error)}</Alert>;
   return <>{children}</>;
 }
 
@@ -699,7 +700,7 @@ export default function GoldDashboard() {
       <Box sx={{ p: 3 }}>
         <Paper elevation={0} sx={{ p: 2.5, borderRadius: 2, border: "1px solid", borderColor: "divider", bgcolor: "background.paper" }}>
 
-      {error && <Alert severity="error" sx={{ mb: 2 }}>{error}</Alert>}
+      {error && <Alert severity="error" sx={{ mb: 2 }}>{dataDisplayText(error)}</Alert>}
 
       {/* ── Filtros globais ── */}
       <Paper variant="outlined" sx={{ p: 1.5, mb: 2, borderRadius: "18px", borderColor: "#e2e7f0", boxShadow: "0 6px 20px rgba(24, 39, 75, 0.035)" }}>
@@ -1584,7 +1585,7 @@ function ExecutiveHighlights({ items, loading, error }: { items: ForecastAck[]; 
     || severityRank(a.severity) - severityRank(b.severity)
     || String(a.registered_at || a.created_at).localeCompare(String(b.registered_at || b.created_at)));
   return <SectionPanel title="EXECUTIVE HIGHLIGHTS" subtitle="Anotações administrativas ativas no período e no caminho de organograma selecionado.">
-    {error ? <Alert severity="error">{error}</Alert>
+    {error ? <Alert severity="error">{dataDisplayText(error)}</Alert>
       : loading ? <Typography color="text.secondary">Carregando registros do período…</Typography>
       : ordered.length ? <Stack spacing={1}>{ordered.map(ack => <Alert key={ack.id} severity={severity(ack.severity)}>
         <b>{ack.target_month} · {ack.department_name} · {ack.category}</b><br />
@@ -2363,7 +2364,7 @@ function Drilldown({ table, filters, filterKey }: { table: string; filters: Filt
 
   return (
     <Grid container spacing={1.5}>
-      {error && <Grid item xs={12}><Alert severity="error">{error}</Alert></Grid>}
+      {error && <Grid item xs={12}><Alert severity="error">{dataDisplayText(error)}</Alert></Grid>}
       <Grid item xs={12}>
         <Paper variant="outlined" sx={{ p: 1.5 }}>
           <Stack direction="row" alignItems="center" gap={0.6} flexWrap="wrap">

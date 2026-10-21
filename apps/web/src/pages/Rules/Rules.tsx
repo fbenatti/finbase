@@ -1,3 +1,4 @@
+import { dataDisplayText } from "../../utils/dataPresentation";
 import { useState, useEffect } from "react";
 import {
   Box, Typography, Button, IconButton, Chip,
@@ -466,7 +467,7 @@ export default function Rules({ embedded = false }: { embedded?: boolean } = {})
         )}
       </Box>
 
-      {error && <Alert severity="error" sx={{ mb: 2 }} onClose={() => setError("")}>{error}</Alert>}
+      {error && <Alert severity="error" sx={{ mb: 2 }} onClose={() => setError("")}>{dataDisplayText(error)}</Alert>}
 
       {!selectedDestId ? (
         <Alert severity="info" sx={{ mb: 2 }}>

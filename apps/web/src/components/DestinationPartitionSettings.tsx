@@ -1,3 +1,4 @@
+import { dataDisplayText } from "../utils/dataPresentation";
 import { useEffect, useState } from "react";
 import {
   Alert, Box, Button, Chip, FormControl, FormHelperText, InputLabel,
@@ -192,8 +193,8 @@ export default function DestinationPartitionSettings({
         )}
       </Box>
 
-      {error && <Alert severity="error" sx={{ mb: 1 }} onClose={() => setError("")}>{error}</Alert>}
-      {success && <Alert severity="success" sx={{ mb: 1 }} onClose={() => setSuccess("")}>{success}</Alert>}
+      {error && <Alert severity="error" sx={{ mb: 1 }} onClose={() => setError("")}>{dataDisplayText(error)}</Alert>}
+      {success && <Alert severity="success" sx={{ mb: 1 }} onClose={() => setSuccess("")}>{dataDisplayText(success)}</Alert>}
 
       <Box sx={{ display: "flex", flexWrap: "wrap", gap: 2, alignItems: "flex-start" }}>
         <FormControl size="small" sx={{ minWidth: 200 }}>

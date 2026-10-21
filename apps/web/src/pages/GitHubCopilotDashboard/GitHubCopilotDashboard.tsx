@@ -1,3 +1,4 @@
+import { dataDisplayText } from "../../utils/dataPresentation";
 import React, { useState, useEffect, useRef } from "react";
 import {
   Box, Typography, Paper, Stack, Card, CardContent, FormControl, InputLabel,
@@ -619,7 +620,7 @@ export default function GitHubCopilotDashboard({ embedded = false }: { embedded?
 
             <TextField fullWidth size="small" placeholder="Buscar..." value={searchQuery} onChange={(e) => { setSearchQuery(e.target.value); setPage(0); }} sx={{ mb: 2 }} />
 
-            {engagementError && <Alert severity="error" sx={{ mb: 2 }}>{engagementError}</Alert>}
+            {engagementError && <Alert severity="error" sx={{ mb: 2 }}>{dataDisplayText(engagementError)}</Alert>}
             {engagementLoading ? (
               <Box p={5} display="flex" justifyContent="center"><CircularProgress size={24} /></Box>
             ) : (

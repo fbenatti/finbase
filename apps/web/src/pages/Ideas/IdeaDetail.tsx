@@ -1,3 +1,4 @@
+import { dataDisplayText } from "../../utils/dataPresentation";
 import { useEffect, useState } from "react";
 import {
   Alert, Autocomplete, Box, Button, Chip, Dialog, DialogActions, DialogContent, DialogTitle,
@@ -113,7 +114,7 @@ export default function IdeaDetail({ ideaId, open, onClose, onUpdated }: Props) 
     <Dialog open={open} onClose={onClose} maxWidth="lg" fullWidth>
       <DialogTitle>{idea.title}</DialogTitle>
       <DialogContent>
-        {error && <Alert severity="error" sx={{ mb: 2 }}>{error}</Alert>}
+        {error && <Alert severity="error" sx={{ mb: 2 }}>{dataDisplayText(error)}</Alert>}
         <Stack spacing={2}>
           <Stack direction="row" spacing={1} flexWrap="wrap">
             <Chip label={TYPE_LABELS[idea.idea_type]} size="small" />

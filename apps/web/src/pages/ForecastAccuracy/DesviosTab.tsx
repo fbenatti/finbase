@@ -1,3 +1,4 @@
+import { dataDisplayText } from "../../utils/dataPresentation";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import Plot from "@/components/Plot";
 import {
@@ -297,8 +298,8 @@ export default function DesviosTab({ runId, targetMonth, department }: { runId: 
 
   return (
     <Box>
-      {message && <Alert severity="success" sx={{ mb: 2 }} onClose={() => setMessage("")}>{message}</Alert>}
-      {error && <Alert severity="error" sx={{ mb: 2 }} onClose={() => setError("")}>{error}</Alert>}
+      {message && <Alert severity="success" sx={{ mb: 2 }} onClose={() => setMessage("")}>{dataDisplayText(message)}</Alert>}
+      {error && <Alert severity="error" sx={{ mb: 2 }} onClose={() => setError("")}>{dataDisplayText(error)}</Alert>}
       <Stack direction="row" justifyContent="space-between" alignItems="flex-start" sx={{ mb: 2 }} gap={1} flexWrap="wrap">
         <Typography variant="body2" color="text.secondary">
           Desvios do mês selecionado no último nível de cada departamento, respeitando o departamento filtrado.
@@ -381,7 +382,7 @@ export default function DesviosTab({ runId, targetMonth, department }: { runId: 
             </DialogTitle>
             <DialogContent dividers>
               {seriesDialog.loading && <LinearProgress sx={{ mb: 1.5, borderRadius: 1 }} />}
-              {seriesDialog.error && <Alert severity="error" sx={{ mb: 1.5 }}>{seriesDialog.error}</Alert>}
+              {seriesDialog.error && <Alert severity="error" sx={{ mb: 1.5 }}>{dataDisplayText(seriesDialog.error)}</Alert>}
               {seriesDialog.data && seriesDialog.data.points.length > 0 && (
                 <>
                   <Stack direction="row" spacing={3} sx={{ mb: 2 }} flexWrap="wrap">

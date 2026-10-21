@@ -1,3 +1,4 @@
+import { dataDisplayText } from "../../utils/dataPresentation";
 import {
   Alert, Box, Card, CardContent, Chip, Grid, Stack, Tooltip, Typography,
 } from "@mui/material";
@@ -55,7 +56,7 @@ export function PtuFinanceViews({ costs, tokenData, aiDemand, provisioned }: {
   provisioned?: { total_ptus?: number; deployment_count?: number };
 }) {
   if (!costs || costs.available === false) {
-    return <Alert severity="warning">Dados financeiros indisponíveis{costs?.error ? `: ${costs.error}` : ""}. A aba operacional continua completa; os custos PTU não foram carregados.</Alert>;
+    return <Alert severity="warning">Dados financeiros indisponíveis{dataDisplayText(costs?.error ? `: ${costs.error}` : "")}. A aba operacional continua completa; os custos PTU não foram carregados.</Alert>;
   }
   if (costs.empty) {
     return <Alert severity="info">Não foram encontrados registros consolidados para os períodos consultados. Verifique a atualização dos dados de custos.</Alert>;

@@ -1,3 +1,4 @@
+import { dataDisplayText } from "../../utils/dataPresentation";
 /**
  * Página `/anomalies` — gestão de anomalias de custo cloud.
  *
@@ -540,7 +541,7 @@ export default function Anomalies() {
         </Stack>
       </Box>
 
-      {error && <Alert severity="error" sx={{ mb: 1 }} onClose={() => setError(null)}>{error}</Alert>}
+      {error && <Alert severity="error" sx={{ mb: 1 }} onClose={() => setError(null)}>{dataDisplayText(error)}</Alert>}
       {latestRun && latestRun.id !== dismissedRunId && <Alert
         severity={latestRun.status === "FAILED" ? "error" : latestRun.status === "COMPLETED" ? "success" : "info"}
         sx={{ mb: 2 }}
@@ -550,9 +551,9 @@ export default function Anomalies() {
         }}
       >
         Detecção #{latestRun.id} · {latestRun.status === "FAILED" ? "Falhou" : latestRun.status === "COMPLETED" ? "Concluída" : latestRun.status === "CANCELLED" ? "Cancelada" : latestRun.status === "QUEUED" ? "Na fila" : "Em execução"}
-        {latestRun.status === "FAILED" ? `: ${latestRun.error ?? latestRun.phase ?? "Consulte os logs de processamento"}`
+        {dataDisplayText(latestRun.status === "FAILED" ? `: ${latestRun.error ?? latestRun.phase ?? "Consulte os logs de processamento"}`
           : latestRun.status === "COMPLETED" ? ` · ${latestRun.cases_created ?? 0} caso(s) novo(s), ${latestRun.cases_updated ?? 0} atualizado(s) · ${latestRun.phase ?? ""}`
-            : ` · ${latestRun.phase ?? "Aguardando processamento"}`}
+            : ` · ${latestRun.phase ?? "Aguardando processamento"}`)}
       </Alert>}
 
       {tab === 0 && summary && (
@@ -632,7 +633,7 @@ export default function Anomalies() {
               ))}
             </Stack>
             <Alert severity="info" sx={{ mt: 2 }}>
-              {summary.notes.join(" · ")}
+              {dataDisplayText(summary.notes.join(" · "))}
             </Alert>
           </Paper>
         </Box>

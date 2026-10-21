@@ -1,3 +1,4 @@
+import { dataDisplayText } from "../../utils/dataPresentation";
 import { useCallback, useEffect, useState } from "react";
 import { useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { Alert, Box, Button, CircularProgress, Paper, Stack, Typography } from "@mui/material";
@@ -71,7 +72,7 @@ export default function ForecastHistory() {
       {/* Área de trabalho */}
       <Box sx={{ p: 3 }}>
         {error && (
-          <Alert severity="error" sx={{ mb: 2 }} onClose={() => setError("")}>{error}</Alert>
+          <Alert severity="error" sx={{ mb: 2 }} onClose={() => setError("")}>{dataDisplayText(error)}</Alert>
         )}
         {loading && !result && (
           <Box sx={{ py: 8, display: "flex", justifyContent: "center" }}>

@@ -1,3 +1,4 @@
+import { dataDisplayText } from "../../utils/dataPresentation";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   Alert, Box, Button, Checkbox, Chip, CircularProgress, Collapse, Divider,
@@ -281,7 +282,7 @@ function EnvironmentCard({
         credenciais e fluxo de coleta próprios.
       </Typography>
 
-      {message && <Alert severity={message.severity} sx={{ mt: 1 }} onClose={() => setMessage(null)}>{message.text}</Alert>}
+      {message && <Alert severity={message.severity} sx={{ mt: 1 }} onClose={() => setMessage(null)}>{dataDisplayText(message.text)}</Alert>}
 
       <Collapse in={expanded}>
         <Box sx={{ mt: 1 }}>
@@ -344,7 +345,7 @@ export default function AzureSourcesPanel({ environment, connectionId }: { envir
   if (error) {
     return (
       <Alert severity="error" action={<IconButton size="small" onClick={() => void load()}><RefreshIcon fontSize="small" /></IconButton>}>
-        Não foi possível carregar as fontes Azure: {error}
+        Não foi possível carregar as fontes Azure: {dataDisplayText(error)}
       </Alert>
     );
   }

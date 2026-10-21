@@ -1,3 +1,4 @@
+import { dataDisplayText } from "../../utils/dataPresentation";
 import { useEffect, useMemo, useState } from "react";
 import { Alert, Box, Button, ButtonGroup, FormControl, InputLabel, MenuItem, Paper, Select, Stack, ToggleButton, ToggleButtonGroup, Typography } from "@mui/material";
 import Plot from "@/components/Plot";
@@ -105,7 +106,7 @@ export default function ExecutiveWidgetsV2({ table, info, filters, filterGroups,
       </Box>
       {tab === 0 && <ButtonGroup size="small" sx={{ flexWrap: "wrap", gap: .5, "& .MuiButtonGroup-grouped": { border: "1px solid #dce2ee !important", borderRadius: "9px !important", textTransform: "none", fontSize: 12, fontWeight: 700, color: "#44506c" } }}>{availableLenses.map((item) => <Button key={item.field} variant={lens === item.field ? "contained" : "outlined"} onClick={() => { setLens(item.field); setShowAll(false); }} sx={lens === item.field ? { bgcolor: "#f2eaff", color: "#6416dc", borderColor: "#c8aaff !important", boxShadow: "none", "&:hover": { bgcolor: "#eadcff", boxShadow: "none" } } : { bgcolor: "#fff" }}>{item.label}</Button>)}</ButtonGroup>}
     </Stack>
-    {error && <Alert severity="error" sx={{ mt: 1 }}>{error}</Alert>}
+    {error && <Alert severity="error" sx={{ mt: 1 }}>{dataDisplayText(error)}</Alert>}
     {loading && <Typography color="text.secondary" mt={2}>Carregando dados realizados…</Typography>}
     {!loading && tab === 0 && !ranking.length && !error && <Alert severity="info" sx={{ mt: 1 }}>Sem dados realizados na última competência disponível para este recorte.</Alert>}
     {tab === 0 && !!ranking.length && <Stack direction={{ xs: "column", md: "row" }} gap={1.5} mt={1.5}>

@@ -1,3 +1,4 @@
+import { dataDisplayText } from "../../utils/dataPresentation";
 import { useEffect, useState } from "react";
 import Plot from "@/components/Plot";
 import { Alert, Box, Card, CardContent, Grid, Stack, Typography } from "@mui/material";
@@ -37,7 +38,7 @@ export default function DashboardTab({ onOpen, refreshKey }: Props) {
       .catch((e) => setError(String(e)));
   }, [from, to, refreshKey]);
 
-  if (error) return <Alert severity="error">{error}</Alert>;
+  if (error) return <Alert severity="error">{dataDisplayText(error)}</Alert>;
   if (!data) return <Typography>Carregando dashboard...</Typography>;
 
   const k = data.kpis;

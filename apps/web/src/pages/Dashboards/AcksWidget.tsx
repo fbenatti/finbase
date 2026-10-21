@@ -1,3 +1,4 @@
+import { dataDisplayText } from "../../utils/dataPresentation";
 import { useEffect, useState } from "react";
 import Plot from "@/components/Plot";
 import {
@@ -259,8 +260,8 @@ export default function AcksWidget({ department, hideManualHighlights = false }:
           </Select>
         </FormControl>
       </Stack>
-      {error && <Alert severity="error" sx={{ mb: 1 }} onClose={() => setError("")}>{error}</Alert>}
-      {desviosWarning && !error && <Alert severity="warning" sx={{ mb: 1 }} onClose={() => setDesviosWarning("")}>{desviosWarning}</Alert>}
+      {error && <Alert severity="error" sx={{ mb: 1 }} onClose={() => setError("")}>{dataDisplayText(error)}</Alert>}
+      {desviosWarning && !error && <Alert severity="warning" sx={{ mb: 1 }} onClose={() => setDesviosWarning("")}>{dataDisplayText(desviosWarning)}</Alert>}
       {loading ? (
         <Box sx={{ py: 3, display: "flex", justifyContent: "center" }}><CircularProgress size={24} /></Box>
       ) : (
@@ -380,7 +381,7 @@ export default function AcksWidget({ department, hideManualHighlights = false }:
           <DialogTitle>Período — {seriesDialog.subcategory}</DialogTitle>
           <DialogContent dividers>
             {seriesDialog.loading && <LinearProgress sx={{ mb: 1.5, borderRadius: 1 }} />}
-            {seriesDialog.error && <Alert severity="error" sx={{ mb: 1.5 }}>{seriesDialog.error}</Alert>}
+            {seriesDialog.error && <Alert severity="error" sx={{ mb: 1.5 }}>{dataDisplayText(seriesDialog.error)}</Alert>}
             {seriesDialog.data && <>
               <Typography variant="body2" color="text.secondary" sx={{ mb: 1.5 }}>{prettyMonth(seriesDialog.data.target_month)} · {seriesDialog.data.department || department || "Todos os departamentos"}</Typography>
               <Stack direction="row" spacing={3} sx={{ mb: 2 }} flexWrap="wrap">

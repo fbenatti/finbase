@@ -1,3 +1,4 @@
+import { dataDisplayText } from "../../utils/dataPresentation";
 import { useEffect, useMemo, useState, type ReactElement } from "react";
 import { Link as RouterLink, useSearchParams } from "react-router-dom";
 import Plot from "@/components/Plot";
@@ -267,7 +268,7 @@ export default function DashboardsIA() {
             </Stack>
           </Stack>
 
-          {error && <Alert severity="error" sx={{ mb: 2 }}>{error}<Button size="small" sx={{ ml: 1 }} onClick={() => setReloadNonce(n => n + 1)}>Tentar de novo</Button></Alert>}
+          {error && <Alert severity="error" sx={{ mb: 2 }}>{dataDisplayText(error)}<Button size="small" sx={{ ml: 1 }} onClick={() => setReloadNonce(n => n + 1)}>Tentar de novo</Button></Alert>}
 
           {loading ? (
             <Stack alignItems="center" mt={6} gap={1}><CircularProgress /><Typography color="text.secondary">Consultando dest_licencas_ia e dest_consumo_ia…</Typography></Stack>

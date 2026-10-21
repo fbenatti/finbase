@@ -1,3 +1,4 @@
+import { dataDisplayText } from "../../utils/dataPresentation";
 import { useEffect, useMemo, useState } from "react";
 import {
   Alert,
@@ -433,7 +434,7 @@ function BudgetPanel({ department }: { department?: string }) {
           )}
         </Stack>
       </Stack>
-      {error && <Alert severity="error">{error}</Alert>}
+      {error && <Alert severity="error">{dataDisplayText(error)}</Alert>}
       {loading ? (
         <Box sx={{ py: 3, display: "flex", justifyContent: "center" }}>
           <CircularProgress size={24} />

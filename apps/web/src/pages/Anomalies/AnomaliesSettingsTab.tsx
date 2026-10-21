@@ -1,3 +1,4 @@
+import { dataDisplayText } from "../../utils/dataPresentation";
 import { useState } from "react";
 import { Accordion, AccordionDetails, AccordionSummary, Alert, Box, Button, Paper, Stack, TextField, Typography } from "@mui/material";
 import ExpandMoreIcon from "@mui/icons-material/ExpandMore";
@@ -168,7 +169,7 @@ export default function AnomaliesSettingsTab({ config, onSaved, busy, setBusy }:
         }}>Salvar configurações</Button>
         <Typography variant="caption" color="text.secondary">Versão atual da configuração: {config.version}</Typography>
       </Stack>
-      {error && <Alert severity="error" sx={{ mt: 2 }}>{error}</Alert>}
+      {error && <Alert severity="error" sx={{ mt: 2 }}>{dataDisplayText(error)}</Alert>}
     </Box>
   );
 }

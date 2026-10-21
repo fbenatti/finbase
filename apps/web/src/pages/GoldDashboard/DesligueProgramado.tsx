@@ -1,3 +1,4 @@
+import { dataDisplayText } from "../../utils/dataPresentation";
 import { useEffect, useMemo, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import {
@@ -247,7 +248,7 @@ export default function DesligueProgramado({ embedded }: { embedded?: boolean })
 
   return (
     <Box>
-      {error && <Alert severity="error" sx={{ mb: 2 }}>{error}</Alert>}
+      {error && <Alert severity="error" sx={{ mb: 2 }}>{dataDisplayText(error)}</Alert>}
 
       {tab === 0 && (
         <>
@@ -783,7 +784,7 @@ export default function DesligueProgramado({ embedded }: { embedded?: boolean })
             </DialogTitle>
             <DialogContent dividers>
               {usageDialog.loading && <LinearProgress sx={{ mb: 1.5, borderRadius: 1 }} />}
-              {usageDialog.error && <Alert severity="error" sx={{ mb: 1.5 }}>{usageDialog.error}</Alert>}
+              {usageDialog.error && <Alert severity="error" sx={{ mb: 1.5 }}>{dataDisplayText(usageDialog.error)}</Alert>}
               {usageDialog.data?.is_recently_born && (
                 <Alert severity="warning" sx={{ mb: 1.5 }}>
                   VM recém-aparecida na janela de 30 dias — classificada como <strong>POUCO_HISTORICO</strong> até estabilizar o ciclo de vida.

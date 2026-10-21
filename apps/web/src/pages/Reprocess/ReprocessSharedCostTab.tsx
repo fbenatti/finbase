@@ -1,3 +1,4 @@
+import { dataDisplayText } from "../../utils/dataPresentation";
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useNotifications } from "../../context/NotificationContext";
@@ -54,8 +55,8 @@ export default function ReprocessSharedCostTab() {
 
   return (
     <Box>
-      {error && <Alert severity="error" sx={{ mb: 2 }} onClose={() => setError("")}>{error}</Alert>}
-      {startMessage && <Alert severity="info" sx={{ mb: 2 }} onClose={() => setStartMessage("")}>{startMessage}</Alert>}
+      {error && <Alert severity="error" sx={{ mb: 2 }} onClose={() => setError("")}>{dataDisplayText(error)}</Alert>}
+      {startMessage && <Alert severity="info" sx={{ mb: 2 }} onClose={() => setStartMessage("")}>{dataDisplayText(startMessage)}</Alert>}
       <Box sx={{ display: "flex", gap: 1, mb: 2, flexWrap: "wrap" }}>
         <Button
           variant="contained"

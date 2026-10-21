@@ -1,3 +1,4 @@
+import { dataDisplayText } from "../../utils/dataPresentation";
 import { useEffect, useRef, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import {
@@ -318,12 +319,12 @@ export default function Forecast() {
       }}>
         {error && (
           <Alert severity="error" sx={{ mb: 2 }} onClose={() => setError("")}>
-            {error}
+            {dataDisplayText(error)}
           </Alert>
         )}
         {message && (
           <Alert severity="success" sx={{ mb: 2 }} onClose={() => setMessage("")}>
-            {message}
+            {dataDisplayText(message)}
           </Alert>
         )}
 

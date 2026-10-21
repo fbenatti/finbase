@@ -1,3 +1,4 @@
+import { dataDisplayText } from "../../utils/dataPresentation";
 import { useEffect, useMemo, useState } from "react";
 import {
   Alert, Box, Button, Chip, CircularProgress, Dialog, DialogActions, DialogContent, DialogTitle,
@@ -289,7 +290,7 @@ export default function CloneRules({ embedded }: { embedded?: boolean } = {}) {
       "& .MuiOutlinedInput-root:not(.MuiInputBase-multiline)": { height: 40 },
       "& .MuiInputLabel-root:not(.MuiInputLabel-shrink)": { transform: "translate(14px, 11px) scale(1)" },
     }}>
-      {error && <Alert severity="error" sx={{ mb: 2 }} onClose={() => setError("")}>{error}</Alert>}
+      {error && <Alert severity="error" sx={{ mb: 2 }} onClose={() => setError("")}>{dataDisplayText(error)}</Alert>}
 
       <Alert severity="info" sx={{ mb: 2 }}>
         <Typography variant="subtitle2" fontWeight={700} gutterBottom>Por que estas regras existem?</Typography>

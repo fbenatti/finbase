@@ -1,3 +1,4 @@
+import { dataDisplayText } from "../../utils/dataPresentation";
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import Plot from "@/components/Plot";
 import { Alert, Box, Card, CardContent, Chip, CircularProgress, Grid, Stack, Table, TableBody, TableCell, TableHead, TableRow, Tooltip, Typography } from "@mui/material";
@@ -20,7 +21,7 @@ function HelpLabel({ label, help }: { label: string; help: string }) {
 export default function DatameshDashboard() {
   const [data, setData] = useState<DatameshDashboard | null>(null); const [error, setError] = useState<string | null>(null); const abort = useRef<AbortController | null>(null);
   useEffect(() => { const controller = new AbortController(); abort.current = controller; setError(null); getDatameshDashboard(controller.signal).then(x => { if (!controller.signal.aborted) setData(x); }).catch(e => { if (e?.code !== "ERR_CANCELED") setError(e?.response?.data?.detail || "Falha ao consultar o dashboard Datamesh."); }); return () => controller.abort(); }, []);
-  if (error) return <Alert severity="error">{error}</Alert>;
+  if (error) return <Alert severity="error">{dataDisplayText(error)}</Alert>;
   if (!data) return <Box p={5} textAlign="center"><CircularProgress /></Box>;
   if (data.empty) return <Alert severity="info">Nenhum custo Datamesh foi encontrado na base consolidada.</Alert>;
   const kpis = data.kpis || { total: 0, databricks: 0, data: 0, infra: 0, forecast: 0 }; const monthly = data.monthly || [];

@@ -1,3 +1,4 @@
+import { dataDisplayText } from "../../utils/dataPresentation";
 import { useEffect, useState } from "react";
 import { Box, Paper, Typography, Alert } from "@mui/material";
 import { getConnections, SourceConnection, formatApiError } from "../../services/api";
@@ -21,7 +22,7 @@ export default function SchedulesPage() {
         Coleta automática diária de dados de cloud e ferramentas. Cada agendamento pode cobrir várias
         conexões e dispara a extração na fila do worker.
       </Typography>
-      {error && <Alert severity="error" sx={{ mb: 2 }} onClose={() => setError("")}>{error}</Alert>}
+      {error && <Alert severity="error" sx={{ mb: 2 }} onClose={() => setError("")}>{dataDisplayText(error)}</Alert>}
       <Paper variant="outlined" sx={{ p: { xs: 1.5, md: 2.5 } }}>
         <SchedulesPanel connections={connections} />
       </Paper>

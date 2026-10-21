@@ -1,3 +1,4 @@
+import { dataDisplayText } from "../../utils/dataPresentation";
 import { useEffect, useMemo, useRef, useState, type ReactElement } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import Plot from "@/components/Plot";
@@ -1325,7 +1326,7 @@ export default function ExpectedView({
       </Alert>
       {error && (
         <Alert severity="error" sx={{ mb: 2 }}>
-          {error}
+          {dataDisplayText(error)}
           <Button
             size="small"
             sx={{ ml: 1 }}
@@ -1412,7 +1413,7 @@ export default function ExpectedView({
                   </FormControl>
                   </Stack>
                 </Stack>
-                {dailyError && (chartGranularity === "daily" || groupBy) && <Alert severity="error" sx={{ mt: 1 }}>{dailyError}</Alert>}
+                {dailyError && (chartGranularity === "daily" || groupBy) && <Alert severity="error" sx={{ mt: 1 }}>{dataDisplayText(dailyError)}</Alert>}
                 {(chartGranularity === "daily" && dailyLoading) || groupQueryLoading
                   ? <Stack alignItems="center" justifyContent="center" sx={{ height: 420 }} direction="row" gap={1}><CircularProgress size={22} /><Typography color="text.secondary">{chartGranularity === "daily" ? "Consultando consumo diário…" : "Consultando o agrupamento dos custos realizados…"}</Typography></Stack>
                   : chartGranularity === "daily" && dailyGold?.available === false

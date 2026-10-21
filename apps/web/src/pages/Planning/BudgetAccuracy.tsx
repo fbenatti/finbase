@@ -1,3 +1,4 @@
+import { dataDisplayText } from "../../utils/dataPresentation";
 import { useEffect, useState } from "react";
 import Plot from "@/components/Plot";
 import {
@@ -377,7 +378,7 @@ export default function BudgetAccuracy() {
       </Paper>
       {error && (
         <Alert severity="error" sx={{ mb: 2 }}>
-          {error}
+          {dataDisplayText(error)}
         </Alert>
       )}
       {loading ? (

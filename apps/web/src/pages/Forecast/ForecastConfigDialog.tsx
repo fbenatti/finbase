@@ -1,3 +1,4 @@
+import { dataDisplayText } from "../../utils/dataPresentation";
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
   Alert,
@@ -317,7 +318,7 @@ export default function ForecastConfigDialog({ open, initial, tables, usedDestin
     <Dialog open={open} onClose={onClose} maxWidth="md" fullWidth>
       <DialogTitle>{initial ? "Editar Forecast" : "Nova configuração de Forecast"}</DialogTitle>
       <DialogContent sx={dialogFieldSx}>
-        {error && <Alert severity="error" sx={{ mb: 2 }} onClose={() => setError("")}>{error}</Alert>}
+        {error && <Alert severity="error" sx={{ mb: 2 }} onClose={() => setError("")}>{dataDisplayText(error)}</Alert>}
         {loading && (
           <Stack direction="row" alignItems="center" gap={1} sx={{ mb: 2 }}>
             <CircularProgress size={18} />

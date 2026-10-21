@@ -1,3 +1,4 @@
+import { dataDisplayText } from "../utils/dataPresentation";
 import { Box, Chip, CircularProgress, Stack, Typography, Alert, Divider, Avatar, IconButton, Tooltip } from "@mui/material";
 import { useEffect, useState } from "react";
 import { api } from "../services/api";
@@ -70,7 +71,7 @@ export default function RecordHistory({ module, entityType, entityId }: { module
       .catch((e) => setError(e?.response?.data?.detail || "Erro ao carregar histórico"));
   }, [module, entityType, entityId]);
 
-  if (error) return <Alert severity="info" sx={{ mt: 1 }}>Histórico indisponível ({error})</Alert>;
+  if (error) return <Alert severity="info" sx={{ mt: 1 }}>Histórico indisponível ({dataDisplayText(error)})</Alert>;
   if (!events) return <Box sx={{ display: "flex", justifyContent: "center", p: 3 }}><CircularProgress size={22} /></Box>;
   if (events.length === 0) return <Typography color="text.secondary" sx={{ py: 3, textAlign: "center" }}>Nenhuma alteração registrada</Typography>;
 

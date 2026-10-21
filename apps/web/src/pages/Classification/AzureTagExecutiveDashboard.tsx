@@ -1,3 +1,4 @@
+import { dataDisplayText } from "../../utils/dataPresentation";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   Alert, Box, Button, Card, CardContent, Chip, CircularProgress, Collapse,
@@ -255,8 +256,8 @@ export default function AzureTagExecutiveDashboard() {
       </Stack>
     </Stack>
 
-    {error && <Alert severity="error" sx={{ mb: 2, whiteSpace: "pre-line" }} onClose={() => setError("")}>{error}</Alert>}
-    {refreshMessage && <Alert severity={refreshing ? "info" : "success"} sx={{ mb: 2 }}>{refreshMessage}</Alert>}
+    {error && <Alert severity="error" sx={{ mb: 2, whiteSpace: "pre-line" }} onClose={() => setError("")}>{dataDisplayText(error)}</Alert>}
+    {refreshMessage && <Alert severity={refreshing ? "info" : "success"} sx={{ mb: 2 }}>{dataDisplayText(refreshMessage)}</Alert>}
     {loading && <LinearProgress sx={{ mb: 2 }} />}
     {data && <>
       <Box sx={{ display: "grid", gridTemplateColumns: { xs: "repeat(2,minmax(0,1fr))", sm: "repeat(3,minmax(0,1fr))", lg: "repeat(6,minmax(0,1fr))" }, gap: 1.5, mb: 1.5 }}>
@@ -383,8 +384,8 @@ export default function AzureTagExecutiveDashboard() {
               </Stack>
               <IconButton data-pdf-hide size="small" aria-label={isOpen ? "Recolher recursos" : "Ver recursos"}>{isOpen ? <ExpandLess /> : <ExpandMore />}</IconButton>
             </Box>
-            {item.inventory_error && <Alert severity="error" sx={{ mx: 2, mb: 2 }}>{item.inventory_error}</Alert>}
-            {item.capability_warnings.length > 0 && <Alert severity="warning" sx={{ mx: 2, mb: 2 }}>Classificação de suporte a tags incompleta: {item.capability_warnings.join("; ")}</Alert>}
+            {item.inventory_error && <Alert severity="error" sx={{ mx: 2, mb: 2 }}>{dataDisplayText(item.inventory_error)}</Alert>}
+            {item.capability_warnings.length > 0 && <Alert severity="warning" sx={{ mx: 2, mb: 2 }}>Classificação de suporte a tags incompleta: {dataDisplayText(item.capability_warnings.join("; "))}</Alert>}
             <Collapse in={isOpen}>
               <CardContent sx={{ pt: 0 }}>
                 {resourceLoading === item.subscription_id && <LinearProgress sx={{ mb: 1 }} />}

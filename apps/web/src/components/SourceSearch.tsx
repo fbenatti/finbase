@@ -1,3 +1,4 @@
+import { dataDisplayText } from "../utils/dataPresentation";
 import { useEffect, useState } from "react";
 import { Alert, Box, Button, Chip, FormControl, InputLabel, MenuItem, Paper, Select, Stack, Table, TableBody, TableCell, TableContainer, TableHead, TableRow, TextField, Typography } from "@mui/material";
 import { Search } from "@mui/icons-material";
@@ -18,7 +19,7 @@ export default function SourceSearch({ destinations, initialTableId }: { destina
   const search = async () => { if (!term.trim()) return; setLoading(true); setError(""); try { setResult(await searchPivotTable(tableId, term, 100, 0, filters)); } catch (e: unknown) { setError(e instanceof Error ? e.message : "Falha na busca"); } finally { setLoading(false); } };
 
   return <Box>
-    {error && <Alert severity="error" sx={{ mb: 2 }}>{error}</Alert>}
+    {error && <Alert severity="error" sx={{ mb: 2 }}>{dataDisplayText(error)}</Alert>}
     <Paper sx={{ p: 2, mb: 2 }}>
       <Typography variant="h6">Busca na Fonte de Dados</Typography>
       <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>Pesquise uma string em todas as colunas textuais da base consolidada, aplicando filtros condicionais antes da busca.</Typography>

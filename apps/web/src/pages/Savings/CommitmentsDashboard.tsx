@@ -1,3 +1,4 @@
+import { dataDisplayText } from "../../utils/dataPresentation";
 import { lazy, Suspense, useEffect, useState } from "react";
 import {
   Alert,
@@ -138,7 +139,7 @@ export default function CommitmentsDashboard() {
         </Stack>
       </Stack>
 
-      {error && <Alert severity="error" sx={{ mb: 2 }}>{error}</Alert>}
+      {error && <Alert severity="error" sx={{ mb: 2 }}>{dataDisplayText(error)}</Alert>}
       {loading && !data && <Stack alignItems="center" sx={{ py: 5 }}><CircularProgress /></Stack>}
       {loading && data && <Typography variant="caption" color="text.secondary" sx={{ display: "block", mb: 1 }}>Atualizando o período…</Typography>}
       {data && <>

@@ -1,3 +1,4 @@
+import { dataDisplayText } from "../../utils/dataPresentation";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import Plot from "@/components/Plot";
@@ -347,7 +348,7 @@ export default function Reservations() {
       )}
       {error && (
         <Alert severity="error" sx={{ mb: 2 }} onClose={() => setError(null)}>
-          {error}
+          {dataDisplayText(error)}
         </Alert>
       )}
       {dash && dash.available === false && (

@@ -1,3 +1,4 @@
+import { dataDisplayText } from "../../utils/dataPresentation";
 import { useCallback, useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import {
@@ -122,8 +123,8 @@ export default function ReprocessAccuracyTab() {
         Exibe apenas meses com realizado no mês e no mês anterior, necessário para o forecast simulado em 02/MM
         (cutoff D-2). O dashboard de acurácia usa automaticamente o snapshot mais recente de cada mês.
       </Alert>
-      {error && <Alert severity="error" sx={{ mb: 2 }} onClose={() => setError("")}>{error}</Alert>}
-      {message && <Alert severity="success" sx={{ mb: 2 }} onClose={() => setMessage("")}>{message}</Alert>}
+      {error && <Alert severity="error" sx={{ mb: 2 }} onClose={() => setError("")}>{dataDisplayText(error)}</Alert>}
+      {message && <Alert severity="success" sx={{ mb: 2 }} onClose={() => setMessage("")}>{dataDisplayText(message)}</Alert>}
 
       <Card sx={{ mb: 2 }}>
         <CardContent>
@@ -193,7 +194,7 @@ export default function ReprocessAccuracyTab() {
               </Typography>
             </Stack>
             <LinearProgress variant={isActive(task.status) ? "indeterminate" : "determinate"} value={progress} sx={{ mt: 1 }} />
-            {task.error && <Alert severity="error" sx={{ mt: 1.5 }}>{task.error}</Alert>}
+            {task.error && <Alert severity="error" sx={{ mt: 1.5 }}>{dataDisplayText(task.error)}</Alert>}
           </CardContent>
         </Card>
       )}

@@ -1,3 +1,4 @@
+import { dataDisplayText } from "../../utils/dataPresentation";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   Box, Chip, Divider, Dialog, DialogContent, DialogTitle, IconButton, InputAdornment, Menu, MenuItem,
@@ -273,7 +274,7 @@ export default function Audit() {
               sx={{ minWidth: 260 }}
             />
           </Box>
-          {error && <Alert severity="error" sx={{ mb: 2 }}>{error}</Alert>}
+          {error && <Alert severity="error" sx={{ mb: 2 }}>{dataDisplayText(error)}</Alert>}
           <Box sx={{ height: 540, width: "100%" }} onContextMenu={onCellContextMenu}>
             <DataGrid
               apiRef={apiRef}

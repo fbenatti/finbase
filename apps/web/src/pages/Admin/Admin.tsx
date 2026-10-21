@@ -1,3 +1,4 @@
+import { dataDisplayText } from "../../utils/dataPresentation";
 import { moduleDisplayName } from "../../utils/dataPresentation";
 import React, { useEffect, useMemo, useState } from "react";
 import { useSearchParams } from "react-router-dom";
@@ -118,8 +119,8 @@ function RolesTab() {
 
   return (
     <Stack spacing={2}>
-      {error && <Alert severity="error">{error}</Alert>}
-      {msg && <Alert severity="success">{msg}</Alert>}
+      {error && <Alert severity="error">{dataDisplayText(error)}</Alert>}
+      {msg && <Alert severity="success">{dataDisplayText(msg)}</Alert>}
       <Stack direction="row" spacing={1} alignItems="center">
         <TextField size="small" label="Nova role" value={newRole} onChange={(e) => setNewRole(e.target.value)} />
         <Button variant="contained" startIcon={<AddIcon />} onClick={async () => {
@@ -211,7 +212,7 @@ function GroupsTab() {
 
   return (
     <Stack spacing={2}>
-      {error && <Alert severity="error">{error}</Alert>}
+      {error && <Alert severity="error">{dataDisplayText(error)}</Alert>}
       <Stack direction="row" spacing={1}>
         <TextField size="small" label="Novo grupo" value={newGroup} onChange={(e) => setNewGroup(e.target.value)} />
         <Button variant="contained" startIcon={<AddIcon />} onClick={() => call(async () => { await createGroup({ name: newGroup }); setNewGroup(""); })}>Criar</Button>
@@ -295,7 +296,7 @@ function UsersTab() {
 
   return (
     <Stack spacing={2}>
-      {error && <Alert severity="error">{error}</Alert>}
+      {error && <Alert severity="error">{dataDisplayText(error)}</Alert>}
       {tempPassword && <Alert severity="info">Senha temporária de {selected?.username}: <b>{tempPassword}</b></Alert>}
       <Stack direction="row" spacing={1}>
         <TextField size="small" label="Novo usuário" value={newUser} onChange={(e) => setNewUser(e.target.value)} />
@@ -383,7 +384,7 @@ function UsersTab() {
             <DialogTitle>Resetar senha de {resetDialog?.username}</DialogTitle>
             <DialogContent>
               {tempPassword && <Alert severity="info" sx={{ mb: 1 }}>Senha temporária: <b>{tempPassword}</b></Alert>}
-              {resetError && <Alert severity="error" sx={{ mb: 1 }}>{resetError}</Alert>}
+              {resetError && <Alert severity="error" sx={{ mb: 1 }}>{dataDisplayText(resetError)}</Alert>}
               <TextField size="small" fullWidth label="Nova senha (opcional)"
                 helperText="Deixe vazio para gerar temporária. Mín. 10 caracteres, maiúscula, minúscula e dígito."
                 value={newPass} onChange={(e) => setNewPass(e.target.value)}

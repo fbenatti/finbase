@@ -1,3 +1,4 @@
+import { dataDisplayText } from "../../utils/dataPresentation";
 import { useState, useEffect, useCallback, useRef } from "react";
 import {
   Box, Typography, Button, Paper, IconButton, Chip,
@@ -324,8 +325,8 @@ export default function Mappings() {
         </Button>
       </Paper>
 
-      {error && <Alert severity="error" sx={{ mb: 2 }} onClose={() => setError("")}>{error}</Alert>}
-      {success && <Alert severity="success" sx={{ mb: 2 }} onClose={() => setSuccess("")}>{success}</Alert>}
+      {error && <Alert severity="error" sx={{ mb: 2 }} onClose={() => setError("")}>{dataDisplayText(error)}</Alert>}
+      {success && <Alert severity="success" sx={{ mb: 2 }} onClose={() => setSuccess("")}>{dataDisplayText(success)}</Alert>}
 
       {!selectedConnId ? (
         <EmptyState message="Selecione um datasource para descobrir as colunas e criar mapeamentos." />

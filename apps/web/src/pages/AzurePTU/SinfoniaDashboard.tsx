@@ -1,3 +1,4 @@
+import { dataDisplayText } from "../../utils/dataPresentation";
 import { useEffect, useRef, useState } from "react";
 import Plot from "@/components/Plot";
 import { Alert, Box, Card, CardContent, Chip, CircularProgress, Grid, Stack, Table, TableBody, TableCell, TableHead, TableRow, Typography } from "@mui/material";
@@ -31,7 +32,7 @@ export default function SinfoniaDashboard() {
     getSinfoniaDashboard(controller.signal).then(value => { if (!controller.signal.aborted) setData(value); }).catch(error => {
       if (error?.code !== "ERR_CANCELED") setError(error?.response?.data?.detail || "Falha ao consultar o dashboard Sinfonia.");
     }); return () => controller.abort(); }, []);
-  if (error) return <Alert severity="error">{error}</Alert>;
+  if (error) return <Alert severity="error">{dataDisplayText(error)}</Alert>;
   if (!data) return <Box p={5} textAlign="center"><CircularProgress /></Box>;
   if (data.empty) return <Alert severity="info">Nenhum custo do portfólio Sinfonia foi encontrado na base consolidada.</Alert>;
   const kpis = data.kpis || { total: 0, ibm: 0, factory: 0, forecast: 0 };

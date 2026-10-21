@@ -1,3 +1,4 @@
+import { dataDisplayText } from "../../utils/dataPresentation";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import Plot from "@/components/Plot";
@@ -170,7 +171,7 @@ export default function ProviderIaDashboard({ provider }: { provider: AIProvider
     [licenses, search],
   );
 
-  if (error && !data) return <Alert severity="error">{error}</Alert>;
+  if (error && !data) return <Alert severity="error">{dataDisplayText(error)}</Alert>;
   if (!data) return <Box p={5} textAlign="center"><CircularProgress /></Box>;
 
   const dates = series.map(r => r.date);

@@ -1,3 +1,4 @@
+import { dataDisplayText } from "../../utils/dataPresentation";
 import { useEffect, useMemo, useState } from "react";
 import { Alert, Box, Card, CardContent, CircularProgress, Grid, Paper, Stack, Table, TableBody, TableCell, TableHead, TableRow, Typography } from "@mui/material";
 import Button from "@mui/material/Button";
@@ -76,7 +77,7 @@ export default function DollarEvolution() {
       <Typography variant="h5" fontWeight={750}>Evolução do dólar</Typography>
       <Button data-print-hide size="small" variant="contained" startIcon={<PictureAsPdfIcon />} onClick={() => exportDashboardPdf("evolucao-dolar")}>Exportar PDF</Button>
     </Stack>
-    {error && <Alert severity="error" sx={{ mb: 2 }}>{error}</Alert>}
+    {error && <Alert severity="error" sx={{ mb: 2 }}>{dataDisplayText(error)}</Alert>}
     {loading ? <Box display="flex" justifyContent="center" p={5}><CircularProgress /></Box> : error ? null : rows.length === 0 ? <Alert severity="warning">O cubo está disponível, mas não retornou taxas mensais para Azure.</Alert> : <>
       <Grid container spacing={2} mb={2}>
         <Grid item xs={12} md={6}><Card variant="outlined"><CardContent><Typography color="text.secondary" variant="body2">Dólar médio</Typography><Typography variant="h5" fontWeight={750}>{periodAverages.rate === null ? "—" : rateLabel(periodAverages.rate)}</Typography><Typography color="text.secondary" variant="caption">{periodRange}</Typography></CardContent></Card></Grid>

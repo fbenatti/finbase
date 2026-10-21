@@ -1,3 +1,4 @@
+import { dataDisplayText } from "../../utils/dataPresentation";
 import { useEffect, useState } from "react";
 import {
   Alert,
@@ -207,7 +208,7 @@ export default function ForecastRuleDialog({ open, initial, config, meta, onClos
     <Dialog open={open} onClose={onClose} maxWidth="md" fullWidth>
       <DialogTitle>{initial ? "Editar regra" : "Nova regra de negócio"}</DialogTitle>
       <DialogContent sx={dialogFieldSx}>
-        {error && <Alert severity="error" sx={{ mb: 2 }} onClose={() => setError("")}>{error}</Alert>}
+        {error && <Alert severity="error" sx={{ mb: 2 }} onClose={() => setError("")}>{dataDisplayText(error)}</Alert>}
         <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
           Configuração {config.id}: {config.name}. Exclusões da origem são aplicadas antes da agregação; as demais regras, após a projeção matemática.
         </Typography>

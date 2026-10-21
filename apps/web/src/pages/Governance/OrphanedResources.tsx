@@ -1,3 +1,4 @@
+import { dataDisplayText } from "../../utils/dataPresentation";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import {
@@ -193,7 +194,7 @@ export default function OrphanedResources() {
   if (view === "savings") {
     return (
       <Box>
-        {error && <Alert severity="warning" sx={{ mb: 2 }} onClose={() => setError("")}>{error}</Alert>}
+        {error && <Alert severity="warning" sx={{ mb: 2 }} onClose={() => setError("")}>{dataDisplayText(error)}</Alert>}
         <Alert severity="info" sx={{ mb: 2 }}>
           Um recurso entra aqui quando estava no snapshot anterior e deixa de aparecer no snapshot diário seguinte.
           Se voltar a aparecer em uma coleta posterior, ele não é contabilizado como deletado. O saving realizado é
@@ -260,8 +261,8 @@ export default function OrphanedResources() {
 
   return (
     <Box>
-      {error && <Alert severity="warning" sx={{ mb: 2 }} onClose={() => setError("")}>{error}</Alert>}
-      {saveError && <Alert severity="error" sx={{ mb: 2 }}>{saveError}</Alert>}
+      {error && <Alert severity="warning" sx={{ mb: 2 }} onClose={() => setError("")}>{dataDisplayText(error)}</Alert>}
+      {saveError && <Alert severity="error" sx={{ mb: 2 }}>{dataDisplayText(saveError)}</Alert>}
 
       {/* KPIs — Saving em primeiro */}
       <Stack direction={{ xs: "column", sm: "row" }} spacing={2} sx={{ mb: 2 }}>

@@ -1,3 +1,4 @@
+import { dataDisplayText } from "../../utils/dataPresentation";
 import { useState, useEffect, useCallback } from "react";
 import {
   Box, Typography, Button, Paper, Chip, IconButton,
@@ -960,8 +961,8 @@ export default function Relationship({ embedded }: { embedded?: boolean } = {}) 
         )}
       </Box>
 
-      {error && <Alert severity="error" sx={{ mb: 2 }} onClose={() => setError("")}>{error}</Alert>}
-      {success && <Alert severity="success" sx={{ mb: 2 }} onClose={() => setSuccess("")}>{success}</Alert>}
+      {error && <Alert severity="error" sx={{ mb: 2 }} onClose={() => setError("")}>{dataDisplayText(error)}</Alert>}
+      {success && <Alert severity="success" sx={{ mb: 2 }} onClose={() => setSuccess("")}>{dataDisplayText(success)}</Alert>}
 
       {loading && <CircularProgress sx={{ display: "block", mx: "auto", mt: 4 }} />}
 

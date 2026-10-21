@@ -1,3 +1,4 @@
+import { dataDisplayText } from "../../utils/dataPresentation";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Link as RouterLink } from "react-router-dom";
 import Plot from "@/components/Plot";
@@ -152,7 +153,7 @@ export default function AzurePTU() {
     return matrix;
   }, [heatmapCells]);
 
-  if (error && !data) return <Box p={3}><Alert severity="error">{error}</Alert></Box>;
+  if (error && !data) return <Box p={3}><Alert severity="error">{dataDisplayText(error)}</Alert></Box>;
   if (!data) return <Box p={5} textAlign="center"><CircularProgress /></Box>;
 
   const k = data.kpis || {};
@@ -252,7 +253,7 @@ export default function AzurePTU() {
       </FormControl>
 
       {error && (
-        <Alert severity="warning" sx={{ mb: 2 }}>{error} — exibindo último recorte disponível.</Alert>
+        <Alert severity="warning" sx={{ mb: 2 }}>{dataDisplayText(error)} — exibindo último recorte disponível.</Alert>
       )}
 
       {tab === 0 && (

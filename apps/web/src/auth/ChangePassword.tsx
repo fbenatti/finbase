@@ -1,3 +1,4 @@
+import { dataDisplayText } from "../utils/dataPresentation";
 import React, { useState } from "react";
 import {
   Box, Button, Card, CardContent, TextField, Typography, Alert, CircularProgress,
@@ -48,7 +49,7 @@ export default function ChangePassword({ onChanged }: { onChanged: () => void })
             Olá {user?.username ?? ""}, defina uma nova senha para continuar.
             Mínimo de 10 caracteres, com maiúscula, minúscula e dígito.
           </Typography>
-          {error && <Alert severity="error" sx={{ mb: 2 }}>{error}</Alert>}
+          {error && <Alert severity="error" sx={{ mb: 2 }}>{dataDisplayText(error)}</Alert>}
           <form onSubmit={submit}>
             <TextField label="Senha atual" type="password" fullWidth margin="normal" value={current}
               onChange={(e) => setCurrent(e.target.value)} autoComplete="current-password" />

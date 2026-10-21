@@ -522,8 +522,8 @@ export default function Extraction({ embedded = false }: { embedded?: boolean })
         </Alert>
       )}
 
-      {error && <Alert severity="error" sx={{ mb: 2 }} onClose={() => setError("")}>{error}</Alert>}
-      {sourceResetMessage && <Alert severity="success" sx={{ mb: 2 }} onClose={() => setSourceResetMessage("")}>{sourceResetMessage}</Alert>}
+      {error && <Alert severity="error" sx={{ mb: 2 }} onClose={() => setError("")}>{dataDisplayText(error)}</Alert>}
+      {sourceResetMessage && <Alert severity="success" sx={{ mb: 2 }} onClose={() => setSourceResetMessage("")}>{dataDisplayText(sourceResetMessage)}</Alert>}
 
 
       {extractableConnections.find(c => c.id === connId)?.connector_type === "oci" && (
@@ -1001,7 +1001,7 @@ export default function Extraction({ embedded = false }: { embedded?: boolean })
             </Box>
           )}
           {!previewLoading && previewError && (
-            <Alert severity="error" sx={{ m: 2 }} onClose={() => setPreviewError("")}>{previewError}</Alert>
+            <Alert severity="error" sx={{ m: 2 }} onClose={() => setPreviewError("")}>{dataDisplayText(previewError)}</Alert>
           )}
           {!previewLoading && previewData && (
             <Box sx={{ p: 2 }}>

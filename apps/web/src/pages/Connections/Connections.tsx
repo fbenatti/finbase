@@ -1,3 +1,4 @@
+import { dataDisplayText } from "../../utils/dataPresentation";
 import { useState, useEffect, useMemo, useRef } from "react";
 import { useSearchParams } from "react-router-dom";
 import {
@@ -1003,7 +1004,7 @@ export default function Connections() {
       </Box>
 
       <Box sx={{ p: 3 }}>
-        {error && <Alert severity="error" sx={{ mb: 2 }} onClose={() => setError("")}>{error}</Alert>}
+        {error && <Alert severity="error" sx={{ mb: 2 }} onClose={() => setError("")}>{dataDisplayText(error)}</Alert>}
 
         <Paper elevation={0} sx={{ p: { xs: 1.5, md: 2 }, borderRadius: 2, bgcolor: "background.paper", border: "1px solid", borderColor: "divider" }}>
           <Box sx={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 2, minHeight: 52, mb: 2 }}>
@@ -1150,7 +1151,7 @@ export default function Connections() {
           "& .MuiOutlinedInput-root:not(.MuiInputBase-multiline)": { height: 40 },
           "& .MuiInputLabel-root:not(.MuiInputLabel-shrink)": { transform: "translate(14px, 11px) scale(1)" },
         }}>
-          {formTestMessage && <Alert severity={formTestMessage.severity} sx={{ mb: 2 }}>{formTestMessage.msg}</Alert>}
+          {formTestMessage && <Alert severity={formTestMessage.severity} sx={{ mb: 2 }}>{dataDisplayText(formTestMessage.msg)}</Alert>}
           <Box sx={{ display: "flex", flexDirection: "column", gap: 2, mt: 1 }}>
             <FormControl fullWidth>
               <InputLabel>Connector Type</InputLabel>
@@ -1610,7 +1611,7 @@ export default function Connections() {
         <DialogContent>
           {deleteError ? (
             <Alert severity="error" sx={{ mb: 2 }}>
-              {deleteError}
+              {dataDisplayText(deleteError)}
             </Alert>
           ) : (
             <Typography>
@@ -1629,7 +1630,7 @@ export default function Connections() {
 
 
       <Snackbar open={Boolean(deleteFeedback)} autoHideDuration={5000} onClose={() => setDeleteFeedback("")} anchorOrigin={{ vertical: "bottom", horizontal: "right" }}>
-        <Alert severity="success" variant="filled" onClose={() => setDeleteFeedback("")}>{deleteFeedback}</Alert>
+        <Alert severity="success" variant="filled" onClose={() => setDeleteFeedback("")}>{dataDisplayText(deleteFeedback)}</Alert>
       </Snackbar>
 
       <Dialog open={historyConn !== null} onClose={() => setHistoryConn(null)} maxWidth="md" fullWidth>

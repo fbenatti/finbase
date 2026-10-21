@@ -1,3 +1,4 @@
+import { dataDisplayText } from "../../utils/dataPresentation";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   Alert, Box, Button, Chip, Dialog, DialogActions, DialogContent, DialogTitle, FormControl, IconButton,
@@ -306,7 +307,7 @@ export default function AcksRegisteredTab({ defaultMonth, department }: { defaul
 
   return (
     <Box>
-      {message && <Alert severity="success" sx={{ mb: 2 }} onClose={() => setMessage("")}>{message}</Alert>}
+      {message && <Alert severity="success" sx={{ mb: 2 }} onClose={() => setMessage("")}>{dataDisplayText(message)}</Alert>}
       <Stack direction="row" spacing={2} alignItems="center" sx={{ mb: 2 }} flexWrap="wrap">
         <TextField
           label="Data (mês)"
@@ -329,7 +330,7 @@ export default function AcksRegisteredTab({ defaultMonth, department }: { defaul
           Filtrado pelo departamento selecionado: <b>{department}</b>
         </Typography>
       )}
-      {error && <Alert severity="error" sx={{ mb: 2 }} onClose={() => setError("")}>{error}</Alert>}
+      {error && <Alert severity="error" sx={{ mb: 2 }} onClose={() => setError("")}>{dataDisplayText(error)}</Alert>}
       <Alert severity="info" sx={{ mb: 2 }}>
         Esta lista mostra somente <strong>itens manuais</strong> (cadastrados via "Cadastrar item"), para explicar
         algo que não foi identificado como desvio. Acks vinculados a desvios identificados são justificados

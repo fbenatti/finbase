@@ -1,3 +1,4 @@
+import { dataDisplayText } from "../utils/dataPresentation";
 import { DragEvent, useEffect, useMemo, useRef, useState } from "react";
 import {
   Alert, Autocomplete, Box, Button, Chip, CircularProgress, Dialog, DialogActions, DialogContent, DialogTitle, Divider, Drawer, FormControl, IconButton, InputLabel,
@@ -613,7 +614,7 @@ export default function PivotAnalysis({ destinations, initialTableId, showSearch
   );
 
   return <Box>
-    {error && <Alert severity="error" sx={{ mb: 2 }}>{error}</Alert>}
+    {error && <Alert severity="error" sx={{ mb: 2 }}>{dataDisplayText(error)}</Alert>}
     <Paper sx={{ p: 2, mb: 2 }}>
       <Stack spacing={1.5}>
         <Stack direction="row" gap={1.5} alignItems="center" flexWrap="wrap">

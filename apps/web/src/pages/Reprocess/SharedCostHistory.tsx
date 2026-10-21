@@ -1,3 +1,4 @@
+import { dataDisplayText } from "../../utils/dataPresentation";
 import { useEffect, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { Alert, Box, Button, CircularProgress, Paper, Stack, Typography } from "@mui/material";
@@ -10,7 +11,7 @@ export default function SharedCostHistory() {
   const { runId } = useParams<{ runId: string }>(); const navigate = useNavigate();
   const [job, setJob] = useState<SharedCostJob | null>(null); const [error, setError] = useState("");
   useEffect(() => { getSharedCostHistory().then(rows => setJob(rows.find(row => row.id === Number(runId)) || null)).catch(e => setError(e instanceof Error ? e.message : String(e))); }, [runId]);
-  if (error) return <Alert severity="error">{error}</Alert>;
+  if (error) return <Alert severity="error">{dataDisplayText(error)}</Alert>;
   if (!job) return <Stack alignItems="center" py={8}><CircularProgress /></Stack>;
   const snapshot = (job.snapshot || {}) as Record<string, unknown>;
   const nodes = Array.isArray(snapshot.shared_nodes) ? snapshot.shared_nodes as Record<string, unknown>[] : [];

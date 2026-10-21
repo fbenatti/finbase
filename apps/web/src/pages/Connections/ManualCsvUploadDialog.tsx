@@ -1,3 +1,4 @@
+import { dataDisplayText } from "../../utils/dataPresentation";
 import { useEffect, useMemo, useState } from "react";
 import {
   Alert,
@@ -231,11 +232,11 @@ export default function ManualCsvUploadDialog({
           )}
         </Stack>
 
-        {error && <Alert severity="error" sx={{ mb: 3 }} onClose={() => setError("")}>{error}</Alert>}
+        {error && <Alert severity="error" sx={{ mb: 3 }} onClose={() => setError("")}>{dataDisplayText(error)}</Alert>}
 
         {preview?.warning_message && (
           <Alert severity="warning" sx={{ mb: 3 }}>
-            {preview.warning_message}
+            {dataDisplayText(preview.warning_message)}
           </Alert>
         )}
 

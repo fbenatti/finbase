@@ -1,3 +1,4 @@
+import { dataDisplayText } from "../../utils/dataPresentation";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   Box, Typography, Button, Paper, Select, MenuItem, FormControl,
@@ -394,7 +395,7 @@ export default function PipelineBuilder() {
 
       {/* Área de trabalho */}
       <Box sx={{ p: 3, display: "flex", flexDirection: "column", gap: 2, height: "calc(100vh - 190px)" }}>
-        {error && <Alert severity="error" onClose={() => setError("")}>{error}</Alert>}
+        {error && <Alert severity="error" onClose={() => setError("")}>{dataDisplayText(error)}</Alert>}
 
         <Paper elevation={0} sx={{ p: { xs: 1.5, md: 2 }, borderRadius: 2, bgcolor: "background.paper", border: "1px solid", borderColor: "divider" }}>
           <Stack direction="row" alignItems="center" gap={1.5} flexWrap="wrap">

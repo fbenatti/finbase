@@ -1,3 +1,4 @@
+import { dataDisplayText } from "../../utils/dataPresentation";
 import { ChangeEvent, useEffect, useMemo, useRef, useState } from "react";
 import {
   Alert, Box, Button, Card, CardContent, Chip, Dialog, DialogActions, DialogContent,
@@ -319,7 +320,7 @@ export default function ContractStoryDashboard() {
         {ledger.contracts.map(item => <MenuItem key={item.id} value={item.id}>{item.name}</MenuItem>)}
       </Select>
     </FormControl>
-    {message && <Alert severity="success" onClose={() => setMessage("")} sx={{ mb: 2 }}>{message}</Alert>}
+    {message && <Alert severity="success" onClose={() => setMessage("")} sx={{ mb: 2 }}>{dataDisplayText(message)}</Alert>}
     <Paper variant="outlined" sx={{ p: { xs: 2, md: 3 }, mb: 2, background: "linear-gradient(120deg, #fff 0%, #f0fdfa 100%)" }}>
       <Stack direction={{ xs: "column", md: "row" }} gap={3} justifyContent="space-between" alignItems={{ md: "center" }}>
         <Box sx={{ maxWidth: 790 }}><Stack direction="row" gap={1} alignItems="center" flexWrap="wrap"><CloudOutlined color="primary" /><Typography variant="h5" fontWeight={800}>{contract.name}</Typography><Chip size="small" label={contract.agreementType} color="primary" variant="outlined" /><Chip size="small" label={contract.country} /></Stack><Typography sx={{ mt: 1.25, lineHeight: 1.7 }}>{contract.summary}</Typography><Typography variant="body2" color="text.secondary" sx={{ mt: 1 }}>Assinatura {monthLabel(contract.start)} · encerramento {monthLabel(contract.end)} · {contract.provider}</Typography></Box>

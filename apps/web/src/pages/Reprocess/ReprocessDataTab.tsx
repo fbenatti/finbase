@@ -1,3 +1,4 @@
+import { dataDisplayText } from "../../utils/dataPresentation";
 import { useState, useEffect, useRef, useCallback } from "react";
 import { useNotifications } from "../../context/NotificationContext";
 import {
@@ -440,7 +441,7 @@ export default function ReprocessDataTab() {
       {/* ── Result ── */}
       {result && (
         <Alert severity={result.type} sx={{ mb: 2 }} onClose={() => setResult(null)}>
-          {result.message}
+          {dataDisplayText(result.message)}
         </Alert>
       )}
 
