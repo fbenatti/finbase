@@ -1,4 +1,4 @@
-import { Box, Paper, Tab, Tabs, Typography } from "@mui/material";
+import { Box, Paper, Typography } from "@mui/material";
 import { Navigate, useSearchParams } from "react-router-dom";
 import Destinations from "../Destinations/Destinations";
 import Relationship from "../Relationship/Relationship";
@@ -9,7 +9,7 @@ const TABS = [
 ] as const;
 
 export default function Tables() {
-  const [params, setParams] = useSearchParams();
+  const [params] = useSearchParams();
   // Legacy tab id redirect: ai-cost-relationship -> cost-relationship.
   const rawTab = params.get("tab");
   // Itens de governança foram movidos para a área de Governança. Preserve links antigos.
@@ -19,12 +19,6 @@ export default function Tables() {
   }
   const normalized = rawTab === "ai-cost-relationship" ? "cost-relationship" : rawTab;
   const activeTab = TABS.some((t) => t.id === normalized) ? normalized! : "destinations";
-
-  const setTab = (next: string) => {
-    const updated = new URLSearchParams(params);
-    updated.set("tab", next);
-    setParams(updated, { replace: true });
-  };
 
   return (
     <Box sx={{ mx: -3, mt: -3 }}>
@@ -43,16 +37,6 @@ export default function Tables() {
         <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
           Gerencie tabelas de destino e mapeamentos de relacionamentos em um só lugar.
         </Typography>
-        <Tabs
-          value={activeTab}
-          onChange={(_, value) => setTab(value)}
-          variant="scrollable"
-          allowScrollButtonsMobile
-        >
-          {TABS.map((item) => (
-            <Tab key={item.id} value={item.id} label={item.label} />
-          ))}
-        </Tabs>
       </Box>
 
       <Box
