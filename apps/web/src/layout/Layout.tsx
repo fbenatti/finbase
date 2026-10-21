@@ -81,6 +81,8 @@ const MENU_GROUPS: MenuGroup[] = [
     icon: <AccountBalanceWalletOutlined fontSize="small" />,
     items: [
       { path: "/financial-planning?tab=dashboard", label: "Resumo financeiro", icon: <AccountBalanceWalletOutlined /> },
+      { path: "/financial-planning?tab=dashboard&executive=historia-contrato", label: "História dos contratos", icon: <HistoryOutlined /> },
+      { path: "/financial-planning?tab=dashboard&executive=compromisso", label: "Consumo de compromissos", icon: <ReceiptLongOutlined /> },
       { path: "/financial-planning?tab=orcamento", label: "Orçamentos", icon: <PaidOutlined /> },
       { path: "/financial-planning?tab=acuracia-orcamento", label: "Acurácia do orçamento", icon: <AutoGraphOutlined /> },
       { path: "/financial-planning?tab=forecast-manual", label: "Projeções manuais", icon: <TrendingUpOutlined /> },
