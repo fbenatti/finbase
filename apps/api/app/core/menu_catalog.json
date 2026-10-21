@@ -1149,5 +1149,96 @@
     "development_only": false,
     "legacy_path": null,
     "api_prefixes": []
+  },
+  {
+    "code": "governanca_reservas_azure",
+    "parent_code": "section_governanca",
+    "label": "Reservas Azure",
+    "path": "/governanca/reservas-azure",
+    "renderer": "Governance",
+    "view_params": {
+      "tab": "reservas"
+    },
+    "permission_module": "reservations",
+    "position": 800,
+    "icon": "HistoryOutlined",
+    "required": false,
+    "development_only": false,
+    "legacy_path": "/governanca",
+    "api_prefixes": [],
+    "visible": false
+  },
+  {
+    "code": "governanca_politicas_de_tags",
+    "parent_code": "section_governanca",
+    "label": "Tags Automatizadas",
+    "path": "/governanca/politicas-de-tags",
+    "renderer": "Governance",
+    "view_params": {
+      "tab": "tags"
+    },
+    "permission_module": "azure_tag_policy",
+    "position": 801,
+    "icon": "HistoryOutlined",
+    "required": false,
+    "development_only": false,
+    "legacy_path": "/governanca",
+    "api_prefixes": [],
+    "visible": false
+  },
+  {
+    "code": "planejamento_carta_de_credito",
+    "parent_code": "section_planejamento",
+    "label": "Carta de crédito",
+    "path": "/planejamento/carta-de-credito",
+    "renderer": "FinancialPlanning",
+    "view_params": {
+      "tab": "carta-credito"
+    },
+    "permission_module": "planning",
+    "position": 802,
+    "icon": "HistoryOutlined",
+    "required": false,
+    "development_only": false,
+    "legacy_path": "/planejamento",
+    "api_prefixes": [],
+    "visible": false
+  },
+  {
+    "code": "planejamento_defesa_orcamentaria",
+    "parent_code": "section_planejamento",
+    "label": "Defesa orçamentária",
+    "path": "/planejamento/defesa-orcamentaria",
+    "renderer": "FinancialPlanning",
+    "view_params": {
+      "tab": "defesa-orcamentaria"
+    },
+    "permission_module": "planning",
+    "position": 803,
+    "icon": "HistoryOutlined",
+    "required": false,
+    "development_only": false,
+    "legacy_path": "/planejamento",
+    "api_prefixes": [],
+    "visible": false
+  },
+  {
+    "code": "planejamento_pedidos_sap",
+    "parent_code": "section_planejamento",
+    "label": "Pedidos SAP",
+    "path": "/planejamento/pedidos-sap",
+    "renderer": "FinancialPlanning",
+    "view_params": {
+      "tab": "visao-contabil",
+      "subview": "pedidos-sap"
+    },
+    "permission_module": "planning",
+    "position": 804,
+    "icon": "HistoryOutlined",
+    "required": false,
+    "development_only": false,
+    "legacy_path": "/planejamento",
+    "api_prefixes": [],
+    "visible": false
   }
 ]

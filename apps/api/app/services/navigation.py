@@ -15,6 +15,7 @@ def load_catalog() -> list[dict]:
     entries = json.loads((Path(__file__).parents[1] / "core" / "menu_catalog.json").read_text())
     codes, paths = set(), set()
     for entry in entries:
+        entry.setdefault("visible", True)
         code, path = entry["code"], entry["path"]
         if code in codes or path in paths or not path.startswith("/") or any(c in path for c in "?#"):
             raise ValueError(f"Invalid or duplicate menu: {code}")
@@ -84,11 +85,11 @@ async def module_snapshot(db: AsyncSession, customer_id: int, *, user_id: int | 
             "renderer": row.renderer, "view_params": row.view_params, "legacy_path": row.legacy_path,
             "permission_module": row.permission_module, "permission_scope": row.code,
             "position": row.position, "icon": row.icon, "required": row.required,
-            "configured_enabled": overrides.get(row.code, True), "enabled": enabled, "allowed": bool(allowed),
+            "visible": row.visible, "configured_enabled": overrides.get(row.code, True), "enabled": enabled, "allowed": bool(allowed),
         })
     for item in result:
         if item["renderer"] == "ModuleIndex":
-            item["allowed"] = item["enabled"] and any(child["allowed"] for child in result if child["parent_code"] == item["code"])
+            item["allowed"] = item["enabled"] and any(child["allowed"] for child in result if child["parent_code"] == item["code"] and child["visible"])
     return result
 
 

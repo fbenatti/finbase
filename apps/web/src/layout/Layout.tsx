@@ -118,12 +118,12 @@ export default function Layout() {
       const Icon = MENU_ICONS[name as keyof typeof MENU_ICONS] || SettingsOutlined;
       return <Icon fontSize="small" />;
     };
-    return catalogItems.filter(item => !item.parent_code && item.allowed).map(group => ({
+    return catalogItems.filter(item => !item.parent_code && item.allowed && item.visible !== false).map(group => ({
       label: group.label,
       icon: iconFor(group.icon),
       items: [
         { path: group.path, label: "Visão geral", icon: iconFor(group.icon) },
-        ...catalogItems.filter(item => item.parent_code === group.code && item.allowed).map(item => ({ path: item.path, label: item.label, icon: iconFor(item.icon) })),
+        ...catalogItems.filter(item => item.parent_code === group.code && item.allowed && item.visible !== false).map(item => ({ path: item.path, label: item.label, icon: iconFor(item.icon) })),
       ],
     }));
   }, [catalogItems]);

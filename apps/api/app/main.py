@@ -183,6 +183,7 @@ async def lifespan(app: FastAPI):
         await conn.execute(text("SET LOCAL statement_timeout = '120s'"))
         await _execute_migration(conn, "ALTER TABLE processing_log ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ NOT NULL DEFAULT now()")
         await _execute_migration(conn, "CREATE INDEX IF NOT EXISTS ix_processing_log_updated ON processing_log (updated_at)")
+        await _execute_migration(conn, "ALTER TABLE navigation_module ADD COLUMN IF NOT EXISTS visible BOOLEAN NOT NULL DEFAULT true")
         # Retenção de auditoria (roda depois do create_all)
         await conn.execute(
             text("DELETE FROM audit_log WHERE created_at < now() - make_interval(days => :days)").bindparams(

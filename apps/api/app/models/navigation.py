@@ -19,6 +19,7 @@ class NavigationModule(Base):
     required = Column(Boolean, nullable=False, default=False)
     development_only = Column(Boolean, nullable=False, default=False)
     active = Column(Boolean, nullable=False, default=True)
+    visible = Column(Boolean, nullable=False, default=True)
 
 
 class NavigationCustomer(Base):

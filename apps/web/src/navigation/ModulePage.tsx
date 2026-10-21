@@ -10,7 +10,7 @@ import type { NavigationModule } from "./types";
 export function ModuleIndex({ item }: { item: NavigationModule }) {
   const { items } = useNavigation();
   const navigate = useNavigate();
-  return <Stack spacing={2}><Typography variant="h4">{item.label}</Typography><Typography color="text.secondary">Selecione uma área para continuar.</Typography>{items.filter(child => child.parent_code === item.code && child.allowed).map(child => <Paper variant="outlined" key={child.code} sx={{ p: 2, display: "flex", alignItems: "center", justifyContent: "space-between" }}><Typography>{child.label}</Typography><Button onClick={() => navigate(child.path)}>Abrir</Button></Paper>)}</Stack>;
+  return <Stack spacing={2}><Typography variant="h4">{item.label}</Typography><Typography color="text.secondary">Selecione uma área para continuar.</Typography>{items.filter(child => child.parent_code === item.code && child.allowed && child.visible !== false).map(child => <Paper variant="outlined" key={child.code} sx={{ p: 2, display: "flex", alignItems: "center", justifyContent: "space-between" }}><Typography>{child.label}</Typography><Button onClick={() => navigate(child.path)}>Abrir</Button></Paper>)}</Stack>;
 }
 
 export function ModulePage({ item, renderers }: { item: NavigationModule; renderers: Record<string, ComponentType> }) {
@@ -50,6 +50,6 @@ export function CatalogLegacyRedirect() {
 }
 export function DefaultModule() {
   const { items } = useNavigation();
-  const target = items.find(item => item.allowed && item.renderer !== "ModuleIndex") || items.find(item => item.allowed);
+  const target = items.find(item => item.allowed && item.visible !== false && item.renderer !== "ModuleIndex") || items.find(item => item.allowed);
   return target ? <Navigate to={target.path} replace /> : <Alert severity="warning">Nenhum módulo disponível. Solicite acesso ao administrador.</Alert>;
 }

@@ -14,6 +14,7 @@ export interface NavigationModule {
   configured_enabled: boolean;
   enabled: boolean;
   allowed: boolean;
+  visible?: boolean;
 }
 export interface NavigationSnapshot {
   customer_id: number;

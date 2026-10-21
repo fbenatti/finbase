@@ -1,3 +1,4 @@
+import { moduleDisplayName } from "../../utils/dataPresentation";
 import { useEffect, useState } from "react";
 import { Alert, Accordion, AccordionDetails, AccordionSummary, Box, Button, Chip, CircularProgress, Dialog, DialogActions, DialogContent, DialogTitle, MenuItem, Paper, Stack, Switch, Table, TableBody, TableCell, TableHead, TableRow, TextField, Tooltip, Typography } from "@mui/material";
 import { ExpandMore } from "@mui/icons-material";
@@ -71,9 +72,9 @@ export default function Modules() {
     <Alert severity="info">Novos menus cadastrados no catálogo do projeto entram automaticamente nesta lista. Cada página tem sua própria rota e identificação de permissão.</Alert>
     {loading ? <Box sx={{ p: 4, textAlign: "center" }}><CircularProgress /></Box> : <Paper variant="outlined" sx={{ overflowX: "auto" }}><Table size="small"><TableHead><TableRow><TableCell>Módulo / menu</TableCell><TableCell>Rota</TableCell><TableCell>Permissão</TableCell><TableCell>Disponibilidade</TableCell><TableCell align="right">Ativo para o cliente</TableCell></TableRow></TableHead><TableBody>
       {visible.map(item => <TableRow key={item.code} sx={!item.parent_code ? { bgcolor: "action.hover" } : undefined}>
-        <TableCell sx={{ pl: item.parent_code ? 4 : 2, fontWeight: item.parent_code ? 400 : 700 }}>{item.label}{item.required && <Chip size="small" label="Essencial" sx={{ ml: 1 }} />}</TableCell>
+        <TableCell sx={{ pl: item.parent_code ? 4 : 2, fontWeight: item.parent_code ? 400 : 700 }}>{item.label}{item.visible === false && <Chip size="small" label="Fora da navegação" sx={{ ml: 1 }} />}{item.required && <Chip size="small" label="Essencial" sx={{ ml: 1 }} />}</TableCell>
         <TableCell sx={{ fontFamily: "monospace", fontSize: 12 }}>{item.path}</TableCell>
-        <TableCell><Typography variant="caption">{item.permission_module ? `${item.permission_module} · ${item.permission_scope}` : "Grupo de módulos"}</Typography></TableCell>
+        <TableCell><Typography variant="caption">{item.permission_module ? `${moduleDisplayName(item.permission_module)} · ${item.permission_scope}` : "Grupo de módulos"}</Typography></TableCell>
         <TableCell>{item.enabled ? "Disponível" : item.configured_enabled ? "Bloqueado pelo grupo ou ambiente" : "Desativado"}</TableCell>
         <TableCell align="right"><Tooltip title={item.required ? "A administração de módulos permanece acessível." : "Ativar ou desativar para este cliente"}><span><Switch checked={item.configured_enabled} disabled={!canUpdate || item.required || busy} onChange={() => void toggle(item)} inputProps={{ "aria-label": `Disponibilizar ${item.label}` }} /></span></Tooltip></TableCell>
       </TableRow>)}
