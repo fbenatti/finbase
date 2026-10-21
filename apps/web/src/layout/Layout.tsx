@@ -157,6 +157,8 @@ const MENU_GROUPS: MenuGroup[] = [
       { path: "/ideas?tab=canvas", label: "Canvas de entrega", icon: <AccountTreeOutlined /> },
       { path: "/ideas?tab=dashboard", label: "Resultados das iniciativas", icon: <DashboardOutlined /> },
       { path: "/admin", label: "Pessoas e acessos", icon: <ManageAccountsOutlined /> },
+      { path: "/admin?tab=groups", label: "Grupos", icon: <CorporateFareOutlined /> },
+      { path: "/admin?tab=roles", label: "Funções e permissões", icon: <VpnKeyOutlined /> },
       { path: "/admin/audit", label: "Trilha de auditoria", icon: <FactCheckOutlined /> },
       { path: "/admin/sso", label: "Login corporativo", icon: <VpnKeyOutlined /> },
     ],
@@ -190,6 +192,8 @@ export default function Layout() {
       if (item.path.startsWith("/ideas")) return canIdeas;
       if (item.path === "/admin/audit") return hasPerm("audit", "read");
       if (item.path === "/admin/sso") return hasPerm("auth", "read");
+      if (item.path.startsWith("/admin?tab=groups")) return hasPerm("groups", "read");
+      if (item.path.startsWith("/admin?tab=roles")) return hasPerm("roles", "read");
       if (item.path === "/admin") return canAdmin;
       const { pathname } = menuPath(item.path);
       const targets = permissionTargetsForPath(pathname);
