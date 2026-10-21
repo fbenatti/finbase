@@ -59,9 +59,26 @@ import { useAuth } from "../auth/AuthContext";
 import { permissionTargetsForLocation } from "../auth/moduleMap";
 import LogoutIcon from "@mui/icons-material/Logout";
 import { NotificationBell } from "../context/NotificationContext";
+import {
+  Content as CarbonContent,
+  Header as CarbonHeader,
+  HeaderGlobalBar as CarbonHeaderGlobalBar,
+  HeaderGlobalAction as CarbonHeaderGlobalAction,
+  HeaderMenuButton as CarbonHeaderMenuButton,
+  HeaderName as CarbonHeaderName,
+  SideNav as CarbonSideNav,
+  SideNavDivider as CarbonSideNavDivider,
+  SideNavItems as CarbonSideNavItems,
+  SideNavMenu as CarbonSideNavMenu,
+  SideNavMenuItem as CarbonSideNavMenuItem,
+  SideNavLink as CarbonSideNavLink,
+} from "@carbon/react";
+import { CarbonProvider } from "@carbon/react";
+import { Dashboard as CarbonDashboard, Notification as CarbonNotification, Logout as CarbonLogout, Finance as CarbonFinance } from "@carbon/react/icons";
 
 const DRAWER_WIDTH = 268;
 const COLLAPSED_WIDTH = 72;
+const LAYOUT_STORAGE_KEY = "finbase.layout";
 
 type MenuEntry = { path: string; label: string; icon: React.ReactNode };
 type MenuGroup = { label: string; icon: React.ReactNode; items: MenuEntry[]; keepVisibleWhenEmpty?: boolean };
@@ -252,7 +269,11 @@ export default function Layout() {
   const [expanded, setExpanded] = useState(true);
   const [mobileOpen, setMobileOpen] = useState(false);
   const [openGroups, setOpenGroups] = useState<string[]>([]);
+  const [layoutMode, setLayoutMode] = useState<"finbase" | "carbon">(() =>
+    window.localStorage.getItem(LAYOUT_STORAGE_KEY) === "carbon" ? "carbon" : "finbase",
+  );
   const drawerWidth = expanded ? DRAWER_WIDTH : COLLAPSED_WIDTH;
+  const isCarbon = layoutMode === "carbon";
   const skipRouteCancelRef = useRef(true);
 
   useEffect(() => {
@@ -271,6 +292,11 @@ export default function Layout() {
   useEffect(() => {
     if (activeGroupLabel) setOpenGroups([activeGroupLabel]);
   }, [activeGroupLabel]);
+
+  useEffect(() => {
+    window.localStorage.setItem(LAYOUT_STORAGE_KEY, layoutMode);
+    document.documentElement.dataset.finbaseLayout = layoutMode;
+  }, [layoutMode]);
 
   const toggleGroup = (label: string) => setOpenGroups(current =>
     current.includes(label) ? current.filter(item => item !== label) : [...current, label],
@@ -319,6 +345,80 @@ export default function Layout() {
       </Box>
     </Box>
   );
+
+  const carbonNavigation = (
+    <CarbonSideNav aria-label="Navegação principal" expanded={isMobile ? mobileOpen : expanded} isPersistent={!isMobile} isChildOfHeader>
+      <CarbonSideNavItems isSideNavExpanded={isMobile ? mobileOpen : expanded}>
+        {visibleMenuGroups.map(group => {
+          const activeGroup = group.items.some(item => menuPath(item.path).pathname === location.pathname);
+          const groupIcon = group.label === "Panorama" ? CarbonDashboard : group.label === "Planejamento" ? CarbonFinance : CarbonDashboard;
+          return group.items.length === 1 ? (
+            <CarbonSideNavLink key={group.label} href={group.items[0].path} as="button" renderIcon={groupIcon}
+              isActive={matchesMenuPath(group.items[0].path, location.pathname, location.search)}
+              onClick={() => { navigate(group.items[0].path); setMobileOpen(false); }}>
+              {group.label}
+            </CarbonSideNavLink>
+          ) : (
+            <CarbonSideNavMenu key={group.label} title={group.label} renderIcon={groupIcon} isActive={activeGroup}
+              isSideNavExpanded={isMobile ? mobileOpen : expanded} defaultExpanded={openGroups.includes(group.label)}>
+              {group.items.map(item => (
+                <CarbonSideNavMenuItem key={item.path} href={item.path} as="button"
+                  isActive={matchesMenuPath(item.path, location.pathname, location.search)}
+                  onClick={() => { navigate(item.path); setMobileOpen(false); }}>
+                  {item.label}
+                </CarbonSideNavMenuItem>
+              ))}
+            </CarbonSideNavMenu>
+          );
+        })}
+        <CarbonSideNavDivider />
+        <CarbonSideNavLink href="#layout-finbase" renderIcon={CarbonDashboard} isActive={!isCarbon} onClick={(event: React.MouseEvent) => { event.preventDefault(); setLayoutMode("finbase"); }}>
+          Usar layout Finbase
+        </CarbonSideNavLink>
+        <CarbonSideNavLink href="#layout-carbon" renderIcon={CarbonDashboard} isActive={isCarbon} onClick={(event: React.MouseEvent) => { event.preventDefault(); setLayoutMode("carbon"); }}>
+          Usar layout Carbon
+        </CarbonSideNavLink>
+      </CarbonSideNavItems>
+    </CarbonSideNav>
+  );
+
+  if (isCarbon) {
+    return (
+      <CarbonProvider theme="white">
+        <Box className="finbase-carbon-shell" sx={{ display: "flex", flexDirection: "column", height: "100%" }}>
+          <CarbonHeader aria-label="Finbase Cloud">
+            <CarbonHeaderMenuButton aria-label={mobileOpen ? "Fechar menu" : "Abrir menu"} isActive={mobileOpen} onClick={() => setMobileOpen(value => !value)} />
+            <CarbonHeaderName href="/" prefix="">finbase.cloud</CarbonHeaderName>
+            <CarbonHeaderGlobalBar>
+              <Box className="finbase-carbon-layout-switch" role="group" aria-label="Escolher layout">
+                <button type="button" aria-pressed={!isCarbon} onClick={() => setLayoutMode("finbase")}>Finbase</button>
+                <button type="button" aria-pressed={isCarbon} onClick={() => setLayoutMode("carbon")}>Carbon</button>
+              </Box>
+              <CarbonHeaderGlobalAction aria-label="Notificações"><CarbonNotification size={20} /><Box className="finbase-carbon-notification"><NotificationBell /></Box></CarbonHeaderGlobalAction>
+              <CarbonHeaderGlobalAction aria-label={`Sair${user?.username ? ` de ${user.username}` : ""}`} onClick={() => logout()}><CarbonLogout size={20} /></CarbonHeaderGlobalAction>
+            </CarbonHeaderGlobalBar>
+          </CarbonHeader>
+          {!isMobile && carbonNavigation}
+          {isMobile && mobileOpen && carbonNavigation}
+          <CarbonContent id="main-content" className="finbase-carbon-main">
+            <Box className="finbase-carbon-page-title">{currentLabel}</Box>
+            {(() => {
+              const targets = permissionTargetsForLocation(location.pathname, location.search);
+              if (targets && !targets.some(target => hasPerm(target.module, "read", target.scope))) {
+                const modules = targets.map(target => target.scope ? `${target.module}:${target.scope}` : target.module).join(" / ");
+                return <Box sx={{ p: 6, textAlign: "center" }}><Typography variant="h6" sx={{ mb: 1 }}>Acesso negado</Typography><Typography color="text.secondary">Você não tem permissão de leitura no módulo <b>{modules}</b>. Solicite acesso ao administrador se precisar utilizá-lo.</Typography></Box>;
+              }
+              return <Outlet />;
+            })()}
+          </CarbonContent>
+          <Box component="footer" className="finbase-carbon-footer">
+            <span>© {new Date().getFullYear()} finbase.cloud</span>
+            <span>FinOps · Cloud cost management</span>
+          </Box>
+        </Box>
+      </CarbonProvider>
+    );
+  }
 
   return (
     <Box sx={{ display: "flex", height: "100%", bgcolor: "background.default" }}>
