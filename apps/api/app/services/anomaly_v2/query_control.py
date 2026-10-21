@@ -12,7 +12,9 @@ MAX_QUERY_SECONDS = 120
 
 
 async def execute(sql: str, *, timeout_s: float = 60, **kwargs: Any) -> list[dict[str, Any]]:
-    # Do not resubmit an expensive scan twelve times after a coordinator crash.
-    kwargs["max_retries"] = 1
+    # A worker can return 503 while Trino is still initializing it. Give the
+    # transport layer a short bounded window to wait for readiness and retry;
+    # callers may still override this for especially expensive detail scans.
+    kwargs.setdefault("max_retries", 4)
     kwargs.setdefault("cancel_event", cancel_event.get())
     return await execute_trino(sql, timeout_s=min(timeout_s, MAX_QUERY_SECONDS), **kwargs)
