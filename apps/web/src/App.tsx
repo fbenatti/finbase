@@ -159,8 +159,8 @@ function App() {
         <Route path="destinations" element={<LegacyRedirect to="/dados/catalogo?tab=destinations" />} />
         <Route path="relationship" element={<LegacyRedirect to="/dados/catalogo?tab=relationship" />} />
         <Route path="clone-rules" element={<LegacyRedirect to="/governanca?tab=rules&subtab=clone-rules" />} />
-        <Route path="financial-contracts" element={<LegacyRedirect to="/planejamento?tab=contratos-financeiros" />} />
-        <Route path="financial-contracts-dashboard" element={<LegacyRedirect to="/planejamento?tab=contratos-financeiros" />} />
+        <Route path="financial-contracts" element={<LegacyRedirect to="/governanca?tab=financial-contracts" />} />
+        <Route path="financial-contracts-dashboard" element={<LegacyRedirect to="/governanca?tab=financial-contracts" />} />
         <Route path="rules" element={<LegacyRedirect to="/governanca?tab=rules" />} />
         <Route path="classifications" element={<LegacyRedirect to="/governanca?tab=classification" />} />
         <Route path="extraction" element={<LegacyRedirect to="/operacoes/execucoes?tab=extraction" />} />
