@@ -5,7 +5,7 @@ import { BrowserRouter } from "react-router-dom";
 import App from "./App";
 import theme from "./theme/theme";
 import "./index.css";
-import "@carbon/react/css/styles.css";
+import "@carbon/styles/css/styles.css";
 import { NotificationProvider } from "./context/NotificationContext";
 
 ReactDOM.createRoot(document.getElementById("root")!).render(
