@@ -1,10 +1,10 @@
 import { useEffect, useMemo, useState, type ReactElement } from "react";
-import { Link as RouterLink } from "react-router-dom";
+import { Link as RouterLink, useSearchParams } from "react-router-dom";
 import Plot from "@/components/Plot";
 import {
   Alert, Box, Breadcrumbs, Button, Card, CardContent, Chip, CircularProgress, Collapse,
   FormControl, IconButton, InputLabel, Link, List, ListItemButton, ListItemText, Menu,
-  MenuItem, Paper, Select, Stack, Tab, Tabs, TextField, Typography,
+  MenuItem, Paper, Select, Stack, TextField, Typography,
 } from "@mui/material";
 import { ChevronRight, ExpandMore } from "@mui/icons-material";
 import { DataGrid, GridColDef } from "@mui/x-data-grid";
@@ -44,7 +44,14 @@ const chartLayout = (yTitle: string, prefix = ""): Record<string, unknown> => ({
 });
 
 export default function DashboardsIA() {
-  const [tab, setTab] = useState(0);
+  const [searchParams, setSearchParams] = useSearchParams();
+  const requestedTab = Number(searchParams.get("tab"));
+  const tab = Number.isInteger(requestedTab) && requestedTab >= 0 && requestedTab <= 2 ? requestedTab : 0;
+  const setTab = (value: number) => {
+    const next = new URLSearchParams(searchParams);
+    next.set("tab", String(value));
+    setSearchParams(next, { replace: true });
+  };
   const [metric, setMetric] = useState<AIMetricKind>("tokens");
   const [period, setPeriod] = useState("202608");
   const [provider, setProvider] = useState<string>("todos");
@@ -217,11 +224,6 @@ export default function DashboardsIA() {
             )}
           </Alert>
         )}
-        <Tabs value={tab} onChange={(_, v) => setTab(v)} sx={{ mb: -1 }}>
-          <Tab label="Visão Executiva" />
-          <Tab label="Eficiência FinOps" />
-          <Tab label="Drilldown por usuário" />
-        </Tabs>
       </Box>
 
       <Box sx={{
