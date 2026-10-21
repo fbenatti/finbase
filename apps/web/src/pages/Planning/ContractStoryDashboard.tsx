@@ -2,7 +2,7 @@ import { ChangeEvent, useEffect, useMemo, useRef, useState } from "react";
 import {
   Alert, Box, Button, Card, CardContent, Chip, Dialog, DialogActions, DialogContent,
   DialogTitle, Divider, FormControl, IconButton, InputLabel, Menu, MenuItem, Paper,
-  Select, Stack, Tab, Tabs, TextField, Typography,
+  Select, Stack, TextField, Typography,
 } from "@mui/material";
 import { Add, AutoGraph, CloudOutlined, EditOutlined, EventOutlined, FileUploadOutlined, MoreVert } from "@mui/icons-material";
 import PictureAsPdfOutlined from "@mui/icons-material/PictureAsPdfOutlined";
@@ -313,7 +313,12 @@ export default function ContractStoryDashboard() {
       <Box><Typography variant="h4" fontWeight={800}>História do contrato</Typography><Typography color="text.secondary">Acordos, decisões e consumo em uma jornada única.</Typography></Box>
       <Stack direction="row" gap={1} alignItems="center"><Button data-pdf-hide variant="outlined" startIcon={<PictureAsPdfOutlined />} onClick={() => void exportPdf()} disabled={exporting}>{exporting ? "Gerando PDF..." : "Exportar PDF"}</Button><Button data-pdf-hide variant="contained" startIcon={<Add />} onClick={event => setMenuAnchor(event.currentTarget)}>Novo registro</Button><Menu anchorEl={menuAnchor} open={Boolean(menuAnchor)} onClose={() => setMenuAnchor(null)}><MenuItem onClick={() => { setCreatingContract(true); setMenuAnchor(null); setDialog("contract"); }}>Cadastrar contrato</MenuItem><MenuItem onClick={() => { setMenuAnchor(null); setDialog("monthly"); }}>Registrar mês de consumo</MenuItem><MenuItem onClick={() => { setMenuAnchor(null); setDialog("milestone"); }}>Adicionar marco à história</MenuItem><Divider /><MenuItem onClick={() => { setMenuAnchor(null); fileRef.current?.click(); }}><FileUploadOutlined fontSize="small" sx={{ mr: 1 }} />Importar consumo via CSV</MenuItem></Menu><input ref={fileRef} type="file" accept=".csv,text/csv" hidden onChange={event => void importCsv(event)} /></Stack>
     </Stack>
-    <Tabs value={contract.id} onChange={(_, value) => setSelectedId(value)} variant="scrollable" scrollButtons="auto" sx={{ mb: 2 }} aria-label="Contratos">{ledger.contracts.map(item => <Tab key={item.id} value={item.id} label={item.name} />)}</Tabs>
+    <FormControl size="small" sx={{ minWidth: 280, mb: 2 }} disabled={!ledger.contracts.length}>
+      <InputLabel id="contract-story-select-label">Contrato</InputLabel>
+      <Select labelId="contract-story-select-label" label="Contrato" value={contract.id} onChange={event => setSelectedId(String(event.target.value))}>
+        {ledger.contracts.map(item => <MenuItem key={item.id} value={item.id}>{item.name}</MenuItem>)}
+      </Select>
+    </FormControl>
     {message && <Alert severity="success" onClose={() => setMessage("")} sx={{ mb: 2 }}>{message}</Alert>}
     <Paper variant="outlined" sx={{ p: { xs: 2, md: 3 }, mb: 2, background: "linear-gradient(120deg, #fff 0%, #f0fdfa 100%)" }}>
       <Stack direction={{ xs: "column", md: "row" }} gap={3} justifyContent="space-between" alignItems={{ md: "center" }}>

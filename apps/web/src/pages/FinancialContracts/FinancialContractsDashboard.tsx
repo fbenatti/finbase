@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
   Alert, Box, Card, CardContent, CircularProgress, FormControl, Grid, InputLabel,
-  MenuItem, Select, Stack, Tab, Tabs, Table, TableBody, TableCell, TableContainer, TableHead,
+  MenuItem, Select, Stack, Table, TableBody, TableCell, TableContainer, TableHead,
   TableRow, Typography, Button,
 } from "@mui/material";
 import PictureAsPdfOutlined from "@mui/icons-material/PictureAsPdfOutlined";
@@ -114,7 +114,12 @@ export default function FinancialContractsDashboard() {
       </Stack>
     </Stack>
 
-    <Tabs value={contractId} onChange={(_, value) => { setContractId(value); setPeriod("all"); }} variant="scrollable" scrollButtons="auto" sx={{ mb: 3 }} aria-label="Contratos">{contracts.map((item) => <Tab key={item.id} value={String(item.id)} label={item.name} />)}</Tabs>
+    <FormControl size="small" sx={{ minWidth: 280, mb: 3 }} disabled={!contracts.length}>
+      <InputLabel id="financial-contract-select-label">Contrato</InputLabel>
+      <Select labelId="financial-contract-select-label" label="Contrato" value={contractId} onChange={(event) => { setContractId(String(event.target.value)); setPeriod("all"); }}>
+        {contracts.map(item => <MenuItem key={item.id} value={String(item.id)}>{item.name}</MenuItem>)}
+      </Select>
+    </FormControl>
 
     {error && <Alert severity="error" sx={{ mb: 2 }}>{error}</Alert>}
     {loading && <Stack direction="row" spacing={1} alignItems="center" sx={{ mb: 2 }}><CircularProgress size={18} /><Typography variant="body2" color="text.secondary">Carregando liquidações...</Typography></Stack>}
