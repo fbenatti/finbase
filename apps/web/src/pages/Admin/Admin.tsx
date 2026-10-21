@@ -1,7 +1,8 @@
 import React, { useEffect, useMemo, useState } from "react";
+import { useSearchParams } from "react-router-dom";
 import {
   Box, Button, Checkbox, Chip, Dialog, DialogActions, DialogContent, DialogTitle,
-  FormControl, IconButton, InputLabel, MenuItem, Paper, Select, Stack, Tab, Tabs,
+  FormControl, IconButton, InputLabel, MenuItem, Paper, Select, Stack,
   TextField, Tooltip, Typography, Alert, Switch, FormControlLabel, Grid,
 } from "@mui/material";
 import { Add as AddIcon, Delete as DeleteIcon, Refresh as RefreshIcon, LockReset as LockResetIcon } from "@mui/icons-material";
@@ -417,7 +418,8 @@ function UsersTab() {
 }
 
 export default function Admin() {
-  const [tab, setTab] = useState(0);
+  const [params] = useSearchParams();
+  const tab = ({ users: 0, groups: 1, roles: 2 } as Record<string, number>)[params.get("tab") || "users"] ?? 0;
   return (
     <Box sx={{ mx: -3, mt: -3, pb: 3, minHeight: "calc(100vh - 64px)", bgcolor: "#f8fafc" }}>
       <Box sx={{ px: 3, pt: 3, bgcolor: "background.paper", borderBottom: "1px solid", borderColor: "divider" }}>
@@ -425,11 +427,6 @@ export default function Admin() {
         <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
           Usuários, grupos de acesso, roles com permissões por módulo e escopo, e os vínculos que definem o que cada pessoa enxerga.
         </Typography>
-        <Tabs value={tab} onChange={(_, v) => setTab(v)}>
-          <Tab label="Usuários" />
-          <Tab label="Grupos" />
-          <Tab label="Roles" />
-        </Tabs>
       </Box>
       <Box sx={{ p: 3 }}>
         <Paper variant="outlined" sx={{ p: { xs: 1.5, md: 2.5 } }}>
