@@ -152,7 +152,10 @@ const MENU_GROUPS: MenuGroup[] = [
     label: "Administração",
     icon: <ManageAccountsOutlined fontSize="small" />,
     items: [
-      { path: "/ideas?tab=portal", label: "Iniciativas", icon: <LightbulbOutlined /> },
+      { path: "/ideas?tab=portal", label: "Portal de iniciativas", icon: <LightbulbOutlined /> },
+      { path: "/ideas?tab=backlog", label: "Fila priorizada", icon: <ScheduleOutlined /> },
+      { path: "/ideas?tab=canvas", label: "Canvas de entrega", icon: <AccountTreeOutlined /> },
+      { path: "/ideas?tab=dashboard", label: "Resultados das iniciativas", icon: <DashboardOutlined /> },
       { path: "/admin", label: "Pessoas e acessos", icon: <ManageAccountsOutlined /> },
       { path: "/admin/audit", label: "Trilha de auditoria", icon: <FactCheckOutlined /> },
       { path: "/admin/sso", label: "Login corporativo", icon: <VpnKeyOutlined /> },
