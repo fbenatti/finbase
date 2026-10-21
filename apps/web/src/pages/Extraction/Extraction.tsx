@@ -424,7 +424,6 @@ export default function Extraction({ embedded = false }: { embedded?: boolean })
       {!embedded && <Typography variant="h4" sx={{ mb: 2 }}>Extração & Monitoramento</Typography>}
 
       <>
-        <>
           <Box sx={{ display: "flex", gap: 2, mb: 3, alignItems: "flex-start", flexWrap: "wrap" }}>
             <FormControl size="small" sx={{ minWidth: 280 }}>
               <InputLabel>Conexao</InputLabel>
