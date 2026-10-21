@@ -118,7 +118,10 @@ const MENU_GROUPS: MenuGroup[] = [
       { path: "/savings?tab=compras-compromissos", label: "Compromissos e compras", icon: <EventAvailableOutlined /> },
       { path: "/savings?tab=desligue", label: "Desligamento programado", icon: <SettingsOutlined /> },
       { path: "/savings?tab=orfaos", label: "Recursos sem uso", icon: <StorageOutlined /> },
-      { path: "/governance?tab=reservas", label: "Reservas Azure", icon: <EventAvailableOutlined /> },
+      { path: "/governance?tab=reservas&subtab=executivo", label: "Reservas · visão executiva", icon: <DashboardOutlined /> },
+      { path: "/governance?tab=reservas&subtab=catalogo", label: "Reservas · catálogo", icon: <TableChartOutlined /> },
+      { path: "/governance?tab=reservas&subtab=recomendacoes", label: "Reservas · recomendações", icon: <LightbulbOutlined /> },
+      { path: "/governance?tab=reservas&subtab=fontes", label: "Reservas · fontes de coleta", icon: <CloudOutlined /> },
     ],
   },
   {
