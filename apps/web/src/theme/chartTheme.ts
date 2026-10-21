@@ -69,8 +69,9 @@ export function standardChartData(data: Data[], tokens: ChartTokens): Data[] {
       if ([undefined, "scatter", "scattergl"].includes(trace.type)) trace.line = { width: 2.5, ...trace.line, color };
     }
     if (typeof trace.colorscale === "string" && /^(Purples|Blues|Viridis|Plasma|Rainbow)$/i.test(trace.colorscale)) trace.colorscale = [[0, "#f4f4f4"], [0.3, "#a6c8ff"], [0.65, "#4589ff"], [1, "#0043ce"]];
-    if (Array.isArray(trace.colorscale)) trace.colorscale = trace.colorscale.map(([stop, color]: [number, string]) => [stop, chartColor(color, tokens)]);
-    if (trace.textfont) trace.textfont = { ...trace.textfont, family: tokens.family };
+    // Explicit continuous/diverging scales carry quantitative meaning; keep their lightness and stops.
+    if (Array.isArray((source as any).colorscale)) trace.colorscale = (source as any).colorscale.map(([stop, color]: [number, string]) => [stop, legacyColors[color.toLowerCase()] || color]);
+    for (const key of ["textfont", "insidetextfont", "outsidetextfont"]) if (trace[key]) trace[key] = { ...trace[key], family: tokens.family };
     if (trace.colorbar) trace.colorbar = { ...trace.colorbar, tickfont: { ...trace.colorbar.tickfont, family: tokens.family, size: 11, color: tokens.muted } };
     return trace;
   });

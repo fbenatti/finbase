@@ -28,7 +28,8 @@ export const Dialog = forwardRef<HTMLDivElement, DialogProps>(function FinbaseDi
           maxHeight: { xs: "calc(100dvh - 32px)", sm: "calc(100dvh - 64px)" },
           margin: { xs: 2, sm: 4 },
         },
-        "& .MuiDialog-paperFullScreen": { borderRadius: 0, border: 0, margin: 0, maxHeight: "100dvh" },
+        "& .MuiDialog-paperFullWidth": { width: { xs: "calc(100% - 32px)", sm: "calc(100% - 64px)" } },
+        "& .MuiDialog-paperFullScreen": { borderRadius: 0, border: 0, margin: 0, width: "100%", maxHeight: "100dvh" },
         "& .MuiDialogTitle-root": {
           position: "relative", flexShrink: 0, px: { xs: 2, sm: 3 }, py: 2.5,
           background: theme.palette.background.paper, borderBottom: "1px solid", borderColor: "divider",

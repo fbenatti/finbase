@@ -1,3 +1,4 @@
+import Plot from "../../components/Plot";
 import { Dialog, DialogActions, DialogContent, DialogTitle } from "../../components/FinbaseDialog";
 import { dataDisplayText } from "../../utils/dataPresentation";
 import { ChangeEvent, useEffect, useMemo, useRef, useState } from "react";
@@ -82,7 +83,7 @@ function ProfileConsumptionChart({ profiles }: { profiles: BronzeConsumption["pr
               </Box>
             </Stack>
             <Box sx={{ height: 8, borderRadius: 10, bgcolor: "#e2e8f0", overflow: "hidden", mt: 1.5 }}>
-              <Box sx={{ width: `${relative}%`, height: "100%", background: index === 0 ? "linear-gradient(90deg, #0f766e, #2dd4bf)" : "#14b8a6", borderRadius: 10, transition: "width .3s" }} />
+              <Box sx={{ width: `${relative}%`, height: "100%", bgcolor: "primary.main", borderRadius: 10, transition: "width .3s" }} />
             </Box>
           </Paper>;
         })}
@@ -123,26 +124,26 @@ function ConsumptionChart({ contract, entries }: { contract: Contract; entries: 
     const target = contractIndex < 0 || !contractPeriods.length ? contract.target : Math.min(((contractIndex + 1) / contractPeriods.length) * contract.target, contract.target);
     return { month, x: periods.length <= 1 ? 0 : index / (periods.length - 1) * 100, target, actual, row };
   });
-  const estimatedIndex = estimatedMonth ? periods.indexOf(estimatedMonth) : -1;
-  const max = Math.max(contract.target, ...points.map(point => Math.max(point.target, point.actual)), 1);
-  const chartHeight = 200;
-  const polyline = (key: "target" | "actual") => points.map(point => `${point.x * 7.2},${chartHeight - point[key] / max * chartHeight}`).join(" ");
-  const estimateX = estimatedIndex >= 0 ? points[estimatedIndex].x * 7.2 : null;
   return <Paper variant="outlined" sx={{ p: { xs: 2, md: 3 }, mb: 2, overflow: "hidden" }}>
     <Stack direction={{ xs: "column", sm: "row" }} justifyContent="space-between" gap={1} sx={{ mb: 2 }}><Box><Typography variant="h6" fontWeight={800}>Evolução do compromisso</Typography><Typography variant="body2" color="text.secondary">Consumo Brasil acumulado comparado à trajetória necessária para atingir 100%.</Typography></Box><Chip size="small" icon={<AutoGraph />} label={estimatedMonth ? <>Projeção commitment · {monthLabel(estimatedMonth)}</> : latestActual ? <>Atualizado até <MonthStatusLabel value={latestActual} /></> : "Aguardando consumo mensal"} color={estimatedMonth ? "error" : latestActual && invoicesStillUpdating(latestActual) ? "warning" : "default"} variant="outlined" /></Stack>
-    {!entries.length ? <Box sx={{ py: 2 }}><Box sx={{ height: 145, borderBottom: 1, borderColor: "divider", borderLeft: 1, position: "relative", background: "repeating-linear-gradient(to bottom, transparent 0, transparent 35px, rgba(148,163,184,.15) 36px)" }}><Typography sx={{ position: "absolute", left: 12, top: 14 }} color="text.secondary" variant="body2">Ainda não há consumo com valor registrado no período.</Typography><Box sx={{ position: "absolute", bottom: 12, left: 12, right: 12, borderTop: "2px dashed #94a3b8" }} /></Box><Stack direction="row" justifyContent="space-between" sx={{ mt: 1 }}><Typography variant="caption">{monthLabel(contract.start)}</Typography><Typography variant="caption">Meta · {money(contract.target, contract.currency)}</Typography><Typography variant="caption">{monthLabel(contract.end)}</Typography></Stack></Box> : <Box sx={{ overflowX: "auto" }}>
-      <Box sx={{ minWidth: 560, position: "relative", height: 244, pl: 6, pr: 1, pt: 1 }}>
-        {[0, 25, 50, 75, 100].map(pct => <Box key={pct} sx={{ position: "absolute", left: 48, right: 8, top: `${8 + (100 - pct) * 2}px`, borderTop: "1px solid", borderColor: "divider" }}><Typography variant="caption" color="text.secondary" sx={{ position: "absolute", right: "100%", mr: 1, top: -10 }}>{pct}%</Typography></Box>)}
-        <svg viewBox="0 0 720 200" preserveAspectRatio="none" width="100%" height="200" aria-label="Consumo acumulado contra objetivo do contrato" style={{ position: "relative", zIndex: 1, overflow: "visible" }}>
-          <polyline points={polyline("target")} fill="none" stroke="#94a3b8" strokeWidth="2" strokeDasharray="7 6" />
-          <polyline points={polyline("actual")} fill="none" stroke="#0f766e" strokeWidth="3" strokeLinejoin="round" strokeLinecap="round" />
-          {estimateX !== null && <g><line x1={estimateX} y1="0" x2={estimateX} y2={chartHeight} stroke="#dc2626" strokeWidth="2.5" strokeDasharray="6 5" /><title>Projeção commitment: {monthLabel(estimatedMonth!)}</title></g>}
-          {points.filter(point => point.row).map(point => <circle key={point.month} cx={point.x * 7.2} cy={chartHeight - point.actual / max * chartHeight} r="4" fill="#0f766e"><title>{monthLabel(point.month)}: {money(point.actual, contract.currency)}</title></circle>)}
-        </svg>
-      </Box>
-      <Stack direction="row" justifyContent="space-between" sx={{ ml: 6, mt: -0.5 }}><Typography variant="caption">{monthLabel(contract.start)}</Typography><Typography variant="caption">{monthLabel(contract.end)}</Typography></Stack>
-      <Stack direction="row" gap={2} flexWrap="wrap" sx={{ mt: 1.5 }}><Stack direction="row" gap={.75} alignItems="center"><Box sx={{ width: 18, borderTop: "3px solid #0f766e" }} /><Typography variant="caption">Consumo acumulado</Typography></Stack><Stack direction="row" gap={.75} alignItems="center"><Box sx={{ width: 18, borderTop: "2px dashed #94a3b8" }} /><Typography variant="caption">Ritmo linear da meta</Typography></Stack>{estimatedMonth ? <Stack direction="row" gap={.75} alignItems="center"><Box sx={{ width: 18, borderTop: "2px dashed #dc2626" }} /><Typography variant="caption" color="error.main">Projeção commitment</Typography></Stack> : <Typography variant="caption" color="text.secondary">Sem ritmo positivo registrado para estimar a data de atingimento.</Typography>}</Stack>
-    </Box>}
+    {!entries.length ? <Alert severity="info">Ainda não há consumo com valor registrado no período. Registre um mês de consumo para acompanhar o compromisso.</Alert> : <>
+      <Plot
+        data={[
+          { type: "scatter", mode: "lines", name: "Meta contratual", x: points.map(point => `${point.month}-01`), y: points.map(point => point.target), line: { dash: "dash", width: 2 }, hovertemplate: "%{x|%m/%Y}<br>Meta: %{y:,.2f}<extra></extra>" },
+          { type: "scatter", mode: "lines+markers", name: "Consumo acumulado", x: points.map(point => `${point.month}-01`), y: points.map(point => point.actual), marker: { size: points.map(point => point.row ? 5 : 0) }, hovertemplate: "%{x|%m/%Y}<br>Consumo: %{y:,.2f}<extra></extra>" },
+        ]}
+        layout={{
+          height: 320, margin: { l: 72, r: 24, t: 40, b: 80 }, hovermode: "x unified",
+          xaxis: { type: "date", tickformat: "%m/%Y", nticks: 8, showgrid: false },
+          yaxis: { tickprefix: contract.currency === "USD" ? "US$ " : "R$ ", tickformat: ".2s" },
+          ...(estimatedMonth ? {
+            shapes: [{ type: "line", xref: "x", yref: "paper", x0: `${estimatedMonth}-01`, x1: `${estimatedMonth}-01`, y0: 0, y1: 1, line: { color: "#da1e28", width: 2, dash: "dot" } }],
+            annotations: [{ x: `${estimatedMonth}-01`, y: 1, yref: "paper", text: `Atingimento estimado: ${monthLabel(estimatedMonth)}`, showarrow: false, yshift: 16, font: { color: "#da1e28" } }],
+          } : {}),
+        }}
+      />
+      {!estimatedMonth && <Typography variant="caption" color="text.secondary">Sem ritmo positivo registrado para estimar a data de atingimento.</Typography>}
+    </>}
   </Paper>;
 }
 

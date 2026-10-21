@@ -35,6 +35,11 @@ describe("shared chart theme", () => {
     expect(standardChartLayout(layout, carbon).legend).toMatchObject({ orientation: "v", x: 1.1 });
     expect(standardChartConfig({ scrollZoom: true, displayModeBar: true })).toMatchObject({ scrollZoom: true, displayModeBar: true, responsive: true, displaylogo: false });
   });
+  it("keeps sequential heatmap scales ordered and custom diverging stops intact", () => {
+    const data: any = standardChartData([{ type: "heatmap", colorscale: "Purples" }, { type: "heatmap", colorscale: [[0, "#ffeeee"], [0.5, "#ffffff"], [1, "#004400"]] }], carbon);
+    expect(data[0].colorscale).toEqual([[0, "#f4f4f4"], [0.3, "#a6c8ff"], [0.65, "#4589ff"], [1, "#0043ce"]]);
+    expect(data[1].colorscale).toEqual([[0, "#ffeeee"], [0.5, "#ffffff"], [1, "#004400"]]);
+  });
   it("does not mutate the original layout or trace styles", () => {
     const layout: Partial<Layout> = { font: { family: "Arial" }, yaxis: { title: { text: "Custo" } } }; const copy = JSON.stringify(layout);
     standardChartLayout(layout, carbon); expect(JSON.stringify(layout)).toBe(copy);
