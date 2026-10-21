@@ -1,5 +1,6 @@
 import { Box, Typography } from "@mui/material";
 import { Inbox as InboxIcon } from "@mui/icons-material";
+import { dataDisplayText } from "../utils/dataPresentation";
 
 interface EmptyStateProps {
   message: string;
@@ -19,7 +20,7 @@ export default function EmptyState({ message, icon }: EmptyStateProps) {
       }}
     >
       {icon || <InboxIcon sx={{ fontSize: 64, mb: 2, opacity: 0.4 }} />}
-      <Typography variant="body1">{message}</Typography>
+      <Typography variant="body1">{dataDisplayText(message)}</Typography>
     </Box>
   );
 }

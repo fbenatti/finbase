@@ -856,7 +856,7 @@ export default function PivotAnalysis({ destinations, initialTableId, showSearch
       </DialogTitle>
       <DialogContent sx={{ bgcolor: "#f8fafc", p: { xs: 1.5, md: 3 } }}>
         {sourceDetailLoading && <Box sx={{ minHeight: 180, display: "flex", alignItems: "center", justifyContent: "center", gap: 1.5 }}><CircularProgress size={22} /><Typography>Buscando a linha de origem na base de origem...</Typography></Box>}
-        {!sourceDetailLoading && sourceDetail && !sourceDetail.available && <Alert severity="info" sx={{ mt: 2 }}>{sourceDetail.reason}</Alert>}
+        {!sourceDetailLoading && sourceDetail && !sourceDetail.available && <Alert severity="info" sx={{ mt: 2 }}>{dataDisplayText(sourceDetail.reason)}</Alert>}
         {!sourceDetailLoading && sourceDetail?.available && <Stack spacing={2} sx={{ maxWidth: 1100, mx: "auto", mt: 1 }}>
           <Paper variant="outlined" sx={{ p: 2, borderRadius: 2, bgcolor: "white" }}><Typography variant="subtitle1" fontWeight={750}>{sourceDetail.connection_name}</Typography><Typography variant="caption" color="text.secondary">{sourceDetail.blob_path || "Arquivo de origem identificado pelo registro"}</Typography></Paper>
           <Box sx={{ display: "grid", gridTemplateColumns: { xs: "1fr", md: "1fr 56px 1fr" }, alignItems: "center", gap: 1 }}>

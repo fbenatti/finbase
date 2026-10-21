@@ -215,7 +215,7 @@ export default function Reservations() {
     setError(null);
     try {
       const result = await testReservationConnection(connId);
-      alert(`${result.status}: ${result.message}`);
+      alert(dataDisplayText(`${result.status}: ${result.message}`));
       load();
     } catch (e: any) {
       setError(e?.response?.data?.detail || "Falha no teste de conexão");
