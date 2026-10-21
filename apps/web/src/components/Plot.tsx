@@ -1,27 +1,16 @@
-// Use the factory entry point so Vite bundles the supported, self-contained
-// Plotly distribution. The package default imports plotly.js/dist/plotly,
-// which is a CommonJS-only dependency and leaks an unresolved module
-// specifier into a browser production bundle.
+// Bundle the supported, self-contained Plotly distribution through its factory.
 import createPlotlyComponent from "react-plotly.js/factory";
 import Plotly from "plotly.js-dist-min";
 import type PlotComponent from "react-plotly.js";
-
+import { useMemo, type ComponentProps } from "react";
+import { useInterfaceTheme } from "../theme/useInterfaceTheme";
+import { chartTokens, standardChartData, standardChartLayout, standardChartConfig } from "../theme/chartTheme";
 const PlotlyComponent = createPlotlyComponent(Plotly) as typeof PlotComponent;
-const Plot = ({ layout, ...props }: ComponentProps<typeof PlotlyComponent>) => (
-  <PlotlyComponent
-    {...props}
-    layout={{
-      ...layout,
-      font: {
-        ...layout?.font,
-        family: '"Inter", "Segoe UI", "Helvetica Neue", Arial, sans-serif',
-        color: layout?.font?.color ?? "#617386",
-      },
-      paper_bgcolor: layout?.paper_bgcolor ?? "transparent",
-      plot_bgcolor: layout?.plot_bgcolor ?? "transparent",
-    }}
-  />
-);
-
-export default Plot;
-import type { ComponentProps } from "react";
+export default function Plot({ layout, data, config, style, ...props }: ComponentProps<typeof PlotlyComponent>) {
+  const theme = useInterfaceTheme();
+  const tokens = useMemo(() => chartTokens(theme), [theme]);
+  const normalizedData = useMemo(() => standardChartData(data, tokens), [data, tokens]);
+  const normalizedLayout = useMemo(() => standardChartLayout(layout, tokens), [layout, tokens]);
+  const normalizedConfig = useMemo(() => standardChartConfig(config), [config]);
+  return <PlotlyComponent useResizeHandler {...props} data={normalizedData} layout={normalizedLayout} config={normalizedConfig} style={{ width: "100%", ...style }} />;
+}
