@@ -15,15 +15,15 @@ import {
 } from "../../services/api";
 import { api } from "../../services/api";
 import EmptyState from "../../components/EmptyState";
-import ConnectionsDataGrid, { ConnectionTestMessage, getProviderLabel } from "./ConnectionsDataGrid";
+import ConnectionsDataGrid, { ConnectionTestMessage, getProviderLabel, getConnectorLabel } from "./ConnectionsDataGrid";
 import RecordHistory from "../../components/RecordHistory";
 import AzureSourcesPanel from "./AzureSourcesPanel";
 import IntegrationsPanel from "./IntegrationsPanel";
 
 const CONNECTOR_TYPES = [
-  { value: "azure_mca_invoice", label: "Azure MCA (Invoices)", scope: "azure" },
-  { value: "azure_blob", label: "Azure Blob Storage", scope: "azure" },
-  { value: "azure_pricesheet", label: "Azure Price Sheet", scope: "azure" },
+  { value: "azure_mca_invoice", label: "Azure MCA — faturas e compromissos", scope: "azure" },
+  { value: "azure_blob", label: "Azure — arquivos de custo", scope: "azure" },
+  { value: "azure_pricesheet", label: "Azure — preços contratados", scope: "azure" },
   { value: "azure_openai_ptu", label: "Azure OpenAI PTU", scope: "azure" },
   { value: "azure_automation_jobs", label: "Azure Automation Jobs", scope: "azure" },
   { value: "azure_resource_graph", label: "Azure Resource Graph", scope: "azure" },
@@ -39,7 +39,7 @@ const CONNECTOR_TYPES = [
   { value: "gemini_token", label: "Gemini Tokens", scope: "gemini" },
   { value: "claude_license", label: "Claude Licenças (Enterprise)", scope: "claude" },
   { value: "claude_token", label: "Claude Tokens (Enterprise)", scope: "claude" },
-  { value: "databricks", label: "Databricks (SQL Warehouse)", scope: "databricks" },
+  { value: "databricks", label: "Databricks — consumo", scope: "databricks" },
 ];
 
 function describeConnectionLoadError(error: unknown, endpoint: string, fallback: string): string {
@@ -103,24 +103,24 @@ const TOOL_LABELS: Record<string, string> = {
   claude: "Claude (Anthropic)",
 };
 
-const CONNECTOR_PICKER_OPTIONS: { value: string; label: string; description: string; icon: React.ReactNode; color: string; category: ConnectionCategory; tool?: string }[] = [
+const CONNECTOR_PICKER_OPTIONS: { value: string; label: string; description: string; icon: React.ReactNode; category: ConnectionCategory; tool?: string }[] = [
   // Provedores Cloud
-  { value: "azure_mca_invoice", label: "Azure MCA", description: "Faturas e compromissos contratados", icon: <Cloud />, color: "#0078D4", category: "provedor" },
-  { value: "azure_blob", label: "Azure", description: "Relatórios de custo em arquivos", icon: <Cloud />, color: "#0078D4", category: "provedor" },
-  { value: "azure_pricesheet", label: "Azure Price Sheet", description: "Tabela de preços contratados", icon: <Cloud />, color: "#0078D4", category: "provedor" },
-  { value: "azure_openai_ptu", label: "Azure OpenAI", description: "PTU / capacidade provisionada", icon: <SmartToy />, color: "#0078D4", category: "ferramenta" },
-  { value: "azure_automation_jobs", label: "Azure Automation", description: "Jobs de Start/Stop de VMs", icon: <Cloud />, color: "#0078D4", category: "ferramenta" },
-  { value: "azure_resource_graph", label: "Azure Resource Graph", description: "Inventário / recursos órfãos", icon: <Search />, color: "#0078D4", category: "ferramenta" },
-  { value: "gcp_bigquery", label: "GCP", description: "BigQuery", icon: <Storage />, color: "#4285F4", category: "provedor" },
-  { value: "oci", label: "OCI", description: "Oracle Cloud", icon: <Cloud />, color: "#F80000", category: "provedor" },
+  { value: "azure_mca_invoice", label: "Azure MCA", description: "Faturas e compromissos contratados", icon: <Cloud />, category: "provedor" },
+  { value: "azure_blob", label: "Azure", description: "Relatórios de custo em arquivos", icon: <Cloud />, category: "provedor" },
+  { value: "azure_pricesheet", label: "Azure — preços contratados", description: "Tabela de preços contratados", icon: <Cloud />, category: "provedor" },
+  { value: "azure_openai_ptu", label: "Azure OpenAI", description: "PTU / capacidade provisionada", icon: <SmartToy />, category: "ferramenta" },
+  { value: "azure_automation_jobs", label: "Azure Automation", description: "Jobs de Start/Stop de VMs", icon: <Cloud />, category: "ferramenta" },
+  { value: "azure_resource_graph", label: "Azure Resource Graph", description: "Inventário / recursos órfãos", icon: <Search />, category: "ferramenta" },
+  { value: "gcp_bigquery", label: "GCP", description: "BigQuery", icon: <Storage />, category: "provedor" },
+  { value: "oci", label: "OCI", description: "Oracle Cloud", icon: <Cloud />, category: "provedor" },
   // Ferramentas Cloud
-  { value: "github", label: "GitHub", description: "Copilot / Tokens / Licenças", icon: <Cloud />, color: "#24292e", category: "ferramenta", tool: "github" },
-  { value: "notebooklm", label: "NotebookLM", description: "Licenças / Tokens", icon: <MenuBook />, color: "#4285F4", category: "ferramenta", tool: "notebooklm" },
-  { value: "gemini", label: "Gemini", description: "Licenças / Tokens", icon: <AutoAwesome />, color: "#8E24AA", category: "ferramenta", tool: "gemini" },
-  { value: "claude", label: "Claude", description: "Claude.ai / Anthropic", icon: <Psychology />, color: "#D97757", category: "ferramenta", tool: "claude" },
-  { value: "databricks", label: "Databricks", description: "Consumo do ambiente de trabalho", icon: <Storage />, color: "#FF3621", category: "ferramenta" },
+  { value: "github", label: "GitHub", description: "Copilot / Tokens / Licenças", icon: <Cloud />, category: "ferramenta", tool: "github" },
+  { value: "notebooklm", label: "NotebookLM", description: "Licenças / Tokens", icon: <MenuBook />, category: "ferramenta", tool: "notebooklm" },
+  { value: "gemini", label: "Gemini", description: "Licenças / Tokens", icon: <AutoAwesome />, category: "ferramenta", tool: "gemini" },
+  { value: "claude", label: "Claude", description: "Claude.ai / Anthropic", icon: <Psychology />, category: "ferramenta", tool: "claude" },
+  { value: "databricks", label: "Databricks", description: "Consumo do ambiente de trabalho", icon: <Storage />, category: "ferramenta" },
   // Marketplace
-  { value: "mongodb_atlas", label: "MongoDB", description: "Atlas", icon: <Dataset />, color: "#13AA52", category: "marketplace" },
+  { value: "mongodb_atlas", label: "MongoDB", description: "Atlas", icon: <Dataset />, category: "marketplace" },
 ];
 
 const CLOUD_SCOPES = [
@@ -886,7 +886,7 @@ export default function Connections() {
         connection.name,
         connection.code,
         getProviderLabel(connection.cloud_scope),
-        connection.connector_type,
+        getConnectorLabel(connection.connector_type),
         connection.updated_at,
         connection.last_test_status || "",
       ]),
@@ -1485,7 +1485,7 @@ export default function Connections() {
         <DialogActions>
           <Button disabled={savingConnection} onClick={() => setDialogOpen(false)}>Cancelar</Button>
           <Button variant="outlined" startIcon={testingForm ? <CircularProgress size={20} /> : <Validate />} onClick={() => void testFormConnection()} disabled={testingForm || savingConnection}>
-            {testingForm ? "Testando…" : form.connector_type === "azure_mca_invoice" ? "Validar acesso e contas" : "Validar conexão"}
+            {testingForm ? "Validando…" : form.connector_type === "azure_mca_invoice" ? "Validar acesso e contas" : "Validar conexão"}
           </Button>
           <Button startIcon={<Save />} onClick={() => void save()} variant="contained" disabled={testingForm || savingConnection}>{savingConnection ? "Salvando…" : "Salvar conexão"}</Button>
         </DialogActions>

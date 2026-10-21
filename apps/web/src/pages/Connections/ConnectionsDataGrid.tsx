@@ -42,13 +42,18 @@ type Props = {
 };
 
 const connectorLabels: Record<string, string> = {
-  azure_blob: "Azure Blob Storage",
-  azure_openai_ptu: "Azure OpenAI PTU",
+  azure_blob: "Arquivos de custo Azure",
+  azure_mca_invoice: "Faturas e compromissos Azure",
+  azure_pricesheet: "Preços contratados Azure",
+  azure_automation_jobs: "Automações Azure",
+  azure_resource_graph: "Inventário Azure",
+  manual_csv: "Importação de arquivos CSV",
+  azure_openai_ptu: "Capacidade provisionada Azure",
   gcp_bigquery: "GCP BigQuery",
   oci: "Oracle Cloud (OCI)",
   mongodb_atlas: "MongoDB Atlas",
   manual_csv: "Upload manual de CSV",
-  github_billing: "GitHub Billing (Copilot)",
+  github_billing: "Faturamento GitHub",
   github_license: "GitHub Licenças (Copilot)",
   github_token: "GitHub Tokens (Copilot)",
   notebooklm_license: "NotebookLM Licenças",
@@ -58,8 +63,10 @@ const connectorLabels: Record<string, string> = {
   gemini_license: "Gemini Licenças",
   gemini_token: "Gemini Tokens",
   gemini_notebooklm: "Gemini NotebookLM",
-  databricks: "Databricks (SQL Warehouse)",
+  databricks: "Consumo Databricks",
 };
+
+export const getConnectorLabel = (type: string) => connectorLabels[type] || type.replaceAll("_", " ");
 
 const providerLabels: Record<string, string> = {
   azure: "Azure",
@@ -101,7 +108,7 @@ function getConnectionSummary(connection: SourceConnection): string {
     case "manual_csv":
       return "Arquivo CSV enviado manualmente";
     case "github_billing":
-      return [config.enterprise_slug, "Billing"].filter(Boolean).join(" · ") || "Enterprise não informada";
+      return [config.enterprise_slug, "Faturamento"].filter(Boolean).join(" · ") || "Enterprise não informada";
     case "github_license":
       return [config.enterprise_slug, "Licenças (Copilot)"].filter(Boolean).join(" · ") || "Enterprise não informada";
     case "github_token":
@@ -156,7 +163,8 @@ export default function ConnectionsDataGrid({
       {activeFilters[field] && <Tooltip title="Esta coluna possui um filtro ativo"><FilterAlt fontSize="small" color="primary" /></Tooltip>}
     </Stack>
   );
-  const columns = useMemo<GridColDef[]>(() => [
+  const columns = useMemo<GridColDef[]>(() => {
+    const definitions: GridColDef[] = [
     {
       field: "name",
       headerName: "Conexão",
@@ -186,10 +194,10 @@ export default function ConnectionsDataGrid({
       renderHeader: () => filteredHeader("Tipo de conexão", "connector_type"),
       minWidth: 180,
       flex: 0.9,
-      valueGetter: (_, row: SourceConnection) => connectorLabels[row.connector_type] || row.connector_type,
+      valueGetter: (_, row: SourceConnection) => getConnectorLabel(row.connector_type),
       renderCell: ({ row }: { row: SourceConnection }) => (
         <Stack direction="row" alignItems="center" gap={0.5} sx={{ minWidth: 0 }}>
-          <Typography variant="body2" noWrap>{connectorLabels[row.connector_type] || row.connector_type}</Typography>
+          <Typography variant="body2" noWrap>{getConnectorLabel(row.connector_type)}</Typography>
           {row.config_json?.marketplace === true && <Chip label="Marketplace" size="small" color="secondary" />}
         </Stack>
       ),
@@ -229,7 +237,7 @@ export default function ConnectionsDataGrid({
           msg: row.last_test_message || "Teste concluído sem mensagem.",
         } : undefined;
         const message = testMessages[row.id] || persistedMessage;
-        if (testingId === row.id) return <Chip label="Testando…" size="small" color="info" />;
+        if (testingId === row.id) return <Chip label="Validando…" size="small" color="info" />;
         if (!message) return <Typography variant="caption" color="text.secondary">Não validada</Typography>;
         const label = message.severity === "success" ? "Validada" : message.severity === "warning" ? "Pendente" : "Falhou";
         const color = message.severity === "success" ? "success" : message.severity === "warning" ? "warning" : "error";
@@ -263,7 +271,9 @@ export default function ConnectionsDataGrid({
         </Stack>
       ),
     },
-  ].sort((left, right) => ["name", "provider", "connector_type", "test_status", "actions", "code", "origin", "updated_at"].indexOf(left.field) - ["name", "provider", "connector_type", "test_status", "actions", "code", "origin", "updated_at"].indexOf(right.field)), [activeFilters, testMessages, testingId, onEdit]);
+  ];
+    return definitions.sort((left, right) => ["name", "provider", "connector_type", "test_status", "actions", "code", "origin", "updated_at"].indexOf(left.field) - ["name", "provider", "connector_type", "test_status", "actions", "code", "origin", "updated_at"].indexOf(right.field));
+  }, [activeFilters, testMessages, testingId, onEdit]);
 
   const query = (next: Partial<{ offset: number; limit: number; sort: { field: string; direction: "asc" | "desc" }; filters: ConnectionGridFilter[] }> = {}) => {
     const currentSort = sortModel[0]?.sort ? { field: sortModel[0].field, direction: sortModel[0].sort } : undefined;

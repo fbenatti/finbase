@@ -2,14 +2,14 @@ import { dataDisplayText } from "../../utils/dataPresentation";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   Alert, Box, Button, Checkbox, Chip, CircularProgress, Collapse, Divider,
-  FormControlLabel, IconButton, Link, Stack, TextField, Tooltip, Typography,
+  FormControlLabel, IconButton, Link, Stack, TextField, Tooltip, Typography, Paper,
 } from "@mui/material";
 import {
   ExpandMore as ExpandMoreIcon,
   PlayArrow as PlayArrowIcon,
   Refresh as RefreshIcon,
-  Science as ScienceIcon,
-} from "@mui/icons-material";
+  Validate as ScienceIcon,
+} from "./ConnectionIcons";
 import {
   AzureEnvironmentGroup,
   AzureSourceItem,
@@ -68,11 +68,12 @@ function SourceRow({
 
   return (
     <Box sx={{ borderBottom: 1, borderColor: "divider", py: 1 }}>
-      <Stack direction="row" alignItems="center" spacing={1}>
+      <Stack direction="row" alignItems="center" spacing={1} flexWrap="wrap">
         <Tooltip title={planned ? "Fonte planejada: ainda não tem coletor" : source.independent_connection ? "Conexão independente: não é ligada dentro de outro ambiente" : "Ligar/desligar a coleta"}>
           <span>
             <Checkbox
               size="small"
+              inputProps={{ "aria-label": `Coletar ${source.display_name}` }}
               checked={source.enabled}
               disabled={busy || planned || source.independent_connection || source.collection_mode === "dedicated"}
               onChange={(e) => onToggle(e.target.checked)}
@@ -83,40 +84,40 @@ function SourceRow({
           <Stack direction="row" alignItems="center" spacing={1} flexWrap="wrap">
             <Typography variant="body2" fontWeight={600}>{source.display_name}</Typography>
             <Chip size="small" label={state.label} color={state.color} variant="outlined" />
-            {source.is_cost_source && <Chip size="small" label="custo" color="info" variant="outlined" />}
-            {source.independent_connection && <Chip size="small" label="conexão independente" color="info" variant="outlined" />}
-            {planned && <Chip size="small" label="planejada" variant="outlined" />}
-            {source.running_tasks > 0 && <Chip size="small" label="coletando" color="primary" />}
+            {source.is_cost_source && <Chip size="small" label="Custos" color="info" variant="outlined" />}
+            {source.independent_connection && <Chip size="small" label="Independente" color="info" variant="outlined" />}
+            {planned && <Chip size="small" label="Em preparação" variant="outlined" />}
+            {source.running_tasks > 0 && <Chip size="small" label="Coletando" color="primary" />}
           </Stack>
           <Typography variant="caption" color="text.secondary" display="block">
-            {source.code} · base de origem {source.bronze_table}
-            {source.rows != null ? ` · ${source.rows.toLocaleString("pt-BR")} linhas` : ""}
+            {source.rows != null ? `${source.rows.toLocaleString("pt-BR")} registros` : "Sem registros coletados"}
             {source.last_billing_period ? ` · ${source.last_billing_period}` : ""}
           </Typography>
         </Box>
-        <Tooltip title="Testar capacidade (não coleta)">
+        <Tooltip title="Validar disponibilidade da fonte">
           <span>
-            <IconButton size="small" onClick={onTest} disabled={busy || planned}>
+            <IconButton aria-label={`Validar ${source.display_name}`} size="small" onClick={onTest} disabled={busy || planned}>
               <ScienceIcon fontSize="small" />
             </IconButton>
           </span>
         </Tooltip>
         {source.collection_mode === "dedicated" && (
-          <Tooltip title="Baixar e validar o snapshot completo na base de origem desta conexão">
+          <Tooltip title="Atualizar os dados desta fonte">
             <span>
-              <IconButton size="small" onClick={onRefreshDedicated} disabled={busy}>
+              <IconButton aria-label={`Atualizar ${source.display_name}`} size="small" onClick={onRefreshDedicated} disabled={busy}>
                 <RefreshIcon fontSize="small" />
               </IconButton>
             </span>
           </Tooltip>
         )}
-        <IconButton size="small" onClick={() => setOpen((v) => !v)}>
+        <IconButton aria-label={`Detalhes de ${source.display_name}`} aria-expanded={open} size="small" onClick={() => setOpen((v) => !v)}>
           <ExpandMoreIcon fontSize="small" sx={{ transform: open ? "rotate(180deg)" : "none" }} />
         </IconButton>
       </Stack>
 
       <Collapse in={open}>
-        <Stack spacing={0.5} sx={{ pl: 5, pt: 1 }}>
+        <Stack spacing={1} sx={{ pl: { xs: 1, sm: 5 }, pt: 1, pb: 1 }}>
+          <Typography variant="caption" color="text.secondary">Identificador: {source.code} · Origem: {source.bronze_table}</Typography>
           {source.description && (
             <Typography variant="caption" color="text.secondary">{source.description}</Typography>
           )}
@@ -217,7 +218,7 @@ function EnvironmentCard({
 
   const collectAll = useCallback(async () => {
     setCollecting(true);
-    setMessage({ severity: "info", text: `Enfileirando a carga full do ambiente ${environment.environment_slug}…` });
+    setMessage({ severity: "info", text: `Preparando a coleta completa do ambiente ${environment.environment_slug}…` });
     try {
       const result = await collectAzureEnvironment(environment.environment_slug);
       setMessage({ severity: "success", text: result.message });
@@ -231,10 +232,10 @@ function EnvironmentCard({
 
   const refreshDedicated = useCallback(async (source: AzureSourceItem) => {
     setBusyId(source.connection_id);
-    setMessage({ severity: "info", text: `Enfileirando snapshot independente de ${source.display_name}…` });
+    setMessage({ severity: "info", text: `Preparando atualização independente de ${source.display_name}…` });
     try {
       const task = await refreshAzurePriceSheet();
-      setMessage({ severity: "success", text: task.message || `Snapshot enfileirado na conexão ${task.source || "azure-pricesheet"} (tarefa ${task.task_id}).` });
+      setMessage({ severity: "success", text: task.message || `Atualização agendada na conexão ${task.source || "azure-pricesheet"} (tarefa ${task.task_id}).` });
       onChanged();
     } catch (error) {
       setMessage({ severity: "error", text: error instanceof Error ? error.message : String(error) });
@@ -244,10 +245,10 @@ function EnvironmentCard({
   }, [onChanged]);
 
   return (
-    <Box sx={{ border: 1, borderColor: "divider", borderRadius: 1, p: 2, mb: 2 }}>
+    <Paper variant="outlined" sx={{ p: 2, mb: 2 }}>
       <Stack direction="row" alignItems="center" spacing={1} flexWrap="wrap">
         <Typography variant="subtitle1" fontWeight={700}>
-          {environment.environment_slug.toUpperCase()}
+          {environment.environment_slug}
         </Typography>
         {environment.cloud_names.map((name) => <Chip key={name} size="small" label={name} />)}
         {environment.sources.some((source) => source.independent_connection) && (
@@ -259,20 +260,20 @@ function EnvironmentCard({
         <Box sx={{ flex: 1 }} />
         {enabledSources.length > 0 && (
           <>
-            <Chip size="small" label={`${environment.enabled_count}/${environment.source_count} ligadas`} />
+            <Chip size="small" label={`${environment.enabled_count}/${environment.source_count} habilitadas`} />
             <Tooltip title="Enfileira a coleta de todas as fontes ligadas deste ambiente">
               <span>
                 <Button
                   size="small" variant="contained" startIcon={collecting ? <CircularProgress size={14} /> : <PlayArrowIcon />}
                   onClick={collectAll} disabled={collecting}
                 >
-                  Carga full ({enabledSources.length})
+                  Coletar fontes ({enabledSources.length})
                 </Button>
               </span>
             </Tooltip>
           </>
         )}
-        <IconButton size="small" onClick={() => setExpanded((v) => !v)}>
+        <IconButton aria-label={`Fontes do ambiente ${environment.environment_slug}`} aria-expanded={expanded} size="small" onClick={() => setExpanded((v) => !v)}>
           <ExpandMoreIcon fontSize="small" sx={{ transform: expanded ? "rotate(180deg)" : "none" }} />
         </IconButton>
       </Stack>
@@ -299,7 +300,7 @@ function EnvironmentCard({
           ))}
         </Box>
       </Collapse>
-    </Box>
+    </Paper>
   );
 }
 
@@ -344,7 +345,7 @@ export default function AzureSourcesPanel({ environment, connectionId }: { envir
 
   if (error) {
     return (
-      <Alert severity="error" action={<IconButton size="small" onClick={() => void load()}><RefreshIcon fontSize="small" /></IconButton>}>
+      <Alert severity="error" action={<IconButton aria-label="Atualizar fontes Azure" size="small" onClick={() => void load()}><RefreshIcon fontSize="small" /></IconButton>}>
         Não foi possível carregar as fontes Azure: {dataDisplayText(error)}
       </Alert>
     );
@@ -363,19 +364,19 @@ export default function AzureSourcesPanel({ environment, connectionId }: { envir
     <Box>
       <Stack direction="row" alignItems="center" spacing={1} sx={{ mb: 1 }}>
         <Typography variant="subtitle2">
-          Fontes coletáveis por ambiente
+          Fontes de coleta Azure
         </Typography>
         <Chip size="small" label={`${totals.environments} ambiente(s)`} />
-        <Chip size="small" label={`${totals.collectable} na carga full`} color="success" variant="outlined" />
+        <Chip size="small" label={`${totals.collectable} habilitadas para coleta`} color="success" variant="outlined" />
         <Box sx={{ flex: 1 }} />
         <Tooltip title="Recarregar estado das fontes">
-          <IconButton size="small" onClick={() => void load()}><RefreshIcon fontSize="small" /></IconButton>
+          <IconButton aria-label="Atualizar fontes Azure" size="small" onClick={() => void load()}><RefreshIcon fontSize="small" /></IconButton>
         </Tooltip>
       </Stack>
       <Typography variant="caption" color="text.secondary" display="block" sx={{ mb: 1.5 }}>
 
-        Ligue fontes do ambiente para a carga genérica. Conexões independentes mantêm sua ação de coleta
-        e base de origem próprias. Desligar uma fonte não apaga o histórico já coletado.
+        Habilite as fontes que devem participar da coleta do ambiente. Conexões independentes mantêm sua ação de coleta
+        e base de origem próprias. Desabilitar uma fonte não apaga o histórico já coletado.
       </Typography>
 
       {groups.map((group) => (
@@ -384,9 +385,9 @@ export default function AzureSourcesPanel({ environment, connectionId }: { envir
 
       <Divider sx={{ my: 1 }} />
       <Typography variant="caption" color="text.secondary">
-        Fontes marcadas como <b>planejada</b> aparecem na lista para dar visibilidade do roadmap, mas
+        Fontes marcadas como <b>planejada</b> aparecem na lista para dar visibilidade do planejamento, mas
         ainda não têm coletor e não entram na carga. Veja{" "}
-        <Link href="/dados/explorador/destinos" underline="hover">Análise</Link> para inspecionar as tabelas de origem, preparação e consolidação.
+        <Link href="/dados/explorador/destinos" underline="hover">Explorador de dados</Link> para inspecionar as tabelas de origem, preparação e consolidação.
       </Typography>
     </Box>
   );

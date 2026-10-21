@@ -18,7 +18,7 @@ import {
   TextField,
   Typography,
 } from "@mui/material";
-import { CloudUpload, Delete, Save } from "@mui/icons-material";
+import { CloudUpload, Delete, Save } from "./ConnectionIcons";
 import { DataGrid, GridColDef } from "@mui/x-data-grid";
 import {
   previewCsv, ingestCsv, ingestCsvBatch, getCsvUploadHistory, formatApiError, IngestedBlob,
@@ -187,12 +187,12 @@ export default function ManualCsvUploadDialog({
 
   return (
     <Dialog open={open} onClose={onClose} maxWidth="xl" fullWidth>
-      <DialogTitle>Upload manual de CSV — {connectionName}</DialogTitle>
+      <DialogTitle>Importar arquivos CSV<Typography variant="body2" color="text.secondary">{connectionName}</Typography></DialogTitle>
       <DialogContent>
         <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
 
           Carregue relatórios CSV locais diretamente na base de origem. Para carregar vários meses de uma
-          vez, use o botão "Carregar vários"; o período é identificado pelas colunas de data/faturamento
+          vez, use o botão "Importar vários arquivos"; o período é identificado pelas colunas de data/faturamento
           do CSV (com alternativa pelo nome do arquivo).
         </Typography>
 
@@ -201,10 +201,10 @@ export default function ManualCsvUploadDialog({
             component="label"
             variant="contained"
             startIcon={<CloudUpload />}
-            sx={{ height: 56 }}
+            sx={{ minHeight: 40 }}
             disabled={loading}
           >
-            {file ? file.name : "Selecionar CSV"}
+            {file ? file.name : "Selecionar arquivo CSV"}
             <input type="file" accept=".csv" hidden onChange={handleFileChange} />
           </Button>
 
@@ -212,10 +212,10 @@ export default function ManualCsvUploadDialog({
             component="label"
             variant="outlined"
             startIcon={<CloudUpload />}
-            sx={{ height: 56 }}
+            sx={{ minHeight: 40 }}
             disabled={loading}
           >
-            Carregar vários (mensal)
+            Importar vários arquivos
             <input type="file" accept=".csv" multiple hidden onChange={handleBatchIngest} />
           </Button>
 
@@ -225,9 +225,9 @@ export default function ManualCsvUploadDialog({
               color="error"
               startIcon={<Delete />}
               onClick={reset}
-              sx={{ height: 56 }}
+              sx={{ minHeight: 40 }}
             >
-              Limpar
+              Remover arquivo
             </Button>
           )}
         </Stack>
@@ -318,7 +318,7 @@ export default function ManualCsvUploadDialog({
 
             <Typography variant="subtitle2" sx={{ mb: 1 }}>Amostra de dados</Typography>
             <Box sx={{ height: 320 }}>
-              <DataGrid rows={previewRows} columns={previewColumns} density="compact" disableRowSelectionOnClick />
+              <DataGrid rows={previewRows} columns={previewColumns} disableRowSelectionOnClick />
             </Box>
 
             <Stack direction="row" justifyContent="flex-end" sx={{ mt: 2 }}>
@@ -337,7 +337,7 @@ export default function ManualCsvUploadDialog({
 
         {history.length > 0 && (
           <Box>
-            <Typography variant="h6" sx={{ mb: 2 }}>Histórico de cargas</Typography>
+            <Typography variant="h6" sx={{ mb: 2 }}>Histórico de importações</Typography>
             <SortableTable
               data={history}
               getRowKey={(b) => b.id}

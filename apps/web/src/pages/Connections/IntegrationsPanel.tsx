@@ -13,9 +13,9 @@ import { useCallback, useEffect, useState } from "react";
 import {
   Alert, Box, Button, Chip, CircularProgress, Dialog, DialogActions,
   DialogContent, DialogTitle, FormControlLabel, IconButton, Link, Stack, Switch,
-  Table, TableBody, TableCell, TableHead, TableRow, TextField, Tooltip, Typography,
+  Table, TableBody, TableCell, TableHead, TableRow, TextField, Tooltip, Typography, TableContainer, Paper,
 } from "@mui/material";
-import DeleteOutline from "@mui/icons-material/DeleteOutline";
+import { Delete as DeleteOutline, Edit, Validate, Save } from "./ConnectionIcons";
 import {
   deleteIntegration, IntegrationItem, getIntegrations, saveIntegration, testIntegration,
 } from "../../services/api";
@@ -26,6 +26,10 @@ const TYPE_HELP: Record<string, string> = {
   itsm: "Abertura de chamado a partir de uma ação aprovada.",
   auxiliary: "Serviço auxiliar.",
 };
+
+const TYPE_LABEL: Record<string, string> = { ai_provider: "Serviço de análise", itsm: "Gestão de chamados", auxiliary: "Serviço auxiliar" };
+const STATUS_LABEL: Record<string, string> = { OK: "Validada", NOT_CONFIGURED: "Não configurada", UNAUTHORIZED: "Acesso negado", UNREACHABLE: "Indisponível", ERROR: "Falha na validação" };
+const FIELD_LABEL: Record<string, string> = { base_url: "Endereço do serviço", model: "Modelo", path_systemone: "Caminho de análise", timeout_s: "Tempo limite (segundos)" };
 
 const STATUS_COLOR: Record<string, "success" | "warning" | "error" | "default"> = {
   OK: "success",
@@ -156,7 +160,8 @@ export default function IntegrationsPanel() {
   }
 
   return (
-    <Box>
+    <Paper variant="outlined" sx={{ p: { xs: 2, md: 3 } }}>
+      <Typography variant="h6" sx={{ mb: 1 }}>Serviços conectados</Typography>
       <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
         Serviços que apoiam a análise sem serem fonte de dado de nuvem. O segredo é
         gravado e nunca exibido de volta.
@@ -164,7 +169,8 @@ export default function IntegrationsPanel() {
 
       {erro && <Alert severity="error" sx={{ mb: 2 }} onClose={() => setErro(null)}>{dataDisplayText(erro)}</Alert>}
 
-      <Table size="small">
+      <TableContainer>
+      <Table size="small" sx={{ minWidth: 680 }}>
         <TableHead>
           <TableRow>
             <TableCell>Serviço</TableCell>
@@ -189,7 +195,7 @@ export default function IntegrationsPanel() {
                 <Chip
                   size="small"
                   variant="outlined"
-                  label={TYPE_HELP[item.integration_type] ? item.integration_type : item.integration_type}
+                  label={TYPE_LABEL[item.integration_type] || item.integration_type}
                   title={TYPE_HELP[item.integration_type] || ""}
                 />
               </TableCell>
@@ -199,6 +205,7 @@ export default function IntegrationsPanel() {
                     control={
                       <Switch
                         size="small"
+                        inputProps={{ "aria-label": `Habilitar ${item.name}` }}
                         checked={item.enabled}
                         onChange={(e) => void alternar(item, e.target.checked)}
                       />
@@ -206,8 +213,8 @@ export default function IntegrationsPanel() {
                     label=""
                   />
                   {item.has_secret
-                    ? <Chip size="small" color="success" variant="outlined" label="token gravado" />
-                    : <Chip size="small" color="warning" variant="outlined" label="sem token" />}
+                    ? <Chip size="small" color="success" variant="outlined" label="Acesso configurado" />
+                    : <Chip size="small" color="warning" variant="outlined" label="Acesso pendente" />}
                 </Stack>
               </TableCell>
               <TableCell>
@@ -216,19 +223,19 @@ export default function IntegrationsPanel() {
                     <Chip
                       size="small"
                       color={STATUS_COLOR[item.last_test_status] || "default"}
-                      label={item.last_test_status}
+                      label={STATUS_LABEL[item.last_test_status] || item.last_test_status}
                     />
                     <Typography variant="caption" color="text.secondary" sx={{ maxWidth: 260 }}>
                       {String(item.last_test_message || "").slice(0, 90)}
                     </Typography>
                   </Stack>
                 ) : (
-                  <Typography variant="caption" color="text.secondary">nunca testado</Typography>
+                  <Typography variant="caption" color="text.secondary">Não validada</Typography>
                 )}
               </TableCell>
               <TableCell align="right">
                 <Stack direction="row" spacing={0.5} justifyContent="flex-end" alignItems="center">
-                  <Button size="small" onClick={() => abrir(item)}>Configurar</Button>
+                  <Button variant="outlined" startIcon={<Edit />} onClick={() => abrir(item)}>Editar serviço</Button>
                   <Tooltip title="Excluir serviço auxiliar">
                     <IconButton
                       size="small"
@@ -245,6 +252,7 @@ export default function IntegrationsPanel() {
           ))}
         </TableBody>
       </Table>
+      </TableContainer>
 
       <Dialog
         open={Boolean(excluindo)}
@@ -284,13 +292,13 @@ export default function IntegrationsPanel() {
             {Object.keys(config).map((chave) => (
               <TextField
                 key={chave}
-                label={chave}
+                label={FIELD_LABEL[chave] || chave}
                 value={config[chave]}
                 onChange={(e) => setConfig({ ...config, [chave]: e.target.value })}
                 size="small"
                 fullWidth
                 helperText={
-                  chave === "base_url" ? "Endpoint do serviço. Variável, não chumbado no código."
+                  chave === "base_url" ? "Endereço usado para acessar o serviço."
                     : chave === "model" ? "Obrigatório para o Jev. Ex.: jev-latest (lista em GET /v1/models)."
                     : chave === "path_systemone" ? "Caminho do primitivo de decisão."
                     : chave === "timeout_s" ? "Segundos."
@@ -307,7 +315,7 @@ export default function IntegrationsPanel() {
               fullWidth
               type="password"
               autoComplete="new-password"
-              helperText="Write-only: não é exibido de volta depois de gravado."
+              helperText="Após salvar, o token não é exibido novamente."
             />
 
             {resultado && (
@@ -319,14 +327,14 @@ export default function IntegrationsPanel() {
         </DialogContent>
         <DialogActions>
           <Button onClick={() => setEditando(null)}>Cancelar</Button>
-          <Button onClick={() => void testar()} disabled={testando}>
-            {testando ? "Testando…" : "Testar"}
+          <Button variant="outlined" startIcon={<Validate />} onClick={() => void testar()} disabled={testando || salvando}>
+            {testando ? "Validando…" : "Validar acesso"}
           </Button>
-          <Button variant="contained" onClick={() => void salvar()} disabled={salvando}>
-            {salvando ? "Salvando…" : "Salvar"}
+          <Button variant="contained" startIcon={<Save />} onClick={() => void salvar()} disabled={salvando || testando}>
+            {salvando ? "Salvando…" : "Salvar serviço"}
           </Button>
         </DialogActions>
       </Dialog>
-    </Box>
+    </Paper>
   );
 }
