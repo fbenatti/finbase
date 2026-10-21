@@ -18,56 +18,56 @@ Os grupos abaixo são as seções da navegação. Cada item listado é uma entra
 
 ### Panorama
 
-- **Resumo de custos**: `/gold-dashboard?tab=visao-executiva`. Custos gerais, evolução, custos por organização/serviço, investigação, decisões, detalhamento e qualidade dos dados foram removidos do menu; suas visões permanecem nas rotas da página.
+- **Resumo de custos**: `/custos?tab=visao-executiva`. Custos gerais, evolução, custos por organização/serviço, investigação, decisões, detalhamento e qualidade dos dados foram removidos do menu; suas visões permanecem na página.
 
 ### Operação de IA
 
-- **Operação de IA / Azure PTUs**: resumo de capacidade, consumo de tokens, capacidade e operação e recomendações (`/visoes-consumo-ia?view=0&tab=0..3`).
-- **Provedores de IA**: GitHub Copilot (`view=1`); Claude executivo e técnico (`view=2&providerTab=executive|technical`); NotebookLM executivo e técnico (`view=3&providerTab=executive|technical`); Aura Brain (`view=4`); Vivo Mais (`view=5`); Sinfonia (`view=6`); Datamesh (`view=7`); Wisper (`view=8`). Todos usam `/visoes-consumo-ia`.
-- **Adoção de IA**: visão executiva, eficiência FinOps e uso por pessoa (`/dashboards-ia?tab=0..2`).
+- **Operação de IA / Azure PTUs**: resumo de capacidade, consumo de tokens, capacidade e operação e recomendações (`/ia/capacidade?view=0&tab=0..3`).
+- **Provedores de IA**: GitHub Copilot (`view=1`); Claude executivo e técnico (`view=2&providerTab=executive|technical`); NotebookLM executivo e técnico (`view=3&providerTab=executive|technical`); Aura Brain (`view=4`); Vivo Mais (`view=5`); Sinfonia (`view=6`); Datamesh (`view=7`); Wisper (`view=8`). Todos usam `/ia/capacidade`.
+- **Adoção de IA**: visão executiva, eficiência FinOps e uso por pessoa (`/ia/adocao?tab=0..2`).
 
 ### Alertas
 
-- Anomalias: visão geral, impacto financeiro, casos em investigação, eventos esperados, saúde do modelo, retrospectivas, anomalias confirmadas e configuração (`/anomalies?tab=0..7`). A visibilidade segue a configuração de ambiente já existente.
+- Anomalias: visão geral, impacto financeiro, casos em investigação, eventos esperados, saúde do modelo, retrospectivas, anomalias confirmadas e configuração (`/alertas?tab=0..7`). A visibilidade segue a configuração de ambiente já existente.
 
 ### Planejamento
 
-- **Orçamento e contratos**: histórico do orçamento, história dos contratos e consumo de compromissos (`/financial-planning?tab=dashboard&executive=orcamento|historia-contrato|compromisso`).
-- **Gestão financeira**: orçamentos, acurácia do orçamento e projeções manuais (`/financial-planning?tab=orcamento|acuracia-orcamento|forecast-manual`). Carta de crédito e Defesa orçamentária foram retiradas do menu.
+- **Orçamento e contratos**: histórico do orçamento, história dos contratos e consumo de compromissos (`/planejamento?tab=dashboard&executive=orcamento|historia-contrato|compromisso`).
+- **Gestão financeira**: orçamentos, acurácia do orçamento e projeções manuais (`/planejamento?tab=orcamento|acuracia-orcamento|forecast-manual`). Carta de crédito e Defesa orçamentária foram retiradas do menu.
 - **Contabilidade e moeda**: Evolução do dólar (`tab=visao-contabil&subview=evolucao-dolar`). Pedidos SAP foi retirado do menu.
-- **Acurácia do forecast**: visão, desvios e justificativas (`/forecast-accuracy?aba=visao|desvios|acks`).
-- **Forecast**: configuração e execução, regras de projeção e histórico de projeções (`/forecast?tab=config|rules|history`).
+- **Acurácia das projeções**: visão, desvios e justificativas (`/projecoes/acuracia?aba=visao|desvios|acks`).
+- **Projeções**: configuração e execução, regras de projeção e histórico (`/projecoes?tab=config|rules|history`).
 
 ### Otimização
 
-- **Savings**: oportunidades (`/savings`) e compromissos e compras (`/savings?tab=compras-compromissos`).
+- **Otimização**: oportunidades (`/otimizacao`) e compromissos e compras (`/otimizacao?tab=compras-compromissos`).
 - **Desligamento programado**: painel, governança e exceções (`tab=desligue&subview=dashboard|governance|exceptions`).
 - **Recursos órfãos**: recursos atuais e economia gerada (`tab=orfaos&subview=current|savings`).
 - As entradas de **Reservas Azure** foram retiradas do menu; as rotas continuam registradas e podem ser abertas diretamente.
 
 ### Dados e operação
 
-- **Integrações**: fontes de dados e serviços auxiliares (`/connections?view=connections|integrations`). Os antigos filtros de categoria/provedor são filtros segmentados na página, não destinos de navegação.
-- **Catálogo**: catálogo de dados e relacionamentos (`/tables?tab=destinations|relationship`).
-- **Operação de dados**: fluxos de dados (`/pipeline`); execuções de dados (`/reprocess?tab=data`); execuções de forecast e acurácia (`tab=forecast&subtab=forecast|accuracy`); custo compartilhado (`tab=shared`); materialização de cubos e relacionamentos de custo IA (`tab=gold&subtab=cubes|ai-cost`); extrações (`tab=extraction`); agendamentos (`tab=schedules`); histórico de execuções (`tab=logs`).
-- **Explorador**: tabelas de destino, fontes de origem, Iceberg Bronze/Silver/Gold, staging, tabelas dinâmicas e busca na fonte (`/analysis?tab=destino|fontes|iceberg&layer=bronze|silver|gold|staging|pivot|busca`).
+- **Integrações**: fontes de dados e serviços auxiliares (`/dados/fontes?view=connections|integrations`). Os filtros de categoria/provedor são controles da página, não destinos de navegação.
+- **Catálogo**: catálogo de dados e relacionamentos (`/dados/catalogo?tab=destinations|relationship`).
+- **Operação de dados**: fluxos de dados (`/dados/fluxos`); execuções de dados (`/operacoes/execucoes?tab=data`); execuções de forecast e acurácia (`tab=forecast&subtab=forecast|accuracy`); custo compartilhado (`tab=shared`); materialização de cubos e relacionamentos de custo IA (`tab=gold&subtab=cubes|ai-cost`); extrações (`tab=extraction`); agendamentos (`tab=schedules`); histórico de execuções (`tab=logs`).
+- **Explorador**: tabelas de destino, fontes de origem, Iceberg Bronze/Silver/Gold, staging, tabelas dinâmicas e busca na fonte (`/dados/explorador?tab=destino|fontes|iceberg&layer=bronze|silver|gold|staging|pivot|busca`).
 
 ### Governança
 
-- Organização (`/governance?tab=organization`), classificação de projetos (`tab=classification`), regras de ajustes (`tab=rules&subtab=adjustments`), reservas e Savings Plans (`tab=rules&subtab=clone-rules`), contratos e compromissos (`tab=financial-contracts`) e cubos analíticos (`tab=cost-relationship`).
+- Organização (`/governanca?tab=organization`), classificação de projetos (`tab=classification`), regras de ajustes (`tab=rules&subtab=adjustments`), reservas e Savings Plans (`tab=rules&subtab=clone-rules`), contratos e compromissos (`tab=financial-contracts`) e cubos analíticos (`tab=cost-relationship`).
 - As entradas de **Tags Automatizadas** foram retiradas do menu; suas rotas continuam registradas e podem ser abertas diretamente. Modos de formato/edição dentro da política permanecem controles locais.
 
 ### Administração
 
-- **Ideias/Iniciativas** foram retiradas do menu. A rota `/ideas` continua registrada e protegida pela permissão de ideias.
-- **Acessos**: pessoas e acessos, grupos e funções/permissões (`/admin?tab=users|groups|roles`). Cada entrada respeita as permissões correspondentes.
-- **Auditoria e autenticação**: trilha de auditoria (`/admin/audit`) e login corporativo (`/admin/sso`).
+- **Ideias/Iniciativas** foram retiradas do menu. A rota `/iniciativas` continua registrada e protegida pela permissão de ideias.
+- **Acessos**: pessoas e acessos, grupos e funções/permissões (`/administracao/acessos?tab=users|groups|roles`). Cada entrada respeita as permissões correspondentes.
+- **Auditoria e autenticação**: trilha de auditoria (`/administracao/auditoria`) e login corporativo (`/administracao/identidade`).
 
 ## Rotas contextuais e compatibilidade
 
-Além do menu, a aplicação preserva rotas de detalhe e histórico que são alcançadas a partir de uma linha, execução ou ação contextual: exploração de conexão (`/explorer/:connectionId`), detalhe de execução de forecast, custo compartilhado e extração (`/forecast/history/:runId`, `/reprocess/shared-cost/history/:runId`, `/extraction/history/:taskId`). Há também aliases antigos redirecionados para as novas rotas de planejamento, catálogo, governança, extração e operações PTU.
+Além do menu, a aplicação preserva rotas de detalhe e histórico que são alcançadas a partir de uma linha, execução ou ação contextual: exploração de conexão (`/dados/fontes/:connectionId/explorar`), detalhe de execução de projeção (`/projecoes/execucoes/:runId`), custo compartilhado (`/operacoes/custos-compartilhados/:runId`) e extração (`/operacoes/extracoes/:taskId/historico`).
 
-O componente legado `apps/web/src/pages/AzurePTU/AzurePTU.tsx` não é registrado em `App.tsx`; suas visões foram mantidas acessíveis como seletor interno no código legado, enquanto a rota ativa é `/visoes-consumo-ia`. A navegação principal e o mapa acima descrevem as rotas realmente montadas.
+O componente legado `apps/web/src/pages/AzurePTU/AzurePTU.tsx` não é registrado em `App.tsx`; suas visões foram mantidas acessíveis como seletor interno no código legado, enquanto a rota ativa é `/ia/capacidade`. A navegação principal e o mapa acima descrevem as rotas realmente montadas.
 
 ## Sequência de nomes proposta
 
