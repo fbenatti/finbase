@@ -5,6 +5,27 @@
 type PermTarget = { module: string; scope?: string | null };
 
 const ROUTE_TARGETS: Array<{ prefix: string; targets: PermTarget[] }> = [
+  { prefix: "/iniciativas", targets: [{ module: "ideas" }] },
+  { prefix: "/alertas", targets: [{ module: "anomalies" }] },
+  { prefix: "/administracao/auditoria", targets: [{ module: "audit" }] },
+  { prefix: "/administracao/identidade", targets: [{ module: "auth" }] },
+  { prefix: "/administracao/acessos", targets: [{ module: "users" }] },
+  { prefix: "/dados/fontes", targets: [{ module: "connections" }] },
+  { prefix: "/dados/catalogo", targets: [{ module: "destinations" }] },
+  { prefix: "/dados/explorador", targets: [{ module: "analysis" }] },
+  { prefix: "/dados/fluxos", targets: [{ module: "etl" }] },
+  { prefix: "/dados/mapeamentos", targets: [{ module: "rules" }] },
+  { prefix: "/operacoes/execucoes", targets: [{ module: "etl" }] },
+  { prefix: "/operacoes/custos-compartilhados", targets: [{ module: "etl" }] },
+  { prefix: "/operacoes/extracoes", targets: [{ module: "etl" }] },
+  { prefix: "/custos", targets: [{ module: "gold" }] },
+  { prefix: "/ia/adocao", targets: [{ module: "ai_dashboards" }] },
+  { prefix: "/ia/github", targets: [{ module: "ai_dashboards" }] },
+  { prefix: "/ia/capacidade", targets: [{ module: "azure_ptu" }] },
+  { prefix: "/planejamento", targets: [{ module: "planning" }] },
+  { prefix: "/projecoes/acuracia", targets: [{ module: "forecast" }] },
+  { prefix: "/projecoes", targets: [{ module: "forecast" }] },
+  { prefix: "/otimizacao", targets: [{ module: "savings" }] },
   { prefix: "/ideas", targets: [{ module: "ideas" }] },
   { prefix: "/anomalies", targets: [{ module: "anomalies" }] },
   { prefix: "/admin/audit", targets: [{ module: "audit" }] },
@@ -65,11 +86,11 @@ export function permissionTargetsForPath(pathname: string): PermTarget[] | null 
 
 export function permissionTargetsForLocation(pathname: string, search: string): PermTarget[] | null {
   const params = new URLSearchParams(search);
-  if (pathname === "/admin") {
+  if (pathname === "/administracao/acessos" || pathname === "/admin") {
     const module = params.get("tab") === "groups" ? "groups" : params.get("tab") === "roles" ? "roles" : "users";
     return [{ module }];
   }
-  if (pathname === "/governance") {
+  if (pathname === "/governanca" || pathname === "/governance") {
     if (params.get("tab") === "rules" && params.get("subtab") === "clone-rules") {
       return [{ module: "reservations" }];
     }
