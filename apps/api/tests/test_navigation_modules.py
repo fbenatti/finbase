@@ -158,3 +158,17 @@ def test_management_requires_permissions_and_assignment_changes_customer(context
     assert client.get("/navigation", headers=headers[2]).json()["customer_id"] == y
     assert client.post("/modules/customers", json={"name": "Novo cliente", "slug": "novo-cliente"}, headers=headers[1]).status_code == 201
     assert client.post("/modules/customers", json={"name": "Duplicado", "slug": "novo-cliente"}, headers=headers[1]).status_code == 409
+
+
+def test_new_catalog_entry_is_registered_for_existing_customers(context, monkeypatch):
+    client, db, session, x, _, headers = context
+    import app.services.navigation as navigation_service
+    added = dict(next(entry for entry in CATALOG if entry["code"] == STORY))
+    added.update(code="planejamento_novo_menu", label="Novo menu", path="/planejamento/novo-menu", api_prefixes=[], position=899)
+    monkeypatch.setattr(navigation_service, "CATALOG", [*CATALOG, added])
+    asyncio.run(sync_catalog(db))
+    response = client.get(f"/modules/customers/{x}", headers=headers[1])
+    row = next(item for item in response.json() if item["code"] == added["code"])
+    assert row["path"] == added["path"]
+    assert row["configured_enabled"] is True
+    assert client.get(f"/navigation/access/{added['code']}", headers=headers[2]).status_code == 200

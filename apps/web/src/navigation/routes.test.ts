@@ -30,3 +30,15 @@ describe("catalog page routes", () => {
     expect(resolveViewChange(items, budget, new URLSearchParams(story.view_params)).path).toBe(story.path);
   });
 });
+
+describe("older favorites", () => {
+  it("keeps the original engine-based explorer favorites at the same layer", () => {
+    const prepared = { ...budget, code: "prepared", path: "/dados/explorador/preparados", legacy_path: "/dados/explorador", view_params: { tab: "acervo", etapa: "preparacao" } };
+    const source = { ...prepared, code: "source", path: "/dados/explorador/fontes", view_params: { tab: "fontes" } };
+    expect(resolveCatalogRoute([source, prepared], "/dados/explorador", new URLSearchParams("tab=iceberg&layer=silver"))?.path).toBe(prepared.path);
+  });
+  it("keeps the financial contract alias on the commitment page", () => {
+    const commitment = { ...story, code: "commitment", path: "/planejamento/consumo-de-compromissos", view_params: { tab: "dashboard", executive: "compromisso" } };
+    expect(resolveCatalogRoute([budget, story, commitment], "/planejamento", new URLSearchParams("tab=contratos-financeiros"))?.path).toBe(commitment.path);
+  });
+});
