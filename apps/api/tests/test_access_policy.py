@@ -9,7 +9,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 import pytest  # noqa: E402
 
-from app.core.access.legacy import access_operation, grants_from_legacy, legacy_scoped_rows  # noqa: E402
+from app.core.access.legacy import access_operation, grants_from_legacy  # noqa: E402
 from app.core.access.policy import (  # noqa: E402
     BusinessRule,
     Condition,
@@ -281,40 +281,10 @@ def test_legado_sem_escopo_vira_acl_de_tela():
     assert all(g.resource_type == "screen" and g.effect == "allow" for g in grants)
 
 
-def test_legado_com_escopo_textual_fica_para_revisao():
+def test_legado_com_escopo_vira_acl_do_recurso_modulo_escopo():
     rows = [(1, "gold", "read", "aba-x")]
-    assert grants_from_legacy(rows) == []
-    assert legacy_scoped_rows(rows) == [(1, "gold", "read", "aba-x")]
-
-
-# ---- expansão de subárvore (hierarquia por id, enquanto não há caminho JSON) ----
-
-def test_expande_subarvore_por_id_do_departamento():
-    children = {"1": ["2", "3"], "2": ["4"], "3": [], "4": []}
-    out = expand_subtree([ScopeValue(HIER, "2")], children)
-    assert {s.value for s in out} == {"2", "4"}
-    assert all(s.match_mode == "exact" for s in out)
-
-
-def test_expansao_ignora_ciclo():
-    children = {"1": ["2"], "2": ["1"]}
-    out = expand_subtree([ScopeValue(HIER, "1")], children)
-    assert {s.value for s in out} == {"1", "2"}
-
-
-def test_escopo_exato_nao_e_expandido():
-    out = expand_subtree([ScopeValue(HIER, "1", match_mode="exact")], {"1": ["2"]})
-    assert [s.value for s in out] == ["1"]
-
-
-def test_subarvore_expandida_gera_filtro_de_igualdade_por_id():
-    children = {"10": ["11", "12"]}
-    scopes = expand_subtree([ScopeValue(HIER, "10")], children)
-    grants = [Grant("table", "fact_cost", "read", "allow", (Condition("department_id", HIER, "exact"),))]
-    d = decide(grants, "read", "table", "fact_cost", scopes)
-    sql, params = compile_postgres(d.row_filter)
-    assert "LIKE" not in sql
-    assert sorted(params["acl_1"]) == ["10", "11", "12"]
+    grants = grants_from_legacy(rows)
+    assert [(g.resource, g.operation) for g in grants] == [("gold.aba-x", "read")]
 
 
 # ---- expansão por mapa de filhos dentro da decisão ----

@@ -72,19 +72,18 @@ CREATE TABLE IF NOT EXISTS access_business_rule (
     created_at TIMESTAMPTZ DEFAULT now()
 );
 
--- Backfill: cada permissão de módulo vira uma ACL de tela equivalente, sem filtro de linha.
--- A ação `update` vira `write`. Perfis de sistema recebem as mesmas ACLs.
+-- Backfill: cada permissão legada vira uma ACL de tela. Sem escopo: recurso = módulo.
+-- Com escopo: recurso = módulo.escopo. A ação `update` vira `write`.
 INSERT INTO access_acl (role_id, resource_type, resource, operation, effect, active, legacy_module)
 SELECT rp.role_id,
        'screen',
-       rp.module,
+       CASE WHEN rp.scope IS NULL THEN rp.module ELSE rp.module || '.' || rp.scope END,
        CASE rp.action WHEN 'update' THEN 'write' ELSE rp.action END,
        'allow',
        TRUE,
        rp.module
 FROM role_permission rp
-WHERE rp.scope IS NULL
-  AND rp.action IN ('read', 'create', 'update', 'delete')
+WHERE rp.action IN ('read', 'create', 'update', 'delete')
 ON CONFLICT ON CONSTRAINT uq_access_acl DO NOTHING;
 
 -- Versão da política: o cache de decisões compara esta linha a cada leitura.

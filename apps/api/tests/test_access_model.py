@@ -70,7 +70,7 @@ def test_acl_unique_key_matches_migration():
     assert set(cols) == {"role_id", "resource_type", "resource", "operation", "effect"}
 
 
-def test_backfill_maps_update_to_write_and_skips_scoped_rows():
+def test_backfill_maps_update_to_write_and_scoped_rows_to_module_scope():
     backfill = MIGRATION.split("-- Backfill", 1)[1]
     assert "WHEN 'update' THEN 'write'" in backfill
-    assert "rp.scope IS NULL" in backfill
+    assert "rp.module || '.' || rp.scope" in backfill

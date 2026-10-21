@@ -19,7 +19,6 @@ from app.core.access.policy import (
 from app.core.rbac import _expand_with_trace, _load_user_context
 from app.models.access import AccessAcl, AccessScope, GroupScope, UserScope
 from app.models.identity import user_group
-from app.models.rules import Department
 
 
 async def load_grants(db: AsyncSession, user_id: int) -> list[Grant]:
@@ -71,6 +70,9 @@ async def load_scopes(db: AsyncSession, user_id: int, now: datetime | None = Non
 
 async def load_children(db: AsyncSession) -> dict[str, list[str]]:
     """Mapa pai → filhos da árvore de departamentos (ids como texto)."""
+    # Import tardio: app.models.rules puxa tabelas de outro domínio para o metadata.
+    from app.models.rules import Department
+
     children: dict[str, list[str]] = {}
     for dept_id, parent_id in (await db.execute(select(Department.id, Department.parent_id))).all():
         if parent_id is not None:

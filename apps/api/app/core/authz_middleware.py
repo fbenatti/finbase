@@ -15,6 +15,7 @@ from starlette.types import ASGIApp, Receive, Scope, Send
 from app.config import settings
 from app.core import security
 from app.core.rbac import get_effective_permissions, has_permission
+from app.core.access.engine import resolve_screen_access
 from app.database import async_session
 from sqlalchemy import select
 
@@ -247,7 +248,10 @@ class RBACMiddleware:
                 return
 
             perms = await get_effective_permissions(db, user.id)
-            if unmapped or not has_permission(perms, module, action, rbac_scope):
+            allowed = not unmapped and has_permission(perms, module, action, rbac_scope)
+            if not unmapped:
+                allowed = await resolve_screen_access(db, user.id, module, action, rbac_scope, legacy_allowed=allowed)
+            if not allowed:
                 await _audit_denied(scope, 403, user)
                 await _respond(send, 403, "Sem permissão para esta ação.")
                 return

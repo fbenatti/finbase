@@ -18,10 +18,10 @@ from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine  # no
 from app.database import Base  # noqa: E402
 import app.models.access  # noqa: E402,F401  (registra as tabelas novas)
 import app.models.identity  # noqa: E402,F401
-import app.models.rules  # noqa: E402,F401
 from app.services.access_service import apply_row_filter, decide_for_user  # noqa: E402
 
 URL = os.environ.get("TEST_ACCESS_DATABASE_URL")
+MIGRATION_SQL = (Path(__file__).resolve().parent.parent / "migrations" / "add_access_control.sql").read_text(encoding="utf-8")
 pytestmark = pytest.mark.skipif(not URL, reason="TEST_ACCESS_DATABASE_URL não definido")
 
 TABLES = [
@@ -35,6 +35,8 @@ FACT = Table("fact_cost_test", MetaData(), Column("id", Integer, primary_key=Tru
 
 
 def _tables():
+    import app.models.rules  # noqa: F401  (tabela department; import tardio evita poluir o metadata)
+
     return [Base.metadata.tables[name] for name in TABLES]
 
 
@@ -137,3 +139,31 @@ def test_cache_respeita_versao_da_politica():
         fresh = await decide_for_user(session, 10, "read", "table", "fact_cost_test", use_cache=True)
         return first.allowed, stale.allowed, fresh.allowed
     assert _run(scenario) == (True, True, False)
+
+
+def test_revisao_sombra_sem_divergencia_com_backfill_real():
+    """Shadow review: após o backfill da migração, legado e ACL concordam para todos os usuários."""
+    from app.core.access.shadow_review import compare_all, divergences
+
+    async def scenario(session):
+        # começa sem ACLs de teste: o backfill deve gerar tudo a partir do role_permission
+        await session.execute(text("DELETE FROM access_acl_condition"))
+        await session.execute(text("DELETE FROM access_acl"))
+        await session.execute(text("SELECT setval(pg_get_serial_sequence('access_acl', 'id'), 1, false)"))
+        await session.execute(text("INSERT INTO role (id, name, is_system) VALUES (2, 'gestor', false)"))
+        await session.execute(text("INSERT INTO user_account (id, username, is_active, auth_provider, must_change_password, failed_attempts) VALUES (12, 'gil', true, 'local', false, 0)"))
+        await session.execute(text("INSERT INTO user_role (user_id, role_id) VALUES (12, 2)"))
+        await session.execute(text(
+            "INSERT INTO role_permission (role_id, module, action, scope) VALUES "
+            "(1, 'gold', 'read', NULL), (1, 'planning', 'read', 'visao-contabil'), "
+            "(2, 'planning', 'update', NULL), (2, 'planning', 'create', 'defesa-solicitar')"
+        ))
+        # roda o backfill exatamente como está no arquivo de migração
+        backfill = MIGRATION_SQL.split("-- Backfill:", 1)[1].split("\n", 1)[1].split("-- Versão da política", 1)[0]
+        await session.execute(text(backfill))
+        rows = await compare_all(session, ["gold", "planning"], {"gold": [None], "planning": [None, "visao-contabil", "defesa-solicitar"]})
+        return rows, divergences(rows)
+
+    rows, diffs = _run(scenario)
+    assert rows, "a revisão precisa comparar alguma coisa"
+    assert diffs == [], [(d.username, d.module, d.action, d.scope, d.kind) for d in diffs]
