@@ -16,6 +16,148 @@ body {
   background: #f4f7fa;
 }
 
+html[data-finbase-layout="carbon"],
+html[data-finbase-layout="carbon"] body,
+html[data-finbase-layout="carbon"] #root {
+  background: #f4f4f4;
+}
+
+.finbase-carbon-theme {
+  display: flex;
+  min-height: 100%;
+  flex: 1;
+}
+
+.finbase-carbon-shell {
+  width: 100%;
+  min-height: 100vh;
+  background: #f4f4f4;
+  color: #161616;
+  font-family: "IBM Plex Sans", "Helvetica Neue", Arial, sans-serif;
+}
+
+.finbase-carbon-shell .cds--header {
+  z-index: 1201;
+}
+
+.finbase-carbon-shell .cds--header__name {
+  font-weight: 600;
+  letter-spacing: 0.01em;
+}
+
+.finbase-carbon-shell .cds--side-nav {
+  top: 3rem;
+  height: calc(100vh - 3rem);
+  z-index: 1200;
+}
+
+.finbase-carbon-shell .cds--side-nav__items {
+  padding-top: 0.75rem;
+}
+
+.finbase-carbon-layout-switch {
+  display: flex;
+  align-items: center;
+  height: 3rem;
+  padding: 0 0.75rem;
+  border-left: 1px solid #393939;
+  border-right: 1px solid #393939;
+}
+
+.finbase-carbon-layout-switch button {
+  min-height: 2rem;
+  padding: 0.4rem 0.7rem;
+  border: 1px solid #6f6f6f;
+  background: transparent;
+  color: #f4f4f4;
+  font: inherit;
+  font-size: 0.75rem;
+  cursor: pointer;
+}
+
+.finbase-carbon-layout-switch button:first-child {
+  border-right: 0;
+}
+
+.finbase-carbon-layout-switch button[aria-pressed="true"] {
+  background: #f4f4f4;
+  color: #161616;
+}
+
+.finbase-carbon-layout-switch button:focus-visible {
+  outline: 2px solid #78a9ff;
+  outline-offset: 2px;
+}
+
+.finbase-carbon-notification .MuiIconButton-root {
+  width: 3rem;
+  height: 3rem;
+  border-radius: 0;
+  color: #f4f4f4;
+}
+
+.finbase-carbon-notification .MuiIconButton-root:hover {
+  background: #393939;
+}
+
+.finbase-carbon-main {
+  flex: 1;
+  min-width: 0;
+  padding: 1.5rem 2rem 2rem;
+  background: #f4f4f4;
+}
+
+.finbase-carbon-page-title {
+  margin: 0 0 1.25rem;
+  color: #161616;
+  font-size: 1.75rem;
+  font-weight: 400;
+  letter-spacing: 0;
+  line-height: 1.25;
+}
+
+.finbase-carbon-main .MuiPaper-root {
+  border-radius: 0;
+}
+
+.finbase-carbon-footer {
+  display: flex;
+  min-height: 2.75rem;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 0.5rem 2rem;
+  border-top: 1px solid #e0e0e0;
+  background: #fff;
+  color: #525252;
+  font-size: 0.75rem;
+}
+
+@media (max-width: 672px) {
+  .finbase-carbon-layout-switch {
+    height: auto;
+    padding: 0 0.35rem;
+    border-left: 0;
+  }
+
+  .finbase-carbon-layout-switch button {
+    padding: 0.3rem 0.45rem;
+  }
+
+  .finbase-carbon-main {
+    padding: 1rem;
+  }
+
+  .finbase-carbon-footer {
+    justify-content: center;
+    padding: 0.5rem 1rem;
+  }
+
+  .finbase-carbon-footer span:last-child {
+    display: none;
+  }
+}
+
 [data-print-only] {
   display: none;
 }
