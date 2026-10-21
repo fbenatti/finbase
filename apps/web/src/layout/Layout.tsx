@@ -74,7 +74,20 @@ import {
   SideNavLink as CarbonSideNavLink,
   Theme as CarbonTheme,
 } from "@carbon/react";
-import { Dashboard as CarbonDashboard, Notification as CarbonNotification, Logout as CarbonLogout, Finance as CarbonFinance } from "@carbon/react/icons";
+import {
+  Dashboard as CarbonDashboard,
+  Notification as CarbonNotification,
+  Logout as CarbonLogout,
+  Finance as CarbonFinance,
+  Bot as CarbonBot,
+  Warning as CarbonWarning,
+  ChartLine as CarbonChartLine,
+  DataBase as CarbonDataBase,
+  Settings as CarbonSettings,
+  Tag as CarbonTag,
+  UserMultiple as CarbonUserMultiple,
+  Cloud as CarbonCloud,
+} from "@carbon/react/icons";
 
 const DRAWER_WIDTH = 268;
 const COLLAPSED_WIDTH = 72;
@@ -351,7 +364,16 @@ export default function Layout() {
       <CarbonSideNavItems isSideNavExpanded={isMobile ? mobileOpen : expanded}>
         {visibleMenuGroups.map(group => {
           const activeGroup = group.items.some(item => menuPath(item.path).pathname === location.pathname);
-          const groupIcon = group.label === "Panorama" ? CarbonDashboard : group.label === "Planejamento" ? CarbonFinance : CarbonDashboard;
+          const groupIcon = group.label === "Panorama" ? CarbonDashboard
+            : group.label.includes("IA") ? CarbonBot
+              : group.label === "Alertas" ? CarbonWarning
+                : group.label === "Unit Economics" ? CarbonChartLine
+                  : group.label === "Planejamento" ? CarbonFinance
+                    : group.label === "Otimização" ? CarbonChartLine
+                      : group.label === "Dados e operação" ? CarbonDataBase
+                        : group.label === "Governança" ? CarbonSettings
+                          : group.label === "Administração" ? CarbonUserMultiple
+                            : CarbonCloud;
           return group.items.length === 1 ? (
             <CarbonSideNavLink key={group.label} href={group.items[0].path} renderIcon={groupIcon}
               isActive={matchesMenuPath(group.items[0].path, location.pathname, location.search)}
@@ -371,13 +393,6 @@ export default function Layout() {
             </CarbonSideNavMenu>
           );
         })}
-        <CarbonSideNavDivider />
-        <CarbonSideNavLink href="#layout-finbase" renderIcon={CarbonDashboard} isActive={!isCarbon} onClick={(event: React.MouseEvent) => { event.preventDefault(); setLayoutMode("finbase"); }}>
-          Usar layout Finbase
-        </CarbonSideNavLink>
-        <CarbonSideNavLink href="#layout-carbon" renderIcon={CarbonDashboard} isActive={isCarbon} onClick={(event: React.MouseEvent) => { event.preventDefault(); setLayoutMode("carbon"); }}>
-          Usar layout Carbon
-        </CarbonSideNavLink>
       </CarbonSideNavItems>
     </CarbonSideNav>
   );
@@ -394,7 +409,8 @@ export default function Layout() {
                 <button type="button" aria-pressed={!isCarbon} onClick={() => setLayoutMode("finbase")}>Finbase</button>
                 <button type="button" aria-pressed={isCarbon} onClick={() => setLayoutMode("carbon")}>Carbon</button>
               </Box>
-              <CarbonHeaderGlobalAction aria-label="Notificações"><CarbonNotification size={20} /><Box className="finbase-carbon-notification"><NotificationBell /></Box></CarbonHeaderGlobalAction>
+              <Box className="finbase-carbon-notification"><NotificationBell /></Box>
+              <CarbonHeaderGlobalAction aria-label="Notificações"><CarbonNotification size={20} /></CarbonHeaderGlobalAction>
               <CarbonHeaderGlobalAction aria-label={`Sair${user?.username ? ` de ${user.username}` : ""}`} onClick={() => logout()}><CarbonLogout size={20} /></CarbonHeaderGlobalAction>
             </CarbonHeaderGlobalBar>
           </CarbonHeader>
