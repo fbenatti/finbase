@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import {
   Box, Typography, Paper, Grid, Chip, Alert, CircularProgress, Button,
-  FormControl, InputLabel, Select, MenuItem, Tabs, Tab, Stack, TextField, Autocomplete, Popover,
+  FormControl, InputLabel, Select, MenuItem, Stack, TextField, Autocomplete, Popover,
   Table, TableBody, TableCell, TableContainer, TableHead, TableRow,
   Divider, Tooltip, LinearProgress, Menu, List, ListItemButton, ListItemText, Collapse, IconButton,
   FormControlLabel, Switch,
@@ -440,10 +440,9 @@ export default function GoldDashboard() {
   const [info, setInfo] = useState<GoldInfo | null>(null);
   // A aba pode vir da URL (?tab=...) — padrão: Visão Executiva.
   const urlTab = params.get("tab");
-  const initialTab: TabId = urlTab && (["visao-executiva", "geral", "evolucao", "organizacao", "servicos", "investigacao", "decisao", "drilldown", "data-quality"] as TabId[]).includes(urlTab as TabId)
+  const tab: TabId = urlTab && (["visao-executiva", "geral", "evolucao", "organizacao", "servicos", "investigacao", "decisao", "drilldown", "data-quality"] as TabId[]).includes(urlTab as TabId)
     ? urlTab as TabId
     : "visao-executiva";
-  const [tab, setTab] = useState<TabId>(initialTab);
   const [filters, setFilters] = useState<Filters>(() => ({
     ...EMPTY_FILTERS,
     months: monthsBetween(`${new Date().getFullYear()}-01`, `${new Date().getFullYear()}-12`),
@@ -823,10 +822,6 @@ export default function GoldDashboard() {
           Período e filtros dimensionais FOCUS são compartilhados pelos widgets executivos. Selecione colunas e valores; vários valores na mesma coluna usam OU e colunas diferentes usam E. As opções são pesquisadas no Trino considerando os demais filtros.
         </Typography>
       </Paper>
-
-      <Tabs value={tab} onChange={(_, v) => setTab(v)} variant="scrollable" scrollButtons="auto" sx={{ mb: 2, borderBottom: 1, borderColor: "divider" }}>
-        <Tab value="visao-executiva" label="Visão Executiva" />
-      </Tabs>
 
       {tab === "visao-executiva" && <>
         <ExpectedView embedded director={globalDirector} departmentId={filters.deptId ?? undefined} directorView={filters.visaoDiretoria} table={table} measureColumn={measureFor(filters)} externalIncludeSharedCost={includeSharedCost} externalScope={executiveScope} groupByOptions={groupByOptions} onMeasureColumnChange={(value) => setFilters(f => ({ ...f, consumoFaturado: value === "realizado" }))} onPeriodFilterChange={setExecutivePeriodFilter} />
