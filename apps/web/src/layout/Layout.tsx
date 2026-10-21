@@ -157,7 +157,9 @@ const MENU_GROUPS: MenuGroup[] = [
       { path: "/governance?tab=rules&subtab=clone-rules", label: "Reservas e Savings Plans", icon: <SavingsOutlined /> },
       { path: "/governance?tab=financial-contracts", label: "Contratos e compromissos", icon: <ReceiptLongOutlined /> },
       { path: "/governance?tab=cost-relationship", label: "Cubos analíticos", icon: <DataObjectOutlined /> },
-      { path: "/governance?tab=tags", label: "Políticas de tags", icon: <LocalOfferOutlined /> },
+      { path: "/governance?tab=tags&subtab=executive", label: "Tags · painel executivo", icon: <DashboardOutlined /> },
+      { path: "/governance?tab=tags&subtab=policies", label: "Tags · políticas Azure", icon: <RuleOutlined /> },
+      { path: "/governance?tab=tags&subtab=mapping", label: "Tags · mapeamentos", icon: <LocalOfferOutlined /> },
     ],
   },
   {
