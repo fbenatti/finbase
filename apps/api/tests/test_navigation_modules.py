@@ -90,7 +90,7 @@ def context(monkeypatch):
     app.add_middleware(RBACMiddleware)
     app.add_middleware(NavigationPolicyMiddleware)
     invalidate_permissions_cache()
-    headers = {u.id: {"Authorization": f"Bearer {security.create_access_token(u.id, u.username)}"} for u in users}
+    headers = {u.id: {"Authorization": f"Bearer {security.create_access_token(u.id, u.username, [])}"} for u in users}
     with TestClient(app) as client:
         yield client, db, session, x.id, y.id, headers
     invalidate_permissions_cache()
@@ -103,7 +103,7 @@ def test_all_menus_have_unique_dedicated_routes_and_registered_renderers():
     assert all("?" not in entry["path"] and "#" not in entry["path"] for entry in CATALOG)
     assert any(entry["path"] == "/administracao/modulos" for entry in CATALOG)
     assert not any(entry["path"].startswith("/ia/") or entry["label"] == "Unit Economics" for entry in CATALOG)
-    frontend = (Path(__file__).parents[3] / "web" / "src" / "App.tsx").read_text()
+    frontend = (Path(__file__).parents[2] / "web" / "src" / "App.tsx").read_text()
     renderer_list = re.search(r"const CATALOG_RENDERERS = \{([^}]+)\}", frontend).group(1)
     registered = {name.strip() for name in renderer_list.split(",")}
     assert {entry["renderer"] for entry in CATALOG} <= registered | {"ModuleIndex"}
