@@ -72,8 +72,8 @@ import {
   SideNavMenu as CarbonSideNavMenu,
   SideNavMenuItem as CarbonSideNavMenuItem,
   SideNavLink as CarbonSideNavLink,
+  Theme as CarbonTheme,
 } from "@carbon/react";
-import { CarbonProvider } from "@carbon/react";
 import { Dashboard as CarbonDashboard, Notification as CarbonNotification, Logout as CarbonLogout, Finance as CarbonFinance } from "@carbon/react/icons";
 
 const DRAWER_WIDTH = 268;
@@ -353,7 +353,7 @@ export default function Layout() {
           const activeGroup = group.items.some(item => menuPath(item.path).pathname === location.pathname);
           const groupIcon = group.label === "Panorama" ? CarbonDashboard : group.label === "Planejamento" ? CarbonFinance : CarbonDashboard;
           return group.items.length === 1 ? (
-            <CarbonSideNavLink key={group.label} href={group.items[0].path} as="button" renderIcon={groupIcon}
+            <CarbonSideNavLink key={group.label} href={group.items[0].path} renderIcon={groupIcon}
               isActive={matchesMenuPath(group.items[0].path, location.pathname, location.search)}
               onClick={() => { navigate(group.items[0].path); setMobileOpen(false); }}>
               {group.label}
@@ -384,7 +384,7 @@ export default function Layout() {
 
   if (isCarbon) {
     return (
-      <CarbonProvider theme="white">
+      <CarbonTheme theme="white" className="finbase-carbon-theme">
         <Box className="finbase-carbon-shell" sx={{ display: "flex", flexDirection: "column", height: "100%" }}>
           <CarbonHeader aria-label="Finbase Cloud">
             <CarbonHeaderMenuButton aria-label={mobileOpen ? "Fechar menu" : "Abrir menu"} isActive={mobileOpen} onClick={() => setMobileOpen(value => !value)} />
@@ -416,7 +416,7 @@ export default function Layout() {
             <span>FinOps · Cloud cost management</span>
           </Box>
         </Box>
-      </CarbonProvider>
+      </CarbonTheme>
     );
   }
 
