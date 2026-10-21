@@ -13,7 +13,7 @@ ALL_MODULES = [
     # é a mesma de administrar a governança Gold.
     "finops",
     # módulos de administração
-    "auth", "users", "groups", "roles", "audit", "ideas",
+    "auth", "users", "groups", "roles", "audit", "ideas", "modules",
 ]
 
 ALL_ACTIONS = ("read", "create", "update", "delete")

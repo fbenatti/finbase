@@ -9,6 +9,8 @@ from sqlalchemy import select, text
 from app.config import settings
 from app.database import engine, Base, async_session
 from app.routers import connections, csv_upload, etl, rules, periods, analysis, ai_dashboards, ai_copilot, ai_provider_dashboards, destinations, schema, forecast, clone_rules, planning, anomalies, savings, azure_tag_policy, gold, azure_ptu, reservations, scheduled_shutdown, azure_resource_graph, azure_sources, azure_mca_commitment, oci_operational, ideas, financial_contracts, auth as auth_router, users as users_router, groups as groups_router, roles as roles_router, audit as audit_router, sso as sso_router, sso_providers as sso_providers_router, integrations, processing_logs
+from app.routers import modules as modules_router
+from app.core.navigation_middleware import NavigationPolicyMiddleware
 from app.seed import seed
 from app.services import scheduler_service
 
@@ -997,6 +999,8 @@ async def lifespan(app: FastAPI):
             await setup_arg_connection(db, arg_connection)
         from app.seed_identity import seed_identity
         await seed_identity(db)
+        from app.services.navigation import sync_catalog
+        await sync_catalog(db)
         from app.routers.forecast import ensure_default_config, ensure_provider_forecast_rules
         await ensure_default_config(db)
         await ensure_provider_forecast_rules(db)
@@ -1036,6 +1040,8 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+app.add_middleware(NavigationPolicyMiddleware)
+app.include_router(modules_router.router)
 app.include_router(auth_router.router)
 app.include_router(users_router.router)
 app.include_router(groups_router.router)
