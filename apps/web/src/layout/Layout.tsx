@@ -51,7 +51,6 @@ import {
   AutoGraphOutlined,
   DataObjectOutlined,
   DeleteSweepOutlined,
-  CurrencyExchangeOutlined,
   SettingsOutlined,
 } from "@mui/icons-material";
 import { cancelPendingAnalysisRequests } from "../services/api";
@@ -64,7 +63,7 @@ const DRAWER_WIDTH = 268;
 const COLLAPSED_WIDTH = 72;
 
 type MenuEntry = { path: string; label: string; icon: React.ReactNode };
-type MenuGroup = { label: string; icon: React.ReactNode; items: MenuEntry[] };
+type MenuGroup = { label: string; icon: React.ReactNode; items: MenuEntry[]; keepVisibleWhenEmpty?: boolean };
 
 const MENU_GROUPS: MenuGroup[] = [
   {
@@ -109,6 +108,12 @@ const MENU_GROUPS: MenuGroup[] = [
     ],
   },
   {
+    label: "Unit Economics",
+    icon: <QueryStatsOutlined fontSize="small" />,
+    items: [],
+    keepVisibleWhenEmpty: true,
+  },
+  {
     label: "Planejamento",
     icon: <AccountBalanceWalletOutlined fontSize="small" />,
     items: [
@@ -118,9 +123,6 @@ const MENU_GROUPS: MenuGroup[] = [
       { path: "/financial-planning?tab=orcamento", label: "Orçamentos", icon: <PaidOutlined /> },
       { path: "/financial-planning?tab=acuracia-orcamento", label: "Acurácia do orçamento", icon: <AutoGraphOutlined /> },
       { path: "/financial-planning?tab=forecast-manual", label: "Projeções manuais", icon: <TrendingUpOutlined /> },
-      { path: "/financial-planning?tab=carta-credito", label: "Créditos", icon: <ReceiptLongOutlined /> },
-      { path: "/financial-planning?tab=defesa-orcamentaria", label: "Defesa orçamentária", icon: <FactCheckOutlined /> },
-      { path: "/financial-planning?tab=visao-contabil&subview=pedidos-sap", label: "Pedidos SAP", icon: <ReceiptLongOutlined /> },
       { path: "/financial-planning?tab=visao-contabil&subview=evolucao-dolar", label: "Evolução do dólar", icon: <CurrencyExchangeOutlined /> },
       { path: "/forecast-accuracy?aba=visao", label: "Acurácia · visão", icon: <AutoGraphOutlined /> },
       { path: "/forecast-accuracy?aba=desvios", label: "Acurácia · desvios", icon: <WarningAmberOutlined /> },
@@ -141,10 +143,6 @@ const MENU_GROUPS: MenuGroup[] = [
       { path: "/savings?tab=desligue&subview=exceptions", label: "Desligamento · exceções", icon: <FactCheckOutlined /> },
       { path: "/savings?tab=orfaos&subview=current", label: "Recursos · órfãos atuais", icon: <StorageOutlined /> },
       { path: "/savings?tab=orfaos&subview=savings", label: "Recursos · economia gerada", icon: <SavingsOutlined /> },
-      { path: "/governance?tab=reservas&subtab=executivo", label: "Reservas · visão executiva", icon: <DashboardOutlined /> },
-      { path: "/governance?tab=reservas&subtab=catalogo", label: "Reservas · catálogo", icon: <TableChartOutlined /> },
-      { path: "/governance?tab=reservas&subtab=recomendacoes", label: "Reservas · recomendações", icon: <LightbulbOutlined /> },
-      { path: "/governance?tab=reservas&subtab=fontes", label: "Reservas · fontes de coleta", icon: <CloudOutlined /> },
     ],
   },
   {
@@ -185,19 +183,12 @@ const MENU_GROUPS: MenuGroup[] = [
       { path: "/governance?tab=rules&subtab=clone-rules", label: "Reservas e Savings Plans", icon: <SavingsOutlined /> },
       { path: "/governance?tab=financial-contracts", label: "Contratos e compromissos", icon: <ReceiptLongOutlined /> },
       { path: "/governance?tab=cost-relationship", label: "Cubos analíticos", icon: <DataObjectOutlined /> },
-      { path: "/governance?tab=tags&subtab=executive", label: "Tags · painel executivo", icon: <DashboardOutlined /> },
-      { path: "/governance?tab=tags&subtab=policies", label: "Tags · políticas Azure", icon: <RuleOutlined /> },
-      { path: "/governance?tab=tags&subtab=mapping", label: "Tags · mapeamentos", icon: <LocalOfferOutlined /> },
     ],
   },
   {
     label: "Administração",
     icon: <ManageAccountsOutlined fontSize="small" />,
     items: [
-      { path: "/ideas?tab=portal", label: "Portal de iniciativas", icon: <LightbulbOutlined /> },
-      { path: "/ideas?tab=backlog", label: "Fila priorizada", icon: <ScheduleOutlined /> },
-      { path: "/ideas?tab=canvas", label: "Canvas de entrega", icon: <AccountTreeOutlined /> },
-      { path: "/ideas?tab=dashboard", label: "Resultados das iniciativas", icon: <DashboardOutlined /> },
       { path: "/admin?tab=users", label: "Pessoas e acessos", icon: <ManageAccountsOutlined /> },
       { path: "/admin?tab=groups", label: "Grupos", icon: <CorporateFareOutlined /> },
       { path: "/admin?tab=roles", label: "Funções e permissões", icon: <VpnKeyOutlined /> },
@@ -226,12 +217,10 @@ export default function Layout() {
   const isMobile = useMediaQuery(theme.breakpoints.down("md"));
   const { hasPerm, user, logout } = useAuth();
   const canAdmin = hasPerm("users", "read") || hasPerm("groups", "read") || hasPerm("roles", "read");
-  const canIdeas = hasPerm("ideas", "read");
   const visibleMenuGroups = useMemo(() => MENU_GROUPS.map(group => ({
     ...group,
     items: group.items.filter(item => {
       if (item.path.startsWith("/anomalies") && !showAnomaliesMenu) return false;
-      if (item.path.startsWith("/ideas")) return canIdeas;
       if (item.path === "/admin/audit") return hasPerm("audit", "read");
       if (item.path === "/admin/sso") return hasPerm("auth", "read");
       if (item.path.startsWith("/admin?tab=groups")) return hasPerm("groups", "read");
@@ -241,7 +230,7 @@ export default function Layout() {
       const targets = permissionTargetsForLocation(pathname, search);
       return !targets || targets.some(target => hasPerm(target.module, "read", target.scope));
     }),
-  })).filter(group => group.items.length > 0), [canAdmin, canIdeas, hasPerm]);
+  })).filter(group => group.items.length > 0 || group.keepVisibleWhenEmpty), [canAdmin, hasPerm]);
   const navigate = useNavigate();
   const location = useLocation();
   const [expanded, setExpanded] = useState(true);
@@ -280,15 +269,15 @@ export default function Layout() {
           const groupActive = group.items.some(item => location.pathname === menuPath(item.path).pathname);
           return <Box key={group.label} sx={{ mb: 0.5 }}>
             <Tooltip title={expanded ? "" : group.label} placement="right">
-              <ListItemButton onClick={() => expanded ? toggleGroup(group.label) : (setExpanded(true), setOpenGroups(current => current.includes(group.label) ? current : [...current, group.label]))}
+              <ListItemButton disabled={group.items.length === 0} onClick={() => expanded ? toggleGroup(group.label) : (setExpanded(true), setOpenGroups(current => current.includes(group.label) ? current : [...current, group.label]))}
                 aria-expanded={expanded ? isOpen : undefined}
                 sx={{ minHeight: 42, px: 1.25, borderRadius: 1.5, color: groupActive ? "primary.main" : "text.secondary", "&:hover": { bgcolor: "#F3F7F8", color: "primary.dark" } }}>
                 <ListItemIcon sx={{ minWidth: 34, color: "inherit" }}>{group.icon}</ListItemIcon>
                 {expanded && <ListItemText primary={group.label} primaryTypographyProps={{ fontSize: 13, fontWeight: 700 }} />}
-                {expanded && (isOpen ? <ExpandLess fontSize="small" /> : <ExpandMore fontSize="small" />)}
+                {expanded && group.items.length > 0 && (isOpen ? <ExpandLess fontSize="small" /> : <ExpandMore fontSize="small" />)}
               </ListItemButton>
             </Tooltip>
-            <Collapse in={expanded && isOpen} timeout="auto" unmountOnExit>
+            <Collapse in={expanded && isOpen && group.items.length > 0} timeout="auto" unmountOnExit>
               <List disablePadding sx={{ mt: 0.25, mb: 1 }}>
                 {group.items.map(item => {
                   const active = matchesMenuPath(item.path, location.pathname, location.search);
