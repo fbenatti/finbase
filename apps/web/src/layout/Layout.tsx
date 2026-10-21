@@ -95,7 +95,7 @@ const MENU_GROUPS: MenuGroup[] = [
     label: "Planejamento",
     icon: <AccountBalanceWalletOutlined fontSize="small" />,
     items: [
-      { path: "/financial-planning?tab=dashboard", label: "Resumo financeiro", icon: <AccountBalanceWalletOutlined /> },
+      { path: "/financial-planning?tab=dashboard&executive=orcamento", label: "Histórico do orçamento", icon: <AccountBalanceWalletOutlined /> },
       { path: "/financial-planning?tab=dashboard&executive=historia-contrato", label: "História dos contratos", icon: <HistoryOutlined /> },
       { path: "/financial-planning?tab=dashboard&executive=compromisso", label: "Consumo de compromissos", icon: <ReceiptLongOutlined /> },
       { path: "/financial-planning?tab=orcamento", label: "Orçamentos", icon: <PaidOutlined /> },
@@ -135,10 +135,10 @@ const MENU_GROUPS: MenuGroup[] = [
       { path: "/tables?tab=relationship", label: "Relacionamentos", icon: <AccountTreeOutlined /> },
       { path: "/pipeline", label: "Fluxos de dados", icon: <AccountTreeOutlined /> },
       { path: "/reprocess?tab=data", label: "Execuções de dados", icon: <SyncOutlined /> },
-      { path: "/reprocess?tab=forecast", label: "Execuções de forecast", icon: <TrendingUpOutlined /> },
+      { path: "/reprocess?tab=forecast&subtab=forecast", label: "Execuções de forecast", icon: <TrendingUpOutlined /> },
       { path: "/reprocess?tab=forecast&subtab=accuracy", label: "Acurácia do forecast", icon: <AutoGraphOutlined /> },
       { path: "/reprocess?tab=shared", label: "Custo compartilhado", icon: <PaidOutlined /> },
-      { path: "/reprocess?tab=gold", label: "Modelos analíticos", icon: <DataObjectOutlined /> },
+      { path: "/reprocess?tab=gold&subtab=cubes", label: "Materialização de cubos", icon: <DataObjectOutlined /> },
       { path: "/reprocess?tab=gold&subtab=ai-cost", label: "Relacionamentos de custo da IA", icon: <SmartToyOutlined /> },
       { path: "/reprocess?tab=extraction", label: "Extrações", icon: <CloudOutlined /> },
       { path: "/reprocess?tab=schedules", label: "Agendamentos", icon: <ScheduleOutlined /> },
@@ -152,7 +152,6 @@ const MENU_GROUPS: MenuGroup[] = [
     items: [
       { path: "/governance?tab=organization", label: "Organização", icon: <CorporateFareOutlined /> },
       { path: "/governance?tab=classification", label: "Classificação de projetos", icon: <LocalOfferOutlined /> },
-      { path: "/governance?tab=rules", label: "Regras financeiras", icon: <RuleOutlined /> },
       { path: "/governance?tab=rules&subtab=adjustments", label: "Regras de ajustes", icon: <SettingsOutlined /> },
       { path: "/governance?tab=rules&subtab=clone-rules", label: "Reservas e Savings Plans", icon: <SavingsOutlined /> },
       { path: "/governance?tab=financial-contracts", label: "Contratos e compromissos", icon: <ReceiptLongOutlined /> },
@@ -168,7 +167,7 @@ const MENU_GROUPS: MenuGroup[] = [
       { path: "/ideas?tab=backlog", label: "Fila priorizada", icon: <ScheduleOutlined /> },
       { path: "/ideas?tab=canvas", label: "Canvas de entrega", icon: <AccountTreeOutlined /> },
       { path: "/ideas?tab=dashboard", label: "Resultados das iniciativas", icon: <DashboardOutlined /> },
-      { path: "/admin", label: "Pessoas e acessos", icon: <ManageAccountsOutlined /> },
+      { path: "/admin?tab=users", label: "Pessoas e acessos", icon: <ManageAccountsOutlined /> },
       { path: "/admin?tab=groups", label: "Grupos", icon: <CorporateFareOutlined /> },
       { path: "/admin?tab=roles", label: "Funções e permissões", icon: <VpnKeyOutlined /> },
       { path: "/admin/audit", label: "Trilha de auditoria", icon: <FactCheckOutlined /> },
@@ -206,7 +205,7 @@ export default function Layout() {
       if (item.path === "/admin/sso") return hasPerm("auth", "read");
       if (item.path.startsWith("/admin?tab=groups")) return hasPerm("groups", "read");
       if (item.path.startsWith("/admin?tab=roles")) return hasPerm("roles", "read");
-      if (item.path === "/admin") return canAdmin;
+      if (item.path === "/admin?tab=users") return canAdmin;
       const { pathname } = menuPath(item.path);
       const targets = permissionTargetsForPath(pathname);
       return !targets || targets.some(target => hasPerm(target.module, "read", target.scope));
