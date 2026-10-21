@@ -171,8 +171,8 @@ export default function Layout() {
     <Box sx={{ height: "100%", display: "flex", flexDirection: "column", bgcolor: "#fff" }}>
       <Box sx={{ height: 72, display: "flex", alignItems: "center", justifyContent: expanded ? "space-between" : "center", px: expanded ? 2 : 1 }}>
         {expanded && <Box component="img" src="/brand/finbase-logo.svg" alt="finbase.cloud" sx={{ display: "block", width: 194, height: "auto" }} />}
-        {!expanded && <Box component="img" src="/brand/finbase-symbol.svg" alt="finbase.cloud" sx={{ width: 32, height: 32, objectFit: "contain", flexShrink: 0 }} />}
-        {!isMobile && <Tooltip title={expanded ? "Recolher navegação" : "Expandir navegação"}><IconButton size="small" onClick={() => setExpanded(value => !value)} aria-label={expanded ? "Recolher navegação" : "Expandir navegação"}>{expanded ? <ChevronLeftIcon /> : <MenuIcon />}</IconButton></Tooltip>}
+        {!expanded && <Tooltip title="Expandir navegação"><IconButton onClick={() => setExpanded(true)} aria-label="Expandir navegação"><Box component="img" src="/brand/finbase-symbol.svg" alt="finbase.cloud" sx={{ width: 32, height: 32, objectFit: "contain", flexShrink: 0 }} /></IconButton></Tooltip>}
+        {!isMobile && expanded && <Tooltip title={expanded ? "Recolher navegação" : "Expandir navegação"}><IconButton size="small" onClick={() => setExpanded(value => !value)} aria-label={expanded ? "Recolher navegação" : "Expandir navegação"}>{expanded ? <ChevronLeftIcon /> : <MenuIcon />}</IconButton></Tooltip>}
       </Box>
       <Divider />
       <Typography variant="overline" sx={{ px: 2.5, pt: 2, pb: 0.75, color: "text.secondary", fontWeight: 700, letterSpacing: 1.1, display: expanded ? "block" : "none" }}>Workspace</Typography>
