@@ -17,14 +17,14 @@ import {
   Paper,
   Select,
   Stack,
-  Tab,
+  ToggleButton,
+  ToggleButtonGroup,
   Table,
   TableBody,
   TableCell,
   TableContainer,
   TableHead,
   TableRow,
-  Tabs,
   Switch,
   TextField,
   Tooltip,
@@ -554,14 +554,10 @@ function BudgetPanel({ department }: { department?: string }) {
                         }
                       />
                     </Stack>
-                    <Tabs
-                      value={detailTab}
-                      onChange={(_, value) => setDetailTab(value)}
-                      sx={{ borderBottom: 1, borderColor: "divider" }}
-                    >
-                      <Tab label="Visão anual" />
-                      <Tab label="Reconhecer desvio" />
-                    </Tabs>
+                    <ToggleButtonGroup exclusive size="small" value={detailTab} onChange={(_, value: number | null) => { if (value !== null) setDetailTab(value); }}>
+                      <ToggleButton value={0}>Visão anual</ToggleButton>
+                      <ToggleButton value={1}>Registrar desvio</ToggleButton>
+                    </ToggleButtonGroup>
                     {detailTab === 0 ? (
                       <>
                         <Box
@@ -786,14 +782,10 @@ export default function AccuracyWidget({
         borderColor: "divider",
       }}
     >
-      <Tabs
-        value={tab}
-        onChange={(_, value) => setTab(value)}
-        sx={{ mb: 2, borderBottom: 1, borderColor: "divider" }}
-      >
-        <Tab label="Acurácia de Forecast" />
-        <Tab label="Acurácia de orçamento" />
-      </Tabs>
+      <ToggleButtonGroup exclusive size="small" value={tab} onChange={(_, value: number | null) => { if (value !== null) setTab(value); }} sx={{ mb: 2 }}>
+        <ToggleButton value={0}>Acurácia de projeções</ToggleButton>
+        <ToggleButton value={1}>Acurácia do orçamento</ToggleButton>
+      </ToggleButtonGroup>
       {tab === 0 ? (
         <AcksWidget department={department} />
       ) : (
