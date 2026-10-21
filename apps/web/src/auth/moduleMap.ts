@@ -70,12 +70,15 @@ export function permissionTargetsForLocation(pathname: string, search: string): 
     return [{ module }];
   }
   if (pathname === "/governance") {
+    if (params.get("tab") === "rules" && params.get("subtab") === "clone-rules") {
+      return [{ module: "reservations" }];
+    }
     const moduleByTab: Record<string, string> = {
       organization: "planning",
       classification: "rules",
       rules: "rules",
       "financial-contracts": "rules",
-      "cost-relationship": "rules",
+      "cost-relationship": "gold",
       reservas: "reservations",
       tags: "azure_tag_policy",
     };
