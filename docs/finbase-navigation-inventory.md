@@ -1,109 +1,113 @@
-# Finbase.cloud — inventário de navegação e renovação visual
+# Finbase.cloud — inventário de navegação
 
 Atualizado em 21/10/2026, branch `layot_carbon`.
 
-Vocabulário dos dados e compatibilidade das URLs: [finbase-data-language.md](finbase-data-language.md).
+O catálogo do backend é a fonte única dos menus e rotas. A disponibilidade por cliente pode ser alterada em **Administração → Módulos**.
 
-## Direção visual
+Implementação e inclusão de novos menus: [menu-catalog.md](menu-catalog.md). Vocabulário dos dados: [finbase-data-language.md](finbase-data-language.md).
 
-- Marca de produto: **finbase.cloud**. O shell já mostra o nome, usa o novo SVG em `apps/web/public/brand/finbase-logo.svg` e traz rodapé com copyright e descrição do produto.
-- Referência: dashboards de FinOps com hierarquia visual enxuta, superfícies claras, navegação lateral escura/compacta opcional, realces em azul-petróleo e verde, cards de métricas e gráficos de leitura rápida, inspirados na linguagem de Vantage Cost sem copiar a marca.
-- Tipografia de interface: Inter, configurada no tema e nos estilos globais; o wrapper dos gráficos também propaga Inter ao Plotly.
-- Ícones: Material UI Outlined, com ícones próprios por área e tamanho uniforme no menu.
-- Navegação: grupos laterais recolhíveis e links internos com URL própria. A seleção atual considera os parâmetros de query relevantes, então a página abre diretamente na visão escolhida. O shell inclui menu móvel, modo recolhido, notificações, usuário, saída e rodapé.
-- O menu inicia recolhido e expande automaticamente o grupo da rota atual. Panorama contém somente o resumo; análises detalhadas de custo foram removidas da navegação a pedido do usuário.
-- Revisão técnica: não restam elementos MUI `<Tabs>` ou `<Tab>` em `apps/web/src`. Controles que filtram ou alteram o modo de um widget sem representar uma página (por exemplo, formato JSON/script ou seleção de contrato) continuam como seletor/controle dentro do conteúdo.
+Os layouts Finbase e Carbon compartilham o catálogo. IA e Unit Economics permanecem fora dos menus. As rotas de favoritos anteriores redirecionam para os endereços abaixo.
 
-## Mapa completo do menu
+## Panorama
 
-Os grupos abaixo são as seções da navegação. Cada item listado é uma entrada de submenu com rota e estado próprios. As seções de IA, os serviços auxiliares de IA, os relacionamentos de custo de IA e Unit Economics foram retirados da navegação nos layouts Finbase e Carbon.
+Visão geral: `/panorama`.
 
-### Panorama
+- **Resumo de custos**: `/custos/resumo`.
 
-- **Resumo de custos**: `/custos?tab=visao-executiva`. Custos gerais, evolução, custos por organização/serviço, investigação, decisões, detalhamento e qualidade dos dados foram removidos do menu; suas visões permanecem na página.
+## Alertas
 
-### Alertas
+Visão geral: `/alertas/inicio`.
 
-- Anomalias: visão geral, impacto financeiro, casos em investigação, eventos esperados, saúde do modelo, retrospectivas, anomalias confirmadas e configuração (`/alertas?tab=0..7`). A visibilidade segue a configuração de ambiente já existente.
+- **Visão geral de alertas**: `/alertas/visao-geral`.
+- **Impacto financeiro**: `/alertas/impacto-financeiro`.
+- **Casos em investigação**: `/alertas/investigacoes`.
+- **Eventos esperados**: `/alertas/eventos-esperados`.
+- **Saúde do modelo**: `/alertas/saude-do-modelo`.
+- **Retrospectivas**: `/alertas/retrospectivas`.
+- **Anomalias confirmadas**: `/alertas/confirmados`.
+- **Configuração de alertas**: `/alertas/configuracao`.
 
-### Planejamento
+## Planejamento
 
-- **Orçamento e contratos**: histórico do orçamento, história dos contratos e consumo de compromissos (`/planejamento?tab=dashboard&executive=orcamento|historia-contrato|compromisso`).
-- **Gestão financeira**: orçamentos, acurácia do orçamento e projeções manuais (`/planejamento?tab=orcamento|acuracia-orcamento|forecast-manual`). Carta de crédito e Defesa orçamentária foram retiradas do menu.
-- **Contabilidade e moeda**: Evolução do dólar (`tab=visao-contabil&subview=evolucao-dolar`). Pedidos SAP foi retirado do menu.
-- **Acurácia das projeções**: visão, desvios e justificativas (`/projecoes/acuracia?aba=visao|desvios|acks`).
-- **Projeções**: configuração e execução, regras de projeção e histórico (`/projecoes?tab=config|rules|history`).
+Visão geral: `/planejamento/inicio`.
 
-### Otimização
+- **Histórico do orçamento**: `/planejamento/historico-do-orcamento`.
+- **História dos contratos**: `/planejamento/historia-dos-contratos`.
+- **Consumo de compromissos**: `/planejamento/consumo-de-compromissos`.
+- **Orçamentos**: `/planejamento/orcamentos`.
+- **Acurácia do orçamento**: `/planejamento/acuracia-do-orcamento`.
+- **Projeções manuais**: `/planejamento/projecoes-manuais`.
+- **Evolução do dólar**: `/planejamento/evolucao-do-dolar`.
+- **Acurácia · visão**: `/projecoes/acuracia/visao`.
+- **Acurácia · desvios**: `/projecoes/acuracia/desvios`.
+- **Acurácia · justificativas**: `/projecoes/acuracia/justificativas`.
+- **Configuração e execução**: `/projecoes/configuracao`.
+- **Regras de projeção**: `/projecoes/regras`.
+- **Histórico de projeções**: `/projecoes/historico`.
 
-- **Otimização**: oportunidades (`/otimizacao`) e compromissos e compras (`/otimizacao?tab=compras-compromissos`).
-- **Desligamento programado**: painel, governança e exceções (`tab=desligue&subview=dashboard|governance|exceptions`).
-- **Recursos órfãos**: recursos atuais e economia gerada (`tab=orfaos&subview=current|savings`).
-- As entradas de **Reservas Azure** foram retiradas do menu; as rotas continuam registradas e podem ser abertas diretamente.
+## Otimização
 
-### Dados e operação
+Visão geral: `/otimizacao/inicio`.
 
-- **Integrações**: fontes de dados (`/dados/fontes?view=connections`). Os filtros de categoria/provedor são controles da página, não destinos de navegação.
-- **Catálogo**: catálogo de dados e relacionamentos (`/dados/catalogo?tab=destinations|relationship`).
-- **Operação de dados**: fluxos de dados (`/dados/fluxos`); execuções de dados (`/operacoes/execucoes?tab=data`); execuções de forecast e acurácia (`tab=forecast&subtab=forecast|accuracy`); custo compartilhado (`tab=shared`); materialização de cubos (`tab=cubos&subtab=cubes`); extrações (`tab=extraction`); agendamentos (`tab=schedules`); histórico de execuções (`tab=logs`).
-- **Explorador**: tabelas de destino, fontes de origem, bases de origem, preparadas e consolidadas (`/dados/explorador?tab=acervo&etapa=origem|preparacao|consolidacao`), área temporária (`tab=temporarios`), tabelas dinâmicas e busca na fonte (`tab=destino|fontes|pivot|busca`).
+- **Oportunidades**: `/otimizacao/oportunidades`.
+- **Compromissos e compras**: `/otimizacao/compromissos-e-compras`.
+- **Desligamento · painel**: `/otimizacao/desligamento/painel`.
+- **Desligamento · governança**: `/otimizacao/desligamento/governanca`.
+- **Desligamento · exceções**: `/otimizacao/desligamento/excecoes`.
+- **Recursos · órfãos atuais**: `/otimizacao/recursos-orfaos`.
+- **Recursos · economia gerada**: `/otimizacao/economia-gerada`.
 
-### Governança
+## Dados e operação
 
-- Organização (`/governanca?tab=organization`), classificação de projetos (`tab=classification`), regras de ajustes (`tab=rules&subtab=adjustments`), reservas e Savings Plans (`tab=rules&subtab=clone-rules`), contratos e compromissos (`tab=financial-contracts`) e cubos analíticos (`tab=cost-relationship`).
-- As entradas de **Tags Automatizadas** foram retiradas do menu; suas rotas continuam registradas e podem ser abertas diretamente. Modos de formato/edição dentro da política permanecem controles locais.
+Visão geral: `/dados/inicio`.
 
-### Administração
+- **Fontes de dados**: `/dados/fontes`.
+- **Catálogo de dados**: `/dados/catalogo/tabelas`.
+- **Relacionamentos**: `/dados/catalogo/relacionamentos`.
+- **Fluxos de dados**: `/dados/fluxos`.
+- **Execuções de dados**: `/operacoes/dados`.
+- **Execuções de forecast**: `/operacoes/projecoes`.
+- **Acurácia do forecast**: `/operacoes/acuracia`.
+- **Custo compartilhado**: `/operacoes/rateios`.
+- **Materialização de cubos**: `/operacoes/cubos`.
+- **Extrações**: `/operacoes/extracoes`.
+- **Agendamentos**: `/operacoes/agendamentos`.
+- **Histórico de execuções**: `/operacoes/historico`.
+- **Explorador · tabelas de destino**: `/dados/explorador/destinos`.
+- **Explorador · fontes de origem**: `/dados/explorador/fontes`.
+- **Base de origem**: `/dados/explorador/origem`.
+- **Base preparada**: `/dados/explorador/preparados`.
+- **Base consolidada**: `/dados/explorador/consolidados`.
+- **Área temporária**: `/dados/explorador/temporarios`.
+- **Explorador · tabelas dinâmicas**: `/dados/explorador/tabelas-dinamicas`.
+- **Explorador · busca na fonte**: `/dados/explorador/busca`.
 
-- **Ideias/Iniciativas** foram retiradas do menu. A rota `/iniciativas` continua registrada e protegida pela permissão de ideias.
-- **Acessos**: pessoas e acessos, grupos e funções/permissões (`/administracao/acessos?tab=users|groups|roles`). Cada entrada respeita as permissões correspondentes.
-- **Auditoria e autenticação**: trilha de auditoria (`/administracao/auditoria`) e login corporativo (`/administracao/identidade`).
+## Governança
 
-## Rotas contextuais e compatibilidade
+Visão geral: `/governanca/inicio`.
 
-Além do menu, a aplicação preserva rotas de detalhe e histórico que são alcançadas a partir de uma linha, execução ou ação contextual: exploração de conexão (`/dados/fontes/:connectionId/explorar`), detalhe de execução de projeção (`/projecoes/execucoes/:runId`), custo compartilhado (`/operacoes/custos-compartilhados/:runId`) e extração (`/operacoes/extracoes/:taskId/historico`).
+- **Organização**: `/governanca/organizacao`.
+- **Classificação de projetos**: `/governanca/classificacao-de-projetos`.
+- **Regras de ajustes**: `/governanca/regras-de-ajuste`.
+- **Reservas e Savings Plans**: `/governanca/compromissos`.
+- **Contratos e compromissos**: `/governanca/contratos`.
+- **Cubos analíticos**: `/governanca/cubos`.
 
-As rotas canônicas usam nomes novos em português. Endereços antigos continuam registrados como aliases e redirecionam para os destinos canônicos, preservando query strings, hash e identificadores dinâmicos:
+## Administração
 
-| Rota antiga | Rota canônica |
-| --- | --- |
-| `/login` | `/entrar` |
-| `/gold-dashboard` | `/custos` |
-| `/gold-dashboard-v2` | `/custos/avancado` |
-| `/visoes-consumo-ia` | `/ia/capacidade` |
-| `/dashboards-ia` | `/ia/adocao` |
-| `/github-copilot` | `/ia/github` |
-| `/anomalies` | `/alertas` |
-| `/financial-planning` | `/planejamento` |
-| `/forecast` | `/projecoes` |
-| `/forecast-accuracy` | `/projecoes/acuracia` |
-| `/forecast/history/:runId` | `/projecoes/execucoes/:runId` |
-| `/savings` | `/otimizacao` |
-| `/connections` | `/dados/fontes` |
-| `/explorer/:connectionId` | `/dados/fontes/:connectionId/explorar` |
-| `/mappings` | `/dados/mapeamentos` |
-| `/tables` | `/dados/catalogo` |
-| `/analysis` | `/dados/explorador` |
-| `/pipeline` | `/dados/fluxos` |
-| `/reprocess` | `/operacoes/execucoes` |
-| `/reprocess/shared-cost/history/:runId` | `/operacoes/custos-compartilhados/:runId` |
-| `/extraction/history/:taskId` | `/operacoes/extracoes/:taskId/historico` |
-| `/governance` | `/governanca` |
-| `/admin` | `/administracao/acessos` |
-| `/admin/sso` | `/administracao/identidade` |
-| `/admin/audit` | `/administracao/auditoria` |
-| `/ideas` | `/iniciativas` |
+Visão geral: `/administracao/inicio`.
 
-Outros aliases de compatibilidade, como `/budgets`, `/reservations` e `/expected-view`, também apontam para as novas rotas.
+- **Pessoas e acessos**: `/administracao/pessoas`.
+- **Grupos**: `/administracao/grupos`.
+- **Funções e permissões**: `/administracao/funcoes`.
+- **Trilha de auditoria**: `/administracao/auditoria`.
+- **Login corporativo**: `/administracao/identidade`.
+- **Módulos**: `/administracao/modulos`.
 
-O componente legado `apps/web/src/pages/AzurePTU/AzurePTU.tsx` não é registrado em `App.tsx`; suas visões foram mantidas acessíveis como seletor interno no código legado, enquanto a rota ativa é `/ia/capacidade`. A navegação principal e o mapa acima descrevem as rotas realmente montadas.
+## Rotas preservadas fora da navegação
 
-## Sequência de nomes proposta
-
-O primeiro corte preserva nomes funcionais próximos ao vocabulário atual para não quebrar treinamento e referências, mas melhora concisão e agrupamento. Para uma segunda rodada, recomendo padronizar os grupos para **Visão geral**, **Planejar**, **Otimizar**, **Operar**, **Governar** e **Configurações**; trocar “Custos por organização” por “Custos por unidade”; “Investigar variações” por “Análise de variações”; “Pessoas e acessos” por “Usuários e acessos”; e “Serviços auxiliares” por “Integrações”. As labels acima ficam como inventário do layout implementado nesta rodada.
-
-## Pontos para validação funcional
-
-- Confirmar em ambiente autenticado o acesso por perfil às rotas de grupos, funções, auditoria, SSO, ideias e anomalias.
-- Validar que as páginas leem os parâmetros indicados (especialmente nomes com `subview`, `subtab`, `executive`, `providerTab`, `layer` e `aba`) e mantêm o item correto destacado após navegação direta/refresh.
-- O domínio está aplicado à identidade mostrada no produto; DNS, certificado e publicação de `finbase.cloud` são configuração de infraestrutura separada.
+- **Reservas Azure**: `/governanca/reservas-azure`.
+- **Tags Automatizadas**: `/governanca/politicas-de-tags`.
+- **Carta de crédito**: `/planejamento/carta-de-credito`.
+- **Defesa orçamentária**: `/planejamento/defesa-orcamentaria`.
+- **Pedidos SAP**: `/planejamento/pedidos-sap`.

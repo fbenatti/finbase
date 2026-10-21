@@ -20,15 +20,15 @@ ajuda, relatórios, permissões e mensagens de execução.
 
 ## Navegação
 
-- Base de origem: `/dados/explorador?tab=acervo&etapa=origem`.
-- Base preparada: `/dados/explorador?tab=acervo&etapa=preparacao`.
-- Base consolidada: `/dados/explorador?tab=acervo&etapa=consolidacao`.
-- Área temporária: `/dados/explorador?tab=temporarios`.
-- Materialização de cubos: `/operacoes/execucoes?tab=cubos&subtab=cubes`.
-- Relacionamentos de custo IA: `/operacoes/execucoes?tab=cubos&subtab=ai-cost`.
+- Base de origem: `/dados/explorador/origem`.
+- Base preparada: `/dados/explorador/preparados`.
+- Base consolidada: `/dados/explorador/consolidados`.
+- Área temporária: `/dados/explorador/temporarios`.
+- Materialização de cubos: `/operacoes/cubos`.
 
-Links antigos são aceitos e normalizados na barra de endereços, preservando os
-demais parâmetros e as permissões da página.
+Cada menu tem uma rota exclusiva, sem parâmetros de seleção de página. O catálogo
+no backend registra os menus automaticamente e permite controlar a disponibilidade
+por cliente. Veja [menu-catalog.md](menu-catalog.md).
 
 ## Limites entre apresentação e integração
 
