@@ -331,7 +331,7 @@ export default function Mappings() {
       {!selectedConnId ? (
         <EmptyState message="Selecione um datasource para descobrir as colunas e criar mapeamentos." />
       ) : columns.length === 0 ? (
-        <EmptyState message="Nenhuma coluna descoberta. Execute o ETL primeiro para popular os dados e descobrir colunas." />
+        <EmptyState message="Nenhuma coluna descoberta. Execute a coleta primeiro para preencher os dados e descobrir colunas." />
       ) : (
         <>
           {/* Legend */}

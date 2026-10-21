@@ -182,7 +182,7 @@ export default function ProviderIaDashboard({ provider }: { provider: AIProvider
       <Box>
           <Typography variant="h4" gutterBottom>{data.provider_label}</Typography>
           <Typography color="text.secondary" gutterBottom>
-            
+
             Visão executiva e técnica a partir dos cubos analíticos de consumo e licenças.
             {isTokens
               ? " Métrica primária: tokens por usuário/modelo/dia; custo alocado quando disponível."

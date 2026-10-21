@@ -536,7 +536,7 @@ export default function GitHubCopilotDashboard({ embedded = false }: { embedded?
           </Paper>
 
           <Typography variant="h5" mb={2} fontWeight="bold" color="text.primary">Otimização e Eficiência</Typography>
-          
+
           <Stack direction={{ xs: "column", lg: "row" }} gap={3} mb={4}>
             <Paper elevation={0} sx={{ flex: 1, p: 3, border: "1px solid", borderColor: "divider", borderRadius: 2, bgcolor: "#fff1f2" }}>
               <Typography variant="h6" color="error.main" mb={1}>Oportunidade de Revogação</Typography>

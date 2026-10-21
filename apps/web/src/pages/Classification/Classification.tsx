@@ -1117,7 +1117,7 @@ export function TagsTab() {
                 )}
                 {(t.subscriptions?.length ?? 0) > 0 && (
                   <Typography variant="caption" color="text.secondary" sx={{ display: "block", mt: 1.25 }}>
-                    
+
                     Escopo dos dados preparados: {t.subscriptions!.map((s) => `${s.subscription_id.slice(0, 8)}… (${s.policies.length})`).join(" · ")}
                   </Typography>
                 )}

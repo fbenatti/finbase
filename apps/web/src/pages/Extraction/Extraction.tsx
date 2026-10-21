@@ -198,12 +198,12 @@ export default function Extraction({ embedded = false }: { embedded?: boolean })
       }
       const result = await runEtl(body);
       if (result.task_id === 0) {
-        setError(result.message || "ETL not available for this connector type");
+        setError(result.message || "Coleta indisponível para este tipo de conexão");
         return;
       }
       pollTask(result.task_id);
     } catch (e: unknown) {
-      setError(e instanceof Error ? e.message : "Failed to start ETL");
+      setError(e instanceof Error ? e.message : "Falha ao iniciar a coleta");
     }
   };
 
@@ -295,7 +295,7 @@ export default function Extraction({ embedded = false }: { embedded?: boolean })
     try {
       const result = await runEtl({ connection_id: connId as number, selected_blobs: paths });
       if (result.task_id === 0) {
-        setError(result.message || "ETL indisponível para esta conexão");
+        setError(result.message || "Coleta indisponível para esta conexão");
         return;
       }
       setSelectedPaths(new Set(paths));
@@ -897,7 +897,7 @@ export default function Extraction({ embedded = false }: { embedded?: boolean })
         <Alert severity="info">Clique em "Escanear" para listar os blobs disponiveis.</Alert>
       )}
 
-      {!connId && <EmptyState message="Selecione uma conexao para visualizar os blobs e executar o ETL." />}
+      {!connId && <EmptyState message="Selecione uma conexao para visualizar os arquivos e executar a coleta." />}
 
       {/* ═══════════════════════════════════════════════════════════ */}
       {/*  AGENDAMENTOS (painel dedicado, independente da conexão)       */}

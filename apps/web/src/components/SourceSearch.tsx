@@ -2,7 +2,7 @@ import { dataDisplayText } from "../utils/dataPresentation";
 import { useEffect, useState } from "react";
 import { Alert, Box, Button, Chip, FormControl, InputLabel, MenuItem, Paper, Select, Stack, Table, TableBody, TableCell, TableContainer, TableHead, TableRow, TextField, Typography } from "@mui/material";
 import { Search } from "@mui/icons-material";
-import { DestinationAnalysis, PivotFilter, PivotMetadata, getPivotMetadata, searchPivotTable, LakehouseSearchResult } from "../services/api";
+import { DestinationAnalysis, PivotFilter, PivotMetadata, getPivotMetadata, searchPivotTable, DataSearchResult } from "../services/api";
 
 export default function SourceSearch({ destinations, initialTableId }: { destinations: DestinationAnalysis[]; initialTableId?: number }) {
   const [tableId, setTableId] = useState(initialTableId || destinations[0]?.id || 0);
@@ -10,7 +10,7 @@ export default function SourceSearch({ destinations, initialTableId }: { destina
   const [term, setTerm] = useState("");
   const [field, setField] = useState("");
   const [filters, setFilters] = useState<PivotFilter[]>([]);
-  const [result, setResult] = useState<LakehouseSearchResult | null>(null);
+  const [result, setResult] = useState<DataSearchResult | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
 

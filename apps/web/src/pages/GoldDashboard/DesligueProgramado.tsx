@@ -570,7 +570,7 @@ export default function DesligueProgramado({ embedded }: { embedded?: boolean })
 
         <Paper variant="outlined" sx={{ p: 2, mt: 2 }}>
           <Typography variant="subtitle2" fontWeight={900} mb={1}>
-            
+
             Alterações nas tags de desligamento automático
             {tagDelta?.latest_snapshot ? ` — ${tagDelta.latest_snapshot}${tagDelta.previous_snapshot ? ` vs ${tagDelta.previous_snapshot}` : " (estado atual — aguardando 2ª coleta)"}` : ""}
           </Typography>
@@ -702,7 +702,7 @@ export default function DesligueProgramado({ embedded }: { embedded?: boolean })
             <Box sx={{ display: "flex", justifyContent: "center", p: 3 }}><CircularProgress size={24} /></Box>
           ) : !opp || !opp.rows.length ? (
             <Typography color="text.secondary" variant="body2">
-              
+
               Nenhum recurso encontrado com os filtros. Atualize os dados de economia para o mês corrente.
             </Typography>
           ) : (

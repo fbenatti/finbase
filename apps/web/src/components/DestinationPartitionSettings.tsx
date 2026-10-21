@@ -163,11 +163,11 @@ export default function DestinationPartitionSettings({
   return (
     <Paper variant="outlined" sx={{ p: 2, mb: 2, bgcolor: "#fafbff" }}>
       <Typography variant="subtitle2" sx={{ mb: 1 }}>
-        
+
         Organização dos dados de destino
       </Typography>
       <Typography variant="caption" color="text.secondary" sx={{ display: "block", mb: 1 }}>
-        A fatia de <strong>replace</strong> (anti-duplicata no ETL) é sempre período + conexão de origem.
+        A substituição de registros para evitar duplicatas considera sempre período + conexão de origem.
         Extra de identidade em <strong>SubAccountId</strong> entra na partição física (Azure: SubscriptionId;
         GCP: id do projeto). Valor vazio vira <code>__UNSET__</code>. SubAccountName não entra no caminho.
       </Typography>
@@ -248,7 +248,7 @@ export default function DestinationPartitionSettings({
 
         {subAccountCol && !hasSubAccountExtra && (
           <Button size="small" variant="outlined" onClick={applyFocusSubAccountPreset} sx={{ mt: 0.5 }}>
-            Adicionar {subAccountCol} (bucket)
+            Adicionar {subAccountCol} (distribuição por grupos)
           </Button>
         )}
 
@@ -292,7 +292,7 @@ export default function DestinationPartitionSettings({
                   })}
                 >
                   <MenuItem value="identity">Identity (baixa cardinalidade)</MenuItem>
-                  <MenuItem value="bucket">Bucket (alta cardinalidade)</MenuItem>
+                  <MenuItem value="bucket">Distribuição por grupos (muitos valores)</MenuItem>
                 </Select>
               </FormControl>
               {extra.transform === "bucket" && (

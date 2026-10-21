@@ -91,13 +91,13 @@ export default function ReprocessTasksPanel() {
       </Typography>
       {tasks.map(task => {
         const running = task.status === "RUNNING";
-        const publishingSilver = kind(task) === "reprocess"
+        const publishingPreparedData = kind(task) === "reprocess"
           && running
           && /publicando partição na camada silver/i.test(String(task.current_blob || task.phase || ""));
         const blobProgress = task.total_blobs > 0
           ? Math.min(100, Math.round((task.processed_blobs / task.total_blobs) * 100))
           : 0;
-        const pct = publishingSilver
+        const pct = publishingPreparedData
           ? 95
           : task.status === "COMPLETED"
             ? 100
@@ -106,7 +106,7 @@ export default function ReprocessTasksPanel() {
               : blobProgress;
         const stageLabel = kind(task) === "reprocess" && running && task.total_blobs > 0
           && task.processed_blobs >= task.total_blobs
-          ? publishingSilver
+          ? publishingPreparedData
             ? "Publicando dados preparados..."
             : "Origem processada · preparando publicação dos dados"
           : task.phase || task.status;

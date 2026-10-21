@@ -3890,19 +3890,19 @@ export async function discoverSchema(
 }
 
 // --- Trino / Data Lakehouse Analysis ---
-export interface TrinoTableList {
+export interface AnalysisTableList {
   bronze: string[];
   silver: string[];
   gold: string[];
 }
 
-export interface TrinoQueryResult {
+export interface AnalysisQueryResult {
   columns: string[];
   rows: Record<string, unknown>[];
   row_count: number;
 }
 
-export interface TrinoSummaryRow {
+export interface AnalysisSummaryRow {
   connection_code: string;
   connection_name: string;
   billing_period: string;
@@ -3914,7 +3914,7 @@ export interface TrinoSummaryRow {
   num_services: number;
 }
 
-export interface TrinoHealth {
+export interface AnalysisHealth {
   trino: string;
   nessie: string;
   minio: string;
@@ -3929,7 +3929,7 @@ export interface AnalysisStagingTable {
   status: "ACTIVE_REPROCESS" | "ORPHANED";
 }
 
-export async function getAnalysisTables(): Promise<TrinoTableList> {
+export async function getAnalysisTables(): Promise<AnalysisTableList> {
   const { data } = await api.get("/analysis/tables");
   return data;
 }
@@ -3971,7 +3971,7 @@ export async function deleteAnalysisStagingTable(
   await api.delete(`/analysis/staging-tables/${encodeURIComponent(tableName)}`);
 }
 
-export async function runAnalysisQuery(sql: string): Promise<TrinoQueryResult> {
+export async function runAnalysisQuery(sql: string): Promise<AnalysisQueryResult> {
   const { data } = await api.post("/analysis/query", { sql });
   return data;
 }
@@ -3980,7 +3980,7 @@ export async function getAnalysisSummary(
   connectionCode?: string,
   billingPeriod?: string,
   layer: "bronze" | "silver" | "gold" = "gold",
-): Promise<{ summary: TrinoSummaryRow[] }> {
+): Promise<{ summary: AnalysisSummaryRow[] }> {
   const { data } = await api.get("/analysis/summary", {
     params: {
       connection_code: connectionCode,
@@ -3991,7 +3991,7 @@ export async function getAnalysisSummary(
   return data;
 }
 
-export async function getAnalysisHealth(): Promise<TrinoHealth> {
+export async function getAnalysisHealth(): Promise<AnalysisHealth> {
   const { data } = await api.get("/analysis/health");
   return data;
 }
@@ -4264,7 +4264,7 @@ export async function savePivotView(
 export async function deletePivotView(viewId: number): Promise<void> {
   await api.delete(`/analysis/pivot/views/${viewId}`);
 }
-export interface LakehouseSearchResult {
+export interface DataSearchResult {
   columns: string[];
   rows: Record<string, unknown>[];
   total: number;
@@ -4280,7 +4280,7 @@ export async function searchPivotTable(
   limit = 100,
   offset = 0,
   filters: PivotFilter[] = [],
-): Promise<LakehouseSearchResult> {
+): Promise<DataSearchResult> {
   return (
     await api.post("/analysis/pivot/search", {
       destination_table_id: destinationTableId,

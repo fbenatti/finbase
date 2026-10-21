@@ -190,7 +190,7 @@ export default function ManualCsvUploadDialog({
       <DialogTitle>Upload manual de CSV — {connectionName}</DialogTitle>
       <DialogContent>
         <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
-          
+
           Carregue relatórios CSV locais diretamente na base de origem. Para carregar vários meses de uma
           vez, use o botão "Carregar vários"; o período é identificado pelas colunas de data/faturamento
           do CSV (com alternativa pelo nome do arquivo).

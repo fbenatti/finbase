@@ -971,7 +971,7 @@ export default function Relationship({ embedded }: { embedded?: boolean } = {}) 
       )}
 
       {!loading && selectedConnId && selectedDestId && sourceCols.length === 0 && (
-        <EmptyState message="Nenhuma coluna encontrada. Execute o ETL primeiro para descobrir o schema da fonte." />
+        <EmptyState message="Nenhuma coluna encontrada. Execute a coleta primeiro para descobrir a estrutura da fonte." />
       )}
 
       {/* ── Drag & Drop area ── */}

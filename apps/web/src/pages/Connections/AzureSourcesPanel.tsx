@@ -373,7 +373,7 @@ export default function AzureSourcesPanel({ environment, connectionId }: { envir
         </Tooltip>
       </Stack>
       <Typography variant="caption" color="text.secondary" display="block" sx={{ mb: 1.5 }}>
-        
+
         Ligue fontes do ambiente para a carga genérica. Conexões independentes mantêm sua ação de coleta
         e base de origem próprias. Desligar uma fonte não apaga o histórico já coletado.
       </Typography>

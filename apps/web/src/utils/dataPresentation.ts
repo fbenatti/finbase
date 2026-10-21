@@ -41,6 +41,7 @@ export function dataDisplayText(value: string | null | undefined): string {
     .replace(/\bNessie\b/gi, "catálogo de dados")
     .replace(/\bMinIO\b/gi, "armazenamento de arquivos")
     .replace(/\bDuckDB\b/gi, "serviço de consultas local")
+    .replace(/\bETL\b/gi, "processamento de dados")
     .replace(/\bBronze\b/gi, "base de origem")
     .replace(/\bSilver\b/gi, "base preparada")
     .replace(/\bGolds\b/gi, "bases consolidadas")

@@ -235,7 +235,7 @@ export default function ReprocessDataTab() {
     <Box>
       {workerHealth && workerHealth.status !== "ok" && (
         <Alert severity="error" sx={{ mb: 2 }}>
-          Worker ETL {workerHealth.status === "offline" ? "offline" : "sem heartbeat"}. O reprocessamento está bloqueado até o worker estar ativo.
+          Serviço de processamento {workerHealth.status === "offline" ? "indisponível" : "sem sinal de atividade"}. O reprocessamento será liberado quando o serviço estiver ativo.
         </Alert>
       )}
 

@@ -1187,7 +1187,7 @@ export default function ExpectedViewV2({
         <Stack alignItems="center" mt={6} gap={1}>
           <CircularProgress />
           <Typography color="text.secondary">
-            
+
             Consultando custos realizados e projeções…
           </Typography>
         </Stack>

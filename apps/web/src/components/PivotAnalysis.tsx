@@ -11,7 +11,7 @@ import * as XLSX from "xlsx";
 import {
   DestinationAnalysis, PivotFilter, PivotMeasure, PivotMetadata, PivotRequest, PivotResult, PivotView, PivotSort,
   deletePivotView, drillDownPivot, getPivotMetadata, getPivotViews, runPivot, runPivotUnion, savePivotView,
-  LakehouseSearchResult, searchPivotTable, formatApiError, FORECAST_MANUAL_PIVOT_ID, getPivotSourceDetail, PivotSourceDetail,
+  DataSearchResult, searchPivotTable, formatApiError, FORECAST_MANUAL_PIVOT_ID, getPivotSourceDetail, PivotSourceDetail,
 } from "../services/api";
 
 interface Props {
@@ -138,7 +138,7 @@ export default function PivotAnalysis({ destinations, initialTableId, showSearch
   const [sourceDetailLoading, setSourceDetailLoading] = useState(false);
   const [relationDialogOpen, setRelationDialogOpen] = useState(false);
   const [searchTerm, setSearchTerm] = useState("");
-  const [searchResult, setSearchResult] = useState<LakehouseSearchResult | null>(null);
+  const [searchResult, setSearchResult] = useState<DataSearchResult | null>(null);
   const [searchLoading, setSearchLoading] = useState(false);
 
   const [drag, setDrag] = useState<{ area: "rows" | "cols" | "filters"; name: string } | null>(null);
@@ -778,7 +778,7 @@ export default function PivotAnalysis({ destinations, initialTableId, showSearch
     </Paper>
     {loading && (
       <Alert severity="info" icon={<CircularProgress size={18} />} sx={{ mb: 2 }}>
-        
+
         Consultando os dados. O resultado aparecerá aqui quando estiver pronto.
       </Alert>
     )}

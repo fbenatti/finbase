@@ -21,7 +21,7 @@ import * as XLSX from "xlsx";
 import {
   getAnalysisHealth, getAnalysisTables, runAnalysisQuery,
   getAnalysisTablePartitions, AnalysisPartition, AnalysisTablePartitionResult,
-  TrinoQueryResult, TrinoHealth, TrinoTableList,
+  AnalysisQueryResult, AnalysisHealth, AnalysisTableList,
   getAnalysisSources, queryAnalysisSource,
   getAnalysisDestinations, queryAnalysisDestination,
   SourceAnalysis, SourceDataResult,
@@ -48,20 +48,20 @@ function filtersFromSearch(params: URLSearchParams): PivotFilter[] {
 
 type AnalysisTab = "destino" | "fontes" | "iceberg" | "staging" | "pivot" | "busca";
 
-interface IcebergTableMember {
+interface DataTableMember {
   tableName: string;
   period?: string;
   dimension?: string;
   scopeId?: string;
 }
 
-interface IcebergTableGroup {
+interface DataTableGroup {
   name: string;
-  members: IcebergTableMember[];
+  members: DataTableMember[];
 }
 
-function groupIcebergTables(names: string[]): IcebergTableGroup[] {
-  const groups = new Map<string, IcebergTableGroup>();
+function groupDataTables(names: string[]): DataTableGroup[] {
+  const groups = new Map<string, DataTableGroup>();
   const costSlice = /^(finops_cost_driver_slice_azure_4p)_(\d{6})_(service|sub_account|region|organization)_(\d+)$/;
   for (const tableName of names) {
     const match = tableName.match(costSlice);
@@ -101,15 +101,15 @@ export default function Analysis() {
   const publicTab = searchParams.get("tab");
   const requestedTab = (publicTab === "acervo" ? "iceberg" : publicTab === "temporarios" ? "staging" : publicTab) as AnalysisTab | null;
   const tab: AnalysisTab = requestedTab && ["destino", "fontes", "iceberg", "staging", "pivot", "busca"].includes(requestedTab) ? requestedTab : "fontes";
-  const [health, setHealth] = useState<TrinoHealth>({ trino: "?", nessie: "?", minio: "?" });
+  const [health, setHealth] = useState<AnalysisHealth>({ trino: "?", nessie: "?", minio: "?" });
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
 
-  // ─── Iceberg state ───
+  // ─── Acervo de dados ───
   const layer = dataLayerForStage(searchParams.get("etapa") || searchParams.get("layer"));
-  const [tables, setTables] = useState<TrinoTableList>({ bronze: [], silver: [], gold: [] });
+  const [tables, setTables] = useState<AnalysisTableList>({ bronze: [], silver: [], gold: [] });
   const [sql, setSql] = useState("");
-  const [result, setResult] = useState<TrinoQueryResult | null>(null);
+  const [result, setResult] = useState<AnalysisQueryResult | null>(null);
   const [executedSql, setExecutedSql] = useState("");
   const [sortKey, setSortKey] = useState<string | null>(null);
   const [sortDir, setSortDir] = useState<"asc" | "desc">("asc");
@@ -117,7 +117,7 @@ export default function Analysis() {
   const [page, setPage] = useState(0);
   const [stagingTables, setStagingTables] = useState<AnalysisStagingTable[]>([]);
   const [stagingLoading, setStagingLoading] = useState(false);
-  const [selectedIcebergTable, setSelectedIcebergTable] = useState("");
+  const [selectedDataTable, setSelectedDataTable] = useState("");
   const [partitionRows, setPartitionRows] = useState<AnalysisPartition[]>([]);
   const [partitionsLoading, setPartitionsLoading] = useState(false);
   const [expandedTableGroups, setExpandedTableGroups] = useState<Set<string>>(new Set());
@@ -138,7 +138,7 @@ export default function Analysis() {
     next.set("etapa", DATA_LAYER_STAGES[nextLayer]);
     next.delete("layer");
     setSearchParams(next, { replace: true });
-    setSelectedIcebergTable("");
+    setSelectedDataTable("");
     setPartitionRows([]);
   };
 
@@ -152,7 +152,7 @@ export default function Analysis() {
     setSrcData(null);
     setDestData(null);
     setError("");
-    setSelectedIcebergTable("");
+    setSelectedDataTable("");
     setPartitionRows([]);
   }, [tab, layer]);
 
@@ -181,7 +181,7 @@ export default function Analysis() {
     getAnalysisSources().then(setSources).catch(() => {});
   }, [tab, sources.length]);
 
-  const refreshLakehouse = async () => {
+  const refreshDataCatalog = async () => {
     try {
       const next = await getAnalysisDestinations();
       setDestinations(next);
@@ -264,7 +264,7 @@ export default function Analysis() {
     if (id) loadDestData(id as number);
   };
 
-  // ─── Trino query ───
+  // ─── Consultas ───
   const executeSql = async (querySql?: string) => {
     const q = querySql || sql;
     if (!q.trim()) return;
@@ -281,8 +281,8 @@ export default function Analysis() {
 
   const setPrebuilt = (q: string) => { setSql(q); executeSql(q); };
 
-  const selectIcebergTable = async (tableName: string) => {
-    setSelectedIcebergTable(tableName);
+  const selectDataTable = async (tableName: string) => {
+    setSelectedDataTable(tableName);
     setSql(`SELECT * FROM iceberg.${layer}.${tableName} LIMIT 10`);
     setPartitionRows([]);
     setPartitionsLoading(true);
@@ -321,7 +321,7 @@ export default function Analysis() {
 
   const sqlLiteral = (value: string) => `'${value.replace(/'/g, "''")}'`;
 
-  const useIcebergSlice = (tableName: string, partition?: Partial<AnalysisPartition>) => {
+  const useDataSlice = (tableName: string, partition?: Partial<AnalysisPartition>) => {
     const clauses: string[] = [];
     if (partition?.period && /^\d{8}$/.test(partition.period)) {
       clauses.push(`snapshot_date = ${sqlLiteral(partition.period)}`);
@@ -337,7 +337,7 @@ export default function Analysis() {
       clauses.push(`SubAccountName = ${sqlLiteral(partition.subaccount)}`);
     }
     const where = clauses.length ? `\nWHERE ${clauses.join(" AND ")}` : "";
-    setSelectedIcebergTable(tableName);
+    setSelectedDataTable(tableName);
     setSql(`SELECT * FROM iceberg.${layer}.${tableName}${where}\nLIMIT 10`);
   };
 
@@ -349,8 +349,8 @@ export default function Analysis() {
     });
   };
 
-  const icebergTableGroups = useMemo(
-    () => groupIcebergTables(tables[layer] || []),
+  const dataTableGroups = useMemo(
+    () => groupDataTables(tables[layer] || []),
     [tables, layer],
   );
 
@@ -400,7 +400,7 @@ export default function Analysis() {
           });
           return (
             <Box key={periodKey}>
-              {rowBar(period, periodRows[0]?.period_kind || "período", periodTotals.records, periodTotals.files, periodKey, () => useIcebergSlice(tableName, { period }), 0)}
+              {rowBar(period, periodRows[0]?.period_kind || "período", periodTotals.records, periodTotals.files, periodKey, () => useDataSlice(tableName, { period }), 0)}
               {periodOpen && [...bySource.entries()].sort(([a], [b]) => a.localeCompare(b)).map(([source, sourceRows]) => {
                 const sourceKey = `${periodKey}|${source}`;
                 const sourceOpen = openPartitionNodes.has(sourceKey);
@@ -408,7 +408,7 @@ export default function Analysis() {
                 const sample = sourceRows[0];
                 return (
                   <Box key={sourceKey}>
-                    {rowBar(source, "fonte", sourceTotals.records, sourceTotals.files, hasAccount ? sourceKey : null, () => useIcebergSlice(tableName, { period, source_connection_id: sample?.source_connection_id }), 1)}
+                    {rowBar(source, "fonte", sourceTotals.records, sourceTotals.files, hasAccount ? sourceKey : null, () => useDataSlice(tableName, { period, source_connection_id: sample?.source_connection_id }), 1)}
                     {hasAccount && sourceOpen && sourceRows
                       .slice()
                       .sort((a, b) => (a.subaccount_id || a.subaccount || "").localeCompare(b.subaccount_id || b.subaccount || ""))
@@ -416,7 +416,7 @@ export default function Analysis() {
                         const account = row.subaccount_id || row.subaccount || "—";
                         return (
                           <Box key={`${sourceKey}|${account}`}>
-                            {rowBar(account, row.subaccount_id ? "SubAccountId" : "conta", row.record_count, row.file_count, null, () => useIcebergSlice(tableName, row), 2)}
+                            {rowBar(account, row.subaccount_id ? "SubAccountId" : "conta", row.record_count, row.file_count, null, () => useDataSlice(tableName, row), 2)}
                           </Box>
                         );
                       })}
@@ -430,7 +430,7 @@ export default function Analysis() {
     );
   };
 
-  const renderIcebergMember = (member: IcebergTableMember) => {
+  const renderDataMember = (member: DataTableMember) => {
     const detail = tablePartitionDetails[member.tableName];
     return (
       <Paper key={member.tableName} variant="outlined" sx={{ p: 1, bgcolor: "action.hover" }}>
@@ -438,14 +438,14 @@ export default function Analysis() {
           <Typography variant="caption" sx={{ flex: 1, minWidth: 220, overflowWrap: "anywhere", fontFamily: "monospace" }}>
             {member.period ? `${member.period} · ${member.dimension} · ID ${member.scopeId}` : member.tableName}
           </Typography>
-          <Button size="small" onClick={() => useIcebergSlice(member.tableName)}>Usar tabela</Button>
+          <Button size="small" onClick={() => useDataSlice(member.tableName)}>Usar tabela</Button>
         </Box>
         <Box sx={{ mt: 1 }}>
           {!detail && partitionDetailsLoading.has(member.tableName) ? <CircularProgress size={18} /> : detail?.partitioned ? (
             detail.partitions.length ? renderPartitionTree(member.tableName, detail.partitions) : <Typography variant="caption" color="text.secondary">Nenhuma divisão de dados encontrada.</Typography>
           ) : detail ? (
             <Alert severity="info" sx={{ py: 0 }}>Esta tabela não possui divisões internas de dados. {member.period ? `O período ${member.period} e o escopo estão codificados no nome; ` : ""}{detail.record_count?.toLocaleString() ?? 0} registros em {detail.file_count ?? 0} arquivo(s).
-              <Button size="small" sx={{ ml: 1 }} onClick={() => useIcebergSlice(member.tableName)}>Usar tabela</Button>
+              <Button size="small" sx={{ ml: 1 }} onClick={() => useDataSlice(member.tableName)}>Usar tabela</Button>
             </Alert>
           ) : !partitionDetailsLoading.has(member.tableName) ? (
             <Alert severity="error" sx={{ py: 0 }}>Não foi possível carregar as partições. Recolha e expanda de novo.</Alert>
@@ -559,7 +559,7 @@ export default function Analysis() {
               Explore os dados importados, classificados e aplicados com regras de negócio.
             </Typography>
           </Box>
-          <Button size="small" variant="outlined" startIcon={<Refresh />} onClick={refreshLakehouse} sx={{ flexShrink: 0 }}>
+          <Button size="small" variant="outlined" startIcon={<Refresh />} onClick={refreshDataCatalog} sx={{ flexShrink: 0 }}>
             Atualizar
           </Button>
         </Box>
@@ -612,7 +612,7 @@ export default function Analysis() {
           )}
 
           {!loading && destData && destData.rows.length === 0 && (
-            <Alert severity="info">Nenhum dado na tabela destino ainda. Execute o ETL para popular os dados.</Alert>
+            <Alert severity="info">Nenhum dado na tabela destino ainda. Execute a coleta para preencher os dados.</Alert>
           )}
 
           {!loading && destData && destData.rows.length > 0 && (
@@ -711,7 +711,7 @@ export default function Analysis() {
           {loading && <CircularProgress sx={{ display: "block", mx: "auto", mt: 4 }} />}
 
           {!loading && !selectedSrcId && sources.every(s => s.row_count === 0) && (
-            <EmptyState message="Nenhuma fonte possui dados ingeridos. Execute o ETL primeiro em 'Extração & Monitoramento'." />
+            <EmptyState message="Nenhuma fonte possui dados ingeridos. Execute a coleta em Dados e operação → Extrações." />
           )}
 
           {!loading && srcData && srcData.rows.length > 0 && (
@@ -758,7 +758,7 @@ export default function Analysis() {
       )}
 
       {/* ================================================================ */}
-      {/* TAB: ICEBERG / TRINO                                             */}
+      {/* TAB: ACERVO / CONSULTAS                                             */}
       {/* ================================================================ */}
       {tab === "iceberg" && (
         <>
@@ -778,9 +778,9 @@ export default function Analysis() {
               ) : (
                 <Box sx={{ display: "flex", gap: 1, mb: 2, flexWrap: "wrap" }}>
                   {(tables.gold || []).map((t) => (
-                    <Chip key={t} label={t} size="small" icon={<SchemaIcon />} variant={selectedIcebergTable === t ? "filled" : "outlined"}
-                      color={selectedIcebergTable === t ? "primary" : "default"}
-                      onClick={() => void selectIcebergTable(t)} sx={{ cursor: "pointer" }}
+                    <Chip key={t} label={t} size="small" icon={<SchemaIcon />} variant={selectedDataTable === t ? "filled" : "outlined"}
+                      color={selectedDataTable === t ? "primary" : "default"}
+                      onClick={() => void selectDataTable(t)} sx={{ cursor: "pointer" }}
                       onDelete={() => void removeGoldTable(t)} deleteIcon={<Delete fontSize="small" />} />
                   ))}
                 </Box>
@@ -796,10 +796,10 @@ export default function Analysis() {
                 <SchemaIcon color="primary" fontSize="small" />
                 <Typography variant="subtitle2" sx={{ fontWeight: 700 }}>{DATA_LAYER_LABELS[layer]} — grupos e tabelas</Typography>
                 <Chip label={`${(tables[layer] || []).length} tabela(s) física(s)`} size="small" color="primary" variant="outlined" />
-                <Chip label={`${icebergTableGroups.length} grupo(s)`} size="small" variant="outlined" />
+                <Chip label={`${dataTableGroups.length} grupo(s)`} size="small" variant="outlined" />
               </Box>
               <Stack spacing={0.75} sx={{ mb: 2 }}>
-                {icebergTableGroups.map((group) => {
+                {dataTableGroups.map((group) => {
                   const expanded = expandedTableGroups.has(group.name);
                   const isFamily = group.members.length > 1;
                   const toggleGroup = () => {
@@ -823,7 +823,7 @@ export default function Analysis() {
                       {expanded && (
                         <Stack spacing={0.5} sx={{ px: 2, pb: 1.25, pt: 0.25 }}>
                           {isFamily
-                            ? Object.entries(group.members.reduce<Record<string, IcebergTableMember[]>>((byPeriod, member) => {
+                            ? Object.entries(group.members.reduce<Record<string, DataTableMember[]>>((byPeriod, member) => {
                                 const period = member.period || "Outros";
                                 (byPeriod[period] ||= []).push(member);
                                 return byPeriod;
@@ -832,10 +832,10 @@ export default function Analysis() {
                                   <AccordionSummary expandIcon={<ExpandMore />}>
                                     <Typography variant="body2" sx={{ fontWeight: 600 }}>{period} <Typography component="span" variant="caption" color="text.secondary">· {members.length} tabela(s)</Typography></Typography>
                                   </AccordionSummary>
-                                  <AccordionDetails><Stack spacing={0.5}>{members.map(renderIcebergMember)}</Stack></AccordionDetails>
+                                  <AccordionDetails><Stack spacing={0.5}>{members.map(renderDataMember)}</Stack></AccordionDetails>
                                 </Accordion>
                               ))
-                            : group.members.map(renderIcebergMember)}
+                            : group.members.map(renderDataMember)}
                         </Stack>
                       )}
                     </Paper>
@@ -844,9 +844,9 @@ export default function Analysis() {
               </Stack>
             </>
           )}
-          {layer === "gold" && selectedIcebergTable && (
+          {layer === "gold" && selectedDataTable && (
             <Accordion disableGutters sx={{ mb: 2, border: "1px solid", borderColor: "divider", borderRadius: "8px !important" }}>
-              <AccordionSummary expandIcon={<ExpandMore />}><Typography variant="body2" sx={{ fontWeight: 600 }}>Partições de {selectedIcebergTable}</Typography></AccordionSummary>
+              <AccordionSummary expandIcon={<ExpandMore />}><Typography variant="body2" sx={{ fontWeight: 600 }}>Partições de {selectedDataTable}</Typography></AccordionSummary>
               <AccordionDetails>
                 {partitionsLoading ? <CircularProgress size={20} /> : partitionRows.length ? (
                   <Table size="small"><TableHead><TableRow><TableCell>Dia / período (UTC quando diário)</TableCell><TableCell>Tipo</TableCell><TableCell align="right">Registros</TableCell><TableCell align="right">Arquivos</TableCell></TableRow></TableHead>
@@ -859,14 +859,14 @@ export default function Analysis() {
           <Paper elevation={0} sx={{ p: 2, mb: 2, borderRadius: 2, bgcolor: "background.paper", border: "1px solid", borderColor: "divider" }}>
             <Box sx={{ display: "flex", gap: 1, mb: 1, flexWrap: "wrap" }}>
               {((layer === "bronze" || layer === "silver")
-                ? (selectedIcebergTable ? [
-                    { label: "Amostra da tabela selecionada", sql: `SELECT * FROM iceberg.${layer}.${selectedIcebergTable} LIMIT 10` },
-                    { label: "Contagem por período", sql: `SELECT _billing_period, COUNT(*) AS rows FROM iceberg.${layer}.${selectedIcebergTable} GROUP BY _billing_period ORDER BY _billing_period DESC` },
+                ? (selectedDataTable ? [
+                    { label: "Amostra da tabela selecionada", sql: `SELECT * FROM iceberg.${layer}.${selectedDataTable} LIMIT 10` },
+                    { label: "Contagem por período", sql: `SELECT _billing_period, COUNT(*) AS rows FROM iceberg.${layer}.${selectedDataTable} GROUP BY _billing_period ORDER BY _billing_period DESC` },
                   ] : [])
                 : layer === "gold"
-                  ? (selectedIcebergTable ? (PREBUILT.gold || []).map(q => ({
+                  ? (selectedDataTable ? (PREBUILT.gold || []).map(q => ({
                       ...q,
-                      sql: q.sql.split("iceberg.gold.dest_modelo_focus").join(`iceberg.gold.${selectedIcebergTable}`),
+                      sql: q.sql.split("iceberg.gold.dest_modelo_focus").join(`iceberg.gold.${selectedDataTable}`),
                     })) : [])
                   : (PREBUILT[layer] || [])).map((q) => (
                 <Button key={q.label} size="small" variant="outlined" onClick={() => setPrebuilt(q.sql)}>{q.label}</Button>
