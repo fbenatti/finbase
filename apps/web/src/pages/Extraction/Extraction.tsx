@@ -762,7 +762,7 @@ export default function Extraction({ embedded = false }: { embedded?: boolean })
               disableRowSelectionOnClick
               pageSizeOptions={[100, 250, 500]}
               initialState={{ pagination: { paginationModel: { pageSize: 100, page: 0 } } }}
-              sx={{ border: 1, borderColor: "divider", borderRadius: 2, bgcolor: "background.paper", "& .MuiDataGrid-columnHeaders": { bgcolor: "#f8fafc" } }}
+              sx={{ border: 1, borderColor: "divider", borderRadius: 2, bgcolor: "background.paper", "& .MuiDataGrid-columnHeaders": { bgcolor: "background.default" } }}
             />
           </Box>
           <Box sx={{ display: "none" }}>

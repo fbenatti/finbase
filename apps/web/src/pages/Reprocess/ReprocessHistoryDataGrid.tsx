@@ -386,11 +386,8 @@ export default function ReprocessHistoryDataGrid({
             borderRadius: 2,
             bgcolor: "background.paper",
             "& .MuiDataGrid-columnHeaders": {
-              bgcolor: "#f8fafc",
+              bgcolor: "background.default",
               borderBottomColor: "divider",
-            },
-            "& .MuiDataGrid-cell:focus, & .MuiDataGrid-columnHeader:focus": {
-              outline: "none",
             },
           }}
         />

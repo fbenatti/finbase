@@ -548,7 +548,7 @@ export default function Planning({
     {
       field: "actions",
       headerName: "Ações",
-      width: 72,
+      width: 88,
       align: "center",
       headerAlign: "center",
       sortable: false,
@@ -652,7 +652,7 @@ export default function Planning({
   };
   return (
     <Box sx={{ minWidth: 0 }}>
-      <Stack direction="row" alignItems="center" justifyContent="space-between" gap={2} sx={{ mb: 3 }}>
+      <Stack direction="row" alignItems="center" justifyContent="space-between" flexWrap="wrap" gap={2} sx={{ mb: 3 }}>
         <Box>
           <Typography variant="h4" component="h1" sx={{ mb: 0.75 }}>{title}</Typography>
           <Typography variant="body2" color="text.secondary">{help}</Typography>
@@ -716,8 +716,8 @@ export default function Planning({
               </Tooltip>
             </Stack>
             <FormControl sx={{ minWidth: 240, flex: { xs: 1, md: "0 1 320px" } }}>
-              <InputLabel id="planning-version-label">Versão do planejamento</InputLabel>
-              <Select labelId="planning-version-label" label="Versão do planejamento" value={snapshotId} onChange={e => setSnapshotId(String(e.target.value))} displayEmpty>
+              <InputLabel shrink id="planning-version-label">Versão do planejamento</InputLabel>
+              <Select labelId="planning-version-label" label="Versão do planejamento" notched value={snapshotId} onChange={e => setSnapshotId(String(e.target.value))} displayEmpty>
                 <MenuItem value="">Versão atual{currentVersion ? ` · v${currentVersion.version}` : ""}</MenuItem>
                 {versions.filter(version => !version.is_current).map(version => <MenuItem key={version.id} value={String(version.id)}>v{version.version} · {version.title || version.source}</MenuItem>)}
               </Select>
@@ -726,17 +726,19 @@ export default function Planning({
           {(type === "orcamento" || type === "defesa-orcamentaria") && (
             <Stack direction="row" gap={1.5} sx={{ px: { xs: 2, md: 3 }, pb: 2 }} flexWrap="wrap">
               <FormControl sx={{ minWidth: 180, flex: { xs: 1, md: "0 1 220px" } }} disabled={Boolean(defenseRequest)}>
-                <InputLabel id="planning-cloud-label">Provedor</InputLabel>
+                <InputLabel shrink id="planning-cloud-label">Provedor</InputLabel>
                 <Select
                   labelId="planning-cloud-label"
                   label="Provedor"
+                  notched
+                  displayEmpty
                   value={cloudFilter}
                   onChange={(event) => {
                     setCloudFilter(String(event.target.value));
                     setIdOrcamentoFilter("");
                   }}
                 >
-                  <MenuItem value="">Todas</MenuItem>
+                  <MenuItem value="">Todos os provedores</MenuItem>
                   {Array.from(
                     new Set(scopes.map((scope) => scope.cloud).filter(Boolean)),
                   ).map((value) => (
@@ -747,10 +749,12 @@ export default function Planning({
                 </Select>
               </FormControl>
               <FormControl sx={{ minWidth: 220, flex: { xs: 1, md: "0 1 320px" } }} disabled={!cloudFilter || Boolean(defenseRequest)}>
-                <InputLabel id="planning-budget-label">ID do orçamento</InputLabel>
+                <InputLabel shrink id="planning-budget-label">ID do orçamento</InputLabel>
                 <Select
                   labelId="planning-budget-label"
                   label="ID do orçamento"
+                  notched
+                  displayEmpty
                   value={idOrcamentoFilter}
                   onChange={(event) =>
                     setIdOrcamentoFilter(String(event.target.value))
@@ -818,7 +822,7 @@ export default function Planning({
               ) : (
                 <Box
                   sx={{
-                    height: 520,
+                    height: Math.min(520, Math.max(280, (scopedRows.length + 2) * 48)),
                     width: "100%",
                     "& .planning-own .planning-hierarchy": { borderLeft: "3px solid #24a148", bgcolor: "#defbe6" },
                     "& .planning-mixed .planning-hierarchy": { borderLeft: "3px solid #f1c21b", bgcolor: "#fff1c7" },

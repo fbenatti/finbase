@@ -370,13 +370,12 @@ export default function ForecastConfigsDataGrid({
             borderColor: "divider",
             borderRadius: 2,
             bgcolor: "background.paper",
-            "& .MuiDataGrid-columnHeaders": { bgcolor: "#f8fafc", borderBottomColor: "divider" },
+            "& .MuiDataGrid-columnHeaders": { bgcolor: "background.default", borderBottomColor: "divider" },
             "& .MuiDataGrid-cell": { display: "flex", alignItems: "center" },
             "& .MuiDataGrid-cell[data-field='actions']": { justifyContent: "center" },
             "& .MuiDataGrid-columnHeader[data-field='actions']": { justifyContent: "center" },
             "& .MuiDataGrid-cell:not([data-field='actions'])": { justifyContent: "flex-start" },
             "& .MuiDataGrid-columnHeader:not([data-field='actions'])": { justifyContent: "flex-start" },
-            "& .MuiDataGrid-cell:focus, & .MuiDataGrid-columnHeader:focus": { outline: "none" },
           }}
         />
       </Box>

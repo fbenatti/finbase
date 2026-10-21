@@ -35,7 +35,7 @@ export default function FinancialPlanning() {
     <Box sx={{ minWidth: 0 }}>
       <Box>
         {active.code === "visao-contabil" && <><Typography variant="h4" sx={{ mb: 0.5 }}>
-          {active.code === "dashboard" && executiveSubtab === "historia-contrato" ? "História dos contratos" : active.code === "dashboard" && executiveSubtab === "compromisso" ? "Consumo de compromissos" : active.title}
+          {active.title}
         </Typography>
         <Typography color="text.secondary" sx={{ mb: 2 }}>{active.help}</Typography></>}
         {active.code === "acuracia-orcamento" ? (

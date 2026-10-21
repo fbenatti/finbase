@@ -67,9 +67,9 @@ html[data-finbase-layout="carbon"] #root {
 .finbase-carbon-layout-switch button {
   min-height: 2rem;
   padding: 0.4rem 0.7rem;
-  border: 1px solid #6f6f6f;
+  border: 1px solid #8d8d8d;
   background: transparent;
-  color: #f4f4f4;
+  color: #525252;
   font: inherit;
   font-size: 0.75rem;
   cursor: pointer;
@@ -80,7 +80,7 @@ html[data-finbase-layout="carbon"] #root {
 }
 
 .finbase-carbon-layout-switch button[aria-pressed="true"] {
-  background: #f4f4f4;
+  background: #e0e0e0;
   color: #161616;
 }
 

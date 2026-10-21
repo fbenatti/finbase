@@ -157,7 +157,7 @@ export default function ProcessingLogsTab() {
     </Stack>
     <Typography variant="caption" color="text.secondary">Selecione uma execução para ver parâmetros, eventos e erros. O conteúdo dos dados permanece na tabela de destino quando o processo o publica.</Typography>
     <Box sx={{ height: 560, width: "100%" }}>
-      <DataGrid rows={rows} columns={columns} loading={loading} rowCount={total} paginationMode="server" paginationModel={pagination} onPaginationModelChange={setPagination} pageSizeOptions={[10, 25, 50, 100]} onRowClick={({ row }) => setSelected(row)} disableRowSelectionOnClick sx={{ "& .MuiDataGrid-row": { cursor: "pointer" }, "& .MuiDataGrid-columnHeaders": { bgcolor: "#f8fafc" } }} />
+      <DataGrid rows={rows} columns={columns} loading={loading} rowCount={total} paginationMode="server" paginationModel={pagination} onPaginationModelChange={setPagination} pageSizeOptions={[10, 25, 50, 100]} onRowClick={({ row }) => setSelected(row)} disableRowSelectionOnClick sx={{ "& .MuiDataGrid-row": { cursor: "pointer" }, "& .MuiDataGrid-columnHeaders": { bgcolor: "background.default" } }} />
     </Box>
     <Dialog open={Boolean(selected)} onClose={() => setSelected(null)} fullWidth maxWidth="lg">
       <DialogTitle sx={{ display: "flex", alignItems: "center", gap: 1 }}>

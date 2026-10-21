@@ -352,7 +352,7 @@ export default function ForecastAccuracy({ embedded = false }: { embedded?: bool
   return (
     <Box sx={embedded
       ? { pb: 3 }
-      : { mx: -3, mt: -3, pb: 3, minHeight: "calc(100vh - 64px)", bgcolor: "#f8fafc" }}>
+      : { minWidth: 0, pb: 3 }}>
       <Box sx={{ px: 3, pt: 3, bgcolor: "background.paper", borderBottom: "1px solid", borderColor: "divider", borderRadius: embedded ? "12px 12px 0 0" : 0 }}>
         <Box sx={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 2, mb: 2, flexWrap: "wrap" }}>
           <Box>

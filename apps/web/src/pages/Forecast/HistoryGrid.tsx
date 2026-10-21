@@ -261,8 +261,7 @@ export default function HistoryGrid({ result, loading, onQuery, measureLabel }: 
             borderColor: "divider",
             borderRadius: 2,
             bgcolor: "background.paper",
-            "& .MuiDataGrid-columnHeaders": { bgcolor: "#f8fafc", borderBottomColor: "divider" },
-            "& .MuiDataGrid-cell:focus, & .MuiDataGrid-columnHeader:focus": { outline: "none" },
+            "& .MuiDataGrid-columnHeaders": { bgcolor: "background.default", borderBottomColor: "divider" },
           }}
         />
       </Box>

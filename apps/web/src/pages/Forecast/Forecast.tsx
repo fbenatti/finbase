@@ -301,11 +301,11 @@ export default function Forecast() {
 
   return (
     <>
-    <Box sx={{ mx: -3, mt: -3, pb: 3, minHeight: "calc(100vh - 64px)", bgcolor: "#f8fafc" }}>
+    <Box sx={{ minWidth: 0 }}>
       {/* Faixa de contexto branca */}
-      <Box sx={{ px: 3, pt: 3, bgcolor: "background.paper", borderBottom: "1px solid", borderColor: "divider" }}>
+      <Box sx={{ mb: 3 }}>
         <Box sx={{ mb: 2 }}>
-          <Typography variant="h4">Forecast</Typography>
+          <Typography variant="h4" component="h1">{tab === "rules" ? "Regras de projeção" : tab === "history" ? "Histórico de projeções" : "Configuração e execução"}</Typography>
           <Typography color="text.secondary" sx={{ mt: 0.5 }}>
             Projeções de custo sobre as bases consolidadas, com regras de negócio e rateio por intervalo.
           </Typography>
@@ -314,7 +314,7 @@ export default function Forecast() {
 
       {/* Área de trabalho com campos simples de 40px */}
       <Box sx={{
-        p: 3,
+        minWidth: 0,
         "& .MuiOutlinedInput-root:not(.MuiInputBase-multiline)": { height: 40 },
         "& .MuiInputLabel-root:not(.MuiInputLabel-shrink)": { transform: "translate(14px, 11px) scale(1)" },
       }}>

@@ -1,5 +1,6 @@
 import { createTheme } from "@mui/material/styles";
 import type {} from "@mui/x-data-grid/themeAugmentation";
+import { dataGridIcons } from "../components/DataGridIcons";
 import { ptBR } from "@mui/x-data-grid/locales";
 
 export function createAppTheme(layout: "finbase" | "carbon" = "finbase") {
@@ -78,13 +79,13 @@ export function createAppTheme(layout: "finbase" | "carbon" = "finbase") {
       head: { backgroundColor: carbon ? "#e0e0e0" : "#EDF2F6", fontWeight: 600, color: carbon ? "#161616" : "#1D2D3F" },
     } },
     MuiDataGrid: {
-      defaultProps: { rowHeight: 48, columnHeaderHeight: 48, disableRowSelectionOnClick: true, localeText: ptBR.components.MuiDataGrid.defaultProps.localeText },
+      defaultProps: { rowHeight: 48, columnHeaderHeight: 48, disableRowSelectionOnClick: true, slots: dataGridIcons, localeText: ptBR.components.MuiDataGrid.defaultProps.localeText },
       styleOverrides: {
-        root: { borderColor: border, backgroundColor: "#fff", borderRadius: carbon ? 0 : 6, fontSize: "0.875rem" },
+        root: { borderColor: border, backgroundColor: "#fff", borderRadius: carbon ? 0 : 6, fontSize: "0.875rem", "& .MuiDataGrid-cell:focus, & .MuiDataGrid-columnHeader:focus, & .MuiDataGrid-cell:focus-within, & .MuiDataGrid-columnHeader:focus-within": { outline: "2px solid", outlineColor: "primary.main", outlineOffset: -2 } },
         columnHeader: { backgroundColor: carbon ? "#e0e0e0" : "#EDF2F6", padding: "0 16px", "&:focus-within": { outlineOffset: -2 } },
         columnHeaderTitle: { fontWeight: 600 },
-        cell: { borderColor: border, padding: "0 16px", fontVariantNumeric: "tabular-nums", display: "flex", alignItems: "center", "&:focus-within": { outlineOffset: -2 } },
-        cellNumber: { justifyContent: "flex-end" },
+        cell: { borderColor: border, padding: "0 16px", fontVariantNumeric: "tabular-nums", display: "flex", alignItems: "center", "&.MuiDataGrid-cell--textRight": { justifyContent: "flex-end" }, "&:focus-within": { outlineOffset: -2 } },
+
         row: { "&:hover": { backgroundColor: carbon ? "#e8e8e8" : "#F0F5F8" } },
         footerContainer: { minHeight: 48, borderColor: border, backgroundColor: surface },
         toolbarContainer: { padding: 16, gap: 8, borderBottom: `1px solid ${border}` },
