@@ -50,6 +50,7 @@ import {
   HistoryOutlined,
   AutoGraphOutlined,
   DataObjectOutlined,
+  DeleteSweepOutlined,
   CurrencyExchangeOutlined,
   SettingsOutlined,
 } from "@mui/icons-material";
@@ -147,7 +148,14 @@ const MENU_GROUPS: MenuGroup[] = [
       { path: "/reprocess?tab=extraction", label: "Extrações", icon: <CloudOutlined /> },
       { path: "/reprocess?tab=schedules", label: "Agendamentos", icon: <ScheduleOutlined /> },
       { path: "/reprocess?tab=logs", label: "Histórico de execuções", icon: <HistoryOutlined /> },
-      { path: "/analysis?tab=fontes", label: "Explorador de dados", icon: <ScienceOutlined /> },
+      { path: "/analysis?tab=destino", label: "Explorador · tabelas de destino", icon: <TableChartOutlined /> },
+      { path: "/analysis?tab=fontes", label: "Explorador · fontes de origem", icon: <CloudOutlined /> },
+      { path: "/analysis?tab=iceberg&layer=bronze", label: "Iceberg · Bronze", icon: <StorageOutlined /> },
+      { path: "/analysis?tab=iceberg&layer=silver", label: "Iceberg · Silver", icon: <DataObjectOutlined /> },
+      { path: "/analysis?tab=iceberg&layer=gold", label: "Iceberg · Gold", icon: <PaidOutlined /> },
+      { path: "/analysis?tab=staging", label: "Explorador · staging", icon: <DeleteSweepOutlined /> },
+      { path: "/analysis?tab=pivot", label: "Explorador · tabelas dinâmicas", icon: <AutoGraphOutlined /> },
+      { path: "/analysis?tab=busca", label: "Explorador · busca na fonte", icon: <ScienceOutlined /> },
     ],
   },
   {
