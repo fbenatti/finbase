@@ -10,7 +10,7 @@ import { dataDisplayText } from "../../utils/dataPresentation";
  * workflow por comandos explícitos.
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { useSearchParams } from "react-router-dom";
+import { useMenuSearchParams as useSearchParams } from "../../navigation/useMenuSearchParams";
 import {
   Accordion, AccordionDetails, AccordionSummary, Alert, Box, Button, Chip, CircularProgress, Divider, Drawer, IconButton, LinearProgress,
   MenuItem, Paper, Stack, Table, TableBody, TableCell, TableHead, TableRow,

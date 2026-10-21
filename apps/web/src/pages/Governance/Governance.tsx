@@ -1,4 +1,5 @@
-import { Navigate, useSearchParams } from "react-router-dom";
+import { Navigate } from "react-router-dom";
+import { useMenuSearchParams as useSearchParams } from "../../navigation/useMenuSearchParams";
 import { useAuth } from "../../auth/AuthContext";
 import { Box, Paper, Typography } from "@mui/material";
 import Rules from "../Rules/Rules";

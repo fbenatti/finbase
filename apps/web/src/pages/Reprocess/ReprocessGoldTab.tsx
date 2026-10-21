@@ -1,7 +1,7 @@
 import { dataDisplayText } from "../../utils/dataPresentation";
 import { useEffect, useState } from "react";
 import { Alert, Box, Button, Checkbox, Chip, Stack, Typography } from "@mui/material";
-import { useSearchParams } from "react-router-dom";
+import { useMenuSearchParams as useSearchParams } from "../../navigation/useMenuSearchParams";
 import { CheckBox, CheckBoxOutlineBlank, PlayArrow, Refresh } from "@mui/icons-material";
 import { GoldCubeRule, formatApiError, getGoldCubeRules, reprocessGoldCubes } from "../../services/api";
 import ReprocessAICostRelationshipsTab from "./ReprocessAICostRelationshipsTab";

@@ -1,6 +1,6 @@
 import { dataDisplayText } from "../../utils/dataPresentation";
 import { useEffect, useMemo, useRef, useState } from "react";
-import { useSearchParams } from "react-router-dom";
+import { useMenuSearchParams as useSearchParams } from "../../navigation/useMenuSearchParams";
 import Plot from "@/components/Plot";
 import PictureAsPdfIcon from "@mui/icons-material/PictureAsPdf";
 import { Alert, Box, Button, Card, CardContent, Chip, CircularProgress, FormControl, Grid, InputLabel, MenuItem, Paper, Select, Stack, Table, TableBody, TableCell, TableHead, TableRow, Tooltip, Typography } from "@mui/material";

@@ -1,6 +1,7 @@
 import { dataDisplayText } from "../../utils/dataPresentation";
 import { useCallback, useEffect, useState } from "react";
-import { useNavigate, useParams, useSearchParams } from "react-router-dom";
+import { useNavigate, useParams } from "react-router-dom";
+import { useMenuSearchParams as useSearchParams } from "../../navigation/useMenuSearchParams";
 import { Alert, Box, Button, CircularProgress, Paper, Stack, Typography } from "@mui/material";
 import { ArrowBack } from "@mui/icons-material";
 import HistoryGrid from "./HistoryGrid";

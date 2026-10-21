@@ -1,7 +1,7 @@
 import { dataDisplayText } from "../../utils/dataPresentation";
 import { moduleDisplayName } from "../../utils/dataPresentation";
 import React, { useEffect, useMemo, useState } from "react";
-import { useSearchParams } from "react-router-dom";
+import { useMenuSearchParams as useSearchParams } from "../../navigation/useMenuSearchParams";
 import {
   Box, Button, Checkbox, Chip, Dialog, DialogActions, DialogContent, DialogTitle,
   FormControl, IconButton, InputLabel, MenuItem, Paper, Select, Stack,

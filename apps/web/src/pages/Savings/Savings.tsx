@@ -1,6 +1,7 @@
 import { dataDisplayText } from "../../utils/dataPresentation";
 import { lazy, Suspense, useEffect, useState } from "react";
-import { Navigate, useSearchParams } from "react-router-dom";
+import { Navigate } from "react-router-dom";
+import { useMenuSearchParams as useSearchParams } from "../../navigation/useMenuSearchParams";
 import { Alert, Box, Button, Card, CardContent, Chip, Dialog, DialogActions, DialogContent, DialogTitle, FormControl, InputLabel, MenuItem, Paper, Select, Stack, TextField, Typography } from "@mui/material";
 import { Add, Cancel, Refresh } from "@mui/icons-material";
 import { DataGrid, GridColDef } from "@mui/x-data-grid";

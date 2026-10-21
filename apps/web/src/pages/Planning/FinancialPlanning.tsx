@@ -1,5 +1,5 @@
 import { Box, Typography } from "@mui/material";
-import { useSearchParams } from "react-router-dom";
+import { useMenuSearchParams as useSearchParams } from "../../navigation/useMenuSearchParams";
 import FinancialDashboard from "./FinancialDashboard";
 import BudgetAccuracy from "./BudgetAccuracy";
 import Planning from "./Planning";

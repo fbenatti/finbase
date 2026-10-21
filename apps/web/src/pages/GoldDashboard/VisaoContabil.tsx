@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { useSearchParams } from "react-router-dom";
+import { useMenuSearchParams as useSearchParams } from "../../navigation/useMenuSearchParams";
 import {
   Box, Paper, Typography, Stack, Alert, Button, Table, TableBody, TableCell,
   TableContainer, TableHead, TableRow, CircularProgress,

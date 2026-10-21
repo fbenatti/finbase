@@ -1,5 +1,6 @@
 import { Box, Paper, Typography } from "@mui/material";
-import { Navigate, useSearchParams } from "react-router-dom";
+import { Navigate } from "react-router-dom";
+import { useMenuSearchParams as useSearchParams } from "../../navigation/useMenuSearchParams";
 import Destinations from "../Destinations/Destinations";
 import Relationship from "../Relationship/Relationship";
 

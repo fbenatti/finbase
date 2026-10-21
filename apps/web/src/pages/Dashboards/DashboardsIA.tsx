@@ -1,6 +1,7 @@
 import { dataDisplayText } from "../../utils/dataPresentation";
 import { useEffect, useMemo, useState, type ReactElement } from "react";
-import { Link as RouterLink, useSearchParams } from "react-router-dom";
+import { Link as RouterLink } from "react-router-dom";
+import { useMenuSearchParams as useSearchParams } from "../../navigation/useMenuSearchParams";
 import Plot from "@/components/Plot";
 import {
   Alert, Box, Breadcrumbs, Button, Card, CardContent, Chip, CircularProgress, Collapse,

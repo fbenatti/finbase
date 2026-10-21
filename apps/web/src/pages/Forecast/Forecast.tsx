@@ -1,6 +1,7 @@
 import { dataDisplayText } from "../../utils/dataPresentation";
 import { useEffect, useRef, useState } from "react";
-import { useNavigate, useSearchParams } from "react-router-dom";
+import { useNavigate } from "react-router-dom";
+import { useMenuSearchParams as useSearchParams } from "../../navigation/useMenuSearchParams";
 import {
   Alert,
   Box,

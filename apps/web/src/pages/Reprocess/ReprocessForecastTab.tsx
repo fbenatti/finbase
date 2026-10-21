@@ -4,7 +4,7 @@ import { useNotifications } from "../../context/NotificationContext";
 import {
   Alert, Box, Button, Card, CardContent, CircularProgress, Stack, Typography,
 } from "@mui/material";
-import { useSearchParams } from "react-router-dom";
+import { useMenuSearchParams as useSearchParams } from "../../navigation/useMenuSearchParams";
 import { PlayArrow } from "@mui/icons-material";
 import {
   ForecastConfig, createForecastRun, getForecastConfigs,

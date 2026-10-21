@@ -1,6 +1,6 @@
 import { dataDisplayText } from "../../utils/dataPresentation";
 import { Box, Paper, Typography } from "@mui/material";
-import { useSearchParams } from "react-router-dom";
+import { useMenuSearchParams as useSearchParams } from "../../navigation/useMenuSearchParams";
 import { canonicalOperationsParams } from "../../utils/dataNavigation";
 import Extraction from "../Extraction/Extraction";
 import SchedulesPanel from "../Extraction/SchedulesPanel";

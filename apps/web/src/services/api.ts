@@ -1,3 +1,4 @@
+import { getActiveModule } from "../navigation/activeModule";
 import { dataDisplayText } from "../utils/dataPresentation";
 import axios from "axios";
 
@@ -561,6 +562,10 @@ function isTokenlessPublic(url: string): boolean {
 }
 
 api.interceptors.request.use((config) => {
+  const activeModule = getActiveModule();
+  if (activeModule && !/^\/(auth|navigation|modules)(\/|$)/.test(config.url || "")) {
+    config.headers.set("X-Finbase-Module", activeModule);
+  }
   const token = getAccessToken();
   if (token && config.url && !isTokenlessPublic(config.url)) {
     config.headers = config.headers || {};

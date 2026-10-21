@@ -1,6 +1,6 @@
 import { dataDisplayText } from "../../utils/dataPresentation";
 import { useEffect, useMemo, useState } from "react";
-import { useSearchParams } from "react-router-dom";
+import { useMenuSearchParams as useSearchParams } from "../../navigation/useMenuSearchParams";
 import {
   Box, Typography, Paper, Grid, Alert, CircularProgress, LinearProgress, Button, Checkbox, ListItemText,
   Table, TableBody, TableCell, TableContainer, TableHead, TableRow, Chip, Tooltip,

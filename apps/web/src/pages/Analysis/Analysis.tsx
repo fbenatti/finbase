@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo } from "react";
-import { useSearchParams } from "react-router-dom";
+import { useMenuSearchParams as useSearchParams } from "../../navigation/useMenuSearchParams";
 import { DATA_LAYER_LABELS, DATA_SERVICE_LABELS, dataDisplayText } from "../../utils/dataPresentation";
 import { canonicalExplorerParams, DATA_LAYER_STAGES, dataLayerForStage } from "../../utils/dataNavigation";
 import {

@@ -1,6 +1,6 @@
 import { dataDisplayText } from "../../utils/dataPresentation";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { useSearchParams } from "react-router-dom";
+import { useMenuSearchParams as useSearchParams } from "../../navigation/useMenuSearchParams";
 import {
   Box, Typography, Paper, Grid, Chip, Alert, CircularProgress, Button,
   FormControl, InputLabel, Select, MenuItem, Stack, TextField, Autocomplete, Popover,

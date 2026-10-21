@@ -1,7 +1,7 @@
 import { dataDisplayText } from "../../utils/dataPresentation";
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Plot from "@/components/Plot";
-import { useSearchParams } from "react-router-dom";
+import { useMenuSearchParams as useSearchParams } from "../../navigation/useMenuSearchParams";
 import {
   Alert, Box, Breadcrumbs, Button, Chip, CircularProgress, Dialog, DialogActions, DialogContent, DialogTitle, FormControl, Grid, IconButton,
   InputLabel, LinearProgress, Link, MenuItem,
