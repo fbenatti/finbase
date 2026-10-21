@@ -24,8 +24,8 @@ import {
   TableContainer,
   TableHead,
   TableRow,
-  Tab,
-  Tabs,
+  ToggleButton,
+  ToggleButtonGroup,
   TextField,
   Typography,
 } from "@mui/material";
@@ -665,14 +665,10 @@ export default function BudgetAccuracy() {
                         color={detailWithinBudget ? "#059669" : "#dc2626"}
                       />
                     </Stack>
-                    <Tabs
-                      value={detailTab}
-                      onChange={(_, value) => setDetailTab(value)}
-                      sx={{ borderBottom: 1, borderColor: "divider" }}
-                    >
-                      <Tab label="Visão anual" />
-                      <Tab label="Reconhecer desvio" />
-                    </Tabs>
+                    <ToggleButtonGroup exclusive size="small" value={detailTab} onChange={(_, value: number | null) => { if (value !== null) setDetailTab(value); }}>
+                      <ToggleButton value={0}>Visão anual</ToggleButton>
+                      <ToggleButton value={1}>Registrar desvio</ToggleButton>
+                    </ToggleButtonGroup>
                     {detailTab === 0 ? (
                       <>
                         <Typography variant="body2" color="text.secondary">
