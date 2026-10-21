@@ -40,12 +40,10 @@ import {
   CorporateFareOutlined,
   LocalOfferOutlined,
   EventAvailableOutlined,
-  LightbulbOutlined,
   ManageAccountsOutlined,
   FactCheckOutlined,
   VpnKeyOutlined,
   ScienceOutlined,
-  SmartToyOutlined,
   StorageOutlined,
   ShowChartOutlined,
   ScheduleOutlined,
@@ -82,7 +80,6 @@ import {
   Notification as CarbonNotification,
   Logout as CarbonLogout,
   Finance as CarbonFinance,
-  Bot as CarbonBot,
   Warning as CarbonWarning,
   ChartLine as CarbonChartLine,
   DataBase as CarbonDataBase,
@@ -97,7 +94,7 @@ const COLLAPSED_WIDTH = 72;
 const LAYOUT_STORAGE_KEY = "finbase.layout";
 
 type MenuEntry = { path: string; label: string; icon: React.ReactNode };
-type MenuGroup = { label: string; icon: React.ReactNode; items: MenuEntry[]; keepVisibleWhenEmpty?: boolean };
+type MenuGroup = { label: string; icon: React.ReactNode; items: MenuEntry[] };
 
 const MENU_GROUPS: MenuGroup[] = [
   {
@@ -105,41 +102,6 @@ const MENU_GROUPS: MenuGroup[] = [
     icon: <DashboardOutlined fontSize="small" />,
     items: [
       { path: "/custos?tab=visao-executiva", label: "Resumo de custos", icon: <QueryStatsOutlined /> },
-    ],
-  },
-  {
-    label: "Operação de IA",
-    icon: <SmartToyOutlined fontSize="small" />,
-    items: [
-      { path: "/ia/capacidade?view=0&tab=0", label: "IA · resumo de capacidade", icon: <SmartToyOutlined /> },
-      { path: "/ia/capacidade?view=0&tab=1", label: "IA · consumo de tokens", icon: <QueryStatsOutlined /> },
-      { path: "/ia/capacidade?view=0&tab=2", label: "IA · capacidade e operação", icon: <SettingsOutlined /> },
-      { path: "/ia/capacidade?view=0&tab=3", label: "IA · recomendações", icon: <LightbulbOutlined /> },
-    ],
-  },
-  {
-    label: "Provedores de IA",
-    icon: <SmartToyOutlined fontSize="small" />,
-    items: [
-      { path: "/ia/capacidade?view=1", label: "IA · GitHub Copilot", icon: <SmartToyOutlined /> },
-      { path: "/ia/capacidade?view=2&providerTab=executive", label: "IA · Claude executivo", icon: <DashboardOutlined /> },
-      { path: "/ia/capacidade?view=2&providerTab=technical", label: "IA · Claude técnico", icon: <ScienceOutlined /> },
-      { path: "/ia/capacidade?view=3&providerTab=executive", label: "IA · NotebookLM executivo", icon: <DashboardOutlined /> },
-      { path: "/ia/capacidade?view=3&providerTab=technical", label: "IA · NotebookLM técnico", icon: <ScienceOutlined /> },
-      { path: "/ia/capacidade?view=4", label: "IA · Aura Brain", icon: <SmartToyOutlined /> },
-      { path: "/ia/capacidade?view=5", label: "IA · Vivo Mais", icon: <SmartToyOutlined /> },
-      { path: "/ia/capacidade?view=6", label: "IA · Sinfonia", icon: <SmartToyOutlined /> },
-      { path: "/ia/capacidade?view=7", label: "IA · Datamesh", icon: <SmartToyOutlined /> },
-      { path: "/ia/capacidade?view=8", label: "IA · Wisper", icon: <SmartToyOutlined /> },
-    ],
-  },
-  {
-    label: "Adoção de IA",
-    icon: <AutoGraphOutlined fontSize="small" />,
-    items: [
-      { path: "/ia/adocao?tab=0", label: "IA · visão executiva", icon: <DashboardOutlined /> },
-      { path: "/ia/adocao?tab=1", label: "IA · eficiência FinOps", icon: <AutoGraphOutlined /> },
-      { path: "/ia/adocao?tab=2", label: "IA · uso por pessoa", icon: <ManageAccountsOutlined /> },
     ],
   },
   {
@@ -155,12 +117,6 @@ const MENU_GROUPS: MenuGroup[] = [
       { path: "/alertas?tab=6", label: "Anomalias confirmadas", icon: <FactCheckOutlined /> },
       { path: "/alertas?tab=7", label: "Configuração de alertas", icon: <SettingsOutlined /> },
     ],
-  },
-  {
-    label: "Unit Economics",
-    icon: <QueryStatsOutlined fontSize="small" />,
-    items: [],
-    keepVisibleWhenEmpty: true,
   },
   {
     label: "Planejamento",
@@ -199,7 +155,6 @@ const MENU_GROUPS: MenuGroup[] = [
     icon: <StorageOutlined fontSize="small" />,
     items: [
       { path: "/dados/fontes?view=connections", label: "Fontes de dados", icon: <CloudOutlined /> },
-      { path: "/dados/fontes?view=integrations", label: "Serviços auxiliares", icon: <SmartToyOutlined /> },
       { path: "/dados/catalogo?tab=destinations", label: "Catálogo de dados", icon: <TableChartOutlined /> },
       { path: "/dados/catalogo?tab=relationship", label: "Relacionamentos", icon: <AccountTreeOutlined /> },
       { path: "/dados/fluxos", label: "Fluxos de dados", icon: <AccountTreeOutlined /> },
@@ -208,7 +163,6 @@ const MENU_GROUPS: MenuGroup[] = [
       { path: "/operacoes/execucoes?tab=forecast&subtab=accuracy", label: "Acurácia do forecast", icon: <AutoGraphOutlined /> },
       { path: "/operacoes/execucoes?tab=shared", label: "Custo compartilhado", icon: <PaidOutlined /> },
       { path: "/operacoes/execucoes?tab=cubos&subtab=cubes", label: "Materialização de cubos", icon: <DataObjectOutlined /> },
-      { path: "/operacoes/execucoes?tab=cubos&subtab=ai-cost", label: "Relacionamentos de custo da IA", icon: <SmartToyOutlined /> },
       { path: "/operacoes/execucoes?tab=extraction", label: "Extrações", icon: <CloudOutlined /> },
       { path: "/operacoes/execucoes?tab=schedules", label: "Agendamentos", icon: <ScheduleOutlined /> },
       { path: "/operacoes/execucoes?tab=logs", label: "Histórico de execuções", icon: <HistoryOutlined /> },
@@ -280,7 +234,7 @@ export default function Layout() {
       const targets = permissionTargetsForLocation(pathname, search);
       return !targets || targets.some(target => hasPerm(target.module, "read", target.scope));
     }),
-  })).filter(group => group.items.length > 0 || group.keepVisibleWhenEmpty), [canAdmin, hasPerm]);
+  })).filter(group => group.items.length > 0), [canAdmin, hasPerm]);
   const navigate = useNavigate();
   const location = useLocation();
   const [expanded, setExpanded] = useState(true);
@@ -369,15 +323,13 @@ export default function Layout() {
         {visibleMenuGroups.map(group => {
           const activeGroup = group.items.some(item => menuPath(item.path).pathname === location.pathname);
           const groupIcon = group.label === "Panorama" ? CarbonDashboard
-            : group.label.includes("IA") ? CarbonBot
-              : group.label === "Alertas" ? CarbonWarning
-                : group.label === "Unit Economics" ? CarbonChartLine
-                  : group.label === "Planejamento" ? CarbonFinance
-                    : group.label === "Otimização" ? CarbonChartLine
-                      : group.label === "Dados e operação" ? CarbonDataBase
-                        : group.label === "Governança" ? CarbonSettings
-                          : group.label === "Administração" ? CarbonUserMultiple
-                            : CarbonCloud;
+            : group.label === "Alertas" ? CarbonWarning
+              : group.label === "Planejamento" ? CarbonFinance
+                : group.label === "Otimização" ? CarbonChartLine
+                  : group.label === "Dados e operação" ? CarbonDataBase
+                    : group.label === "Governança" ? CarbonSettings
+                      : group.label === "Administração" ? CarbonUserMultiple
+                        : CarbonCloud;
           return group.items.length === 1 ? (
             <CarbonSideNavLink key={group.label} href={group.items[0].path} renderIcon={groupIcon}
               isActive={matchesMenuPath(group.items[0].path, location.pathname, location.search)}

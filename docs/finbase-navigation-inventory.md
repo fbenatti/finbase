@@ -16,17 +16,11 @@ Vocabulário dos dados e compatibilidade das URLs: [finbase-data-language.md](fi
 
 ## Mapa completo do menu
 
-Os grupos abaixo são as seções da navegação. Cada item listado é uma entrada de submenu com rota e estado próprios. **Unit Economics** fica como seção vazia, conforme solicitado.
+Os grupos abaixo são as seções da navegação. Cada item listado é uma entrada de submenu com rota e estado próprios. As seções de IA, os serviços auxiliares de IA, os relacionamentos de custo de IA e Unit Economics foram retirados da navegação nos layouts Finbase e Carbon.
 
 ### Panorama
 
 - **Resumo de custos**: `/custos?tab=visao-executiva`. Custos gerais, evolução, custos por organização/serviço, investigação, decisões, detalhamento e qualidade dos dados foram removidos do menu; suas visões permanecem na página.
-
-### Operação de IA
-
-- **Operação de IA / Azure PTUs**: resumo de capacidade, consumo de tokens, capacidade e operação e recomendações (`/ia/capacidade?view=0&tab=0..3`).
-- **Provedores de IA**: GitHub Copilot (`view=1`); Claude executivo e técnico (`view=2&providerTab=executive|technical`); NotebookLM executivo e técnico (`view=3&providerTab=executive|technical`); Aura Brain (`view=4`); Vivo Mais (`view=5`); Sinfonia (`view=6`); Datamesh (`view=7`); Wisper (`view=8`). Todos usam `/ia/capacidade`.
-- **Adoção de IA**: visão executiva, eficiência FinOps e uso por pessoa (`/ia/adocao?tab=0..2`).
 
 ### Alertas
 
@@ -49,9 +43,9 @@ Os grupos abaixo são as seções da navegação. Cada item listado é uma entra
 
 ### Dados e operação
 
-- **Integrações**: fontes de dados e serviços auxiliares (`/dados/fontes?view=connections|integrations`). Os filtros de categoria/provedor são controles da página, não destinos de navegação.
+- **Integrações**: fontes de dados (`/dados/fontes?view=connections`). Os filtros de categoria/provedor são controles da página, não destinos de navegação.
 - **Catálogo**: catálogo de dados e relacionamentos (`/dados/catalogo?tab=destinations|relationship`).
-- **Operação de dados**: fluxos de dados (`/dados/fluxos`); execuções de dados (`/operacoes/execucoes?tab=data`); execuções de forecast e acurácia (`tab=forecast&subtab=forecast|accuracy`); custo compartilhado (`tab=shared`); materialização de cubos e relacionamentos de custo IA (`tab=cubos&subtab=cubes|ai-cost`); extrações (`tab=extraction`); agendamentos (`tab=schedules`); histórico de execuções (`tab=logs`).
+- **Operação de dados**: fluxos de dados (`/dados/fluxos`); execuções de dados (`/operacoes/execucoes?tab=data`); execuções de forecast e acurácia (`tab=forecast&subtab=forecast|accuracy`); custo compartilhado (`tab=shared`); materialização de cubos (`tab=cubos&subtab=cubes`); extrações (`tab=extraction`); agendamentos (`tab=schedules`); histórico de execuções (`tab=logs`).
 - **Explorador**: tabelas de destino, fontes de origem, bases de origem, preparadas e consolidadas (`/dados/explorador?tab=acervo&etapa=origem|preparacao|consolidacao`), área temporária (`tab=temporarios`), tabelas dinâmicas e busca na fonte (`tab=destino|fontes|pivot|busca`).
 
 ### Governança
