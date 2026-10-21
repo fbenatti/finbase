@@ -1,6 +1,8 @@
 # Finbase.cloud — inventário de navegação e renovação visual
 
-Atualizado em 21/10/2026, branch `novo_layout`.
+Atualizado em 21/10/2026, branch `layot_carbon`.
+
+Vocabulário dos dados e compatibilidade das URLs: [finbase-data-language.md](finbase-data-language.md).
 
 ## Direção visual
 
@@ -49,8 +51,8 @@ Os grupos abaixo são as seções da navegação. Cada item listado é uma entra
 
 - **Integrações**: fontes de dados e serviços auxiliares (`/dados/fontes?view=connections|integrations`). Os filtros de categoria/provedor são controles da página, não destinos de navegação.
 - **Catálogo**: catálogo de dados e relacionamentos (`/dados/catalogo?tab=destinations|relationship`).
-- **Operação de dados**: fluxos de dados (`/dados/fluxos`); execuções de dados (`/operacoes/execucoes?tab=data`); execuções de forecast e acurácia (`tab=forecast&subtab=forecast|accuracy`); custo compartilhado (`tab=shared`); materialização de cubos e relacionamentos de custo IA (`tab=gold&subtab=cubes|ai-cost`); extrações (`tab=extraction`); agendamentos (`tab=schedules`); histórico de execuções (`tab=logs`).
-- **Explorador**: tabelas de destino, fontes de origem, Iceberg Bronze/Silver/Gold, staging, tabelas dinâmicas e busca na fonte (`/dados/explorador?tab=destino|fontes|iceberg&layer=bronze|silver|gold|staging|pivot|busca`).
+- **Operação de dados**: fluxos de dados (`/dados/fluxos`); execuções de dados (`/operacoes/execucoes?tab=data`); execuções de forecast e acurácia (`tab=forecast&subtab=forecast|accuracy`); custo compartilhado (`tab=shared`); materialização de cubos e relacionamentos de custo IA (`tab=cubos&subtab=cubes|ai-cost`); extrações (`tab=extraction`); agendamentos (`tab=schedules`); histórico de execuções (`tab=logs`).
+- **Explorador**: tabelas de destino, fontes de origem, bases de origem, preparadas e consolidadas (`/dados/explorador?tab=acervo&etapa=origem|preparacao|consolidacao`), área temporária (`tab=temporarios`), tabelas dinâmicas e busca na fonte (`tab=destino|fontes|pivot|busca`).
 
 ### Governança
 
