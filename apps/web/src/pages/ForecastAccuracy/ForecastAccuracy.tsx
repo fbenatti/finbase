@@ -4,7 +4,7 @@ import { useSearchParams } from "react-router-dom";
 import {
   Alert, Box, Breadcrumbs, Button, Chip, CircularProgress, Dialog, DialogActions, DialogContent, DialogTitle, FormControl, Grid, IconButton,
   InputLabel, LinearProgress, Link, MenuItem,
-  Paper, Select, Stack, Tab, Tabs, Table, TableBody, TableCell, TableContainer, TableHead,
+  Paper, Select, Stack, Table, TableBody, TableCell, TableContainer, TableHead,
   TableRow, TextField, Typography,
 } from "@mui/material";
 import { Add, ArrowBack, Remove } from "@mui/icons-material";
@@ -47,7 +47,8 @@ function KpiCard({ label, value, hint, color }: { label: string; value: string; 
 
 export default function ForecastAccuracy({ embedded = false }: { embedded?: boolean }) {
   const [params, setParams] = useSearchParams();
-  const [tab, setTabState] = useState(params.get("aba") === "desvios" ? "desvios" : params.get("aba") === "acks" ? "acks" : "visao");
+  const requestedTab = params.get("aba");
+  const tab = requestedTab === "desvios" || requestedTab === "acks" ? requestedTab : "visao";
   const [months, setMonths] = useState<ForecastAccuracyMonth[]>([]);
   const [summary, setSummary] = useState<ForecastAccuracyMonth | null>(null);
   const [dimensions, setDimensions] = useState<ForecastAccuracyDimensions | null>(null);
@@ -106,14 +107,6 @@ export default function ForecastAccuracy({ embedded = false }: { embedded?: bool
     const next = new URLSearchParams(params);
     if (dim) next.set("dim", dim); else next.delete("dim");
     setParams(next, { replace: true });
-  };
-  const setTab = (next: "visao" | "desvios" | "acks") => {
-    setTabState(next);
-    const url = new URLSearchParams(params);
-    if (next === "desvios") url.set("aba", "desvios");
-    else if (next === "acks") url.set("aba", "acks");
-    else url.delete("aba");
-    setParams(url, { replace: true });
   };
 
   // Carrega a árvore de departamentos (como no ExpectedView) e define o default,
@@ -409,12 +402,6 @@ export default function ForecastAccuracy({ embedded = false }: { embedded?: bool
             </FormControl>
           </Stack>
         </Box>
-
-        <Tabs value={tab} onChange={(_, value) => setTab(value as "visao" | "desvios" | "acks")} sx={{ mb: 0, minHeight: 42 }} aria-label="Seções da acurácia">
-          <Tab value="visao" label="Visão" sx={{ minHeight: 42 }} />
-          <Tab value="desvios" label="Desvios" sx={{ minHeight: 42 }} />
-          <Tab value="acks" label="Highlights" sx={{ minHeight: 42 }} />
-        </Tabs>
 
         {pathParts.length > 0 && (
           <Breadcrumbs separator=">" sx={{ pb: 2, "& .MuiBreadcrumbs-separator": { mx: 0.5 } }}>
