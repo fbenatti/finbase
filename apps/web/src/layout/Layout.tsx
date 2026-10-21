@@ -122,8 +122,11 @@ const MENU_GROUPS: MenuGroup[] = [
     items: [
       { path: "/savings?tab=calcular", label: "Ações de economia", icon: <SavingsOutlined /> },
       { path: "/savings?tab=compras-compromissos", label: "Compromissos e compras", icon: <EventAvailableOutlined /> },
-      { path: "/savings?tab=desligue", label: "Desligamento programado", icon: <SettingsOutlined /> },
-      { path: "/savings?tab=orfaos", label: "Recursos sem uso", icon: <StorageOutlined /> },
+      { path: "/savings?tab=desligue&subview=dashboard", label: "Desligamento · painel", icon: <DashboardOutlined /> },
+      { path: "/savings?tab=desligue&subview=governance", label: "Desligamento · governança", icon: <RuleOutlined /> },
+      { path: "/savings?tab=desligue&subview=exceptions", label: "Desligamento · exceções", icon: <FactCheckOutlined /> },
+      { path: "/savings?tab=orfaos&subview=current", label: "Recursos · órfãos atuais", icon: <StorageOutlined /> },
+      { path: "/savings?tab=orfaos&subview=savings", label: "Recursos · economia gerada", icon: <SavingsOutlined /> },
       { path: "/governance?tab=reservas&subtab=executivo", label: "Reservas · visão executiva", icon: <DashboardOutlined /> },
       { path: "/governance?tab=reservas&subtab=catalogo", label: "Reservas · catálogo", icon: <TableChartOutlined /> },
       { path: "/governance?tab=reservas&subtab=recomendacoes", label: "Reservas · recomendações", icon: <LightbulbOutlined /> },
