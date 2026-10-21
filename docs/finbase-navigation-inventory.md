@@ -9,6 +9,7 @@ Atualizado em 21/10/2026, branch `novo_layout`.
 - Tipografia de interface: Inter, configurada no tema e nos estilos globais; o wrapper dos gráficos também propaga Inter ao Plotly.
 - Ícones: Material UI Outlined, com ícones próprios por área e tamanho uniforme no menu.
 - Navegação: grupos laterais recolhíveis e links internos com URL própria. A seleção atual considera os parâmetros de query relevantes, então a página abre diretamente na visão escolhida. O shell inclui menu móvel, modo recolhido, notificações, usuário, saída e rodapé.
+- O menu inicia recolhido e expande automaticamente o grupo da rota atual. Panorama contém somente o resumo; análises detalhadas de custo foram removidas da navegação a pedido do usuário.
 - Revisão técnica: não restam elementos MUI `<Tabs>` ou `<Tab>` em `apps/web/src`. Controles que filtram ou alteram o modo de um widget sem representar uma página (por exemplo, formato JSON/script ou seleção de contrato) continuam como seletor/controle dentro do conteúdo.
 
 ## Mapa completo do menu
@@ -17,12 +18,17 @@ Os grupos abaixo são as seções da navegação. Cada item listado é uma entra
 
 ### Panorama
 
-- **Custos**: Resumo de custos (`/gold-dashboard?tab=visao-executiva`), Custos gerais (`tab=geral`), Evolução de custos (`tab=evolucao`), Custos por organização (`tab=organizacao`), Custos por serviço (`tab=servicos`), Investigar variações (`tab=investigacao`), Decisões (`tab=decisao`), Detalhamento (`tab=drilldown`) e Qualidade dos dados (`tab=data-quality`).
+- **Resumo de custos**: `/gold-dashboard?tab=visao-executiva`. Custos gerais, evolução, custos por organização/serviço, investigação, decisões, detalhamento e qualidade dos dados foram removidos do menu; suas visões permanecem nas rotas da página.
+
+### Operação de IA
+
 - **Operação de IA / Azure PTUs**: resumo de capacidade, consumo de tokens, capacidade e operação e recomendações (`/visoes-consumo-ia?view=0&tab=0..3`).
-- **Provedores e projetos de IA**: GitHub Copilot (`view=1`); Claude executivo e técnico (`view=2&providerTab=executive|technical`); NotebookLM executivo e técnico (`view=3&providerTab=executive|technical`); Aura Brain (`view=4`); Vivo Mais (`view=5`); Sinfonia (`view=6`); Datamesh (`view=7`); Wisper (`view=8`). Todos usam `/visoes-consumo-ia`.
-- **Painéis de IA**: visão executiva, eficiência FinOps e uso por pessoa (`/dashboards-ia?tab=0..2`).
-- **Oportunidades**: entrada para `/savings`.
-- **Alertas e anomalias**: visão geral, impacto financeiro, casos em investigação, eventos esperados, saúde do modelo, retrospectivas, anomalias confirmadas e configuração de alertas (`/anomalies?tab=0..7`). A visibilidade segue a configuração de ambiente já existente.
+- **Provedores de IA**: GitHub Copilot (`view=1`); Claude executivo e técnico (`view=2&providerTab=executive|technical`); NotebookLM executivo e técnico (`view=3&providerTab=executive|technical`); Aura Brain (`view=4`); Vivo Mais (`view=5`); Sinfonia (`view=6`); Datamesh (`view=7`); Wisper (`view=8`). Todos usam `/visoes-consumo-ia`.
+- **Adoção de IA**: visão executiva, eficiência FinOps e uso por pessoa (`/dashboards-ia?tab=0..2`).
+
+### Alertas
+
+- Anomalias: visão geral, impacto financeiro, casos em investigação, eventos esperados, saúde do modelo, retrospectivas, anomalias confirmadas e configuração (`/anomalies?tab=0..7`). A visibilidade segue a configuração de ambiente já existente.
 
 ### Planejamento
 
@@ -34,7 +40,7 @@ Os grupos abaixo são as seções da navegação. Cada item listado é uma entra
 
 ### Otimização
 
-- **Savings**: ações de economia e compromissos e compras (`/savings?tab=calcular|compras-compromissos`).
+- **Savings**: oportunidades (`/savings`) e compromissos e compras (`/savings?tab=compras-compromissos`).
 - **Desligamento programado**: painel, governança e exceções (`tab=desligue&subview=dashboard|governance|exceptions`).
 - **Recursos órfãos**: recursos atuais e economia gerada (`tab=orfaos&subview=current|savings`).
 - As entradas de **Reservas Azure** foram retiradas do menu; as rotas continuam registradas e podem ser abertas diretamente.
