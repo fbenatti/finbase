@@ -367,8 +367,7 @@ export default function AcksRegisteredTab({ defaultMonth, department }: { defaul
             borderColor: "divider",
             borderRadius: 2,
             bgcolor: "background.paper",
-            "& .MuiDataGrid-columnHeaders": { bgcolor: "#f8fafc", borderBottomColor: "divider" },
-            "& .MuiDataGrid-cell:focus, & .MuiDataGrid-columnHeader:focus": { outline: "none" },
+            "& .MuiDataGrid-columnHeaders": { bgcolor: "background.default", borderBottomColor: "divider" },
             "& .ack-row-inactive": { opacity: 0.55 },
           }}
         />
