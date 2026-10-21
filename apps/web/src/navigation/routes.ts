@@ -22,3 +22,9 @@ export function resolveViewChange(items: NavigationModule[], current: Navigation
   return candidates.filter(item => Object.entries(item.view_params).every(([key, value]) => params.get(key) === value))
     .sort((a, b) => Object.keys(b.view_params).length - Object.keys(a.view_params).length)[0] || current;
 }
+
+export function routeViewParams(item: NavigationModule, query: URLSearchParams): URLSearchParams {
+  const params = widgetSearch(query);
+  for (const [key, value] of Object.entries(item.view_params)) params.set(key, value);
+  return params;
+}

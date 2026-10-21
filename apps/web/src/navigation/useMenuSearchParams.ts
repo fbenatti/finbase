@@ -1,7 +1,7 @@
 import { useContext, useMemo } from "react";
 import { createSearchParams, useNavigate, useSearchParams as useRouterSearchParams, type SetURLSearchParams } from "react-router-dom";
 import { MenuViewContext, useNavigation } from "./NavigationContext";
-import { resolveViewChange, widgetSearch } from "./routes";
+import { resolveViewChange, routeViewParams, widgetSearch } from "./routes";
 
 /** Page selection is fixed by the route; query parameters contain only widget filters. */
 export function useMenuSearchParams(): ReturnType<typeof useRouterSearchParams> {
@@ -11,9 +11,7 @@ export function useMenuSearchParams(): ReturnType<typeof useRouterSearchParams> 
   const navigate = useNavigate();
   const params = useMemo(() => {
     if (!current) return query;
-    const result = widgetSearch(query);
-    for (const [key, value] of Object.entries(current.view_params)) result.set(key, value);
-    return result;
+    return routeViewParams(current, query);
   }, [query, current]);
   const setParams: SetURLSearchParams = (next, options) => {
     if (!current) { setQuery(next, options); return; }
