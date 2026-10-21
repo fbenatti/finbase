@@ -223,7 +223,7 @@ export default function Gold({ embedded }: { embedded?: boolean } = {}) {
       </Paper></Grid>
       <Grid item xs={12} md={8}><Paper variant="outlined" sx={{ p: 2 }}>
         <Typography variant="h6" mb={2}>{selected.id ? "Editar regra" : "Nova regra"}</Typography>
-        <ToggleButtonGroup exclusive size="small" value={editorMode} onChange={(_, value: string | null) => { if (value) setEditorMode(value); }} sx={{ mb: 2 }}>
+        <ToggleButtonGroup exclusive size="small" value={editorMode} onChange={(_, value: "pivot" | "sql" | null) => { if (value) setEditorMode(value); }} sx={{ mb: 2 }}>
           <ToggleButton value="pivot">Construtor visual</ToggleButton>
           <ToggleButton value="sql">SQL personalizado</ToggleButton>
         </ToggleButtonGroup>
