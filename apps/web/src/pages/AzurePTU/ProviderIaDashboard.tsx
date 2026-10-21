@@ -80,7 +80,7 @@ const HELP: Record<string, string> = {
 };
 
 function Kpi({ label, value, hint, color }: { label: string; value: React.ReactNode; hint?: string; color?: string }) {
-  const help = HELP[label] || "Indicador calculado a partir das cubos Gold de consumo e licenças de IA no recorte selecionado.";
+  const help = HELP[label] || "Indicador calculado a partir dos cubos analíticos de consumo e licenças de IA no recorte selecionado.";
   return (
     <Tooltip title={<Typography variant="body2" sx={{ maxWidth: 320, p: .5 }}>{help}</Typography>} arrow placement="top" enterDelay={200}>
       <Card sx={{ height: "100%", borderTop: color ? `3px solid ${color}` : undefined, cursor: "help" }}>
@@ -181,7 +181,8 @@ export default function ProviderIaDashboard({ provider }: { provider: AIProvider
       <Box>
           <Typography variant="h4" gutterBottom>{data.provider_label}</Typography>
           <Typography color="text.secondary" gutterBottom>
-            Visão executiva e técnica a partir das cubos Gold derivadas dos dados normalizados de consumo e licenças.
+            
+            Visão executiva e técnica a partir dos cubos analíticos de consumo e licenças.
             {isTokens
               ? " Métrica primária: tokens por usuário/modelo/dia; custo alocado quando disponível."
               : " Métrica primária: custo (billing GCP) por serviço; adoção por licença."}
@@ -189,7 +190,7 @@ export default function ProviderIaDashboard({ provider }: { provider: AIProvider
           <Stack direction="row" gap={1} flexWrap="wrap">
             <Chip size="small" label={`Recorte: ${data.period.date_from} → ${data.period.date_to}`} />
             <Chip size="small" label={`Snapshot licenças: ${data.period.license_period || "—"}`} />
-            <Chip size="small" label={`Fonte: Gold Iceberg (${data.period.period_count} períodos)`} color={isTokens ? "primary" : "success"} variant="outlined" />
+            <Chip size="small" label={`Fonte: Base consolidada (${data.period.period_count} períodos)`} color={isTokens ? "primary" : "success"} variant="outlined" />
           </Stack>
       </Box>
       <Stack direction="row" justifyContent="flex-end">

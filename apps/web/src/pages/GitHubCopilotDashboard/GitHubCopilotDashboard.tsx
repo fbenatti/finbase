@@ -440,7 +440,7 @@ export default function GitHubCopilotDashboard({ embedded = false }: { embedded?
           <Paper elevation={0} sx={{ p: 3, border: "1px solid", borderColor: "divider", borderRadius: 2, mb: 4 }}>
             <Typography variant="h5" fontWeight="bold" color="primary.main" mb={1}>FinOps: GitHub × Azure</Typography>
             <Typography variant="body2" color="text.secondary" mb={2}>
-              Custo realizado e consumo processado são conciliados pelo mês fechado: SKUs faturados de GitHub Copilot na Gold
+              Custo realizado e consumo processado são conciliados pelo mês fechado: SKUs faturados de GitHub Copilot na base consolidada
               <b> dest_dm_cost_copilot_custo</b> ÷ input + output + cache do relatório financeiro.
             </Typography>
 
@@ -491,7 +491,7 @@ export default function GitHubCopilotDashboard({ embedded = false }: { embedded?
                           <TableRow>
                             <TableCell>
                               <Typography variant="body2" fontWeight={600} color="text.secondary">Projeção (restante do mês)</Typography>
-                              <Typography variant="caption" color="text.secondary">forecast da Gold para os dias restantes</Typography>
+                              <Typography variant="caption" color="text.secondary">forecast da base consolidada para os dias restantes</Typography>
                             </TableCell>
                             <TableCell align="right">—</TableCell>
                             <TableCell align="right"><Typography variant="body2" fontWeight={600}>{money.format(financialInsights?.totals?.current_forecast_brl || 0)}</Typography></TableCell>
@@ -586,7 +586,7 @@ export default function GitHubCopilotDashboard({ embedded = false }: { embedded?
           <Paper ref={tableSectionRef} elevation={0} sx={{ p: 3, border: "1px solid", borderColor: "divider", borderRadius: 2, mb: 4, bgcolor: "background.paper" }}>
             <Box mb={2}>
               <Typography variant="h5" fontWeight="bold" color="primary.main">Relação de Desenvolvedores, Créditos e Engajamento</Typography>
-              <Typography variant="body2" color="text.secondary" sx={{ mt: 0.5 }}>Resumo individual carregado da Gold por usuário/período. Clique em qualquer linha para ver o breakdown da Gold diária por modelo.</Typography>
+              <Typography variant="body2" color="text.secondary" sx={{ mt: 0.5 }}>Resumo individual carregado da base consolidada por usuário/período. Clique em qualquer linha para ver o breakdown da base consolidada diária por modelo.</Typography>
             </Box>
 
             <Alert severity="info" sx={{ mb: 3, borderRadius: 2 }}>
@@ -834,8 +834,8 @@ export default function GitHubCopilotDashboard({ embedded = false }: { embedded?
             <Paper elevation={0} sx={{ p: 3, border: "1px solid #e2e8f0", borderRadius: 2, mb: 4 }}>
               <Typography variant="h6" mb={0.5}>Evolução do Custo Realizado — GitHub (PricingCategory = GitHub)</Typography>
               <Typography variant="body2" color="text.secondary" mb={2}>
-                Total mensal = soma do realizado da Gold <b>dest_dm_cost_copilot_custo</b> (classificação PricingCategory=GitHub, mesma usada na criação da Gold). Julho ≈ 190 mil BRL.
-                {" "}<b>Mês corrente ({periodLabel(OPEN_PERIOD)}): realizado parcial + projeção do restante</b>; meses futuros = projeção (forecast da Gold) até o fim do horizonte — padrão FinOps de mês em andamento.
+                Total mensal = soma do realizado da base consolidada <b>dest_dm_cost_copilot_custo</b> (classificação PricingCategory=GitHub, mesma usada na criação da base consolidada). Julho ≈ 190 mil BRL.
+                {" "}<b>Mês corrente ({periodLabel(OPEN_PERIOD)}): realizado parcial + projeção do restante</b>; meses futuros = projeção (forecast da base consolidada) até o fim do horizonte — padrão FinOps de mês em andamento.
               </Typography>
               <Plot
                 data={[

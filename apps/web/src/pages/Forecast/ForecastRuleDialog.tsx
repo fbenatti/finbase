@@ -214,22 +214,22 @@ export default function ForecastRuleDialog({ open, initial, config, meta, onClos
 
         {rule.behavior === "SOURCE_EXCLUDE_PREFIX" && (
           <Alert severity="info" sx={{ mb: 2 }}>
-            O campo será filtrado diretamente na Gold usando “começa com”. Ele não precisa estar nas dimensões do forecast.
+            O campo será filtrado diretamente na base consolidada usando “começa com”. Ele não precisa estar nas dimensões do forecast.
           </Alert>
         )}
         {rule.behavior === "SOURCE_MEAN_30D_PREFIX" && (
           <Alert severity="info" sx={{ mb: 2 }}>
-            O campo será separado diretamente na Gold usando “começa com” e projetado pela média diária dos últimos 30 dias. Ele não precisa estar nas dimensões do forecast.
+            O campo será separado diretamente na base consolidada usando “começa com” e projetado pela média diária dos últimos 30 dias. Ele não precisa estar nas dimensões do forecast.
           </Alert>
         )}
         {rule.behavior === "SOURCE_MAX_PREVIOUS_MONTH_PREFIX" && (
           <Alert severity="info" sx={{ mb: 2 }}>
-            Separa as cobranças identificadas na Gold e compara o ritmo diário do modelo atual com a média diária do mês fechado anterior (incluindo dias sem cobrança). Usa o maior valor para projetar o mês corrente e os próximos.
+            Separa as cobranças identificadas na base consolidada e compara o ritmo diário do modelo atual com a média diária do mês fechado anterior (incluindo dias sem cobrança). Usa o maior valor para projetar o mês corrente e os próximos.
           </Alert>
         )}
         {rule.behavior === "SOURCE_GITHUB_COPILOT_OVERAGE_2_PHASE" && (
           <Alert severity="info" sx={{ mb: 2 }}>
-            Separa a fonte identificada na Gold. Antes da primeira cobrança positiva no mês, projeta pela média dos dias positivos dos últimos 30 dias. Depois da primeira cobrança, usa a maior entre essa média e a média positiva do mês corrente. Dias sem cobrança não entram nas médias.
+            Separa a fonte identificada na base consolidada. Antes da primeira cobrança positiva no mês, projeta pela média dos dias positivos dos últimos 30 dias. Depois da primeira cobrança, usa a maior entre essa média e a média positiva do mês corrente. Dias sem cobrança não entram nas médias.
           </Alert>
         )}
         {rule.behavior === "SOURCE_VALIDITY" && (

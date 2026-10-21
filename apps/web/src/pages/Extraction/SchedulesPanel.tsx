@@ -352,7 +352,7 @@ export default function SchedulesPanel({ connections }: { connections: SourceCon
               </Select>
             </FormControl>
             {form.schedule_type === "backup" && <>
-              <Alert severity="info">Backup do projeto, PostgreSQL e camadas Iceberg selecionadas. As estimativas abaixo representam o volume atual dos dados antes da compressão do arquivo.</Alert>
+              <Alert severity="info">Cópia de segurança da aplicação, do banco de dados e das bases selecionadas. As estimativas abaixo representam o volume atual dos dados antes da compressão do arquivo.</Alert>
               <Box sx={{ border: 1, borderColor: "divider", borderRadius: 2, p: 1.5 }}>
                 <Typography variant="subtitle2" sx={{ mb: 0.5 }}>Tabelas incluídas no backup</Typography>
                 {(["bronze", "silver", "gold"] as const).map(layer => (
@@ -401,19 +401,19 @@ export default function SchedulesPanel({ connections }: { connections: SourceCon
 
             {form.schedule_type === "collection" && <>
               <FormControlLabel control={<Switch checked={form.destination_reprocess} onChange={e => setForm({ ...form, destination_reprocess: e.target.checked })} />} label="Auto-reprocessar tabela destino após extração" />
-              <FormHelperText>Se desligado, a execução termina na Bronze e as etapas seguintes ficam indisponíveis.</FormHelperText>
+              <FormHelperText>Se desligado, a execução termina na base de origem e as etapas seguintes ficam indisponíveis.</FormHelperText>
             </>}
 
             {form.schedule_type !== "backup" && (form.schedule_type !== "collection" || form.destination_reprocess) && <>
               <Box>
                 <FormControl size="small" fullWidth>
-                  <InputLabel>Golds</InputLabel>
+                  <InputLabel>bases consolidadas</InputLabel>
                   <Select multiple value={form.destination_table_ids} label="Golds"
                     onChange={e => setForm({ ...form, destination_table_ids: e.target.value as number[] })}
                     renderValue={ids => (ids as number[]).map(id => destinations.find(d => d.id === id)?.name || `ID ${id}`).join(", ")}>
                     {destinations.map(d => <MenuItem key={d.id} value={d.id}>{d.name}</MenuItem>)}
                   </Select>
-                  <FormHelperText>Golds reprocessadas após a Bronze (ou relidas na reclassificação).</FormHelperText>
+                  <FormHelperText>Bases consolidadas reprocessadas após a carga de origem (ou relidas na reclassificação).</FormHelperText>
                 </FormControl>
                 <Box sx={{ display: "flex", gap: 1, mt: 0.5 }}>
                   <Button size="small" onClick={() => setForm({ ...form, destination_table_ids: destinations.map(d => d.id) })}>Selecionar todas</Button>
@@ -425,11 +425,11 @@ export default function SchedulesPanel({ connections }: { connections: SourceCon
                 <FormControl size="small"><InputLabel>Períodos</InputLabel><Select value={form.period_mode} label="Períodos" onChange={e => setForm({ ...form, period_mode: e.target.value as "selected" | "all" })}><MenuItem value="all">Todos disponíveis</MenuItem><MenuItem value="selected">Selecionados</MenuItem></Select></FormControl>
                 {form.period_mode === "selected" && <TextField label="Períodos (YYYYMM)" value={form.billing_periods} onChange={e => setForm({ ...form, billing_periods: e.target.value })} helperText="Ex.: 202601, 202602, 202603" />}
               </>}
-              {(form.schedule_type === "reprocess" || form.forecast_after_ingestion) && <FormControl size="small"><InputLabel>Forecasts candidatos</InputLabel><Select multiple value={form.forecast_config_ids} label="Forecasts candidatos" onChange={e => { const ids = (e.target.value as number[]).map(Number); setForm({ ...form, forecast_config_ids: ids, forecast_config_id: String(ids[0] || "") }); }} renderValue={ids => (ids as number[]).map(id => { const candidate = forecastConfigs.find(c => c.id === Number(id)); return candidate ? `${candidate.name} — ${candidate.table_name || `Gold ${candidate.destination_table_id}`}` : `Configuração ${id}`; }).join(", ")}><MenuItem value={0}>Nenhum</MenuItem>{forecastCandidates.map(c => <MenuItem key={c.id} value={c.id}>{c.name} — {c.table_name || `Gold ${c.destination_table_id}`}</MenuItem>)}</Select><FormHelperText>{forecastConfigsError ? "Não foi possível carregar as configurações de forecast. Verifique a API." : forecastCandidates.length ? "Somente configurações ativas compatíveis com as Golds selecionadas." : "Nenhuma configuração ativa compatível com as Golds selecionadas."}</FormHelperText></FormControl>}
+              {(form.schedule_type === "reprocess" || form.forecast_after_ingestion) && <FormControl size="small"><InputLabel>Forecasts candidatos</InputLabel><Select multiple value={form.forecast_config_ids} label="Forecasts candidatos" onChange={e => { const ids = (e.target.value as number[]).map(Number); setForm({ ...form, forecast_config_ids: ids, forecast_config_id: String(ids[0] || "") }); }} renderValue={ids => (ids as number[]).map(id => { const candidate = forecastConfigs.find(c => c.id === Number(id)); return candidate ? `${candidate.name} — ${candidate.table_name || `base consolidada ${candidate.destination_table_id}`}` : `Configuração ${id}`; }).join(", ")}><MenuItem value={0}>Nenhum</MenuItem>{forecastCandidates.map(c => <MenuItem key={c.id} value={c.id}>{c.name} — {c.table_name || `base consolidada ${c.destination_table_id}`}</MenuItem>)}</Select><FormHelperText>{forecastConfigsError ? "Não foi possível carregar as configurações de forecast. Verifique a API." : forecastCandidates.length ? "Somente configurações ativas compatíveis com as bases consolidadas selecionadas." : "Nenhuma configuração ativa compatível com as bases consolidadas selecionadas."}</FormHelperText></FormControl>}
               <FormControlLabel control={<Switch checked={form.accuracy} onChange={e => setForm({ ...form, accuracy: e.target.checked })} />} label="Gerar acurácia" />
               <FormControlLabel control={<Switch checked={form.shared_cost} onChange={e => setForm({ ...form, shared_cost: e.target.checked })} />} label="Gerar custo compartilhado" />
               <Box>
-                <FormControl size="small" fullWidth><InputLabel>cubos Gold</InputLabel><Select multiple value={form.gold_rule_ids} label="cubos Gold" onChange={e => setForm({ ...form, gold_rule_ids: e.target.value as number[] })} renderValue={ids => (ids as number[]).map(id => goldRules.find(r => r.id === id)?.name || `Regra ${id}`).join(", ")}><MenuItem value={0}>Nenhuma</MenuItem>{goldRules.filter(r => r.active).map(r => <MenuItem key={r.id} value={r.id}>{r.name}</MenuItem>)}</Select><FormHelperText>cubos Gold relacionadas à Gold selecionada já aparecem marcadas.</FormHelperText></FormControl>
+                <FormControl size="small" fullWidth><InputLabel>cubos analíticos</InputLabel><Select multiple value={form.gold_rule_ids} label="cubos analíticos" onChange={e => setForm({ ...form, gold_rule_ids: e.target.value as number[] })} renderValue={ids => (ids as number[]).map(id => goldRules.find(r => r.id === id)?.name || `Regra ${id}`).join(", ")}><MenuItem value={0}>Nenhuma</MenuItem>{goldRules.filter(r => r.active).map(r => <MenuItem key={r.id} value={r.id}>{r.name}</MenuItem>)}</Select><FormHelperText>Os cubos analíticos relacionados à base selecionada já aparecem marcados.</FormHelperText></FormControl>
                 <Box sx={{ display: "flex", gap: 1, mt: 0.5 }}>
                   <Button size="small" onClick={() => setForm({ ...form, gold_rule_ids: goldRules.filter(r => r.active).map(r => r.id).filter((id): id is number => id != null) })}>Selecionar todas</Button>
                   <Button size="small" onClick={() => setForm({ ...form, gold_rule_ids: [] })}>Limpar</Button>

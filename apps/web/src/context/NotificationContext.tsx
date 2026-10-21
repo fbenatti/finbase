@@ -70,7 +70,7 @@ function titleFor(task: TaskStatus, connections: SourceConnection[]): string {
   if (k === "shared_cost") return "Custo compartilhado";
   if (k === "forecast") return "Forecast";
   if (String(task.task_type || task.type || "") === "gold_reprocess") {
-    return "Gold (custo pré-agregado) #" + task.id;
+    return "Custos consolidados #" + task.id;
   }
   if (String(task.task_type || task.type || "") === "ai_cost_relationship_reprocess") {
     return "Relacionamentos de custo IA #" + task.id;
@@ -112,7 +112,7 @@ function scopeFor(task: TaskStatus, connections: SourceConnection[]): string {
         });
   const periods = (task.billing_periods || []).map(formatBillingPeriod);
   const destination = task.destination_table_name || task.table || "destino não informado";
-  return `Origem: ${sourceNames.length ? [...new Set(sourceNames)].join(", ") : "não informada"} · Mês: ${periods.length ? [...new Set(periods)].join(", ") : "não informado"} · Destino: ${destination} (Silver)`;
+  return `Origem: ${sourceNames.length ? [...new Set(sourceNames)].join(", ") : "não informada"} · Mês: ${periods.length ? [...new Set(periods)].join(", ") : "não informado"} · Destino: ${destination} (base preparada)`;
 }
 
 function isOperationalSource(task: TaskStatus): boolean {
@@ -133,8 +133,8 @@ function reprocessStageLabel(item: NotificationItem): string {
   }
   if (item.processed >= item.total) {
     return /publicando partição na camada silver/i.test(item.phase + " " + item.current)
-      ? "Publicando partição na camada Silver..."
-      : "Bronze processado · preparando publicação na camada Silver";
+      ? "Publicando dados preparados..."
+      : "Origem processada · preparando publicação dos dados";
   }
   return item.phase || item.status;
 }
@@ -182,17 +182,17 @@ function progressCaption(task: TaskStatus): string {
   if (String(task.task_type || task.type || "") === "backup") {
     const bytes = Number(task.downloaded_bytes_total || 0);
     const elapsed = task.started_at ? formatElapsed(Date.now() - new Date(task.started_at).getTime()) : "calculando";
-    const volume = bytes > 0 ? `${formatBytes(bytes)} compactados` : "preparando dump do PostgreSQL";
-    return `${volume} · ${elapsed} decorridos · projeto + banco + Iceberg`;
+    const volume = bytes > 0 ? `${formatBytes(bytes)} compactados` : "preparando cópia do banco de dados";
+    return `${volume} · ${elapsed} decorridos · aplicação + banco de dados + acervo`;
   }
   if (isOperationalSource(task)) {
     const total = task.total_blobs || 0;
     const processed = task.processed_blobs || 0;
     const gold = (task.rows_destination || 0).toLocaleString("pt-BR");
     if (total > 0) {
-      return `${processed}/${total} janelas Monitor · ${gold} registros Gold`;
+      return `${processed}/${total} janelas Monitor · ${gold} registros base consolidada`;
     }
-    return `${gold} registros Gold · ARM/Monitor`;
+    return `${gold} registros base consolidada · ARM/Monitor`;
   }
   return `${(task.rows_destination || 0).toLocaleString("pt-BR")} linhas · ${task.processed_blobs}/${task.total_blobs || "?"}`;
 }

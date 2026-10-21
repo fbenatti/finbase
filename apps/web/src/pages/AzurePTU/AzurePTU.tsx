@@ -175,7 +175,7 @@ export default function AzurePTU() {
       projectLabel: PROJECT_LABELS[project] || project,
       grainLabel: GRAIN_LABELS[grain] || grain,
       tabLabel: TAB_LABELS[tab],
-      dataSourceLabel: data.data_source === "gold" ? "Gold Iceberg" : "Azure Monitor live",
+      dataSourceLabel: data.data_source === "gold" ? "Base consolidada" : "Azure Monitor live",
     });
   };
 
@@ -190,7 +190,7 @@ export default function AzurePTU() {
         <h1>Azure OpenAI PTU — Relatório</h1>
         <p><strong>Período:</strong> {selectedPeriod.label}</p>
         <p><strong>Projeto:</strong> {PROJECT_LABELS[project] || project} · <strong>Granularidade:</strong> {GRAIN_LABELS[grain] || grain}</p>
-        <p><strong>Aba:</strong> {TAB_LABELS[tab]} · <strong>Fonte:</strong> {data.data_source === "gold" ? "Gold Iceberg" : "Azure Monitor live"}</p>
+        <p><strong>Aba:</strong> {TAB_LABELS[tab]} · <strong>Fonte:</strong> {data.data_source === "gold" ? "Base consolidada" : "Azure Monitor live"}</p>
         <p><strong>Exportado em:</strong> {exportedAt}</p>
         <p style={{ marginTop: 8, fontStyle: "italic" }}>
           Gráficos interativos abaixo refletem o recorte atual na tela. Para dados tabulares completos, consulte as tabelas neste PDF.
@@ -232,7 +232,7 @@ export default function AzurePTU() {
             <MenuItem value="month">Mês</MenuItem>
           </Select>
         </FormControl>
-        <Chip size="small" label={`Fonte: ${data.data_source === "gold" ? "Gold Iceberg" : data.data_source === "stale" ? "Gold (parcial)" : "Azure Monitor live"}`} />
+        <Chip size="small" label={`Fonte: ${data.data_source === "gold" ? "Base consolidada" : data.data_source === "stale" ? "Dados parciais" : "Azure Monitor live"}`} />
         <Button component={RouterLink} to="/dados/catalogo?tab=ai-cost-relationship" size="small" variant="outlined">Origem de custo IA</Button>
         <Button
           size="small"
@@ -304,7 +304,7 @@ export default function AzurePTU() {
                       useResizeHandler
                     />
                   ) : (
-                    <Alert severity="info">Sem série temporal — aguarde coleta Gold ou conexão Azure Monitor.</Alert>
+                    <Alert severity="info">Sem série temporal — aguarde coleta base consolidada ou conexão Azure Monitor.</Alert>
                   )}
                 </CardContent>
               </Card>
@@ -327,7 +327,7 @@ export default function AzurePTU() {
                         ...(tokenSeries.length > 0 ? [{
                           x: tokenSeries.map((r: { timestamp: string }) => r.timestamp),
                           y: tokenSeries.map((r: { total_tokens: number }) => r.total_tokens),
-                          name: "Tokens (Gold)",
+                          name: "Tokens (base consolidada)",
                           type: "scatter",
                           mode: "lines",
                           line: { color: "#2563EB" },
@@ -586,7 +586,7 @@ export default function AzurePTU() {
                   useResizeHandler
                 />
               ) : (
-                <Alert severity="info">Sem série temporal — aguarde coleta Gold ou conexão Azure Monitor.</Alert>
+                <Alert severity="info">Sem série temporal — aguarde coleta base consolidada ou conexão Azure Monitor.</Alert>
               )}
             </CardContent>
           </Card>

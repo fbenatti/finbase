@@ -21,9 +21,9 @@ export default function SourceSearch({ destinations, initialTableId }: { destina
     {error && <Alert severity="error" sx={{ mb: 2 }}>{error}</Alert>}
     <Paper sx={{ p: 2, mb: 2 }}>
       <Typography variant="h6">Busca na Fonte de Dados</Typography>
-      <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>Pesquise uma string em todas as colunas textuais da tabela Gold, aplicando filtros condicionais antes da busca.</Typography>
+      <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>Pesquise uma string em todas as colunas textuais da base consolidada, aplicando filtros condicionais antes da busca.</Typography>
       <Stack direction="row" gap={1.5} flexWrap="wrap" alignItems="center">
-        <FormControl size="small" sx={{ minWidth: 250 }}><InputLabel>Tabela Gold</InputLabel><Select value={tableId} label="Tabela Gold" onChange={e => { setTableId(Number(e.target.value)); setResult(null); }}>{destinations.map(d => <MenuItem key={d.id} value={d.id}>{d.name}</MenuItem>)}</Select></FormControl>
+        <FormControl size="small" sx={{ minWidth: 250 }}><InputLabel>base consolidada</InputLabel><Select value={tableId} label="base consolidada" onChange={e => { setTableId(Number(e.target.value)); setResult(null); }}>{destinations.map(d => <MenuItem key={d.id} value={d.id}>{d.name}</MenuItem>)}</Select></FormControl>
         <TextField size="small" label="Texto para buscar" placeholder="marketplace" value={term} onChange={e => setTerm(e.target.value)} onKeyDown={e => e.key === "Enter" && search()} sx={{ minWidth: 280 }} />
         <Button variant="contained" startIcon={<Search />} onClick={search} disabled={loading || !term.trim()}>{loading ? "Buscando..." : "Buscar"}</Button>
       </Stack>

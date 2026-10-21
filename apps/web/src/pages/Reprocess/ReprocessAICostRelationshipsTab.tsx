@@ -19,7 +19,7 @@ export default function ReprocessAICostRelationshipsTab() {
   };
   return <Stack spacing={2}>
     <Typography variant="h6">Relacionamentos de custo IA</Typography>
-    <Typography color="text.secondary">Lê cada período da FOCUS uma única vez, classifica os matches e publica uma Gold individual para cada relacionamento ativo. Os dashboards consultam apenas essas tabelas materializadas.</Typography>
+    <Typography color="text.secondary">Lê cada período de custos uma única vez, aplica as regras e publica uma base consolidada para cada relacionamento ativo. Os painéis consultam essas bases.</Typography>
     {error && <Alert severity="warning">{error}</Alert>}
     <div><Button variant="contained" startIcon={running ? <CircularProgress size={16} color="inherit" /> : <Refresh />} disabled={running} onClick={start}>Reprocessar todos os relacionamentos</Button></div>
   </Stack>;

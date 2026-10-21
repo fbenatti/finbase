@@ -50,19 +50,19 @@ const PROJECT_ACCENT: Record<string, string> = {
 };
 
 const HELP: Record<string, string> = {
-  "Custo total": "Mês de referência = realizado + forecast do mês corrente: quando a compra mensal de PTU ainda não foi lançada na Gold, entra o valor previsto (estimado pelo último realizado). BRL, líquido de devoluções (Returns).",
+  "Custo total": "Mês de referência = realizado + forecast do mês corrente: quando a compra mensal de PTU ainda não foi lançada na base consolidada, entra o valor previsto (estimado pelo último realizado). BRL, líquido de devoluções (Returns).",
   "PTUs (compra mensal)": "Compra mensal de capacidade PTU — reserva (Purchase) ou on-demand (Provisioned Throughput Units, 1/Month). Vale uma única fonte por mês: realizada se existir, senão estimada pelo último realizado da compra. O consumo diário/horário (Provisioned Managed*, 1/Hour) já está incluído na compra e não é exibido.",
   "Tokens on-demand": "Meters PAYG de tokens da Azure OpenAI clássicos (gpt 4o, gpt 4.1, embeddings). Modelos novos (GPT-5, Deepseek, Claude) têm card próprio em Serviços de IA.",
   "Serviços de IA": "Serviços relacionados a IA com card próprio na fatura Azure: Azure Document Intelligence, Claude (Anthropic), Azure OpenAI GPT-5/Media/Reasoning, Deepseek, Azure Speech etc. Foram removidos de Infraestrutura e de Tokens on-demand.",
   "Infraestrutura": "Todo o restante: VMs, Cosmos DB, discos, rede, Service Bus, Log Analytics etc., detalhado por servicesubcategory (sem serviços de IA).",
   "Infra compartilhada (rateio)": "Custo de infraestrutura repassado ao projeto. O Vivo Mais não recebe rateio: consome a infra do Aura Brain, mas a divisão não é feita por não existir forma eficiente (a infra não é específica do Vivo Mais e uma estrutura dedicada seria inviável).",
   "Custo previsto (forecast)": "Total planejado (planning) do mês de referência, exibido como total no chip — o planejamento não tem granularidade por componente. Bruto (sem abater as devoluções do espelho, que espelham o consumo horário já excluído do realizado).",
-  "Bilhões de tokens": "Bilhões de tokens atribuídos ao projeto na Gold diária de Azure PTU, somando input e output no mesmo mês do custo.",
+  "Bilhões de tokens": "Bilhões de tokens atribuídos ao projeto na base consolidada diária de Azure PTU, somando input e output no mesmo mês do custo.",
   "Custo por MM de tokens": "Custo total do projeto dividido pelos milhões de tokens atribuídos no mesmo período. Inclui toda a composição de custo do projeto, não apenas meters de tokens.",
 };
 
 function Kpi({ label, value, hint, color }: { label: string; value: React.ReactNode; hint?: string; color?: string }) {
-  const help = HELP[label] || "Indicador executivo calculado a partir da Gold específica do projeto.";
+  const help = HELP[label] || "Indicador executivo calculado a partir da base consolidada específica do projeto.";
   return (
     <Tooltip title={<Typography variant="body2" sx={{ maxWidth: 340, p: 0.5 }}>{help}</Typography>} arrow placement="top" enterDelay={250}>
       <Card sx={{ height: "100%", borderTop: color ? `3px solid ${color}` : undefined, cursor: "help" }}>
@@ -168,7 +168,7 @@ export default function ProjectCostDashboard({ project }: { project: "aura-brain
       {error && <Alert severity="error">{error}</Alert>}
       {!error && !data && <Box p={5} textAlign="center"><CircularProgress /></Box>}
       {!error && data?.available === false && <Alert severity="warning">{data.error || "Dados indisponíveis."}</Alert>}
-      {!error && data?.empty && <Alert severity="info">Nenhum mês com custo realizado na Gold para este projeto.</Alert>}
+      {!error && data?.empty && <Alert severity="info">Nenhum mês com custo realizado na base consolidada para este projeto.</Alert>}
 
       {data?.available && !data?.empty && (
         <>
@@ -191,7 +191,7 @@ export default function ProjectCostDashboard({ project }: { project: "aura-brain
               <Kpi label="Custo total" value={money(total)} hint={`${cur.label} · último realizado: R$ ${compact(realizedTotal)}${cur.mom_pct == null ? "" : ` · ${cur.mom_pct >= 0 ? "+" : ""}${n(cur.mom_pct)}% vs ${cur.prev_period_label}`}`} color={PROJECT_ACCENT[project]} />
             </Grid>
             <Grid item xs={12} sm={6} md={isVivo ? 4 : 3}>
-              <Kpi label="PTUs (compra mensal)" value={<>{money(classes.ptu)} {ptuSource === "estimado" && <Chip size="small" color="warning" label="estimado" sx={{ ml: 0.5 }} />}</>} hint={`${pct(pcts.ptu)} do total · ${ptuSource === "estimado" ? `compra ainda não lançada na Gold — estimado pelo ${ptuEstimateNote}` : isVivo ? "reserva (Purchase) realizada" : "on-demand mensal realizado"}`} color={CLASS_COLORS.ptu} />
+              <Kpi label="PTUs (compra mensal)" value={<>{money(classes.ptu)} {ptuSource === "estimado" && <Chip size="small" color="warning" label="estimado" sx={{ ml: 0.5 }} />}</>} hint={`${pct(pcts.ptu)} do total · ${ptuSource === "estimado" ? `compra ainda não lançada na base consolidada — estimado pelo ${ptuEstimateNote}` : isVivo ? "reserva (Purchase) realizada" : "on-demand mensal realizado"}`} color={CLASS_COLORS.ptu} />
             </Grid>
             <Grid item xs={12} sm={6} md={isVivo ? 4 : 3}>
               <Kpi label="Tokens on-demand" value={money(classes.tokens_ondemand)} hint={`${pct(pcts.tokens_ondemand)} do total · meters PAYG clássicos (GPT-5, Claude e outros têm card próprio)`} color={CLASS_COLORS.tokens_ondemand} />

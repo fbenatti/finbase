@@ -266,7 +266,7 @@ export default function OrphanedResources() {
       {/* KPIs — Saving em primeiro */}
       <Stack direction={{ xs: "column", sm: "row" }} spacing={2} sx={{ mb: 2 }}>
         <Paper elevation={0} sx={{ flex: 1, p: 2, border: "1px solid", borderColor: "#1976d2", borderRadius: 2, bgcolor: "rgba(25,118,210,0.04)" }}>
-          <Tooltip title={kpis.gold ? "Saving (potencial de economia) = custo realizado mensal dos recursos órfãos — coluna 'realizado' da Gold FOCUS, com taxas/markup — Gold dest_dm_cost_custo_recursos_orfaos" : "Materialize a Gold 'Custo por recurso órfão' para calcular o saving (custo realizado) mensal (join FOCUS)"}>
+          <Tooltip title={kpis.gold ? "Economia potencial = custo realizado mensal dos recursos órfãos, incluindo taxas e ajustes." : "Atualize o cubo de custos por recurso órfão para calcular a economia potencial mensal."}>
             <Stack direction="row" alignItems="center" gap={0.5}>
               <Typography variant="h5" color="primary.main">{formatBRL(kpis.custo)}</Typography>
               <InfoOutlined fontSize="small" color="disabled" />
@@ -514,7 +514,7 @@ export default function OrphanedResources() {
                 <DetailRow label="Idade" value={formatAge(detailRow.age_days)} />
               </Box>
               <Box>
-                <Typography variant="overline" color="text.secondary">Custo mensal (Gold × FOCUS — realizado)</Typography>
+                <Typography variant="overline" color="text.secondary">Custo mensal realizado dos recursos órfãos</Typography>
                 <DetailRow label="Custo realizado" value={formatBRL(detailRow.cost_brl)} />
                 <DetailRow label="Billed cost" value={formatBRL(detailRow.billedcost)} />
                 <DetailRow label="Effective cost" value={formatBRL(detailRow.effectivecost)} />

@@ -189,9 +189,10 @@ export default function ManualCsvUploadDialog({
       <DialogTitle>Upload manual de CSV — {connectionName}</DialogTitle>
       <DialogContent>
         <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
-          Carregue relatórios CSV locais diretamente na camada Bronze. Para carregar vários meses de uma
+          
+          Carregue relatórios CSV locais diretamente na base de origem. Para carregar vários meses de uma
           vez, use o botão "Carregar vários"; o período é identificado pelas colunas de data/faturamento
-          do CSV (com fallback para o nome do arquivo).
+          do CSV (com alternativa pelo nome do arquivo).
         </Typography>
 
         <Stack direction={{ xs: "column", md: "row" }} spacing={2} sx={{ mb: 3 }} alignItems="flex-start">
@@ -240,7 +241,7 @@ export default function ManualCsvUploadDialog({
 
         {result && (
           <Alert severity={result.skip_gold_realizado ? "warning" : "success"} sx={{ mb: 3 }} onClose={() => setResult(null)}>
-            <strong>{result.skip_gold_realizado ? "CSV armazenado no Bronze (Gold/Forecast bloqueados)." : "CSV carregado com sucesso."}</strong><br />
+            <strong>{result.skip_gold_realizado ? "CSV armazenado na base de origem (consolidação e projeção bloqueadas)." : "CSV carregado com sucesso."}</strong><br />
             {result.row_count.toLocaleString()} linhas gravadas em {result.table_name} para o período {result.billing_period}.
             {result.warning_message && (
               <>
@@ -258,8 +259,8 @@ export default function ManualCsvUploadDialog({
             onClose={() => setBatchResult(null)}
           >
             <strong>
-              {batchResult.length} arquivo(s) gravados no Bronze
-              {batchResult.some(r => r.skip_gold_realizado) ? " (alguns com Gold/Forecast bloqueados)." : "."}
+              {batchResult.length} arquivo(s) gravados no base de origem
+              {batchResult.some(r => r.skip_gold_realizado) ? " (alguns com consolidação e projeção bloqueadas)." : "."}
             </strong>
             <ul style={{ margin: "4px 0 0", paddingLeft: 18 }}>
               {batchResult.map((r, i) => (
@@ -327,7 +328,7 @@ export default function ManualCsvUploadDialog({
                 onClick={handleIngest}
                 disabled={loading || !billingPeriod}
               >
-                {loading ? "Carregando..." : "Carregar no Bronze"}
+                {loading ? "Carregando..." : "Carregar no base de origem"}
               </Button>
             </Stack>
           </Paper>

@@ -125,7 +125,7 @@ export default function FinancialContractsDashboard() {
     {loading && <Stack direction="row" spacing={1} alignItems="center" sx={{ mb: 2 }}><CircularProgress size={18} /><Typography variant="body2" color="text.secondary">Carregando liquidações...</Typography></Stack>}
     <Grid container spacing={2} sx={{ mb: 3 }}>
       <Grid item xs={12} sm={6} lg={3}><Metric label="Orçamento do período" value={amount(sum(selectedRows, "commitment"))} detail={period === "all" ? "Soma das competências exibidas" : periodLabel(period)} accent="#2563eb" /></Grid>
-      <Grid item xs={12} sm={6} lg={3}><Metric label="Consumo realizado" value={amount(sum(selectedRows, "consumption"))} detail="Consumo apurado na Silver" accent="#0891b2" /></Grid>
+      <Grid item xs={12} sm={6} lg={3}><Metric label="Consumo realizado" value={amount(sum(selectedRows, "consumption"))} detail="Consumo apurado na base preparada" accent="#0891b2" /></Grid>
       <Grid item xs={12} sm={6} lg={3}><Metric label="Realizado contratual" value={amount(sum(selectedRows, "realized"))} detail="Valor reconhecido no pool" accent="#7c3aed" /></Grid>
       <Grid item xs={12} sm={6} lg={3}><Metric label="Saldo de crédito" value={amount(sum(latestRows, "closing_credit"))} detail={`Saldo final · ${latestPeriod ? periodLabel(latestPeriod) : "sem dados"}`} accent="#059669" /></Grid>
       <Grid item xs={12} sm={6} lg={3}><Metric label="Ajuste contratual" value={amount(sum(selectedRows, "contractual_adjustment"))} detail="Crédito (+) / overage bruto (−)" accent="#d97706" /></Grid>

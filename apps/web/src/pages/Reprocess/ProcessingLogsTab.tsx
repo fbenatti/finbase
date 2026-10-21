@@ -11,7 +11,7 @@ import { cancelEtl, getProcessingLog, getProcessingLogs, ProcessingLog } from ".
 
 const PROCESS_LABELS: Record<string, string> = {
   extraction: "Extração", reprocess: "Reprocessamento de dados", reclassification: "Reclassificação",
-  bronze_audit: "Auditoria Bronze", gold_reprocess: "Materialização Gold",
+  bronze_audit: "Auditoria base de origem", gold_reprocess: "Consolidação de dados",
   shared_cost: "Custo compartilhado", forecast: "Forecast", forecast_accuracy: "Acurácia de Forecast",
   ai_cost_relationship_reprocess: "Relacionamentos de custo IA", backup: "Backup",
 };
@@ -22,7 +22,7 @@ const dateLabel = (value?: string | null) => value ? format(new Date(value), "dd
 const text = (value: unknown) => value == null || value === "" ? "—" : Array.isArray(value) ? value.join(", ") : typeof value === "object" ? JSON.stringify(value) : String(value);
 const FIELD_LABELS: Record<string, string> = {
   at: "Data e hora", backfill_days: "Dias consultados", billing_periods: "Períodos", blobs: "Arquivos processados",
-  bronze_audit: "Auditoria Bronze", bronze_audit_task_id: "ID da auditoria Bronze", connection_codes: "Códigos das conexões",
+  bronze_audit: "Auditoria base de origem", bronze_audit_task_id: "ID da auditoria base de origem", connection_codes: "Códigos das conexões",
   connection_ids: "IDs das conexões", connection_names: "Conexões", destination_table_id: "ID do destino",
   destination_name: "Tabela de destino", error: "Erro", errors: "Erros", event_log: "Eventos", exception_type: "Tipo do erro",
   input_rows: "Linhas de entrada", level: "Nível", message: "Mensagem", output_rows: "Linhas processadas",
@@ -195,7 +195,7 @@ export default function ProcessingLogsTab() {
             })}
           </Stack> : <Typography variant="body2" color="text.secondary">Nenhum evento adicional foi registrado para esta execução.</Typography>}
           {Object.keys(otherDetails).length > 0 && <><Divider /><Accordion disableGutters elevation={0} sx={{ "&:before": { display: "none" } }}><AccordionSummary expandIcon={<ExpandMore />}><Typography variant="subtitle2">Resultado e informações adicionais</Typography></AccordionSummary><AccordionDetails sx={{ pt: 0 }}><StructuredPanel value={otherDetails} /></AccordionDetails></Accordion></>}
-          {detail.etl_task_id && detail.process_type === "extraction" && <Box><Divider sx={{ mb: 1 }} /><Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>Os registros Bronze desta extração podem ser consultados na visualização especializada.</Typography><Chip clickable label="Abrir dados Bronze" onClick={() => navigate(`/operacoes/extracoes/${detail.etl_task_id}`)} /></Box>}
+          {detail.etl_task_id && detail.process_type === "extraction" && <Box><Divider sx={{ mb: 1 }} /><Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>Os registros base de origem desta extração podem ser consultados na visualização especializada.</Typography><Chip clickable label="Abrir dados base de origem" onClick={() => navigate(`/operacoes/extracoes/${detail.etl_task_id}`)} /></Box>}
           {detail.etl_task_id && ["QUEUED", "RUNNING"].includes(detail.status) && <Chip clickable color="error" label="Cancelar execução" onClick={async () => { await cancelEtl(detail.etl_task_id!); await load(); setSelected(null); }} sx={{ alignSelf: "flex-start" }} />}
         </Stack>}
       </DialogContent>

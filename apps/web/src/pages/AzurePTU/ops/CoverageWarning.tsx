@@ -25,7 +25,7 @@ export default function CoverageWarning({ coverage, period }: Props) {
     <Alert severity="warning" sx={{ mb: 2 }}>
       {missing > 0 && (
         <Typography variant="body2">
-          Cobertura incompleta no Gold: {coverage?.days_with_data}/{coverage?.expected_days} dias
+          Cobertura incompleta no base consolidada: {coverage?.days_with_data}/{coverage?.expected_days} dias
           ({coverage?.coverage_pct}%).
           {coverage?.missing_day_samples?.length
             ? ` Ex.: ${coverage.missing_day_samples.slice(0, 5).join(", ")}`

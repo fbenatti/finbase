@@ -88,7 +88,7 @@ export default function Gold({ embedded }: { embedded?: boolean } = {}) {
       setRules(ruleList); setTables(tableList);
       setSelected(current => current.id ? current : (ruleList[0] ? { ...ruleList[0] } : emptyRule()));
       getGoldCubeHistory().then(setHistory).catch(() => setHistory([]));
-    } catch (e) { setError(formatApiError(e, "Não foi possível carregar as cubos Gold")); }
+    } catch (e) { setError(formatApiError(e, "Não foi possível carregar os cubos analíticos")); }
     finally { setLoading(false); }
   };
   useEffect(() => { void load(); }, []);
@@ -106,28 +106,28 @@ export default function Gold({ embedded }: { embedded?: boolean } = {}) {
       const saved = await saveGoldCubeRule({ ...selected, sources: (selected.sources || []).map(s => ({ ...s, filter_json: conditions(s) })) });
       setSelected({ ...saved });
       await load();
-      enqueueSnackbar('Regra Gold "' + (saved.name || saved.code || "?") + '" salva com sucesso', "success");
-    } catch (e) { setError(formatApiError(e, "Não foi possível salvar a regra Gold")); }
+      enqueueSnackbar('regra de consolidação "' + (saved.name || saved.code || "?") + '" salva com sucesso', "success");
+    } catch (e) { setError(formatApiError(e, "Não foi possível salvar a regra de consolidação")); }
     finally { setSaving(false); }
   };
 
   const startReprocess = async () => {
     setError("");
-    try { await reprocessGoldCubes(selected.id ? [selected.id] : []); await load(); enqueueSnackbar("Reprocessamento Gold enfileirado", "info"); }
+    try { await reprocessGoldCubes(selected.id ? [selected.id] : []); await load(); enqueueSnackbar("Reprocessamento base consolidada enfileirado", "info"); }
     catch (e) { setError(formatApiError(e, "Não foi possível enfileirar o reprocessamento")); }
   };
 
   const removeRule = async (ruleId: number) => {
     const rule = rules.find(r => r.id === ruleId);
     const label = rule?.code || '#' + ruleId;
-    if (!window.confirm('Excluir a regra "' + label + '"? A tabela física ' + (rule?.materialization_table || 'dest_dm_cost_...') + ' também será removida do Iceberg.')) return;
+    if (!window.confirm('Excluir a regra "' + label + '"? A tabela física ' + (rule?.materialization_table || 'dest_dm_cost_...') + ' também será removida do acervo de dados.')) return;
     setError("");
     try {
       await deleteGoldCubeRule(ruleId);
       if (selected.id === ruleId) setSelected(emptyRule());
       await load();
       enqueueSnackbar('Regra "' + label + '" e tabela excluídas', "success");
-    } catch (e) { setError(formatApiError(e, "Não foi possível excluir a regra Gold")); }
+    } catch (e) { setError(formatApiError(e, "Não foi possível excluir a regra de consolidação")); }
   };
 
   const cloneRule = (ruleId: number) => {
@@ -188,7 +188,7 @@ export default function Gold({ embedded }: { embedded?: boolean } = {}) {
         <Typography variant="body2" color="text.secondary">
           {processingLogCube?.available
             ? `${processingLogCube.table} · ${processingLogCube.row_count.toLocaleString("pt-BR")} execuções · atualização ${processingLogCube.updated_at ? new Date(processingLogCube.updated_at).toLocaleString("pt-BR") : "em andamento"}`
-            : "Aguardando primeira materialização. A grade de logs usa este cubo Gold; detalhes completos continuam no PostgreSQL."}
+            : "Aguardando a primeira consolidação. A grade de logs usa este cubo analítico; os detalhes completos continuam no histórico de execuções."}
         </Typography>
       </Box>
       <Chip size="small" label={processingLogCube?.available ? "Disponível" : "Aguardando"} color={processingLogCube?.available ? "success" : "warning"} />
@@ -196,9 +196,9 @@ export default function Gold({ embedded }: { embedded?: boolean } = {}) {
         {rebuildingProcessingLogCube ? "Enfileirando…" : "Reconstruir cubo"}
       </Button>
     </Paper>
-    <Typography variant="h4">Cubos de custo (Gold)</Typography>
-    <Typography color="text.secondary" mb={2}>Escolha as Golds de origem, defina as dimensões de agrupamento (linhas do pivot) e as medidas a somar (valores). O reprocessamento gera uma tabela pré-agregada dest_dm_cost_&lt;code&gt; — os dashboards consultam apenas essas tabelas materializadas.</Typography>
-    <Alert severity="info" sx={{ mb: 2 }}>Fluxo: Gold(s) + filtros → dimensões (GROUP BY) + medidas (SUM) → <b>dest_dm_cost_&lt;code&gt;</b>. Salvar preserva a regra; o reprocessamento gera a tabela Gold.</Alert>
+    <Typography variant="h4">Cubos de custo (base consolidada)</Typography>
+    <Typography color="text.secondary" mb={2}>Escolha as bases consolidadas de origem, defina as dimensões de agrupamento (linhas do pivot) e as medidas a somar (valores). O reprocessamento gera uma tabela pré-agregada dest_dm_cost_&lt;code&gt; — os dashboards consultam apenas essas tabelas materializadas.</Typography>
+    <Alert severity="info" sx={{ mb: 2 }}>Fluxo: Bases de origem + filtros → agrupamentos + medidas → <b>dest_dm_cost_&lt;code&gt;</b>. Salvar preserva a regra; o reprocessamento gera a base consolidada.</Alert>
     {error && <Alert severity="error" sx={{ mb: 2 }}>{error}</Alert>}
     <Grid container spacing={2}>
       <Grid item xs={12} md={4}><Paper variant="outlined" sx={{ p: 2, minHeight: 460 }}>
@@ -263,16 +263,16 @@ export default function Gold({ embedded }: { embedded?: boolean } = {}) {
             </>
           )}
           {editorMode === "pivot" && (<>
-          <Typography variant="subtitle1">Origens (Golds)</Typography>
-          <Typography variant="caption" color="text.secondary">Cada origem pode ter UMA OU MAIS tabelas Gold com a mesma estrutura — unidas num dado único e limpo com os mesmos filtros. Origens diferentes são concatenadas e agregadas.</Typography>
+          <Typography variant="subtitle1">Origens (bases consolidadas)</Typography>
+          <Typography variant="caption" color="text.secondary">Cada origem pode reunir bases consolidadas com a mesma estrutura. Os registros são unificados, filtrados e agrupados.</Typography>
           {(selected.sources || []).map((source, sourceIndex) => {
             const sourceConditions = conditions(source);
             return <Paper key={sourceIndex} variant="outlined" sx={{ p: 1.5 }}><Stack spacing={1.25}>
               <Typography variant="subtitle2">Origem {sourceIndex + 1}{sourceIndex > 0 ? " (UNION)" : ""}</Typography>
-              <FormControl size="small" required><InputLabel>Tabelas Gold (mesma estrutura)</InputLabel>
+              <FormControl size="small" required><InputLabel>bases consolidadas (mesma estrutura)</InputLabel>
                 <Select
                   multiple
-                  label="Tabelas Gold (mesma estrutura)"
+                  label="bases consolidadas (mesma estrutura)"
                   value={source.gold_tables && source.gold_tables.length ? source.gold_tables : (source.gold_table ? [source.gold_table] : [])}
                   onChange={e => {
                     const ids = (e.target.value as string[]);
@@ -296,18 +296,18 @@ export default function Gold({ embedded }: { embedded?: boolean } = {}) {
               </Stack>
             </Stack></Paper>;
           })}
-          <Button variant="outlined" startIcon={<Add />} onClick={() => setSelected({ ...selected, sources: [...(selected.sources || []), emptySource()] })}>Adicionar Gold (UNION)</Button>
+          <Button variant="outlined" startIcon={<Add />} onClick={() => setSelected({ ...selected, sources: [...(selected.sources || []), emptySource()] })}>Adicionar base à origem</Button>
           <Divider />
 
           {/* ═══════════ PIVOT: DIMENSÕES (GROUP BY) ═══════════ */}
           <Typography variant="subtitle1">Dimensões de agrupamento (linhas do pivot)</Typography>
           <Typography variant="caption" color="text.secondary">Colunas que agrupam os dados (ex.: _billing_period, organograma_nivel_1, servicename). Vazio → dimensões analíticas padrão.</Typography>
-          {!selectedGolds.length && <Alert severity="info" sx={{ mb: 1 }}>Selecione uma Gold na Origem para ver os campos disponíveis.</Alert>}
+          {!selectedGolds.length && <Alert severity="info" sx={{ mb: 1 }}>Selecione uma base consolidada na origem para ver os campos disponíveis.</Alert>}
           {selectedGolds.length > 0 && <Autocomplete
             size="small"
             options={schemaCols.map(c => c.name)}
             onChange={(_, val) => addDimension(val || "")}
-            renderInput={(params) => <TextField {...params} label="Adicionar dimensão (campo da Gold)" />}
+            renderInput={(params) => <TextField {...params} label="Adicionar dimensão (campo da base consolidada)" />}
           />}
           <Box sx={{ display: "flex", gap: 1, flexWrap: "wrap" }}>
             {(selected.dimensions || []).map(dim =>

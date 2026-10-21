@@ -42,7 +42,8 @@ export default function Reprocess() {
       <Box sx={{ bgcolor: "background.paper", px: { xs: 2, md: 4 }, pt: 3, borderBottom: 1, borderColor: "divider" }}>
         <Typography variant="h4" sx={{ mb: 0.5 }}>Reprocessar</Typography>
         <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
-        Extração, Gold, forecast e custo compartilhado no mesmo lugar. O andamento das execuções aparece no sino de notificações (canto superior direito).
+        
+        Extração, consolidação, projeções e custo compartilhado no mesmo lugar. Acompanhe as execuções no sino de notificações.
         </Typography>
       </Box>
       <Box sx={{ bgcolor: "#f8fafc", p: { xs: 2, md: 4 }, minHeight: "calc(100vh - 150px)" }}>

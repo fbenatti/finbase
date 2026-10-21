@@ -207,7 +207,7 @@ export default function Extraction({ embedded = false }: { embedded?: boolean })
   };
 
   const doResetSource = async () => {
-    if (!connId || !confirm("Isso removerá o histórico de ingestão e o Bronze desta fonte. Os CSVs do Azure não serão apagados. Continuar?")) return;
+    if (!connId || !confirm("Isso removerá o histórico de ingestão e o base de origem desta fonte. Os CSVs do Azure não serão apagados. Continuar?")) return;
     try {
       await resetSourceForReimport(connId as number);
       setTask(null); setBlobs([]); setScanResult(null);
@@ -559,7 +559,7 @@ export default function Extraction({ embedded = false }: { embedded?: boolean })
                   {task.total_blobs > 0
                     ? `${task.processed_blobs} / ${task.total_blobs} janelas Monitor`
                     : "Coleta ARM/Monitor em andamento"}
-                  {" | "}{(task.rows_destination ?? 0).toLocaleString()} registros Gold
+                  {" | "}{(task.rows_destination ?? 0).toLocaleString()} registros base consolidada
                 </>
               ) : (
                 <>
@@ -636,12 +636,12 @@ export default function Extraction({ embedded = false }: { embedded?: boolean })
 
               <Box sx={{ mt: 1, p: 1, bgcolor: "#f7f9fc", borderRadius: 1, border: "1px solid #dbe3ef" }}>
                 <Typography variant="caption" fontWeight={700} sx={{ display: "block" }}>
-                  {isPtuTask ? "Coleta operacional Azure PTU" : "Importação para Iceberg"}
+                  {isPtuTask ? "Coleta operacional Azure PTU" : "Importação de dados"}
                 </Typography>
                 <Typography variant="caption" color="text.secondary" sx={{ display: "block" }}>
                   {isPtuTask
                     ? "Sequência: descoberta ARM → Azure Monitor (janelas de até 30 dias) → persistência horária em dest_azure_ptu_metrics."
-                    : "O download concluído não significa que a importação terminou. A sequência é: Leitura CSV → Bronze → Silver/Gold → concluído."}
+                    : "O download concluído não significa que a importação terminou. A sequência é: Leitura do arquivo → Dados de origem → Preparação e consolidação → Concluído."}
                 </Typography>
                 <Typography variant="caption" color="primary.main" sx={{ display: "block", mt: 0.25 }}>
                   {task.phase || (isPtuTask ? "Aguardando início da coleta PTU" : "Aguardando início da importação")}
@@ -687,13 +687,13 @@ export default function Extraction({ embedded = false }: { embedded?: boolean })
 
           {isTerminal && task.status === "COMPLETED_WITH_ERRORS" && (
             <Alert severity="warning" sx={{ mt: 1 }}>
-              <strong>Bronze concluído, Silver não gerado.</strong>{" "}
+              <strong>Dados de origem carregados; preparação pendente.</strong>{" "}
               {task.phase || task.errors?.[0] || "Verifique o relacionamento origem → destino."}
             </Alert>
           )}
           {isTerminal && task.status === "COMPLETED" && (task.rows_raw ?? 0) > 0 && (task.rows_normalized ?? 0) === 0 && (
             <Alert severity="success" sx={{ mt: 1 }}>
-              <strong>Load Bronze concluído.</strong> A origem foi carregada sem mapping ou transformação. Silver/Gold serão executados posteriormente.
+              <strong>Carga da origem concluída.</strong>  A origem foi carregada sem mapeamento ou transformação. A preparação e a consolidação serão executadas posteriormente.
             </Alert>
           )}
 
@@ -1005,7 +1005,7 @@ export default function Extraction({ embedded = false }: { embedded?: boolean })
           {!previewLoading && previewData && (
             <Box sx={{ p: 2 }}>
               <Typography variant="subtitle2" sx={{ mb: 1 }}>
-                Header ({previewData.columns.length} colunas) — amostra de {previewData.rows.length} linha(s). Use este schema para decidir a normalização/mapping (Silver/Gold).
+                Header ({previewData.columns.length} colunas) — amostra de {previewData.rows.length} linha(s). Use este schema para decidir a normalização/mapping (preparação e consolidação).
               </Typography>
               <Box sx={{ display: "flex", flexWrap: "wrap", gap: 0.5, mb: 2 }}>
                 {previewData.columns.map((column) => (

@@ -111,8 +111,8 @@ export default function ForecastConfigsDataGrid({
     },
     {
       field: "table_name",
-      headerName: "Tabela Gold",
-      renderHeader: () => filteredHeader("Tabela Gold", "table_name"),
+      headerName: "base consolidada",
+      renderHeader: () => filteredHeader("base consolidada", "table_name"),
       minWidth: 180,
       flex: 1,
       align: "left",
@@ -314,7 +314,7 @@ export default function ForecastConfigsDataGrid({
 
   const exportDisplayed = () => {
     const escape = (value: unknown) => '"' + String(value ?? "").replace(/"/g, '""') + '"';
-    const header = ["Nome", "Tabela Gold", "Medida", "Horizonte", "Rateio", "Versão", "Ativa", "Atualizado em"];
+    const header = ["Nome", "base consolidada", "Medida", "Horizonte", "Rateio", "Versão", "Ativa", "Atualizado em"];
     const lines = [
       header.join(";"),
       ...rows.map((config) => [

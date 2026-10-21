@@ -36,7 +36,7 @@ const PROJECT_KEY_LABEL: Record<string, string> = {
 };
 
 function Kpi({ label, value, hint }: { label: string; value: React.ReactNode; hint?: string }) {
-  const help = widgetHelp[label] || "Indicador financeiro calculado a partir da Gold FOCUS no mês de referência.";
+  const help = widgetHelp[label] || "Indicador financeiro calculado a partir da base consolidada FOCUS no mês de referência.";
   return (
     <Tooltip title={<Typography variant="body2" sx={{ maxWidth: 340, p: 0.5 }}>{help}</Typography>} arrow placement="top" enterDelay={250}>
       <Card sx={{ height: "100%", borderTop: "3px solid #0EA5E9", cursor: "help" }}><CardContent>
@@ -55,10 +55,10 @@ export function PtuFinanceViews({ costs, tokenData, aiDemand, provisioned }: {
   provisioned?: { total_ptus?: number; deployment_count?: number };
 }) {
   if (!costs || costs.available === false) {
-    return <Alert severity="warning">Enriquecimento financeiro (Gold) indisponível{costs?.error ? `: ${costs.error}` : ""}. A aba operacional continua completa; os custos PTU não foram carregados.</Alert>;
+    return <Alert severity="warning">Dados financeiros indisponíveis{costs?.error ? `: ${costs.error}` : ""}. A aba operacional continua completa; os custos PTU não foram carregados.</Alert>;
   }
   if (costs.empty) {
-    return <Alert severity="info">A Gold não retornou linhas para os períodos consultados. Verifique se a materialização do FOCUS está atualizada.</Alert>;
+    return <Alert severity="info">Não foram encontrados registros consolidados para os períodos consultados. Verifique a atualização dos dados de custos.</Alert>;
   }
 
   const current = costs.current || {};
@@ -108,13 +108,13 @@ export function PtuFinanceViews({ costs, tokenData, aiDemand, provisioned }: {
   return (
     <Stack gap={2.5}>
       <Alert severity="info" sx={{ mb: 0.5 }}>
-        <b>Fonte:</b> Gold FOCUS <code>{costs.table}</code> (+ planejamento) · mês de referência: <b>{costs.current_label}</b> · janela de faturamento intersectada: {costs.window_label}.
+        <b>Fonte:</b> base consolidada FOCUS <code>{costs.table}</code> (+ planejamento) · mês de referência: <b>{costs.current_label}</b> · janela de faturamento intersectada: {costs.window_label}.
         A capacidade PTU é faturada como <b>reserva</b> (<i>Microsoft.Capacity</i>) e <b>on-demand</b> (<i>Provisioned Throughput Units · 1/Month</i>), classificadas no <b>organograma_nivel_5</b>. Valores em BRL (realizado; previsto quando marcado).
         As <b>unidades faturadas</b> (reserva + on-demand) <b>não são a capacidade provisionada física</b> — o inventário Azure mostra os PTUs realmente configurados nos deployments ({provisioned?.total_ptus != null ? `${n(provisioned.total_ptus)} PTUs em ${n(provisioned.deployment_count)} deployments` : "ver KPIs operacionais"}).
       </Alert>
       {notes.map((note: string, i: number) => <Alert key={i} severity="warning" sx={{ mb: 0.5 }}>{note}</Alert>)}
 
-      <Typography variant="h6" gutterBottom>Financeiro (Gold) — {costs.current_label}</Typography>
+      <Typography variant="h6" gutterBottom>Financeiro — {costs.current_label}</Typography>
 
       <Grid container spacing={2}>
         <Grid item xs={12} sm={6} md={3}><Kpi label="Custo PTU mensal" value={money(ptuMonthlyCost)} hint={`reserva ${money(totals.reservation_cost)}${reservationReferenced ? " (última compra)" : ""} + on-demand ${money(totals.ondemand_cost)}${ondemandEstimated ? " (previsto)" : ""}`} /></Grid>

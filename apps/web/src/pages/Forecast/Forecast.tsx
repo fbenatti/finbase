@@ -305,7 +305,7 @@ export default function Forecast() {
         <Box sx={{ mb: 2 }}>
           <Typography variant="h4">Forecast</Typography>
           <Typography color="text.secondary" sx={{ mt: 0.5 }}>
-            Projeções de custo sobre as tabelas Gold, com regras de negócio e rateio por intervalo.
+            Projeções de custo sobre as bases consolidadas, com regras de negócio e rateio por intervalo.
           </Typography>
         </Box>
       </Box>
@@ -333,7 +333,7 @@ export default function Forecast() {
               <Box>
                 <Typography variant="h6">Configurações e execução</Typography>
                 <Typography variant="body2" color="text.secondary">
-                  Perfis de projeção por tabela Gold e execução do forecast.
+                  Perfis de projeção por base consolidada e execução do forecast.
                 </Typography>
               </Box>
               <Stack direction="row" spacing={1} flexShrink={0}>

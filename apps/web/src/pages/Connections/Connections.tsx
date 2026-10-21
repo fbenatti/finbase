@@ -847,7 +847,7 @@ export default function Connections() {
       const result = await extractMcaCommitmentInvoices({ start_period: startPeriod, end_period: endPeriod, billing_account_ids: billingAccountIds });
       setFormTestMessage({
         severity: "success",
-        msg: `Extração concluída: ${Number(result.invoice_profile_month_rows || 0).toLocaleString("pt-BR")} linha(s), ${Number(result.invoice_ids || 0).toLocaleString("pt-BR")} invoice(s), ${Number(result.profiles_loaded || 0).toLocaleString("pt-BR")} profile(s), ${Number(result.months_requested || 0)} competência(s). Bronze atualizada.`,
+        msg: `Extração concluída: ${Number(result.invoice_profile_month_rows || 0).toLocaleString("pt-BR")} linha(s), ${Number(result.invoice_ids || 0).toLocaleString("pt-BR")} invoice(s), ${Number(result.profiles_loaded || 0).toLocaleString("pt-BR")} profile(s), ${Number(result.months_requested || 0)} competência(s). base de origem atualizada.`,
       });
       void load();
       void loadGrid();
@@ -866,7 +866,7 @@ export default function Connections() {
       await deleteConnection(connectionPendingDeletion.id);
       setConnectionPendingDeletion(null);
       setDeleteError("");
-      setDeleteFeedback(`Conexão "${connectionPendingDeletion.name}" excluída com sucesso. Tabela Bronze removida.`);
+      setDeleteFeedback(`Conexão "${connectionPendingDeletion.name}" excluída com sucesso. Tabela base de origem removida.`);
       await load();
       await loadGrid();
     } catch (e: unknown) {
@@ -1206,7 +1206,7 @@ export default function Connections() {
                     <Alert severity="info">Usa a sessão Azure CLI deste servidor e renova o access token automaticamente. Faça login com az login no mesmo usuário que executa a API.</Alert>
                   </>
                 )}
-                <Typography variant="body2" color="text.secondary">Fonte contratos-mca · Cost Management Query agrupada por invoice · Bronze raw_azure_commitment_br · desde 2025-04.</Typography>
+                <Typography variant="body2" color="text.secondary">Fonte de contratos · Faturas agrupadas por conta de cobrança · desde abril de 2025.</Typography>
                 <Divider />
                 <Alert severity="info">Salve a credencial primeiro. A validação e a extração abaixo usam o token já salvo, consultam os Billing Accounts configurados e nunca mostram o segredo.</Alert>
                 <Stack direction={{ xs: "column", sm: "row" }} spacing={2}>
@@ -1214,7 +1214,7 @@ export default function Connections() {
                   <TextField label="Extrair até" type="month" value={form.mca_end_period} onChange={(e) => setForm({ ...form, mca_end_period: e.target.value })} InputLabelProps={{ shrink: true }} fullWidth />
                 </Stack>
                 <Button variant="outlined" startIcon={testingForm ? <CircularProgress size={16} /> : <Storage />} onClick={() => void extractMcaData()} disabled={testingForm || !form.mca_billing_account_ids.trim()}>
-                  {testingForm ? "Consultando Azure…" : "Extrair invoices para Bronze"}
+                  {testingForm ? "Consultando Azure…" : "Extrair invoices para base de origem"}
                 </Button>
               </>
             )}
@@ -1275,7 +1275,7 @@ export default function Connections() {
                 <Typography variant="subtitle2" sx={{ mt: 1 }}>3. Coleta</Typography>
                 <Typography variant="body2" color="text.secondary">
                   Scan descobre as Automation Accounts; a extração coleta jobs (últimos N dias) e
-                  schedules atuais, persiste na Bronze e permite reprocessar para a Gold
+                  schedules atuais, persiste na base de origem e permite reprocessar para a base consolidada
                   (MODELO AUTOMATION / MODELO AUTOMATION SCHEDULE).
                 </Typography>
               </>
@@ -1308,7 +1308,7 @@ export default function Connections() {
                 <Typography variant="subtitle2" sx={{ mt: 1 }}>4. Coleta</Typography>
                 <Typography variant="body2" color="text.secondary">
                   Scan lista as subscriptions acessíveis; a extração coleta o inventário completo e
-                  os órfãos por snapshot diário, persiste na Bronze e permite reprocessar para a Gold
+                  os órfãos por snapshot diário, persiste na base de origem e permite reprocessar para a base consolidada
                   (MODELO INVENTÁRIO CLOUD / MODELO RECURSOS ÓRFÃOS). Governança → Recursos Órfãos.
                 </Typography>
               </>
@@ -1319,7 +1319,7 @@ export default function Connections() {
                 {form.connector_type === "azure_pricesheet" && (
                   <Alert severity="info">
                     Conexão independente do Azure 4P Cost Management. As credenciais são gravadas nesta conexão;
-                    o snapshot vai para Bronze <code>raw_azure_pricesheet</code> pelo prefixo próprio.
+                    o snapshot vai para base de origem <code>raw_azure_pricesheet</code> pelo prefixo próprio.
                   </Alert>
                 )}
                 <Typography variant="subtitle2" sx={{ mt: 1, color: "primary.main" }}>Azure Credentials</Typography>
@@ -1615,7 +1615,7 @@ export default function Connections() {
           ) : (
             <Typography>
               Você está prestes a excluir a conexão <strong>{connectionPendingDeletion?.name}</strong>.
-              A tabela Bronze associada também será removida. Esta ação não pode ser desfeita.
+              A tabela base de origem associada também será removida. Esta ação não pode ser desfeita.
             </Typography>
           )}
         </DialogContent>

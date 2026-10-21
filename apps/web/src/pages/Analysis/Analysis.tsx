@@ -182,15 +182,15 @@ export default function Analysis() {
       setTables(nextTables);
       setStagingTables(nextStaging);
     } catch (e: unknown) {
-      setError(formatApiError(e, "Falha ao atualizar o Data Lakehouse"));
+      setError(formatApiError(e, "Falha ao atualizar a Central de dados"));
     }
   };
 
   const removeStagingTable = async (item: AnalysisStagingTable) => {
     if (item.protected) return;
     if (!window.confirm(
-      `Excluir permanentemente a staging ${item.table_name}?\n\n` +
-      "A ação remove somente a tabela temporária; a Gold publicada não será alterada."
+      `Excluir permanentemente a área temporária ${item.table_name}?\n\n` +
+      "A ação remove somente a tabela temporária; a base consolidada publicada não será alterada."
     )) return;
     setStagingLoading(true); setError("");
     try {
@@ -201,21 +201,21 @@ export default function Analysis() {
       setStagingTables(nextStaging);
       setTables(nextTables);
     } catch (e: unknown) {
-      setError(formatApiError(e, "Não foi possível excluir a tabela staging"));
+      setError(formatApiError(e, "Não foi possível excluir a tabela temporária"));
     } finally {
       setStagingLoading(false);
     }
   };
 
   const removeGoldTable = async (t: string) => {
-    if (!window.confirm('Excluir a tabela ' + t + '? A regra Gold associada (se houver) e a tabela física no Iceberg serão removidas.')) return;
+    if (!window.confirm('Excluir a tabela ' + t + "? A regra de consolidação associada (se houver) e a tabela armazenada serão removidas.")) return;
     setError("");
     try {
       await deleteGoldTable(t);
       getAnalysisTables().then(setTables).catch(() => {});
       if (sql.startsWith('SELECT * FROM iceberg.gold.' + t)) setSql("");
     } catch (e: unknown) {
-      setError(formatApiError(e, 'Não foi possível excluir a tabela Gold'));
+      setError(formatApiError(e, 'Não foi possível excluir a base consolidada'));
     }
   };
 
@@ -433,9 +433,9 @@ export default function Analysis() {
         </Box>
         <Box sx={{ mt: 1 }}>
           {!detail && partitionDetailsLoading.has(member.tableName) ? <CircularProgress size={18} /> : detail?.partitioned ? (
-            detail.partitions.length ? renderPartitionTree(member.tableName, detail.partitions) : <Typography variant="caption" color="text.secondary">Nenhuma partição Iceberg.</Typography>
+            detail.partitions.length ? renderPartitionTree(member.tableName, detail.partitions) : <Typography variant="caption" color="text.secondary">Nenhuma divisão de dados encontrada.</Typography>
           ) : detail ? (
-            <Alert severity="info" sx={{ py: 0 }}>Esta tabela física não tem partição Iceberg interna. {member.period ? `O período ${member.period} e o escopo estão codificados no nome; ` : ""}{detail.record_count?.toLocaleString() ?? 0} registros em {detail.file_count ?? 0} arquivo(s).
+            <Alert severity="info" sx={{ py: 0 }}>Esta tabela não possui divisões internas de dados. {member.period ? `O período ${member.period} e o escopo estão codificados no nome; ` : ""}{detail.record_count?.toLocaleString() ?? 0} registros em {detail.file_count ?? 0} arquivo(s).
               <Button size="small" sx={{ ml: 1 }} onClick={() => useIcebergSlice(member.tableName)}>Usar tabela</Button>
             </Alert>
           ) : !partitionDetailsLoading.has(member.tableName) ? (
@@ -545,7 +545,7 @@ export default function Analysis() {
       <Box sx={{ px: 3, pt: 3, bgcolor: "background.paper", borderBottom: "1px solid", borderColor: "divider" }}>
         <Box sx={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 2, mb: 2 }}>
           <Box>
-            <Typography variant="h4">Análise — Data Lakehouse</Typography>
+            <Typography variant="h4">Central de dados</Typography>
             <Typography color="text.secondary" sx={{ mt: 0.5 }}>
               Explore os dados importados, classificados e aplicados com regras de negócio.
             </Typography>
@@ -761,11 +761,11 @@ export default function Analysis() {
             <>
               <Box sx={{ display: "flex", alignItems: "center", gap: 1, mb: 1.5, flexWrap: "wrap" }}>
                 <SchemaIcon color="primary" fontSize="small" />
-                <Typography variant="subtitle2" sx={{ fontWeight: 700 }}>Gold — tabelas pré-agregadas (dest_dm_cost_*)</Typography>
+                <Typography variant="subtitle2" sx={{ fontWeight: 700 }}>Bases consolidadas — tabelas pré-agregadas</Typography>
                 <Chip label={`${goldTablesCount} tabela(s)`} size="small" color="primary" variant="outlined" />
               </Box>
               {goldTablesCount === 0 ? (
-                <Alert severity="info" sx={{ mb: 2 }}>Nenhuma tabela Gold gerada ainda. Ela é criada automaticamente ao final do reprocess do destino MODELO FOCUS.</Alert>
+                <Alert severity="info" sx={{ mb: 2 }}>Nenhuma base consolidada gerada ainda. Ela é criada automaticamente ao final do reprocess do destino MODELO FOCUS.</Alert>
               ) : (
                 <Box sx={{ display: "flex", gap: 1, mb: 2, flexWrap: "wrap" }}>
                   {(tables.gold || []).map((t) => (
@@ -777,7 +777,7 @@ export default function Analysis() {
                 </Box>
               )}
               <Typography variant="caption" color="text.secondary" sx={{ display: "block", mb: 1 }}>
-                Clique em uma tabela para montar a query e depois em <b>Run</b> — mesmo comportamento da camada Gold. As cubos Gold são pré-agregadas (mensal) com medidas <b>quantity</b>, <b>realizado</b> e <b>billedcost</b>.
+                Clique em uma tabela para montar a query e depois em <b>Run</b>  para executar a consulta. Os cubos analíticos agrupam os dados por mês com medidas <b>quantity</b>, <b>realizado</b> e <b>billedcost</b>.
               </Typography>
             </>
           )}
@@ -785,7 +785,7 @@ export default function Analysis() {
             <>
               <Box sx={{ display: "flex", alignItems: "center", gap: 1, mb: 1.5, flexWrap: "wrap" }}>
                 <SchemaIcon color="primary" fontSize="small" />
-                <Typography variant="subtitle2" sx={{ fontWeight: 700 }}>{layer === "bronze" ? "Bronze" : "Silver"} — grupos e tabelas</Typography>
+                <Typography variant="subtitle2" sx={{ fontWeight: 700 }}>{layer === "bronze" ? "base de origem" : "base preparada"} — grupos e tabelas</Typography>
                 <Chip label={`${(tables[layer] || []).length} tabela(s) física(s)`} size="small" color="primary" variant="outlined" />
                 <Chip label={`${icebergTableGroups.length} grupo(s)`} size="small" variant="outlined" />
               </Box>
@@ -886,7 +886,7 @@ export default function Analysis() {
           {loading && <CircularProgress sx={{ display: "block", mx: "auto", mt: 4 }} />}
 
           {!loading && !result && (
-            <EmptyState message="Execute uma query SQL acima. O Trino precisa estar ativo para consultas SQL; a navegação das tabelas Iceberg continua disponível pelo fallback local." />
+            <EmptyState message="Execute uma consulta acima. O serviço de consultas precisa estar disponível; a navegação das bases continua disponível pela leitura local." />
           )}
 
           {!loading && result && (
@@ -944,7 +944,7 @@ export default function Analysis() {
             <Box>
               <Typography variant="h6">Tabelas temporárias de reprocessamento</Typography>
               <Typography variant="body2" color="text.secondary">
-                Stagings órfãs podem ser removidas sem alterar a Gold publicada. Tabelas de destinos com reprocessamento ativo ficam protegidas.
+                tabelas temporárias órfãs podem ser removidas sem alterar a base consolidada publicada. Tabelas de destinos com reprocessamento ativo ficam protegidas.
               </Typography>
             </Box>
             <Button
@@ -955,7 +955,7 @@ export default function Analysis() {
               onClick={async () => {
                 setStagingLoading(true); setError("");
                 try { setStagingTables(await getAnalysisStagingTables()); }
-                catch (e: unknown) { setError(formatApiError(e, "Falha ao listar tabelas staging")); }
+                catch (e: unknown) { setError(formatApiError(e, "Falha ao listar tabelas temporárias")); }
                 finally { setStagingLoading(false); }
               }}
             >
@@ -964,7 +964,7 @@ export default function Analysis() {
           </Box>
 
           {stagingTables.length === 0 ? (
-            <Alert severity="success">Nenhuma tabela staging pendente de limpeza.</Alert>
+            <Alert severity="success">Nenhuma tabela temporária pendente de limpeza.</Alert>
           ) : (
             <TableContainer component={Paper} variant="outlined">
               <Table size="small">
@@ -1034,12 +1034,12 @@ export default function Analysis() {
                 setTab("iceberg");
               }}
             />
-          : <EmptyState message="Nenhuma tabela Gold ativa disponível para análise pivot." />
+          : <EmptyState message="Nenhuma base consolidada ativa disponível para análise pivot." />
       )}
       {tab === "busca" && (
         destinations.length > 0
           ? <SourceSearch destinations={destinations} initialTableId={destinations.find(d => d.name.toUpperCase() === "MODELO FOCUS")?.id} />
-          : <EmptyState message="Nenhuma tabela Gold ativa disponível para busca." />
+          : <EmptyState message="Nenhuma base consolidada ativa disponível para busca." />
       )}
       </Paper>
       </Box>

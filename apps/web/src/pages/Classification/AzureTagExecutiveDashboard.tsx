@@ -208,20 +208,20 @@ export default function AzureTagExecutiveDashboard() {
     if (connectionId === "") return;
     setRefreshing(true);
     setError("");
-    setRefreshMessage("Enfileirando coleta Resource Graph para gravar o snapshot na Bronze…");
+    setRefreshMessage("Enfileirando coleta de inventário para atualizar a base de origem…");
     try {
       const queued = await queueAzureTagExecutiveRefresh(connectionId);
       const terminal = new Set(["COMPLETED", "COMPLETED_WITH_ERRORS", "FAILED", "CANCELLED"]);
       let task = await getTaskStatus(queued.task_id);
       for (let attempt = 0; !terminal.has(task.status) && attempt < 180; attempt += 1) {
-        setRefreshMessage(task.phase || "Coletando inventário Azure e atualizando a Bronze…");
+        setRefreshMessage(task.phase || "Coletando inventário Azure e atualizando a base de origem…");
         await new Promise((resolve) => window.setTimeout(resolve, 3000));
         task = await getTaskStatus(queued.task_id);
       }
       if (task.status === "COMPLETED") {
-        setRefreshMessage("Coleta concluída. Lendo o snapshot mais recente da Bronze…");
+        setRefreshMessage("Coleta concluída. Lendo o inventário mais recente…");
         const updated = await loadDashboard();
-        setRefreshMessage(`Snapshot Bronze atualizado${updated?.snapshot_date ? ` (${updated.snapshot_date})` : ""}.`);
+        setRefreshMessage(`Inventário atualizado${updated?.snapshot_date ? ` (${updated.snapshot_date})` : ""}.`);
       } else if (terminal.has(task.status)) {
         throw new Error(task.errors?.join("; ") || task.phase || `A coleta terminou com status ${task.status}.`);
       } else {
@@ -239,7 +239,7 @@ export default function AzureTagExecutiveDashboard() {
     <Stack direction={{ xs: "column", md: "row" }} justifyContent="space-between" alignItems={{ xs: "stretch", md: "center" }} spacing={2} sx={{ mb: 2 }}>
       <Box>
         <Typography variant="h5" fontWeight={700}>Dashboard Executivo de Tags</Typography>
-        <Typography variant="body2" color="text.secondary">Aderência calculada pelas tags do último snapshot Resource Graph armazenado na Bronze.</Typography>
+        <Typography variant="body2" color="text.secondary">Aderência calculada pelas tags do último inventário coletado.</Typography>
       </Box>
       <Stack direction="row" spacing={1}>
         <FormControl data-pdf-hide size="small" sx={{ minWidth: 250 }}>
@@ -415,7 +415,7 @@ export default function AzureTagExecutiveDashboard() {
                               Esperado{resource.expected_tags_source === "resource_group" ? " pelo Resource Group" : " pela classificação"}: {Object.entries(expected).map(([key, value]) => `${key}=${value}`).join(" · ")}
                             </Typography>
                           : <Typography variant="caption" display="block" color={resource.expected_tags_ambiguous ? "warning.main" : "text.secondary"} sx={{ mt: 0.5 }}>
-                              {resource.expected_tags_ambiguous ? "Mais de uma classificação possível na Silver para este Resource Group." : "Expectativa não encontrada na Silver mais recente."}
+                              {resource.expected_tags_ambiguous ? "Mais de uma classificação possível na base preparada para este Resource Group." : "Expectativa não encontrada na base preparada mais recente."}
                             </Typography>}
                       </TableCell>
                     </TableRow>;

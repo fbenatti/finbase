@@ -312,7 +312,7 @@ export default function PivotAnalysis({ destinations, initialTableId, showSearch
       setFilters(current => current.filter(item => known.has(item.column)));
       const wanted = [initialMeasure, "realizado", next.default_measure].find(name => name && next.measures.includes(name));
       setMeasures(wanted ? [{ column: wanted, aggregation: "SUM" }] : []);
-    }).catch(e => setError(formatApiError(e, "Não foi possível ler o schema Gold pelo Trino")));
+    }).catch(e => setError(formatApiError(e, "Não foi possível carregar a estrutura da base consolidada")));
     // Views are global to the workspace. Filtering only by the current table
     // made a saved dashboard disappear when the user opened another table.
     getPivotViews().then(setViews).catch(() => setViews([]));
@@ -346,7 +346,7 @@ export default function PivotAnalysis({ destinations, initialTableId, showSearch
         ? await runPivotUnion({ destination_table_ids: sourceIds, rows: safeRows, columns: safeCols, measures: safeMeasures, filters: safeFilters, row_limit: 500, column_limit: 60, include_totals: true, origin_column: "origem", sort_rows: sortRows, sort_columns: sortCols })
         : await runPivot({ destination_table_id: pivotTarget, rows: safeRows, columns: safeCols, measures: safeMeasures, filters: safeFilters, row_limit: 500, column_limit: 60, include_totals: true, sort_rows: sortRows, sort_columns: sortCols }));
     }
-    catch (e: unknown) { setError(formatApiError(e, "Falha ao consultar o Trino")); }
+    catch (e: unknown) { setError(formatApiError(e, "Falha ao consultar os dados")); }
     finally { setLoading(false); }
   };
 
@@ -359,7 +359,7 @@ export default function PivotAnalysis({ destinations, initialTableId, showSearch
     if (!tableId || !searchTerm.trim()) return;
     setSearchLoading(true); setError("");
     try { setSearchResult(await searchPivotTable(tableId, searchTerm, 100, 0, filters)); }
-    catch (e: unknown) { setError(formatApiError(e, "Falha ao pesquisar no Trino")); }
+    catch (e: unknown) { setError(formatApiError(e, "Falha ao pesquisar os dados")); }
     finally { setSearchLoading(false); }
   };
 
@@ -617,7 +617,7 @@ export default function PivotAnalysis({ destinations, initialTableId, showSearch
     <Paper sx={{ p: 2, mb: 2 }}>
       <Stack spacing={1.5}>
         <Stack direction="row" gap={1.5} alignItems="center" flexWrap="wrap">
-          <FormControl size="small" sx={{ minWidth: 250 }}><InputLabel>Tabela Gold</InputLabel><Select value={tableId || ""} label="Tabela Gold" onChange={e => { const id = Number(e.target.value); setTableId(id); setSourceIds([id]); }}>{[...destinations.filter(d => d.id > 0), ...destinations.filter(d => d.id <= 0)].map(d => <MenuItem key={d.id} value={d.id}>{d.name}{d.id < 0 ? " · análise" : ""}</MenuItem>)}</Select></FormControl>
+          <FormControl size="small" sx={{ minWidth: 250 }}><InputLabel>base consolidada</InputLabel><Select value={tableId || ""} label="base consolidada" onChange={e => { const id = Number(e.target.value); setTableId(id); setSourceIds([id]); }}>{[...destinations.filter(d => d.id > 0), ...destinations.filter(d => d.id <= 0)].map(d => <MenuItem key={d.id} value={d.id}>{d.name}{d.id < 0 ? " · análise" : ""}</MenuItem>)}</Select></FormControl>
           <Box sx={{ display: "flex", alignItems: "center", gap: .5, flexWrap: "wrap" }}>
           <Typography variant="caption" color="text.secondary">Origem:</Typography>
           {selectedSourceOptions.map(d => <Chip key={d.id} label={d.analysis_kind === "shared_cost" ? "Custo compartilhado" : d.id < 0 ? "Forecast" : "Realizado"} color={sourceIds.includes(d.id) ? "primary" : "default"} variant={sourceIds.includes(d.id) ? "filled" : "outlined"} onClick={() => setSourceIds(current => {
@@ -651,7 +651,7 @@ export default function PivotAnalysis({ destinations, initialTableId, showSearch
         <Button startIcon={<Add />} onClick={() => addField("cols")} disabled={!field}>Colunas</Button>
         <Button startIcon={<Add />} onClick={() => addField("filters")} disabled={!field}>Filtro</Button>
         <Button variant="outlined" startIcon={<Visibility />} onClick={() => setQueryOpen(true)}>Ver query</Button>
-          <Button variant="contained" startIcon={<PlayArrow />} onClick={execute} disabled={loading || !meta}>{loading ? "Consultando Trino..." : "Atualizar pivot"}</Button>
+          <Button variant="contained" startIcon={<PlayArrow />} onClick={execute} disabled={loading || !meta}>{loading ? "Consultando dados..." : "Atualizar pivot"}</Button>
           <Button variant="outlined" startIcon={<Download />} disabled={!result} onClick={() => result && downloadCsv(result)}>CSV</Button>
           <Button variant="outlined" startIcon={<TableChart />} disabled={!result} onClick={() => result && downloadExcel(result)}>Excel</Button>
         </Stack>
@@ -777,11 +777,12 @@ export default function PivotAnalysis({ destinations, initialTableId, showSearch
     </Paper>
     {loading && (
       <Alert severity="info" icon={<CircularProgress size={18} />} sx={{ mb: 2 }}>
-        Executando consulta no Trino. O resultado aparecerá aqui quando estiver pronto.
+        
+        Consultando os dados. O resultado aparecerá aqui quando estiver pronto.
       </Alert>
     )}
     {result?.currency_added && <Alert severity="info" sx={{ mb: 2 }}>Currency foi adicionada às linhas para impedir a soma de moedas diferentes.</Alert>}
-    {result?.period_auto_applied && <Alert severity="info" sx={{ mb: 2 }}>Sem período no eixo, o pivot restringiu Gold e forecast a {result.period_auto_applied}. Coloque <code>_billing_period</code> (ou <code>period</code>) em colunas para ver a série completa.</Alert>}
+    {result?.period_auto_applied && <Alert severity="info" sx={{ mb: 2 }}>Sem período no eixo, o pivot restringiu base consolidada e forecast a {result.period_auto_applied}. Coloque <code>_billing_period</code> (ou <code>period</code>) em colunas para ver a série completa.</Alert>}
     {drillLoading && <Alert severity="info" sx={{ mb: 2 }}>Carregando drill-down...</Alert>}
     {(result || loading) && <Box sx={{ position: "relative" }} aria-busy={loading}>{result && <TableContainer component={Paper} sx={{ maxHeight: "60vh", opacity: loading ? 0.45 : 1, transition: "opacity .15s" }}><Table stickyHeader size="small"><TableHead><TableRow>{result.rows.map(name => <TableCell key={name}>{name}</TableCell>)}{colKeys.flatMap(col => result.measures.map(m => <TableCell key={`${key(col)}-${m.column}`}>{formatKey(col, result.columns)}<br /><small>{m.label || `${m.aggregation} ${m.column}`}</small></TableCell>))}<TableCell>Total</TableCell></TableRow></TableHead><TableBody>{rowKeys.map(row => <TableRow key={key(row)}>{row.map((value, i) => <TableCell key={i}>{dimLabel(result.rows[i], value)}</TableCell>)}{colKeys.flatMap(col => (cells.get(`${key(row)}|${key(col)}`) || result.measures.map(() => null)).map((value, i) => <TableCell key={`${key(col)}-${i}`} onClick={() => openDrill(row, col)} sx={{ cursor: "pointer", "&:hover": { bgcolor: "action.hover" } }}>{typeof value === "number" ? money.format(value) : "—"}</TableCell>))}<TableCell>{totalFor("rows", row).map(value => typeof value === "number" ? money.format(value) : "—").join(" / ")}</TableCell></TableRow>)}{result.totals && <TableRow sx={{ bgcolor: "action.hover" }}>{result.rows.map((_, i) => <TableCell key={i}>{i === 0 ? "TOTAL" : ""}</TableCell>)}{colKeys.flatMap(col => totalFor("columns", col).map((value, i) => <TableCell key={`${key(col)}-${i}`}>{typeof value === "number" ? money.format(value) : "—"}</TableCell>))}<TableCell>{result.totals.grand.map(value => typeof value === "number" ? money.format(value) : "—").join(" / ")}</TableCell></TableRow>}</TableBody></Table></TableContainer>}{loading && <Box sx={{ position: "absolute", inset: 0, display: "grid", placeItems: "center", bgcolor: "rgba(255,255,255,.55)", zIndex: 1 }}><Paper elevation={3} sx={{ px: 2, py: 1.5, display: "flex", alignItems: "center", gap: 1 }}><CircularProgress size={20} /><Typography variant="body2">Atualizando resultado do Pivot…</Typography></Paper></Box>}</Box>}
     {showSearch && searchResult && <Paper sx={{ mt: 2, p: 2 }}><Stack direction="row" justifyContent="space-between" alignItems="center"><Typography variant="subtitle1">Resultados para “{searchTerm}”</Typography><Chip label={`${searchResult.total.toLocaleString("pt-BR")}${searchResult.total_is_estimate ? " exibidos (limite da busca)" : " registros encontrados"}`} size="small" /></Stack><Typography variant="caption" color="text.secondary">Pesquisa realizada em {searchResult.searched_columns?.length || 0} colunas textuais. As colunas encontradas aparecem destacadas.</Typography><TableContainer sx={{ maxHeight: "55vh", mt: 1 }}><Table stickyHeader size="small"><TableHead><TableRow>{searchResult.columns.map(column => <TableCell key={column}>{column}</TableCell>)}</TableRow></TableHead><TableBody>{searchResult.rows.map((row, index) => <TableRow key={index}>{searchResult.columns.map(column => <TableCell key={column} sx={searchResult.matched_columns[index]?.includes(column) ? { bgcolor: "#fff3cd", fontWeight: 700 } : undefined}>{String(row[column] ?? "")}</TableCell>)}</TableRow>)}</TableBody></Table></TableContainer></Paper>}
@@ -848,17 +849,17 @@ export default function PivotAnalysis({ destinations, initialTableId, showSearch
     <Dialog open={relationDialogOpen} onClose={() => setRelationDialogOpen(false)} fullWidth maxWidth="lg">
       <DialogTitle sx={{ borderBottom: 1, borderColor: "divider" }}>
         <Stack direction="row" alignItems="center" justifyContent="space-between" gap={2}>
-          <Box><Typography variant="h6" fontWeight={750}>Relação Bronze → Silver</Typography><Typography variant="body2" color="text.secondary">Correspondência direta pelo identificador persistido da linha</Typography></Box>
+          <Box><Typography variant="h6" fontWeight={750}>Origem → Dados preparados</Typography><Typography variant="body2" color="text.secondary">Correspondência direta pelo identificador persistido da linha</Typography></Box>
           <IconButton aria-label="Fechar relação com a origem" onClick={() => setRelationDialogOpen(false)}><Close /></IconButton>
         </Stack>
       </DialogTitle>
       <DialogContent sx={{ bgcolor: "#f8fafc", p: { xs: 1.5, md: 3 } }}>
-        {sourceDetailLoading && <Box sx={{ minHeight: 180, display: "flex", alignItems: "center", justifyContent: "center", gap: 1.5 }}><CircularProgress size={22} /><Typography>Buscando a linha de origem na Bronze...</Typography></Box>}
+        {sourceDetailLoading && <Box sx={{ minHeight: 180, display: "flex", alignItems: "center", justifyContent: "center", gap: 1.5 }}><CircularProgress size={22} /><Typography>Buscando a linha de origem na base de origem...</Typography></Box>}
         {!sourceDetailLoading && sourceDetail && !sourceDetail.available && <Alert severity="info" sx={{ mt: 2 }}>{sourceDetail.reason}</Alert>}
         {!sourceDetailLoading && sourceDetail?.available && <Stack spacing={2} sx={{ maxWidth: 1100, mx: "auto", mt: 1 }}>
-          <Paper variant="outlined" sx={{ p: 2, borderRadius: 2, bgcolor: "white" }}><Typography variant="subtitle1" fontWeight={750}>{sourceDetail.connection_name}</Typography><Typography variant="caption" color="text.secondary">{sourceDetail.blob_path || "Arquivo Bronze identificado por source_record_id"}</Typography></Paper>
+          <Paper variant="outlined" sx={{ p: 2, borderRadius: 2, bgcolor: "white" }}><Typography variant="subtitle1" fontWeight={750}>{sourceDetail.connection_name}</Typography><Typography variant="caption" color="text.secondary">{sourceDetail.blob_path || "Arquivo de origem identificado pelo registro"}</Typography></Paper>
           <Box sx={{ display: "grid", gridTemplateColumns: { xs: "1fr", md: "1fr 56px 1fr" }, alignItems: "center", gap: 1 }}>
-            <Typography variant="overline" color="#0369a1" fontWeight={800}>BRONZE · ORIGEM</Typography><CompareArrows sx={{ display: { xs: "none", md: "block" }, color: "#64748b", mx: "auto" }} /><Typography variant="overline" color="#6d28d9" fontWeight={800}>SILVER · DESTINO</Typography>
+            <Typography variant="overline" color="#0369a1" fontWeight={800}>DADOS DE ORIGEM</Typography><CompareArrows sx={{ display: { xs: "none", md: "block" }, color: "#64748b", mx: "auto" }} /><Typography variant="overline" color="#6d28d9" fontWeight={800}>DADOS PREPARADOS</Typography>
           </Box>
           {(sourceDetail.pairs || []).map((pair, index) => <Box key={`${pair.source_key}-${pair.destination_key}-${index}`} sx={{ display: "grid", gridTemplateColumns: { xs: "1fr", md: "1fr 56px 1fr" }, gap: 1, alignItems: "stretch" }}>
             <Paper variant="outlined" sx={{ p: 1.5, borderRadius: 2, bgcolor: "#f0f9ff", borderColor: "#bae6fd", minWidth: 0 }}><Typography variant="caption" fontWeight={750} color="#0369a1" display="block" mb={0.5}>{pair.source_key}</Typography>{renderDetailValue(pair.source_value)}</Paper>
@@ -897,12 +898,12 @@ export default function PivotAnalysis({ destinations, initialTableId, showSearch
     <Dialog open={queryOpen} onClose={() => setQueryOpen(false)} fullWidth maxWidth="md">
       <DialogTitle>Query SQL do Pivot</DialogTitle>
       <DialogContent>
-        <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>A query consulta a tabela de detalhe na camada Silver, usada pelo Pivot, e agrega pelas dimensões e medidas configuradas.</Typography>
+        <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>A query consulta a tabela de detalhe na camada base preparada, usada pelo Pivot, e agrega pelas dimensões e medidas configuradas.</Typography>
         <TextField fullWidth multiline minRows={8} value={generatedSql} InputProps={{ readOnly: true }} sx={{ "& textarea": { fontFamily: "monospace", fontSize: 13 } }} />
       </DialogContent>
       <DialogActions>
         <Button startIcon={<ContentCopy />} onClick={() => { void navigator.clipboard?.writeText(generatedSql).then(() => { setCopiedQuery(true); setQueryOpen(false); }); }}>{copiedQuery ? "Copiada" : "Copiar query"}</Button>
-        {onOpenQuery && <Button variant="contained" startIcon={<PlayArrow />} onClick={() => { onOpenQuery(generatedSql); setQueryOpen(false); }}>Abrir no Iceberg / Trino</Button>}
+        {onOpenQuery && <Button variant="contained" startIcon={<PlayArrow />} onClick={() => { onOpenQuery(generatedSql); setQueryOpen(false); }}>Abrir no editor de consultas</Button>}
         <Button onClick={() => setQueryOpen(false)}>Fechar</Button>
       </DialogActions>
     </Dialog>

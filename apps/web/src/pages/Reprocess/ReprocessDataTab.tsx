@@ -332,14 +332,14 @@ export default function ReprocessDataTab() {
             />
             <FormControlLabel
               control={<Switch checked={chainGoldCubes} onChange={(e) => setChainGoldCubes(e.target.checked)} color="primary" disabled={classificationOnly} />}
-              label="Materializar Gold na sequência (visão completa)"
+              label="Materializar base consolidada na sequência (visão completa)"
             />
             {chainGoldCubes && (
               <FormControl sx={{ minWidth: 280 }} size="small">
-                <InputLabel>Tabela Gold</InputLabel>
+                <InputLabel>base consolidada</InputLabel>
                 <Select
                   value={chainGoldCubeRuleId}
-                  label="Tabela Gold"
+                  label="base consolidada"
                   onChange={(e) => setChainRuleId(e.target.value as number | "")}
                 >
                   <MenuItem value=""><em>Todas as regras ativas</em></MenuItem>
@@ -392,15 +392,15 @@ export default function ReprocessDataTab() {
         <Alert severity="info" sx={{ mb: 2 }}>
           Fonte Azure PTU: selecione o mês (ex.: <strong>08/2026</strong>) e clique em Reprocessar para buscar
           métricas horárias via Azure Monitor (janelas de até 30 dias) em <strong>dest_azure_ptu_metrics</strong>.
-          Sem mês selecionado, busca os últimos ~93 dias. Azure Monitor retém plataforma por ~93 dias — não usa blobs Bronze.
+          Sem mês selecionado, busca os últimos ~93 dias. Azure Monitor retém plataforma por ~93 dias — não usa blobs base de origem.
         </Alert>
       )}
       {/* ── Andamento — movido para o ícone de notificações ── */}
       {chainGoldCubes && !isRunning && (
         <Alert severity="info" sx={{ mb: 2 }}>
-          A Gold selecionada será materializada <strong>na sequência</strong>, depois que o último
+          A base consolidada selecionada será materializada <strong>na sequência</strong>, depois que o último
           reprocessamento do grupo concluir (visão completa = realizado + forecast + rateio). Acompanhe
-          a execução da Gold no sino de notificações e na aba <strong>Gold (Custo pré-agregado)</strong>.
+          a execução da base consolidada no sino de notificações e na aba <strong>Custos consolidados</strong>.
         </Alert>
       )}
       {(isRunning || isQueued) && (

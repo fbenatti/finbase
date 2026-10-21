@@ -517,7 +517,7 @@ export default function WisperDashboard() {
       <Box>
         <SectionTitle
           title="Finanças"
-          subtitle={`Referência do mês fechado (${ref.closed_label}). Realizado: FOCUS · Forecast: Gold/planning.`}
+          subtitle={`Referência do mês fechado (${ref.closed_label}). Realizado: Custos apurados · Projeção: Planejamento.`}
         />
         <Grid container spacing={2} sx={{ mb: 2 }}>
           <Grid item xs={12} sm={6} md={4}>

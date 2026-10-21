@@ -689,7 +689,7 @@ export default function Relationship({ embedded }: { embedded?: boolean } = {}) 
       },
     },
     {
-      key: "partition_spec_json" as keyof TableRelationship, label: "Partição Silver", width: 220,
+      key: "partition_spec_json" as keyof TableRelationship, label: "Partição base preparada", width: 220,
       sortable: false,
       render: (r) => {
         const dest = destById.get(r.destination_table_id);
@@ -939,7 +939,7 @@ export default function Relationship({ embedded }: { embedded?: boolean } = {}) 
         {!selectedDestId ? (
           <Paper variant="outlined" sx={{ p: 2, bgcolor: "#fafbff" }}>
             <Typography variant="subtitle2" sx={{ mb: 0.5 }}>
-              Partição Silver (destino)
+              Partição base preparada (destino)
             </Typography>
             <Typography variant="body2" color="text.secondary">
               Escolha <strong>Fonte</strong> (ex. azure-4p) e <strong>Tabela Destino</strong> (ex. MODELO FOCUS).
@@ -1032,7 +1032,7 @@ export default function Relationship({ embedded }: { embedded?: boolean } = {}) 
                   <Collapse in={!collapsed}>
                     <Box sx={{ mt: 0.4, pl: 0.5, borderLeft: "2px solid #cfd8dc", ml: 1.2 }}>
                       {renderSourceColumn(parent, {
-                        subtitle: "Objeto JSON completo (coluna Bronze)",
+                        subtitle: "Objeto JSON completo (coluna base de origem)",
                       })}
                       {children.map((col) => renderSourceColumn(col, {
                         nested: true,

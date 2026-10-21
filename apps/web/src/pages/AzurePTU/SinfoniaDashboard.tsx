@@ -33,7 +33,7 @@ export default function SinfoniaDashboard() {
     }); return () => controller.abort(); }, []);
   if (error) return <Alert severity="error">{error}</Alert>;
   if (!data) return <Box p={5} textAlign="center"><CircularProgress /></Box>;
-  if (data.empty) return <Alert severity="info">Nenhum custo do portfólio Sinfonia foi encontrado na Gold.</Alert>;
+  if (data.empty) return <Alert severity="info">Nenhum custo do portfólio Sinfonia foi encontrado na base consolidada.</Alert>;
   const kpis = data.kpis || { total: 0, ibm: 0, factory: 0, forecast: 0 };
   const projects = data.projects || [];
   const ibm = projects.filter(x => x.group === "Sinfonia IBM");
@@ -41,7 +41,7 @@ export default function SinfoniaDashboard() {
   const monthly = data.monthly || [];
   return <Stack gap={2.5}>
     <Box><Typography variant="h4">Projeto Sinfonia</Typography><Typography color="text.secondary">Visão executiva consolidada de Sinfonia IBM e Fábrica de Agentes Azure.</Typography>
-      <Stack direction="row" gap={1} mt={1} flexWrap="wrap"><Chip size="small" label={`Referência: ${data.reference?.label || "—"}`} /><Chip size="small" color={data.reference?.source === "forecast" ? "warning" : "success"} label={data.reference?.source === "forecast" ? "Forecast do mês aberto" : "Realizado fechado"} /><Chip size="small" variant="outlined" label="Fonte: Gold / dest_dm_cost_projeto_sinfonia" /></Stack></Box>
+      <Stack direction="row" gap={1} mt={1} flexWrap="wrap"><Chip size="small" label={`Referência: ${data.reference?.label || "—"}`} /><Chip size="small" color={data.reference?.source === "forecast" ? "warning" : "success"} label={data.reference?.source === "forecast" ? "Forecast do mês aberto" : "Realizado fechado"} /><Chip size="small" variant="outlined" label="Fonte: Custos consolidados do portfólio Sinfonia" /></Stack></Box>
     <Grid container spacing={2}><Grid item xs={12} sm={6} md={3}><Kpi label="Custo total do projeto" value={kpis.total} color="#0F172A" hint="IBM + Azure, incluindo rateios" /></Grid><Grid item xs={12} sm={6} md={3}><Kpi label="Sinfonia IBM" value={kpis.ibm} color={accents.IBM} hint="Watson e VivoCog" /></Grid><Grid item xs={12} sm={6} md={3}><Kpi label="Fábrica de Agentes" value={kpis.factory} color={accents["Fábrica de Agentes"]} hint="Comercial, Financeiro e Suporte Técnico" /></Grid><Grid item xs={12} sm={6} md={3}><Kpi label="Forecast do mês" value={kpis.forecast} color="#F59E0B" hint="Referência enquanto o mês estiver aberto" /></Grid></Grid>
     <Grid container spacing={2}><Grid item xs={12} md={5}><PortfolioCard title="Sinfonia IBM" cloud="IBM" items={ibm} /></Grid><Grid item xs={12} md={7}><PortfolioCard title="Fábrica de Agentes" cloud="Azure" items={factory} /></Grid></Grid>
     <Card><CardContent><Typography variant="h6">Evolução mensal — consumo e forecast</Typography><Typography variant="body2" color="text.secondary" gutterBottom>As barras empilhadas mostram IBM e Fábrica; a linha indica o forecast consolidado.</Typography>

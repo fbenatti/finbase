@@ -206,11 +206,11 @@ export default function ExtractionHistory() {
             {metadata ? (
               <>
                 <strong>Fonte:</strong> {metadata.connection_name} ({metadata.connection_code}) ·{" "}
-                <strong>Tabela Bronze:</strong> <code>{metadata.table_name}</code> ·{" "}
+                <strong>Tabela base de origem:</strong> <code>{metadata.table_name}</code> ·{" "}
                 <strong>Total de Registros:</strong> {totalRows.toLocaleString()}
               </>
             ) : (
-              `Execução ${taskId} · consulta server-side no Apache Iceberg`
+              `Execução ${taskId} · consulta aos registros armazenados`
             )}
           </Typography>
         </Box>

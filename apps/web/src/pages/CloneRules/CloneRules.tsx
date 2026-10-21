@@ -296,7 +296,7 @@ export default function CloneRules({ embedded }: { embedded?: boolean } = {}) {
         <Typography variant="body2" component="div">
           Na fatura Azure, linhas de <strong>uso (Usage)</strong> cobertas por <strong>Reserva</strong> ou <strong>Savings Plan</strong> frequentemente chegam com custo zerado — o compromisso já foi pago em outro lançamento. Sem esse tratamento, dashboards e pivots subestimam o consumo real da cloud.
           <br /><br />
-          No reprocessamento da Gold, cada regra elegível reconstrói o <strong>preço On-Demand de referência</strong> na linha original e cria uma linha sintética de <strong>estorno (Return)</strong> com valor negativo. O total financeiro se mantém; o que muda é a visibilidade do uso real para análise FinOps.
+          No reprocessamento da base consolidada, cada regra elegível reconstrói o <strong>preço On-Demand de referência</strong> na linha original e cria uma linha sintética de <strong>estorno (Return)</strong> com valor negativo. O total financeiro se mantém; o que muda é a visibilidade do uso real para análise FinOps.
           <br /><br />
           Templates editáveis para tabelas FOCUS são instalados automaticamente (ex.: <em>Azure Reservation Usage → Return</em>). Se não houver preço On-Demand histórico para o medidor, a linha vai para <strong>pendências</strong> — nada é alterado em silêncio.
         </Typography>

@@ -1340,7 +1340,8 @@ export default function ExpectedView({
         <Stack alignItems="center" mt={6} gap={1}>
           <CircularProgress />
           <Typography color="text.secondary">
-            Consultando realizado e forecast no Trino…
+            
+            Consultando custos realizados e projeções…
           </Typography>
         </Stack>
       ) : (
@@ -1413,9 +1414,9 @@ export default function ExpectedView({
                 </Stack>
                 {dailyError && (chartGranularity === "daily" || groupBy) && <Alert severity="error" sx={{ mt: 1 }}>{dailyError}</Alert>}
                 {(chartGranularity === "daily" && dailyLoading) || groupQueryLoading
-                  ? <Stack alignItems="center" justifyContent="center" sx={{ height: 420 }} direction="row" gap={1}><CircularProgress size={22} /><Typography color="text.secondary">{chartGranularity === "daily" ? "Consultando consumo diário…" : "Consultando agrupamento do realizado no Trino…"}</Typography></Stack>
+                  ? <Stack alignItems="center" justifyContent="center" sx={{ height: 420 }} direction="row" gap={1}><CircularProgress size={22} /><Typography color="text.secondary">{chartGranularity === "daily" ? "Consultando consumo diário…" : "Consultando o agrupamento dos custos realizados…"}</Typography></Stack>
                   : chartGranularity === "daily" && dailyGold?.available === false
-                    ? <Alert severity="info" sx={{ mt: 1 }}>A fonte Silver não disponibiliza uma data real de consumo para este recorte.</Alert>
+                    ? <Alert severity="info" sx={{ mt: 1 }}>A fonte base preparada não disponibiliza uma data real de consumo para este recorte.</Alert>
                     : chartGranularity === "daily" && !dailyGold?.rows.length
                       ? <Alert severity="info" sx={{ mt: 1 }}>Sem dados diários disponíveis neste período.</Alert>
                       : groupBy && chartGranularity !== "daily" && groupedGold && !groupedGold.rows.length

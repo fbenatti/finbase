@@ -20,12 +20,12 @@ export const widgetHelp: Record<string, string> = {
   "Disponibilidade": "Percentual estimado de disponibilidade das chamadas Azure OpenAI. 97,1% significa que cerca de 2,9% não foram consideradas disponíveis pela métrica Azure; não é sinônimo de taxa de 429.",
   "TTFT médio": "Time to First Token: tempo até o primeiro token da resposta. Mede a espera inicial percebida pelo usuário.",
   "TBT médio": "Time Between Tokens: intervalo normalizado entre tokens durante a geração. Mede a cadência de streaming após o primeiro token.",
-  "Horas ≥80%": "Quantidade de horas Gold em que o pico válido de utilização atingiu pelo menos 80%. É uma contagem observada no período filtrado.",
-  "Horas ≥95%": "Quantidade de horas Gold em que o pico válido atingiu pelo menos 95%. É evidência de proximidade do limite, não confirmação de indisponibilidade ou custo adicional.",
-  "Pico observado": "Maior utilização válida encontrada nas agregações horárias do período. Não é P95 bruto; o Gold histórico não contém toda a distribuição de pontos de minuto.",
+  "Horas ≥80%": "Quantidade de horas em que o pico válido de utilização atingiu pelo menos 80%. É uma contagem observada no período filtrado.",
+  "Horas ≥95%": "Quantidade de horas em que o pico válido atingiu pelo menos 95%. É evidência de proximidade do limite, não confirmação de indisponibilidade ou custo adicional.",
+  "Pico observado": "Maior utilização válida encontrada nas agregações horárias do período. Não é P95 bruto; o base consolidada histórico não contém toda a distribuição de pontos de minuto.",
   "Cache match": "Percentual de tokens de contexto atendidos pelo cache, quando o deployment expõe essa métrica. Maior valor pode indicar reaproveitamento de contexto.",
-  "Custo PTU mensal": "Soma do custo da reserva de capacidade (Microsoft.Capacity) e da PTU on-demand (Provisioned Throughput Units · 1/Month), no mês de referência da Gold FOCUS. Quando o on-demand do mês corrente ainda não foi lançado, usa o forecast (ou o último realizado) marcado como previsto.",
-  "PTUs (reserva + on-demand)": "Unidades FATURADAS de capacidade PTU no mês de referência: reserva (Microsoft.Capacity · Purchase) + on-demand (Provisioned Throughput Units · 1/Month). O on-demand só é contabilizado para projetos com linha realizada na Gold (ex.: Aura Brain 100 PTUs/mês); quando o mês corrente ainda não foi lançado, usa o forecast marcado como previsto. Projetos cobertos pela reserva (ex.: Vivo Mais) não recebem on-demand fabricado. ATENÇÃO: não é a capacidade física — o inventário Azure (dest_azure_ptu_capacity) mostra os PTUs realmente configurados nos deployments (KPIs operacionais).",
+  "Custo PTU mensal": "Soma do custo da reserva de capacidade (Microsoft.Capacity) e da PTU on-demand (Provisioned Throughput Units · 1/Month), no mês de referência da base consolidada FOCUS. Quando o on-demand do mês corrente ainda não foi lançado, usa o forecast (ou o último realizado) marcado como previsto.",
+  "PTUs (reserva + on-demand)": "Unidades FATURADAS de capacidade PTU no mês de referência: reserva (Microsoft.Capacity · Purchase) + on-demand (Provisioned Throughput Units · 1/Month). O on-demand só é contabilizado para projetos com linha realizada na base consolidada (ex.: Aura Brain 100 PTUs/mês); quando o mês corrente ainda não foi lançado, usa o forecast marcado como previsto. Projetos cobertos pela reserva (ex.: Vivo Mais) não recebem on-demand fabricado. ATENÇÃO: não é a capacidade física — o inventário Azure (dest_azure_ptu_capacity) mostra os PTUs realmente configurados nos deployments (KPIs operacionais).",
   "On-demand vs reserva": "Diferença percentual entre o custo por PTU on-demand e o custo por PTU da reserva no mês de referência. O delta esperado entre reserva e on-demand é de no máximo ~20%. Quando o on-demand do mês corrente não foi lançado, usa o forecast (ou o último realizado) marcado como previsto.",
   "Custo por milhão de tokens": "Custo da capacidade PTU (reserva + on-demand) no mês de referência dividido pelos tokens consumidos nos últimos 30 dias (Azure Monitor), multiplicado por 1 milhão. É o custo efetivo de cada milhão de tokens dado o gasto fixo mensal de capacidade.",
 };
@@ -98,7 +98,7 @@ export function AzurePtuOpsReport({ data, meta }: { data: any; meta: AzurePtuOps
   const series = token.series || data.token_series || [], tokenHeatmap = data.token_heatmap || [], util = risk.utilization_series || data.utilization_series || [];
   const deps = risk.deployment_table || data.deployment_utilization || [];
   const total = Number(d.total_tokens || 0), input = Number(d.input_tokens || 0), output = Number(d.output_tokens || 0);
-  const sourceLabel = data.data_source === "gold" ? "Gold Iceberg" : data.data_source === "stale" ? "Gold (parcial)" : "Gold parcial";
+  const sourceLabel = data.data_source === "gold" ? "Base consolidada" : data.data_source === "stale" ? "Dados parciais" : "Dados parciais";
   const mixReserved = data?.kpis?.reserved_ptus ?? s?.capacity_decision?.reserved_ptus;
   const mixOnDemand = data?.kpis?.ondemand_ptus ?? s?.capacity_decision?.ondemand_ptus;
 
@@ -162,7 +162,7 @@ export function AzurePtuOpsReport({ data, meta }: { data: any; meta: AzurePtuOps
         <p><strong>Recorte:</strong> {periodInfo.start || "—"} → {periodInfo.end || "—"} · última amostra: {periodInfo.last_sample || "—"} · cobertura: {pct(periodInfo.coverage_pct ?? coverage.coverage_pct)}{periodInfo.sample_unit ? ` (${periodInfo.sample_count}/${periodInfo.expected_count} ${periodInfo.sample_unit === "hour" ? "horas" : periodInfo.sample_unit === "day" ? "dias" : "meses"})` : ""} · {c.deployment_count ?? deps.length} deployments / {n(c.total_ptus ?? data.kpis?.total_ptus)} PTUs</p>
         {mixReserved != null && <p><strong>Composição de capacidade:</strong> Reserva: {n(mixReserved)} PTUs · OnDemand: {n(mixOnDemand)} PTUs</p>}
         <p><strong>Exportado em:</strong> {meta.exportedAt}</p>
-        <p style={{ marginTop: 8, fontStyle: "italic" }}>Relatório consolidado com todos os painéis da tela Azure PTU — Operação: resumo executivo (inclui financeiro Gold), consumo de tokens, capacidade/operação e recomendações. Todos os valores refletem exclusivamente o período e os filtros selecionados.</p>
+        <p style={{ marginTop: 8, fontStyle: "italic" }}>Relatório consolidado com todos os painéis da tela Azure PTU — Operação: resumo executivo (inclui financeiro base consolidada), consumo de tokens, capacidade/operação e recomendações. Todos os valores refletem exclusivamente o período e os filtros selecionados.</p>
       </Box>
 
       {coverage.complete === false && <Alert severity="warning" sx={{ mb: 2 }}>Cobertura parcial: {coverage.days_with_data}/{coverage.expected_days} dias; lacunas não significam consumo zero.</Alert>}
@@ -225,7 +225,7 @@ export function AzurePtuOpsReport({ data, meta }: { data: any; meta: AzurePtuOps
       </Section>
 
       {/* ── 03 · Capacidade e operação ────────────────────────────────── */}
-      <Section index="03" title="Capacidade e operação" subtitle="As horas ≥80% e ≥95% são contagens observadas no Gold. O pico acima de 100% é mostrado como anomalia de medição/agregação até ser validado; não deve ser interpretado como cobrança extra. Possíveis ações técnicas incluem revisar distribuição de tráfego, versão/modelo, cache e arquitetura RAG — sempre após confirmar a qualidade do dado.">
+      <Section index="03" title="Capacidade e operação" subtitle="As horas ≥80% e ≥95% são contagens observadas no base consolidada. O pico acima de 100% é mostrado como anomalia de medição/agregação até ser validado; não deve ser interpretado como cobrança extra. Possíveis ações técnicas incluem revisar distribuição de tráfego, versão/modelo, cache e arquitetura RAG — sempre após confirmar a qualidade do dado.">
         <Grid container spacing={1.5} sx={{ mb: 1.5 }}>
           <KpiCard label="Horas ≥80%" value={n(risk.hours_at_or_above_80)} hint="zona de atenção" />
           <KpiCard label="Horas ≥95%" value={n(risk.hours_at_or_above_95)} hint="zona crítica observada" color="#DC2626" />
@@ -278,9 +278,9 @@ export function AzurePtuOpsReport({ data, meta }: { data: any; meta: AzurePtuOps
           {Object.entries(widgetHelp).map(([label, help]) => (
             <Typography key={label} variant="body2"><strong>{label}:</strong> {help}</Typography>
           ))}
-          <Typography variant="body2" sx={{ mt: 1 }}><strong>Horas ≥80%/≥95%:</strong> horas Gold observadas que cruzaram esses limiares; são fatos do recorte, não previsão nem confirmação de cobrança.</Typography>
+          <Typography variant="body2" sx={{ mt: 1 }}><strong>Horas ≥80%/≥95%:</strong>  horas observadas que cruzaram esses limiares; são fatos do recorte, não previsão nem confirmação de cobrança.</Typography>
           <Typography variant="body2"><strong>Heatmaps:</strong> a escala de verde vai de uso baixo (verde fraco) a uso alto (verde forte), aplicada igualmente no portal e neste relatório.</Typography>
-          <Typography variant="body2"><strong>Financeiro (Gold):</strong> valores em BRL (realizado) da Gold FOCUS. Reserva = Microsoft.Capacity (100 PTUs/mês, Vivo Mais); on-demand = Provisioned Throughput Units · 1/Month (100 PTUs/mês, Aura Brain); uso horário da capacidade = meter Provisioned Managed (1/Hour, informativo). Classificação por organograma_nivel_5 (projeto).</Typography>
+          <Typography variant="body2"><strong>Financeiro:</strong> valores em BRL (realizado) da base consolidada FOCUS. Reserva = Microsoft.Capacity (100 PTUs/mês, Vivo Mais); on-demand = Provisioned Throughput Units · 1/Month (100 PTUs/mês, Aura Brain); uso horário da capacidade = meter Provisioned Managed (1/Hour, informativo). Classificação por organograma_nivel_5 (projeto).</Typography>
         </Stack>
       </Section>
 

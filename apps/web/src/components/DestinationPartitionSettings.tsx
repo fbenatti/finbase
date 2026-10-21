@@ -162,7 +162,8 @@ export default function DestinationPartitionSettings({
   return (
     <Paper variant="outlined" sx={{ p: 2, mb: 2, bgcolor: "#fafbff" }}>
       <Typography variant="subtitle2" sx={{ mb: 1 }}>
-        Partição Silver / Iceberg (tabela destino)
+        
+        Organização dos dados de destino
       </Typography>
       <Typography variant="caption" color="text.secondary" sx={{ display: "block", mb: 1 }}>
         A fatia de <strong>replace</strong> (anti-duplicata no ETL) é sempre período + conexão de origem.
@@ -208,7 +209,7 @@ export default function DestinationPartitionSettings({
             <MenuItem value="billing_period">Mês (_billing_period)</MenuItem>
             <MenuItem value="snapshot_date">Dia (snapshot)</MenuItem>
           </Select>
-          <FormHelperText>Obrigatório na publicação Silver</FormHelperText>
+          <FormHelperText>Obrigatório na publicação base preparada</FormHelperText>
         </FormControl>
 
         {spec.grain === "snapshot_date" && (

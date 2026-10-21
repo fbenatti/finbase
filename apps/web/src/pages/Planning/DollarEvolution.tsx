@@ -52,8 +52,8 @@ export default function DollarEvolution() {
       if (!alive) return;
       const status = (cause as { response?: { status?: number } })?.response?.status;
       setError(status === 404
-        ? `O cubo ${TABLE} ainda não foi materializado. Reprocesse os cubos Gold em Governança → Geração de Cubos.`
-        : `Não foi possível consultar o cubo ${TABLE}${status ? ` (HTTP ${status})` : ""}. Verifique a disponibilidade da API Gold e do Trino.`);
+        ? `O cubo ${TABLE} ainda não está disponível. Atualize os cubos em Dados e operação → Materialização de cubos.`
+        : `Não foi possível consultar o cubo ${TABLE}${status ? ` (HTTP ${status})` : ""}. Verifique a disponibilidade dos dados e do serviço de consultas.`);
     }).finally(() => { if (alive) setLoading(false); });
     return () => { alive = false; };
   }, []);

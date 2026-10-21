@@ -1097,7 +1097,7 @@ export function TagsTab() {
                     count={Array.isArray(t.layers?.resources) ? (t.layers.resources as unknown[]).length : 0}
                   />
                   <LayerSummary
-                    label="Subscriptions cobertas pela Silver"
+                    label="Subscriptions cobertas pela base preparada"
                     count={t.subscriptions?.length ?? 0}
                   />
                   <LayerSummary
@@ -1116,7 +1116,8 @@ export function TagsTab() {
                 )}
                 {(t.subscriptions?.length ?? 0) > 0 && (
                   <Typography variant="caption" color="text.secondary" sx={{ display: "block", mt: 1.25 }}>
-                    Escopo Silver: {t.subscriptions!.map((s) => `${s.subscription_id.slice(0, 8)}… (${s.policies.length})`).join(" · ")}
+                    
+                    Escopo dos dados preparados: {t.subscriptions!.map((s) => `${s.subscription_id.slice(0, 8)}… (${s.policies.length})`).join(" · ")}
                   </Typography>
                 )}
               </Box>

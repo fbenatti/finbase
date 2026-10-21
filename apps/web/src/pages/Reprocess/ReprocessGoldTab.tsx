@@ -69,8 +69,8 @@ export default function ReprocessGoldTab() {
 
   return <Stack spacing={2}>
     {subtab === "ai-cost" ? <ReprocessAICostRelationshipsTab /> : <>
-    <Typography variant="h6">Materialização Gold</Typography>
-    <Typography color="text.secondary">Lê a Silver (FOCUS, planejamento/forecast/rateio...), aplica os filtros das regras e publica cubos agregados no namespace iceberg.gold. Escolha reprocessar <b>todas</b> ou apenas uma regra/fonte.</Typography>
+    <Typography variant="h6">Consolidação de dados</Typography>
+    <Typography color="text.secondary">Lê os dados preparados de custos, planejamento, projeções e rateios, aplica os filtros das regras e publica cubos analíticos. Escolha reprocessar <b>todas</b> ou apenas uma regra/fonte.</Typography>
     {error && <Alert severity="error">{error}</Alert>}
 
     <Stack direction={{ xs: "column", sm: "row" }} spacing={1} alignItems={{ sm: "center" }}>
@@ -80,8 +80,8 @@ export default function ReprocessGoldTab() {
 
     {/* Regras ativas com status */}
     <Box>
-      <Typography variant="subtitle2" mb={1}>Regras Gold ({rules.length}) · {selectedIds.size} selecionada(s)</Typography>
-      {rules.length === 0 ? <Typography color="text.secondary">Nenhuma regra de cubo Gold configurada.</Typography> : <Stack spacing={1}>
+      <Typography variant="subtitle2" mb={1}>regras de consolidação ({rules.length}) · {selectedIds.size} selecionada(s)</Typography>
+      {rules.length === 0 ? <Typography color="text.secondary">Nenhuma regra de cubo analítico configurada.</Typography> : <Stack spacing={1}>
         {rules.map(r => <Box key={r.id} sx={{ display: "flex", alignItems: "center", gap: 1.5, p: 1, border: "1px solid", borderColor: selectedIds.has(r.id!) ? "primary.main" : "divider", borderRadius: 1, bgcolor: selectedIds.has(r.id!) ? "action.selected" : "transparent", cursor: "pointer" }} onClick={() => r.id != null && toggleRule(r.id)}>
           <Checkbox size="small" checked={r.id != null && selectedIds.has(r.id)} onChange={() => r.id != null && toggleRule(r.id)} onClick={e => e.stopPropagation()} />
           <Box sx={{ flex: 1, minWidth: 0 }}>

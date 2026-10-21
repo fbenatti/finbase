@@ -59,7 +59,7 @@ function groupDetail(subscription: string, subscriptionName: string, policies: F
       `Alvos (${targets.length}): ${targets.join(", ")}`,
       `Assignment: ${scopes.join(", ")}`,
       `Modo: ${scopeModesLabel(policies)}`,
-      `Evidência GOLD: ${policies.map((item) => item.evidence_count).join(" / ")} linha(s)`,
+      `Evidência BASE CONSOLIDADA: ${policies.map((item) => item.evidence_count).join(" / ")} linha(s)`,
     ].join("\n"),
     policies,
   };
@@ -183,7 +183,7 @@ export default function PolicyFlow({ tenant }: { tenant?: AzureTenantPolicy }) {
       <DialogContent dividers><Typography component="pre" variant="body2" sx={{ mt: 0, whiteSpace: "pre-wrap", fontFamily: "inherit" }}>{detail?.body}</Typography>{dialogPolicies.map((policy, index) => {
         const subscriptionId = policy.scope_subscriptions[0] || "";
         const subscriptionName = tenant?.subscription_catalog?.find((entry) => entry.ids.includes(subscriptionId))?.name || subscriptionId;
-        return <Box key={`${policy.rule_id}-${policy.kind}-${index}`} sx={{ mt: 2, p: 2, borderLeft: "4px solid", borderColor: policy.kind === "resource_groups" ? "primary.main" : "success.main", bgcolor: "#f8fafc" }}><Typography fontWeight={700}>#{policy.rule_id} {policy.rule_name} · {policy.kind === "resource_groups" ? "All / Resource Group" : "Indexed / recursos"}</Typography><Typography variant="body2">Alvo: {targetOf(policy, subscriptionName)}</Typography><Typography variant="body2">Assignment: {assignmentScopePath(subscriptionId, policy)}</Typography><Typography variant="body2">Evidência GOLD: {policy.evidence_count} linha(s)</Typography><Typography variant="body2" sx={{ mt: 1 }} fontWeight={700}>Tags implementadas</Typography><Box sx={{ mt: .5, display: "flex", gap: .5, flexWrap: "wrap" }}>{Object.entries(policy.tags || {}).map(([key, value]) => <Chip key={key} size="small" color="success" label={`${key}=${value}`} />)}</Box><ExclusionCards exclusions={policy.exclusions} /></Box>;
+        return <Box key={`${policy.rule_id}-${policy.kind}-${index}`} sx={{ mt: 2, p: 2, borderLeft: "4px solid", borderColor: policy.kind === "resource_groups" ? "primary.main" : "success.main", bgcolor: "#f8fafc" }}><Typography fontWeight={700}>#{policy.rule_id} {policy.rule_name} · {policy.kind === "resource_groups" ? "All / Resource Group" : "Indexed / recursos"}</Typography><Typography variant="body2">Alvo: {targetOf(policy, subscriptionName)}</Typography><Typography variant="body2">Assignment: {assignmentScopePath(subscriptionId, policy)}</Typography><Typography variant="body2">Evidência BASE CONSOLIDADA: {policy.evidence_count} linha(s)</Typography><Typography variant="body2" sx={{ mt: 1 }} fontWeight={700}>Tags implementadas</Typography><Box sx={{ mt: .5, display: "flex", gap: .5, flexWrap: "wrap" }}>{Object.entries(policy.tags || {}).map(([key, value]) => <Chip key={key} size="small" color="success" label={`${key}=${value}`} />)}</Box><ExclusionCards exclusions={policy.exclusions} /></Box>;
       })}</DialogContent>
     </Dialog>
     <Box sx={{ mt: 1, display: "flex", gap: .75, flexWrap: "wrap" }}><Chip size="small" color="primary" label={`${new Set(policies.flatMap((policy) => policy.scope_subscriptions)).size} subscriptions`} /><Chip size="small" color="success" label={`${policies.length} policies aplicadas`} /><Chip size="small" color="error" label={`${policies.reduce((total, policy) => total + policy.exclusions.length, 0)} exclusões`} /></Box>
@@ -197,7 +197,7 @@ export default function PolicyFlow({ tenant }: { tenant?: AzureTenantPolicy }) {
           <Typography variant="body2">Alvo: {targetOf(policy, group.name)}</Typography>
           <Typography variant="body2">   ├─ Policy: {policy.kind === "resource_groups" ? "modo All para Resource Group" : "modo Indexed para recursos"}</Typography>
           <Typography variant="body2">   ├─ Assignment: {assignmentScopePath(group.id, policy)}</Typography>
-          <Typography variant="body2">   ├─ Evidência GOLD: {policy.evidence_count} linha(s)</Typography>
+          <Typography variant="body2">   ├─ Evidência BASE CONSOLIDADA: {policy.evidence_count} linha(s)</Typography>
           <Typography variant="body2">   ├─ Tags:</Typography>
           <Box sx={{ ml: 3, mt: .5, display: "flex", flexWrap: "wrap", gap: .5 }}>{Object.entries(policy.tags || {}).map(([key, value]) => <Chip key={key} size="small" color="success" variant="outlined" label={`${key}=${value}`} />)}</Box>
           <ExclusionCards exclusions={policy.exclusions} />

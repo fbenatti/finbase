@@ -335,7 +335,7 @@ function useTabQueries(table: string, defs: QueryDef[], key: string) {
         m[d.id] = result;
       });
       setResults(m);
-    }).catch(e => { if (alive) setError(formatApiError(e, "Falha ao consultar a Gold")); })
+    }).catch(e => { if (alive) setError(formatApiError(e, "Falha ao consultar a base consolidada")); })
       .finally(() => { if (alive) setLoading(false); });
     return () => { alive = false; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -643,7 +643,7 @@ export default function GoldDashboard() {
     let alive = true;
     setInfo(null);
     getDimonInfo(table).then(i => { if (alive) { setInfo(i); setMonthsAll(i.periods || []); } })
-      .catch(e => { if (alive) setError(formatApiError(e, "Falha ao carregar info da Gold")); });
+      .catch(e => { if (alive) setError(formatApiError(e, "Falha ao carregar info da base consolidada")); });
     return () => { alive = false; };
   }, [table]);
 
@@ -806,7 +806,7 @@ export default function GoldDashboard() {
               options={filterDimensionOptions.filter((column) => !filters.extra[column])}
               getOptionLabel={sourceDimensionLabel}
               onChange={(_, column) => { if (column) { setFilters((current) => ({ ...current, extra: { ...current.extra, [column]: [] } })); setFilterMenuAnchor(null); } }}
-              noOptionsText={!info ? "Carregando esquema Gold…" : "Todas as colunas já foram adicionadas"}
+              noOptionsText={!info ? "Carregando esquema base consolidada…" : "Todas as colunas já foram adicionadas"}
               slotProps={{
                 popper: { sx: { zIndex: (theme) => theme.zIndex.modal + 1 } },
                 listbox: { sx: { maxHeight: 280, overflowY: "auto" } },
@@ -819,7 +819,7 @@ export default function GoldDashboard() {
           {Object.entries(filters.extra).map(([column, values]) => <Stack key={column} direction="row" alignItems="flex-start" gap={.5} sx={{ minWidth: 0 }}><Box sx={{ minWidth: 0, flex: 1 }}><CascadeDimensionFilter column={column} label={sourceDimensionLabel(column)} table={table} value={values} filters={filtersOf(filters).filter((filter) => filter.column !== column)} onChange={(nextValues) => setFilters((current) => ({ ...current, extra: { ...current.extra, [column]: nextValues } }))} /></Box><Chip size="small" color={values.length ? "success" : "default"} variant={values.length ? "filled" : "outlined"} label={values.length ? `${values.length} aplicado${values.length === 1 ? "" : "s"}` : "Sem filtro"} sx={{ mt: 1, flexShrink: 0 }} /><IconButton size="small" aria-label={`Remover filtro ${sourceDimensionLabel(column)}`} onClick={() => setFilters((current) => { const extra = { ...current.extra }; delete extra[column]; return { ...current, extra }; })}><Close fontSize="small" /></IconButton></Stack>)}
         </Box>}
         <Typography variant="caption" color="text.secondary" display="block" mt={1}>
-          Período e filtros dimensionais FOCUS são compartilhados pelos widgets executivos. Selecione colunas e valores; vários valores na mesma coluna usam OU e colunas diferentes usam E. As opções são pesquisadas no Trino considerando os demais filtros.
+          Período e filtros dimensionais FOCUS são compartilhados pelos widgets executivos. Selecione colunas e valores; vários valores na mesma coluna usam OU e colunas diferentes usam E. As opções são pesquisadas no serviço de consultas considerando os demais filtros.
         </Typography>
       </Paper>
 
@@ -963,7 +963,7 @@ function VisaoGeral({ table, filters, filterKey }: { table: string; filters: Fil
       `Top cloud: ${topCloud ? esc(topCloud.cloud_origem) : "—"} · Top serviço: ${topServico ? esc(topServico.servicename) : "—"}`,
       `Health Score: ${health}/100 (${healthStatus.label}).`,
       "",
-      "Gerado automaticamente pelo Dashboard FinOps (Gold).",
+      "Gerado automaticamente pelo Dashboard FinOps (base consolidada).",
     ].join("\n");
   }, [total, mensal, mom, topDir, topCloud, topServico, top5Share, health, healthStatus, filters.months, latest, dirField, dirLabel]);
 
@@ -973,14 +973,14 @@ function VisaoGeral({ table, filters, filterKey }: { table: string; filters: Fil
         <Grid item xs={6} sm={4} md={2}><KpiCard label="Realizado (BRL)" value={money(total.realizado)} sub="Soma da medida realizado" color={PURPLE} full={moneyFull(total.realizado)} /></Grid>
         <Grid item xs={6} sm={4} md={2}><KpiCard label="Billed Cost (USD)" value={money(total.billedcost, "USD")} sub="Moeda de billing" color={ORANGE} full={moneyFull(total.billedcost, "USD")} /></Grid>
         <Grid item xs={6} sm={4} md={2}><KpiCard label="Quantidade" value={num(total.quantity)} sub="Soma de ConsumedQuantity" color={BLUE} full={total.quantity.toLocaleString("pt-BR")} /></Grid>
-        <Grid item xs={6} sm={4} md={2}><KpiCard label="Linhas agregadas" value={num(total.count)} sub="Registros da Gold" color={GREEN} full={total.count.toLocaleString("pt-BR")} /></Grid>
+        <Grid item xs={6} sm={4} md={2}><KpiCard label="Linhas agregadas" value={num(total.count)} sub="Registros da base consolidada" color={GREEN} full={total.count.toLocaleString("pt-BR")} /></Grid>
         <Grid item xs={6} sm={4} md={2}><KpiCard label="Health Score" value={`${health}/100`} sub={healthStatus.label} color={healthStatus.color} /></Grid>
         <Grid item xs={6} sm={4} md={2}><KpiCard label="MoM último mês" value={mom === null ? "—" : `${mom >= 0 ? "+" : ""}${pct(mom)}`} sub={latest ? monthLabel(latest.month) : "sem histórico"} color={mom !== null && mom > 10 ? RED : GREEN} /></Grid>
       </Grid>
 
       <Grid container spacing={1.5}>
         <Grid item xs={12} md={7}>
-          <ChartCard title="Evolução mensal — Realizado vs Billed Cost" note="Valores somados da Gold para o escopo filtrado.">
+          <ChartCard title="Evolução mensal — Realizado vs Billed Cost" note="Valores somados da base consolidada para o escopo filtrado.">
             <Chart
               data={[
                 { x: mensal.map(r => monthLabel(r.month)), y: mensal.map(r => r.value), type: "bar", name: "Realizado (BRL)", marker: { color: PURPLE } },

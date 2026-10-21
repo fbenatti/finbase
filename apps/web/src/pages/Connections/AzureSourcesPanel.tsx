@@ -88,7 +88,7 @@ function SourceRow({
             {source.running_tasks > 0 && <Chip size="small" label="coletando" color="primary" />}
           </Stack>
           <Typography variant="caption" color="text.secondary" display="block">
-            {source.code} · Bronze {source.bronze_table}
+            {source.code} · base de origem {source.bronze_table}
             {source.rows != null ? ` · ${source.rows.toLocaleString("pt-BR")} linhas` : ""}
             {source.last_billing_period ? ` · ${source.last_billing_period}` : ""}
           </Typography>
@@ -101,7 +101,7 @@ function SourceRow({
           </span>
         </Tooltip>
         {source.collection_mode === "dedicated" && (
-          <Tooltip title="Baixar e validar o snapshot completo no Bronze desta conexão">
+          <Tooltip title="Baixar e validar o snapshot completo no base de origem desta conexão">
             <span>
               <IconButton size="small" onClick={onRefreshDedicated} disabled={busy}>
                 <RefreshIcon fontSize="small" />
@@ -372,8 +372,9 @@ export default function AzureSourcesPanel({ environment, connectionId }: { envir
         </Tooltip>
       </Stack>
       <Typography variant="caption" color="text.secondary" display="block" sx={{ mb: 1.5 }}>
+        
         Ligue fontes do ambiente para a carga genérica. Conexões independentes mantêm sua ação de coleta
-        e Bronze próprios. Desligar uma fonte não apaga o histórico já coletado.
+        e base de origem próprias. Desligar uma fonte não apaga o histórico já coletado.
       </Typography>
 
       {groups.map((group) => (
@@ -384,7 +385,7 @@ export default function AzureSourcesPanel({ environment, connectionId }: { envir
       <Typography variant="caption" color="text.secondary">
         Fontes marcadas como <b>planejada</b> aparecem na lista para dar visibilidade do roadmap, mas
         ainda não têm coletor e não entram na carga. Veja{" "}
-        <Link href="/dados/explorador" underline="hover">Análise</Link> para inspecionar as tabelas Bronze/Silver/Gold.
+        <Link href="/dados/explorador" underline="hover">Análise</Link> para inspecionar as tabelas de origem, preparação e consolidação.
       </Typography>
     </Box>
   );

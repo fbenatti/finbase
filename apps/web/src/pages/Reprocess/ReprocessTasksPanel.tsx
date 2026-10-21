@@ -39,7 +39,7 @@ function scope(task: TaskStatus): string {
   if (kind(task) !== "reprocess") return "";
   const sources = task.connections?.map((source) => `${source.cloud_name || source.name} (${source.code})`) || [];
   const periods = task.billing_periods?.map(formatBillingPeriod) || [];
-  return `Origem: ${sources.length ? [...new Set(sources)].join(", ") : "não informada"} · Mês: ${periods.length ? [...new Set(periods)].join(", ") : "não informado"} · Destino: ${task.destination_table_name || task.table || "não informado"} (Silver)`;
+  return `Origem: ${sources.length ? [...new Set(sources)].join(", ") : "não informada"} · Mês: ${periods.length ? [...new Set(periods)].join(", ") : "não informado"} · Destino: ${task.destination_table_name || task.table || "não informado"} (base preparada)`;
 }
 
 export default function ReprocessTasksPanel() {
@@ -106,8 +106,8 @@ export default function ReprocessTasksPanel() {
         const stageLabel = kind(task) === "reprocess" && running && task.total_blobs > 0
           && task.processed_blobs >= task.total_blobs
           ? publishingSilver
-            ? "Publicando partição na camada Silver..."
-            : "Bronze processado · preparando publicação na camada Silver"
+            ? "Publicando dados preparados..."
+            : "Origem processada · preparando publicação dos dados"
           : task.phase || task.status;
         return (
           <Box key={task.id} sx={{ mb: 1.5, p: 1.25, bgcolor: "#f8fafc", borderRadius: 1 }}>

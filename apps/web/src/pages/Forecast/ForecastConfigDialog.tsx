@@ -246,7 +246,7 @@ export default function ForecastConfigDialog({ open, initial, tables, usedDestin
 
   const save = async () => {
     if (!tableId || !measure || !dateColumn) {
-      setError("Informe a tabela Gold, a medida e a coluna de data.");
+      setError("Informe a base consolidada, a medida e a coluna de data.");
       return;
     }
     const connectionRules = intervalConnections
@@ -332,9 +332,9 @@ export default function ForecastConfigDialog({ open, initial, tables, usedDestin
             </FieldWithHelp>
             <FieldWithHelp help={FORECAST_CONFIG_FIELD_HELP.table} sx={{ minWidth: 240 }}>
               <FormControl fullWidth>
-                <InputLabel>Tabela Gold</InputLabel>
+                <InputLabel>base consolidada</InputLabel>
                 <Select
-                  label="Tabela Gold"
+                  label="base consolidada"
                   value={tableId}
                   disabled={!!initial}
                   onChange={(e) => void selectTable(Number(e.target.value))}
@@ -531,17 +531,17 @@ export default function ForecastConfigDialog({ open, initial, tables, usedDestin
           <Stack spacing={0.5}>
             {!initial && selectableTables.length === 0 && (
               <Typography variant="caption" color="text.secondary">
-                Todas as tabelas Gold já possuem configuração de forecast.
+                Todas as bases consolidadas já possuem configuração de forecast.
               </Typography>
             )}
             {!tableId && (
               <Typography variant="caption" color="text.secondary">
-                Selecione uma tabela Gold para escolher conexões com rateio.
+                Selecione uma base consolidada para escolher conexões com rateio.
               </Typography>
             )}
             {tableId && mappedConnections.length === 0 && (
               <Typography variant="caption" color="text.secondary">
-                Nenhuma conexão mapeada para esta Gold. Configure o relacionamento origem → destino primeiro.
+                Nenhuma conexão mapeada para esta base consolidada. Configure o relacionamento origem → destino primeiro.
               </Typography>
             )}
             <Typography variant="caption" color="text.secondary">
