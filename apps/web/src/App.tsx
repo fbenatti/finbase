@@ -168,7 +168,6 @@ function App() {
         <Route path="expected-view" element={<LegacyRedirect to="/custos?tab=visao-executiva" />} />
         <Route path="reservations" element={<LegacyRedirect to="/governanca?tab=reservas" />} />
         <Route path="ai-cost-origin" element={<LegacyRedirect to="/governanca?tab=cost-relationship" />} />
-        <Route path="login" element={<LegacyRedirect to="/entrar" />} />
         <Route path="*" element={<Navigate to="/custos" replace />} />
         </Route>
       </Routes>
