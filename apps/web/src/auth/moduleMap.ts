@@ -54,7 +54,7 @@ const ROUTE_TARGETS: Array<{ prefix: string; targets: PermTarget[] }> = [
   { prefix: "/financial-dashboard", targets: [{ module: "planning" }] },
   { prefix: "/departments", targets: [{ module: "planning" }] },
   { prefix: "/savings", targets: [{ module: "savings" }] },
-  { prefix: "/reservations", targets: [{ module: "savings" }] },
+  { prefix: "/reservations", targets: [{ module: "reservations" }] },
   {
     prefix: "/governance",
     targets: [
