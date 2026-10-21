@@ -27,7 +27,7 @@ export default function Governance() {
   const { hasPerm } = useAuth();
   const requested = searchParams.get("tab");
   if (requested === "desligue" || requested === "orfaos") {
-    return <Navigate to={`/savings?tab=${requested}`} replace />;
+    return <Navigate to={`/otimizacao?tab=${requested}`} replace />;
   }
   if (requested === "reservas-legacy") {
     return <Navigate to="/governanca?tab=reservas" replace />;
