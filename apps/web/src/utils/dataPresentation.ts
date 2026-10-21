@@ -12,6 +12,7 @@ export const DATA_SERVICE_LABELS: Record<string, string> = {
 };
 
 const MODULE_LABELS: Record<string, string> = {
+  modules: "Módulos",
   connections: "Fontes de dados", rules: "Regras de negócio", etl: "Operação de dados",
   analysis: "Explorador de dados", forecast: "Projeções", planning: "Planejamento",
   reservations: "Reservas e compromissos", savings: "Otimização", periods: "Períodos",

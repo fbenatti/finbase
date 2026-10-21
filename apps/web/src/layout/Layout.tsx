@@ -1,3 +1,4 @@
+import { useNavigation } from "../navigation/NavigationContext";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Outlet, useNavigate, useLocation } from "react-router-dom";
 import {
@@ -96,123 +97,14 @@ const LAYOUT_STORAGE_KEY = "finbase.layout";
 type MenuEntry = { path: string; label: string; icon: React.ReactNode };
 type MenuGroup = { label: string; icon: React.ReactNode; items: MenuEntry[] };
 
-const MENU_GROUPS: MenuGroup[] = [
-  {
-    label: "Panorama",
-    icon: <DashboardOutlined fontSize="small" />,
-    items: [
-      { path: "/custos?tab=visao-executiva", label: "Resumo de custos", icon: <QueryStatsOutlined /> },
-    ],
-  },
-  {
-    label: "Alertas",
-    icon: <WarningAmberOutlined fontSize="small" />,
-    items: [
-      { path: "/alertas?tab=0", label: "Visão geral de alertas", icon: <WarningAmberOutlined /> },
-      { path: "/alertas?tab=1", label: "Impacto financeiro", icon: <PaidOutlined /> },
-      { path: "/alertas?tab=2", label: "Casos em investigação", icon: <QueryStatsOutlined /> },
-      { path: "/alertas?tab=3", label: "Eventos esperados", icon: <ScheduleOutlined /> },
-      { path: "/alertas?tab=4", label: "Saúde do modelo", icon: <ScienceOutlined /> },
-      { path: "/alertas?tab=5", label: "Retrospectivas", icon: <HistoryOutlined /> },
-      { path: "/alertas?tab=6", label: "Anomalias confirmadas", icon: <FactCheckOutlined /> },
-      { path: "/alertas?tab=7", label: "Configuração de alertas", icon: <SettingsOutlined /> },
-    ],
-  },
-  {
-    label: "Planejamento",
-    icon: <AccountBalanceWalletOutlined fontSize="small" />,
-    items: [
-      { path: "/planejamento?tab=dashboard&executive=orcamento", label: "Histórico do orçamento", icon: <AccountBalanceWalletOutlined /> },
-      { path: "/planejamento?tab=dashboard&executive=historia-contrato", label: "História dos contratos", icon: <HistoryOutlined /> },
-      { path: "/planejamento?tab=dashboard&executive=compromisso", label: "Consumo de compromissos", icon: <ReceiptLongOutlined /> },
-      { path: "/planejamento?tab=orcamento", label: "Orçamentos", icon: <PaidOutlined /> },
-      { path: "/planejamento?tab=acuracia-orcamento", label: "Acurácia do orçamento", icon: <AutoGraphOutlined /> },
-      { path: "/planejamento?tab=forecast-manual", label: "Projeções manuais", icon: <TrendingUpOutlined /> },
-      { path: "/planejamento?tab=visao-contabil&subview=evolucao-dolar", label: "Evolução do dólar", icon: <CurrencyExchangeOutlined /> },
-      { path: "/projecoes/acuracia?aba=visao", label: "Acurácia · visão", icon: <AutoGraphOutlined /> },
-      { path: "/projecoes/acuracia?aba=desvios", label: "Acurácia · desvios", icon: <WarningAmberOutlined /> },
-      { path: "/projecoes/acuracia?aba=acks", label: "Acurácia · justificativas", icon: <FactCheckOutlined /> },
-      { path: "/projecoes?tab=config", label: "Configuração e execução", icon: <SettingsOutlined /> },
-      { path: "/projecoes?tab=rules", label: "Regras de projeção", icon: <RuleOutlined /> },
-      { path: "/projecoes?tab=history", label: "Histórico de projeções", icon: <HistoryOutlined /> },
-    ],
-  },
-  {
-    label: "Otimização",
-    icon: <SavingsOutlined fontSize="small" />,
-    items: [
-      { path: "/otimizacao", label: "Oportunidades", icon: <SavingsOutlined /> },
-      { path: "/otimizacao?tab=compras-compromissos", label: "Compromissos e compras", icon: <EventAvailableOutlined /> },
-      { path: "/otimizacao?tab=desligue&subview=dashboard", label: "Desligamento · painel", icon: <DashboardOutlined /> },
-      { path: "/otimizacao?tab=desligue&subview=governance", label: "Desligamento · governança", icon: <RuleOutlined /> },
-      { path: "/otimizacao?tab=desligue&subview=exceptions", label: "Desligamento · exceções", icon: <FactCheckOutlined /> },
-      { path: "/otimizacao?tab=orfaos&subview=current", label: "Recursos · órfãos atuais", icon: <StorageOutlined /> },
-      { path: "/otimizacao?tab=orfaos&subview=savings", label: "Recursos · economia gerada", icon: <SavingsOutlined /> },
-    ],
-  },
-  {
-    label: "Dados e operação",
-    icon: <StorageOutlined fontSize="small" />,
-    items: [
-      { path: "/dados/fontes?view=connections", label: "Fontes de dados", icon: <CloudOutlined /> },
-      { path: "/dados/catalogo?tab=destinations", label: "Catálogo de dados", icon: <TableChartOutlined /> },
-      { path: "/dados/catalogo?tab=relationship", label: "Relacionamentos", icon: <AccountTreeOutlined /> },
-      { path: "/dados/fluxos", label: "Fluxos de dados", icon: <AccountTreeOutlined /> },
-      { path: "/operacoes/execucoes?tab=data", label: "Execuções de dados", icon: <SyncOutlined /> },
-      { path: "/operacoes/execucoes?tab=forecast&subtab=forecast", label: "Execuções de forecast", icon: <TrendingUpOutlined /> },
-      { path: "/operacoes/execucoes?tab=forecast&subtab=accuracy", label: "Acurácia do forecast", icon: <AutoGraphOutlined /> },
-      { path: "/operacoes/execucoes?tab=shared", label: "Custo compartilhado", icon: <PaidOutlined /> },
-      { path: "/operacoes/execucoes?tab=cubos&subtab=cubes", label: "Materialização de cubos", icon: <DataObjectOutlined /> },
-      { path: "/operacoes/execucoes?tab=extraction", label: "Extrações", icon: <CloudOutlined /> },
-      { path: "/operacoes/execucoes?tab=schedules", label: "Agendamentos", icon: <ScheduleOutlined /> },
-      { path: "/operacoes/execucoes?tab=logs", label: "Histórico de execuções", icon: <HistoryOutlined /> },
-      { path: "/dados/explorador?tab=destino", label: "Explorador · tabelas de destino", icon: <TableChartOutlined /> },
-      { path: "/dados/explorador?tab=fontes", label: "Explorador · fontes de origem", icon: <CloudOutlined /> },
-      { path: "/dados/explorador?tab=acervo&etapa=origem", label: "Base de origem", icon: <StorageOutlined /> },
-      { path: "/dados/explorador?tab=acervo&etapa=preparacao", label: "Base preparada", icon: <DataObjectOutlined /> },
-      { path: "/dados/explorador?tab=acervo&etapa=consolidacao", label: "Base consolidada", icon: <PaidOutlined /> },
-      { path: "/dados/explorador?tab=temporarios", label: "Área temporária", icon: <DeleteSweepOutlined /> },
-      { path: "/dados/explorador?tab=pivot", label: "Explorador · tabelas dinâmicas", icon: <AutoGraphOutlined /> },
-      { path: "/dados/explorador?tab=busca", label: "Explorador · busca na fonte", icon: <ScienceOutlined /> },
-    ],
-  },
-  {
-    label: "Governança",
-    icon: <RuleOutlined fontSize="small" />,
-    items: [
-      { path: "/governanca?tab=organization", label: "Organização", icon: <CorporateFareOutlined /> },
-      { path: "/governanca?tab=classification", label: "Classificação de projetos", icon: <LocalOfferOutlined /> },
-      { path: "/governanca?tab=rules&subtab=adjustments", label: "Regras de ajustes", icon: <SettingsOutlined /> },
-      { path: "/governanca?tab=rules&subtab=clone-rules", label: "Reservas e Savings Plans", icon: <SavingsOutlined /> },
-      { path: "/governanca?tab=financial-contracts", label: "Contratos e compromissos", icon: <ReceiptLongOutlined /> },
-      { path: "/governanca?tab=cost-relationship", label: "Cubos analíticos", icon: <DataObjectOutlined /> },
-    ],
-  },
-  {
-    label: "Administração",
-    icon: <ManageAccountsOutlined fontSize="small" />,
-    items: [
-      { path: "/administracao/acessos?tab=users", label: "Pessoas e acessos", icon: <ManageAccountsOutlined /> },
-      { path: "/administracao/acessos?tab=groups", label: "Grupos", icon: <CorporateFareOutlined /> },
-      { path: "/administracao/acessos?tab=roles", label: "Funções e permissões", icon: <VpnKeyOutlined /> },
-      { path: "/administracao/auditoria", label: "Trilha de auditoria", icon: <FactCheckOutlined /> },
-      { path: "/administracao/identidade", label: "Login corporativo", icon: <VpnKeyOutlined /> },
-    ],
-  },
-];
+const MENU_ICONS = { AccountBalanceWalletOutlined, AccountTreeOutlined, AutoGraphOutlined, CloudOutlined, CorporateFareOutlined, CurrencyExchangeOutlined, DashboardOutlined, DataObjectOutlined, DeleteSweepOutlined, EventAvailableOutlined, FactCheckOutlined, HistoryOutlined, LocalOfferOutlined, ManageAccountsOutlined, PaidOutlined, QueryStatsOutlined, ReceiptLongOutlined, RuleOutlined, SavingsOutlined, ScheduleOutlined, ScienceOutlined, SettingsOutlined, StorageOutlined, SyncOutlined, TableChartOutlined, TrendingUpOutlined, VpnKeyOutlined, WarningAmberOutlined };
 
-const showAnomaliesMenu = import.meta.env.VITE_APP_ENV !== "production";
 const menuPath = (target: string) => {
   const url = new URL(target, window.location.origin);
   return { pathname: url.pathname, search: url.search };
 };
 const matchesMenuPath = (target: string, pathname: string, search: string) => {
-  const route = menuPath(target);
-  if (pathname !== route.pathname) return false;
-  const expected = new URLSearchParams(route.search);
-  const actual = new URLSearchParams(search);
-  if (expected.size === 0) return actual.size === 0;
-  return Array.from(expected.entries()).every(([key, value]) => actual.get(key) === value);
+  return menuPath(target).pathname === pathname;
 };
 
 export default function Layout() {
@@ -220,23 +112,24 @@ export default function Layout() {
   const isMobile = useMediaQuery(theme.breakpoints.down("md"));
   const { hasPerm, user, logout } = useAuth();
   const { unreadCount, openDialog: openNotifications } = useNotifications();
-  const canAdmin = hasPerm("users", "read") || hasPerm("groups", "read") || hasPerm("roles", "read");
-  const visibleMenuGroups = useMemo(() => MENU_GROUPS.map(group => ({
-    ...group,
-    items: group.items.filter(item => {
-      if (item.path.startsWith("/alertas") && !showAnomaliesMenu) return false;
-      if (item.path === "/administracao/auditoria") return hasPerm("audit", "read");
-      if (item.path === "/administracao/identidade") return hasPerm("auth", "read");
-      if (item.path.startsWith("/administracao/acessos?tab=groups")) return hasPerm("groups", "read");
-      if (item.path.startsWith("/administracao/acessos?tab=roles")) return hasPerm("roles", "read");
-      if (item.path === "/administracao/acessos?tab=users") return canAdmin;
-      const { pathname, search } = menuPath(item.path);
-      const targets = permissionTargetsForLocation(pathname, search);
-      return !targets || targets.some(target => hasPerm(target.module, "read", target.scope));
-    }),
-  })).filter(group => group.items.length > 0), [canAdmin, hasPerm]);
+  const { items: catalogItems } = useNavigation();
+  const visibleMenuGroups = useMemo(() => {
+    const iconFor = (name: string) => {
+      const Icon = MENU_ICONS[name as keyof typeof MENU_ICONS] || SettingsOutlined;
+      return <Icon fontSize="small" />;
+    };
+    return catalogItems.filter(item => !item.parent_code && item.allowed).map(group => ({
+      label: group.label,
+      icon: iconFor(group.icon),
+      items: [
+        { path: group.path, label: "Visão geral", icon: iconFor(group.icon) },
+        ...catalogItems.filter(item => item.parent_code === group.code && item.allowed).map(item => ({ path: item.path, label: item.label, icon: iconFor(item.icon) })),
+      ],
+    }));
+  }, [catalogItems]);
   const navigate = useNavigate();
   const location = useLocation();
+  const currentModule = catalogItems.find(item => item.path === location.pathname);
   const [expanded, setExpanded] = useState(true);
   const [mobileOpen, setMobileOpen] = useState(false);
   const [openGroups, setOpenGroups] = useState<string[]>([]);
@@ -255,7 +148,7 @@ export default function Layout() {
     cancelPendingAnalysisRequests();
   }, [location.pathname]);
 
-  const currentLabel = visibleMenuGroups.flatMap(group => group.items).find(item => {
+  const currentLabel = currentModule?.label ?? visibleMenuGroups.flatMap(group => group.items).find(item => {
     return matchesMenuPath(item.path, location.pathname, location.search);
   })?.label ?? visibleMenuGroups.flatMap(group => group.items).find(item => menuPath(item.path).pathname === location.pathname)?.label ?? "Workspace";
   const activeGroupLabel = visibleMenuGroups.find(group => group.items.some(item => menuPath(item.path).pathname === location.pathname))?.label;
@@ -377,7 +270,7 @@ export default function Layout() {
           <CarbonContent id="main-content" className="finbase-carbon-main">
             <Box className="finbase-carbon-page-title">{currentLabel}</Box>
             {(() => {
-              const targets = permissionTargetsForLocation(location.pathname, location.search);
+              const targets = currentModule ? null : permissionTargetsForLocation(location.pathname, location.search);
               if (targets && !targets.some(target => hasPerm(target.module, "read", target.scope))) {
                 const modules = targets.map(target => target.scope ? `${moduleDisplayName(target.module)}: ${dataDisplayText(target.scope)}` : moduleDisplayName(target.module)).join(" / ");
                 return <Box sx={{ p: 6, textAlign: "center" }}><Typography variant="h6" sx={{ mb: 1 }}>Acesso negado</Typography><Typography color="text.secondary">Você não tem permissão de leitura no módulo <b>{modules}</b>. Solicite acesso ao administrador se precisar utilizá-lo.</Typography></Box>;
@@ -418,7 +311,7 @@ export default function Layout() {
         </AppBar>
         <Box component="main" sx={{ flex: 1, minHeight: 0, overflow: "auto", bgcolor: "background.default", p: { xs: 1.5, sm: 2.5, lg: 3 } }}>
           {(() => {
-            const targets = permissionTargetsForLocation(location.pathname, location.search);
+            const targets = currentModule ? null : permissionTargetsForLocation(location.pathname, location.search);
             if (targets && !targets.some(target => hasPerm(target.module, "read", target.scope))) {
               const modules = targets.map(target => target.scope ? `${moduleDisplayName(target.module)}: ${dataDisplayText(target.scope)}` : moduleDisplayName(target.module)).join(" / ");
               return <Box sx={{ p: 6, textAlign: "center" }}><Typography variant="h6" sx={{ mb: 1 }}>Acesso negado</Typography><Typography color="text.secondary">Você não tem permissão de leitura no módulo <b>{modules}</b>. Solicite acesso ao administrador se precisar utilizá-lo.</Typography></Box>;

@@ -1,3 +1,7 @@
+import { Alert, Button } from "@mui/material";
+import { NavigationProvider, useNavigation } from "./navigation/NavigationContext";
+import { ModulePage, CatalogLegacyRedirect, DefaultModule } from "./navigation/ModulePage";
+import { resolveCatalogRoute, widgetSearch } from "./navigation/routes";
 import { Routes, Route, Navigate, useLocation, useParams } from "react-router-dom";
 import { Box, CircularProgress } from "@mui/material";
 import { lazy, Suspense } from "react";
@@ -5,6 +9,7 @@ import type { ReactElement } from "react";
 import Layout from "./layout/Layout";
 import { AuthProvider, useAuth } from "./auth/AuthContext";
 import ChangePassword from "./auth/ChangePassword";
+const Modules = lazy(() => import("./pages/Admin/Modules"));
 const Login = lazy(() => import("./pages/Login/Login"));
 const Connections = lazy(() => import("./pages/Connections/Connections"));
 const Explorer = lazy(() => import("./pages/Explorer/Explorer"));
@@ -61,7 +66,10 @@ function LegacyRedirect({ to }: { to: string }) {
   new URLSearchParams(location.search).forEach((value, key) => {
     if (!params.has(key)) params.append(key, value);
   });
-  return <Navigate to={{ pathname, search: params.size ? `?${params}` : "", hash: location.hash }} replace />;
+  const { items } = useNavigation();
+  const entry = resolveCatalogRoute(items, pathname, params);
+  const targetSearch = entry ? widgetSearch(params) : params;
+  return <Navigate to={{ pathname: entry?.path || pathname, search: targetSearch.size ? `?${targetSearch}` : "", hash: location.hash }} replace />;
 }
 
 function LegacyForecastHistory() {
@@ -84,41 +92,43 @@ function LegacyExplorer() {
   return <LegacyRedirect to={`/dados/fontes/${connectionId}/explorar`} />;
 }
 
-function App() {
+const CATALOG_RENDERERS = { Modules, GoldDashboard, Anomalies, FinancialPlanning, ForecastAccuracy, Forecast, Savings, Connections, Tables, PipelineBuilder, Reprocess, Analysis, Governance, Admin, Audit, SsoProviders };
+
+function ApplicationRoutes() {
+  const { user } = useAuth();
+  const navigation = useNavigation();
+  if (user && navigation.loading) return <Box sx={{ p: 6, textAlign: "center" }}><CircularProgress /></Box>;
+  if (user && navigation.error) return <Box sx={{ p: 4 }}><Alert severity="error">{navigation.error}</Alert><Button onClick={() => void navigation.reload()}>Tentar novamente</Button></Box>;
   return (
-    <AuthProvider>
       <Suspense fallback={<Box sx={{ minHeight: "100vh", display: "flex", alignItems: "center", justifyContent: "center" }}><CircularProgress /></Box>}>
       <Routes>
         <Route path="/entrar" element={<Login />} />
         <Route path="/login" element={<LegacyRedirect to="/entrar" />} />
         <Route path="/" element={<RequireAuth><Layout /></RequireAuth>}>
-        <Route index element={<Navigate to="/custos" replace />} />
+        <Route index element={<DefaultModule />} />
+        {navigation.items.map(item => <Route key={item.code} path={item.path.slice(1)} element={<ModulePage item={item} renderers={CATALOG_RENDERERS} />} />)}
 
         {/* Rotas canônicas finbase.cloud */}
-        <Route path="custos" element={<GoldDashboard />} />
+        <Route path="custos" element={<CatalogLegacyRedirect />} />
         <Route path="custos/avancado" element={<GoldDashboardV2 />} />
         <Route path="ia/capacidade" element={<AzurePtuOps />} />
         <Route path="ia/adocao" element={<DashboardsIA />} />
         <Route path="ia/github" element={<GitHubCopilotDashboard />} />
-        <Route path="alertas" element={<Anomalies />} />
-        <Route path="planejamento" element={<FinancialPlanning />} />
-        <Route path="projecoes" element={<Forecast />} />
-        <Route path="projecoes/acuracia" element={<ForecastAccuracy />} />
+        <Route path="alertas" element={<CatalogLegacyRedirect />} />
+        <Route path="planejamento" element={<CatalogLegacyRedirect />} />
+        <Route path="projecoes" element={<CatalogLegacyRedirect />} />
+        <Route path="projecoes/acuracia" element={<CatalogLegacyRedirect />} />
         <Route path="projecoes/execucoes/:runId" element={<ForecastHistory />} />
-        <Route path="otimizacao" element={<Savings />} />
-        <Route path="dados/fontes" element={<Connections />} />
+        <Route path="otimizacao" element={<CatalogLegacyRedirect />} />
         <Route path="dados/fontes/:connectionId/explorar" element={<Explorer />} />
         <Route path="dados/mapeamentos" element={<Mappings />} />
-        <Route path="dados/catalogo" element={<Tables />} />
-        <Route path="dados/explorador" element={<Analysis />} />
-        <Route path="dados/fluxos" element={<PipelineBuilder />} />
-        <Route path="operacoes/execucoes" element={<Reprocess />} />
+        <Route path="dados/catalogo" element={<CatalogLegacyRedirect />} />
+        <Route path="dados/explorador" element={<CatalogLegacyRedirect />} />
+        <Route path="operacoes/execucoes" element={<CatalogLegacyRedirect />} />
         <Route path="operacoes/custos-compartilhados/:runId" element={<SharedCostHistory />} />
         <Route path="operacoes/extracoes/:taskId/historico" element={<ExtractionHistory />} />
-        <Route path="governanca" element={<Governance />} />
-        <Route path="administracao/acessos" element={<Admin />} />
-        <Route path="administracao/identidade" element={<SsoProviders />} />
-        <Route path="administracao/auditoria" element={<Audit />} />
+        <Route path="governanca" element={<CatalogLegacyRedirect />} />
+        <Route path="administracao/acessos" element={<CatalogLegacyRedirect />} />
         <Route path="iniciativas" element={<Ideas />} />
 
         {/* Aliases antigos: preservam favoritos e links existentes. */}
@@ -168,12 +178,15 @@ function App() {
         <Route path="expected-view" element={<LegacyRedirect to="/custos?tab=visao-executiva" />} />
         <Route path="reservations" element={<LegacyRedirect to="/governanca?tab=reservas" />} />
         <Route path="ai-cost-origin" element={<LegacyRedirect to="/governanca?tab=cost-relationship" />} />
-        <Route path="*" element={<Navigate to="/custos" replace />} />
+        <Route path="*" element={<DefaultModule />} />
         </Route>
       </Routes>
       </Suspense>
-    </AuthProvider>
   );
+}
+
+function App() {
+  return <AuthProvider><NavigationProvider><ApplicationRoutes /></NavigationProvider></AuthProvider>;
 }
 
 export default App;
