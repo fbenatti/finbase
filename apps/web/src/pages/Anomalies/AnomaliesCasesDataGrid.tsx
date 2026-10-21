@@ -1,4 +1,5 @@
-import { DataGrid, type GridColDef } from "@mui/x-data-grid";
+import DataGrid from "../../components/FinbaseDataGrid";
+import { type GridColDef } from "@mui/x-data-grid";
 import { Chip } from "@mui/material";
 import type { AnomalyCase } from "../../services/anomaliesApi";
 

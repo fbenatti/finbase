@@ -1,3 +1,4 @@
+import DataGrid from "../../components/FinbaseDataGrid";
 import { dataDisplayText } from "../../utils/dataPresentation";
 import { useEffect, useMemo, useState } from "react";
 import {
@@ -5,8 +6,8 @@ import {
   Divider, FormControl, IconButton, InputAdornment, InputLabel, MenuItem, Paper, Select, Stack,
   Switch, TextField, Tooltip, Typography,
 } from "@mui/material";
-import { Add, Delete, Edit, Refresh, Search } from "@mui/icons-material";
-import { DataGrid, GridColDef } from "@mui/x-data-grid";
+import { Add, Delete, Edit, Refresh, Search } from "../../components/FinbaseIcons";
+import { GridColDef } from "@mui/x-data-grid";
 import {
   CloneRule, DestinationTable, SourceConnection, createCloneRule, deleteCloneRule, getClonePendencies,
   getCloneRules, getConnections, getDestinationSchema, getDestinationTables, updateCloneRule,
@@ -347,7 +348,6 @@ export default function CloneRules({ embedded }: { embedded?: boolean } = {}) {
             columns={gridColumns}
             autoHeight
             disableColumnMenu
-            density="compact"
             getRowId={(row) => (row as CloneRule).id}
             sx={{ border: 0 }}
           />

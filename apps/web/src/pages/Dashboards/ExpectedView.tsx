@@ -1,3 +1,4 @@
+import DataGrid from "../../components/FinbaseDataGrid";
 import { dataDisplayText } from "../../utils/dataPresentation";
 import { useEffect, useMemo, useRef, useState, type ReactElement } from "react";
 import { useNavigate } from "react-router-dom";
@@ -31,8 +32,8 @@ import {
   Switch,
   Typography,
 } from "@mui/material";
-import { Add, ChevronRight, ExpandMore, Remove } from "@mui/icons-material";
-import { DataGrid, GridColDef } from "@mui/x-data-grid";
+import { Add, ChevronRight, ExpandMore, Remove } from "../../components/FinbaseIcons";
+import { GridColDef } from "@mui/x-data-grid";
 import {
   Department,
   formatApiError,
@@ -1558,7 +1559,6 @@ export default function ExpectedView({
                 autoHeight
                 disableColumnMenu
                 hideFooter
-                density="compact"
                 onCellClick={(params) =>
                   onPivotCellClick(params as { field: string })
                 }

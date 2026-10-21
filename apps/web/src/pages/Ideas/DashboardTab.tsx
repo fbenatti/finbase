@@ -1,8 +1,9 @@
+import DataGrid from "../../components/FinbaseDataGrid";
 import { dataDisplayText } from "../../utils/dataPresentation";
 import { useEffect, useState } from "react";
 import Plot from "@/components/Plot";
 import { Alert, Box, Card, CardContent, Grid, Stack, Typography } from "@mui/material";
-import { DataGrid, GridColDef } from "@mui/x-data-grid";
+import { GridColDef } from "@mui/x-data-grid";
 import { getIdeasDashboard, type IdeasDashboard, type Idea } from "../../services/ideasApi";
 import { STATUS_LABELS, TYPE_LABELS } from "./constants";
 

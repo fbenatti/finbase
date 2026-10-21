@@ -1,3 +1,4 @@
+import DataGrid from "../../components/FinbaseDataGrid";
 import { useMemo, useState } from "react";
 import {
   Box,
@@ -18,7 +19,7 @@ import {
   History,
   FilterAlt, More,
 } from "./ConnectionIcons";
-import { DataGrid, GridColDef, GridFilterModel, GridPaginationModel, GridSortModel, useGridApiRef } from "@mui/x-data-grid";
+import { GridColDef, GridFilterModel, GridPaginationModel, GridSortModel, useGridApiRef } from "@mui/x-data-grid";
 import { SourceConnection } from "../../services/api";
 
 export type ConnectionTestMessage = {

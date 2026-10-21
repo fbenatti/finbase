@@ -1,11 +1,12 @@
+import DataGrid from "../../components/FinbaseDataGrid";
 import { dataDisplayText } from "../../utils/dataPresentation";
 import { useCallback, useEffect, useState } from "react";
 import { useMenuSearchParams as useSearchParams } from "../../navigation/useMenuSearchParams";
 import {
   Alert, Box, Button, Chip, Stack, Typography,
 } from "@mui/material";
-import { Add, ThumbUp } from "@mui/icons-material";
-import { DataGrid, GridColDef } from "@mui/x-data-grid";
+import { Add, ThumbUp } from "../../components/FinbaseIcons";
+import { GridColDef } from "@mui/x-data-grid";
 import { useAuth } from "../../auth/AuthContext";
 import { listIdeas, voteIdea, type Idea } from "../../services/ideasApi";
 import { IMPACT_LABELS, STATUS_COLOR, STATUS_LABELS, TYPE_LABELS, VOTABLE_TYPES } from "./constants";

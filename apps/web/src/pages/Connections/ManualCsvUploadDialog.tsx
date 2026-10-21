@@ -1,3 +1,4 @@
+import DataGrid from "../../components/FinbaseDataGrid";
 import { dataDisplayText } from "../../utils/dataPresentation";
 import { useEffect, useMemo, useState } from "react";
 import {
@@ -19,7 +20,7 @@ import {
   Typography,
 } from "@mui/material";
 import { CloudUpload, Delete, Save } from "./ConnectionIcons";
-import { DataGrid, GridColDef } from "@mui/x-data-grid";
+import { GridColDef } from "@mui/x-data-grid";
 import {
   previewCsv, ingestCsv, ingestCsvBatch, getCsvUploadHistory, formatApiError, IngestedBlob,
 } from "../../services/api";

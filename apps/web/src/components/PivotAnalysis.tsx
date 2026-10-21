@@ -1,3 +1,4 @@
+import DataGrid from "./FinbaseDataGrid";
 import { dataDisplayText } from "../utils/dataPresentation";
 import { DragEvent, useEffect, useMemo, useRef, useState } from "react";
 import {
@@ -5,8 +6,8 @@ import {
   MenuItem, Paper, Select, Stack, Table, TableBody, TableCell, TableContainer,
   TableHead, TableRow, TextField, Typography,
 } from "@mui/material";
-import { DataGrid, GridColDef, GridPaginationModel } from "@mui/x-data-grid";
-import { Add, Close, CompareArrows, ContentCopy, Delete, Download, OpenInFull, PlayArrow, Save, TableChart, Visibility } from "@mui/icons-material";
+import { GridColDef, GridPaginationModel } from "@mui/x-data-grid";
+import { Add, Close, CompareArrows, ContentCopy, Delete, Download, OpenInFull, PlayArrow, Save, TableChart, Visibility } from "./FinbaseIcons";
 import * as XLSX from "xlsx";
 import {
   DestinationAnalysis, PivotFilter, PivotMeasure, PivotMetadata, PivotRequest, PivotResult, PivotView, PivotSort,

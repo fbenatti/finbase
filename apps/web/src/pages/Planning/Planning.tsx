@@ -1,3 +1,4 @@
+import DataGrid from "../../components/FinbaseDataGrid";
 import { dataDisplayText } from "../../utils/dataPresentation";
 import { ChangeEvent, useEffect, useMemo, useRef, useState } from "react";
 import {
@@ -27,7 +28,7 @@ import {
   ChevronDown as ExpandMore, Reset as Restore, Save,
   Upload as UploadFile, Search,
 } from "@carbon/react/icons";
-import { DataGrid, GridColDef } from "@mui/x-data-grid";
+import { GridColDef } from "@mui/x-data-grid";
 import * as XLSX from "xlsx";
 import {
   BudgetDefenseRequest,

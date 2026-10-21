@@ -1,3 +1,4 @@
+import DataGrid from "../../components/FinbaseDataGrid";
 import { dataDisplayText } from "../../utils/dataPresentation";
 import { useEffect, useMemo, useState, type ReactElement } from "react";
 import { Link as RouterLink } from "react-router-dom";
@@ -8,8 +9,8 @@ import {
   FormControl, IconButton, InputLabel, Link, List, ListItemButton, ListItemText, Menu,
   MenuItem, Paper, Select, Stack, TextField, Typography,
 } from "@mui/material";
-import { ChevronRight, ExpandMore } from "@mui/icons-material";
-import { DataGrid, GridColDef } from "@mui/x-data-grid";
+import { ChevronRight, ExpandMore } from "../../components/FinbaseIcons";
+import { GridColDef } from "@mui/x-data-grid";
 import {
   AIMetricKind, AIConsumptionResult, AILicensesResult, AIOverviewResult, AIUserResult,
   Department, formatApiError, getAIDashboardConsumption, getAIDashboardLicenses,
@@ -415,7 +416,6 @@ export default function DashboardsIA() {
                     columns={rankedColumns}
                     autoHeight
                     hideFooter
-                    density="compact"
                     onRowClick={p => { setSelectedUser(String(p.row.user_email)); setTab(2); }}
                     sx={{ mt: 1, cursor: "pointer" }}
                   />
@@ -427,7 +427,6 @@ export default function DashboardsIA() {
                     columns={rankedColumns}
                     autoHeight
                     hideFooter
-                    density="compact"
                     onRowClick={p => { setSelectedUser(String(p.row.user_email)); setTab(2); }}
                     sx={{ mt: 1, cursor: "pointer" }}
                   />
@@ -460,7 +459,7 @@ export default function DashboardsIA() {
                   <Stack direction={{ xs: "column", md: "row" }} gap={2}>
                     <Paper elevation={0} sx={{ flex: 1, p: 2, border: "1px solid", borderColor: "divider", borderRadius: 2 }}>
                       <Typography variant="h6">Licenças ({userData.summary.license_count})</Typography>
-                      <DataGrid rows={userData.licenses.map((r, i) => ({ id: i, ...r }))} columns={userLicenseColumns} autoHeight hideFooter density="compact" sx={{ mt: 1 }} />
+                      <DataGrid rows={userData.licenses.map((r, i) => ({ id: i, ...r }))} columns={userLicenseColumns} autoHeight hideFooter sx={{ mt: 1 }} />
                     </Paper>
                     <Paper elevation={0} sx={{ flex: 1, p: 2, border: "1px solid", borderColor: "divider", borderRadius: 2 }}>
                       <Typography variant="h6">Tokens por modelo/dia</Typography>

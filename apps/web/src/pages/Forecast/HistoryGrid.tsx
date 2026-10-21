@@ -1,3 +1,4 @@
+import DataGrid from "../../components/FinbaseDataGrid";
 import { useEffect, useMemo, useState } from "react";
 import {
   Box,
@@ -10,18 +11,9 @@ import {
   Tooltip,
   Typography,
 } from "@mui/material";
-import { Search } from "@mui/icons-material";
-import {
-  FilterAlt,
-} from "@mui/icons-material";
-import {
-  DataGrid,
-  GridColDef,
-  GridFilterModel,
-  GridPaginationModel,
-  GridSortModel,
-  useGridApiRef,
-} from "@mui/x-data-grid";
+import { Search } from "../../components/FinbaseIcons";
+import { FilterAlt } from "../../components/FinbaseIcons";
+import { GridColDef, GridFilterModel, GridPaginationModel, GridSortModel, useGridApiRef } from "@mui/x-data-grid";
 import { ForecastHistoryPivot, HistoryFilter } from "../../services/api";
 
 type Props = {

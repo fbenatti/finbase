@@ -1,6 +1,6 @@
 import {
   ArrowDown, ArrowUp, ArrowsVertical, Close, Column, Download,
-  Filter, OverflowMenuVertical, Search, ViewOff,
+  Filter, OverflowMenuVertical, Search, ViewOff, RowCollapse, Row, RowExpand,
 } from "@carbon/react/icons";
 
 type IconProps = { className?: string };
@@ -16,7 +16,11 @@ const Clear = ({ className }: IconProps) => <Close size={20} className={classNam
 const Hide = ({ className }: IconProps) => <ViewOff size={20} className={className} />;
 
 /** Shared by every grid through the application theme, including lazy modules. */
+const Compact = ({ className }: IconProps) => <RowCollapse size={20} className={className} />;
+const Standard = ({ className }: IconProps) => <Row size={20} className={className} />;
+const Comfortable = ({ className }: IconProps) => <RowExpand size={20} className={className} />;
 export const dataGridIcons = {
+  densityCompactIcon: Compact, densityStandardIcon: Standard, densityComfortableIcon: Comfortable,
   columnSortedAscendingIcon: Ascending, columnSortedDescendingIcon: Descending,
   columnUnsortedIcon: Unsorted, columnMenuIcon: More, moreActionsIcon: More,
   columnFilteredIcon: FilterIcon, openFilterButtonIcon: FilterIcon,

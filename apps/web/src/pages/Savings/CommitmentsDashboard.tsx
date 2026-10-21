@@ -1,3 +1,4 @@
+import DataGrid from "../../components/FinbaseDataGrid";
 import { dataDisplayText } from "../../utils/dataPresentation";
 import { lazy, Suspense, useEffect, useState } from "react";
 import {
@@ -15,7 +16,7 @@ import {
   TextField,
   Typography,
 } from "@mui/material";
-import { DataGrid, GridColDef } from "@mui/x-data-grid";
+import { GridColDef } from "@mui/x-data-grid";
 import {
   CommitmentsDashboard as CommitmentsDashboardData,
   CommitmentDashboardRow,

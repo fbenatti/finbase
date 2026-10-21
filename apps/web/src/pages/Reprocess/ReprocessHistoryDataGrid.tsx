@@ -1,3 +1,4 @@
+import DataGrid from "../../components/FinbaseDataGrid";
 import { useMemo, useState } from "react";
 import {
   Box,
@@ -10,15 +11,8 @@ import {
   Tooltip,
   Typography,
 } from "@mui/material";
-import { FilterAlt, Replay } from "@mui/icons-material";
-import {
-  DataGrid,
-  GridColDef,
-  GridFilterModel,
-  GridPaginationModel,
-  GridSortModel,
-  useGridApiRef,
-} from "@mui/x-data-grid";
+import { FilterAlt, Replay } from "../../components/FinbaseIcons";
+import { GridColDef, GridFilterModel, GridPaginationModel, GridSortModel, useGridApiRef } from "@mui/x-data-grid";
 import { ReprocessStatus } from "../../services/api";
 
 export type ReprocessGridFilter = {

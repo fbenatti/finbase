@@ -1,3 +1,4 @@
+import DataGrid from "../../components/FinbaseDataGrid";
 import { dataDisplayText } from "../../utils/dataPresentation";
 import { useState, useEffect, useRef, useCallback, useMemo } from "react";
 import {
@@ -6,8 +7,8 @@ import {
   CircularProgress, Tooltip, Dialog, DialogTitle, DialogContent, DialogActions, TextField,
   FormControlLabel, Switch, IconButton, Stack, Table, TableHead, TableRow, TableBody, TableContainer,
 } from "@mui/material";
-import { PlayArrow, Refresh, Stop, Delete, DeleteForever, Block, Undo, Storage, Schedule, Add, Edit, CloudUpload, Download, TableChart, Visibility } from "@mui/icons-material";
-import { DataGrid, GridColDef } from "@mui/x-data-grid";
+import { PlayArrow, Refresh, Stop, Delete, DeleteForever, Block, Undo, Storage, Schedule, Add, Edit, CloudUpload, Download, TableChart, Visibility } from "../../components/FinbaseIcons";
+import { GridColDef } from "@mui/x-data-grid";
 import {
   getConnections, scanBlobs, runEtl, getTaskStatus, getIngestedBlobs, cancelEtl,
   resetSourceForReimport,

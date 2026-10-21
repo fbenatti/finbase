@@ -1,11 +1,12 @@
+import DataGrid from "../../components/FinbaseDataGrid";
 import { dataDisplayText } from "../../utils/dataPresentation";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   Accordion, AccordionDetails, AccordionSummary, Alert, Box, Chip, Dialog, DialogContent, DialogTitle, Divider, IconButton, MenuItem,
   Stack, TextField, Typography,
 } from "@mui/material";
-import { Close, ExpandMore } from "@mui/icons-material";
-import { DataGrid, GridColDef, GridPaginationModel } from "@mui/x-data-grid";
+import { Close, ExpandMore } from "../../components/FinbaseIcons";
+import { GridColDef, GridPaginationModel } from "@mui/x-data-grid";
 import { format } from "date-fns";
 import { useNavigate } from "react-router-dom";
 import { cancelEtl, getProcessingLog, getProcessingLogs, ProcessingLog } from "../../services/api";

@@ -1,3 +1,4 @@
+import DataGrid, { FinbaseGridToolbar as GridToolbar } from "../../components/FinbaseDataGrid";
 import { dataDisplayText } from "../../utils/dataPresentation";
 import { useCallback, useEffect, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
@@ -13,15 +14,8 @@ import {
   TextField,
   Typography,
 } from "@mui/material";
-import { ArrowBack, Refresh } from "@mui/icons-material";
-import {
-  DataGrid,
-  GridToolbar,
-  GridFilterModel,
-  GridPaginationModel,
-  GridSortModel,
-  GridColDef,
-} from "@mui/x-data-grid";
+import { ArrowBack, Refresh } from "../../components/FinbaseIcons";
+import { GridFilterModel, GridPaginationModel, GridSortModel, GridColDef } from "@mui/x-data-grid";
 import {
   ExtractionHistoryMetadata,
   ExtractionHistoryQueryResponse,
@@ -279,7 +273,6 @@ export default function ExtractionHistory() {
           sortingOrder={["asc", "desc"]}
           slots={{ toolbar: GridToolbar }}
           disableRowSelectionOnClick
-          density="compact"
           sx={{
             "& .MuiDataGrid-columnHeaders": {
               bgcolor: "grey.100",

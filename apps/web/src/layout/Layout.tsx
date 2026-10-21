@@ -248,7 +248,7 @@ export default function Layout() {
                     : group.label === "Governança" ? CarbonSettings
                       : group.label === "Administração" ? CarbonUserMultiple
                         : CarbonCloud;
-          return group.items.length === 1 ? (
+          return group.items.length === 1 && !searching ? (
             <CarbonSideNavLink key={group.label} href={group.items[0].path} renderIcon={groupIcon}
               isActive={matchesMenuPath(group.items[0].path, location.pathname, location.search)}
               onClick={() => { openMenu(group.items[0].path); }}>

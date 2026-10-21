@@ -1,3 +1,4 @@
+import DataGrid from "../../components/FinbaseDataGrid";
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
   Box,
@@ -10,20 +11,8 @@ import {
   Tooltip,
   Typography,
 } from "@mui/material";
-import {
-  Delete,
-  Edit,
-  ContentCopy,
-  FilterAlt,
-} from "@mui/icons-material";
-import {
-  DataGrid,
-  GridColDef,
-  GridFilterModel,
-  GridPaginationModel,
-  GridSortModel,
-  useGridApiRef,
-} from "@mui/x-data-grid";
+import { Delete, Edit, ContentCopy, FilterAlt } from "../../components/FinbaseIcons";
+import { GridColDef, GridFilterModel, GridPaginationModel, GridSortModel, useGridApiRef } from "@mui/x-data-grid";
 import { ClassificationRule, Department } from "../../services/api";
 import { flattenDepartments } from "../../components/DepartmentTreePicker";
 

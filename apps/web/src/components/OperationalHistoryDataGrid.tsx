@@ -1,7 +1,8 @@
+import DataGrid from "./FinbaseDataGrid";
 import { useMemo, useState } from "react";
 import { Box, Divider, Menu, MenuItem, Stack, Tooltip } from "@mui/material";
-import { FilterAlt } from "@mui/icons-material";
-import { DataGrid, GridColDef, GridFilterModel, GridPaginationModel, GridSortModel } from "@mui/x-data-grid";
+import { FilterAlt } from "./FinbaseIcons";
+import { GridColDef, GridFilterModel, GridPaginationModel, GridSortModel } from "@mui/x-data-grid";
 
 type Filter = { field: string; operator: "equals" | "notEquals"; value: string };
 type Props = { rows: Record<string, unknown>[]; columns: GridColDef[]; loading?: boolean; emptyMessage?: string };

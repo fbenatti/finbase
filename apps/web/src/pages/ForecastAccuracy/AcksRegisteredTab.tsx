@@ -1,11 +1,12 @@
+import DataGrid from "../../components/FinbaseDataGrid";
 import { dataDisplayText } from "../../utils/dataPresentation";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   Alert, Box, Button, Chip, Dialog, DialogActions, DialogContent, DialogTitle, FormControl, IconButton,
   InputLabel, MenuItem, Select, Stack, TextField, Tooltip, Typography,
 } from "@mui/material";
-import { Add, Block, Check, Delete, Edit } from "@mui/icons-material";
-import { DataGrid, GridColDef, GridRenderEditCellParams, GridRowModel } from "@mui/x-data-grid";
+import { Add, Block, Check, Delete, Edit } from "../../components/FinbaseIcons";
+import { GridColDef, GridRenderEditCellParams, GridRowModel } from "@mui/x-data-grid";
 import {
   ForecastAck, activateForecastAck, deactivateForecastAck, deleteForecastAck, getForecastAcks, updateForecastAck,
 } from "../../services/api";
@@ -357,7 +358,6 @@ export default function AcksRegisteredTab({ defaultMonth, department }: { defaul
           autoHeight
           disableColumnMenu
           hideFooter
-          density="compact"
           editMode="cell"
           processRowUpdate={processRowUpdate}
           onProcessRowUpdateError={onProcessRowUpdateError}
