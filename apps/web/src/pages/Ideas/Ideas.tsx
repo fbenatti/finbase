@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import {
-  Alert, Box, Button, Chip, Stack, Tab, Tabs, Typography,
+  Alert, Box, Button, Chip, Stack, Typography,
 } from "@mui/material";
 import { Add, ThumbUp } from "@mui/icons-material";
 import { DataGrid, GridColDef } from "@mui/x-data-grid";
@@ -24,10 +24,9 @@ type TabId = (typeof TABS)[number]["id"];
 export default function Ideas() {
   const { hasPerm } = useAuth();
   const canCreate = hasPerm("ideas", "create");
-  const [searchParams, setSearchParams] = useSearchParams();
+  const [searchParams] = useSearchParams();
   const requested = searchParams.get("tab");
   const tab: TabId = TABS.some((t) => t.id === requested) ? (requested as TabId) : "portal";
-  const setTab = (value: TabId) => setSearchParams({ tab: value }, { replace: true });
 
   const [ideas, setIdeas] = useState<Idea[]>([]);
   const [error, setError] = useState("");
@@ -89,9 +88,6 @@ export default function Ideas() {
             <Button variant="contained" startIcon={<Add />} onClick={() => setDialog(true)}>Nova ideia</Button>
           )}
         </Stack>
-        <Tabs value={tab} onChange={(_, v: TabId) => setTab(v)} sx={{ minHeight: 42 }}>
-          {TABS.map((t) => <Tab key={t.id} value={t.id} label={t.label} sx={{ minHeight: 42 }} />)}
-        </Tabs>
       </Box>
 
       <Box sx={{ p: 3 }}>
