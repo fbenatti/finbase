@@ -1,8 +1,9 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import { useSearchParams } from "react-router-dom";
 import Plot from "@/components/Plot";
 import {
   Alert, Box, Card, CardContent, Chip, CircularProgress, FormControl, Grid,
-  InputLabel, MenuItem, Paper, Select, Stack, Tab, Tabs, Table, TableBody,
+  InputLabel, MenuItem, Paper, Select, Stack, Table, TableBody,
   TableCell, TableHead, TableRow, TextField, Tooltip, Typography,
 } from "@mui/material";
 import {
@@ -132,9 +133,10 @@ function AdoptionFunnel({ funnel }: { funnel: { assigned: number; logged_in: num
 }
 
 export default function ProviderIaDashboard({ provider }: { provider: AIProviderId }) {
+  const [searchParams] = useSearchParams();
+  const tab = searchParams.get("providerTab") === "technical" ? 1 : 0;
   const [data, setData] = useState<AIProviderOverviewResult | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [tab, setTab] = useState(0);
   const [days, setDays] = useState<number>(() => provider === "anthropic" ? 30 : 90);
   const [search, setSearch] = useState("");
   const abort = useRef<AbortController | null>(null);
@@ -227,11 +229,6 @@ export default function ProviderIaDashboard({ provider }: { provider: AIProvider
         <Grid item xs={12} sm={6} md={3}><Kpi label="Nunca usaram" value={n(k?.never_used)} hint={`${n(k?.inactive_30d)} inativos ≥30d`} color="#DC2626" /></Grid>
         {isTokens && <Grid item xs={12} sm={6} md={3}><Kpi label="Usuários no consumo" value={n(k?.consumption_users)} hint={`${n(k?.tokens_per_user)} tokens/usuário`} /></Grid>}
       </Grid>
-
-      <Tabs value={tab} onChange={(_, v) => setTab(v)}>
-        <Tab label="Visão executiva" />
-        <Tab label="Visão técnica (usuários e licenças)" />
-      </Tabs>
 
       {tab === 0 && (
         <Stack gap={2.5}>
