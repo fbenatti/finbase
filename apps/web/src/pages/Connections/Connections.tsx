@@ -1,9 +1,10 @@
 import { useState, useEffect, useMemo, useRef } from "react";
+import { useSearchParams } from "react-router-dom";
 import {
   Box, Typography, Button,
   Dialog, DialogTitle, DialogContent, DialogActions, TextField, Divider,
   Select, MenuItem, FormControl, InputLabel, Alert, CircularProgress,
-  FormControlLabel, Checkbox, Tab, Tabs, Paper, InputAdornment, Stack, Snackbar,
+  FormControlLabel, Checkbox, Paper, InputAdornment, Stack, Snackbar, ToggleButton, ToggleButtonGroup,
 } from "@mui/material";
 import { Add, AutoAwesome, Cloud, Dataset, Download, MenuBook, Psychology, Search, SmartToy, Storage, Storefront } from "@mui/icons-material";
 import {
@@ -227,6 +228,8 @@ function textToPrefixes(texto: string): Record<string, string> {
 }
 
 export default function Connections() {
+  const [searchParams] = useSearchParams();
+  const activeView = searchParams.get("view") === "integrations" ? "integrations" : "connections";
   const [connections, setConnections] = useState<SourceConnection[]>([]);
   const [connectionCatalog, setConnectionCatalog] = useState<SourceConnection[]>([]);
   const [gridTotal, setGridTotal] = useState(0);
@@ -242,7 +245,6 @@ export default function Connections() {
   // Serviços auxiliares (Jev, ServiceNow) não são fontes de dado de nuvem, mas
   // seguem o mesmo princípio de configuração — por isso vivem aqui, e não numa
   // tela separada que ninguém encontra.
-  const [activeView, setActiveView] = useState<"connections" | "integrations">("connections");
   const gridQuery = useRef<{ offset: number; limit: number; sort?: { field: string; direction: "asc" | "desc" }; filters: Array<{ field: string; operator: "equals" | "notEquals"; value: string }> }>({ offset: 0, limit: 25, filters: [] });
   const gridRequestId = useRef(0);
   const [connectorPickerOpen, setConnectorPickerOpen] = useState(false);
@@ -945,38 +947,28 @@ export default function Connections() {
         </Box>
         </Box>
 
-        <Tabs
-          value={activeView}
-          onChange={(_, value: "connections" | "integrations") => setActiveView(value)}
-          aria-label="Conexões ou serviços auxiliares"
-          sx={{ mb: 1.5, minHeight: 44 }}
-        >
-          <Tab value="connections" label="Conexões" />
-          <Tab value="integrations" label="Serviços auxiliares" />
-        </Tabs>
-
         {activeView === "integrations" ? (
           <Box sx={{ py: 3 }}>
             <IntegrationsPanel />
           </Box>
         ) : (
           <>
-        <Tabs
+        <ToggleButtonGroup
+          exclusive
+          size="small"
           value={activeCategory}
-          onChange={(_, value: string) => selectCategory(value as "all" | ConnectionCategory)}
+          onChange={(_, value: string | null) => { if (value) selectCategory(value as "all" | ConnectionCategory); }}
           aria-label="Filtrar conexões por categoria"
-          sx={{ mb: 1.5, minHeight: 44 }}
+          sx={{ mb: 1.5, flexWrap: "wrap", gap: 0.5, "& .MuiToggleButtonGroup-grouped": { border: "1px solid #E4EAF0 !important", borderRadius: "8px !important" }, "& .MuiToggleButton-root": { textTransform: "none", px: 1.5 } }}
         >
           {categoryTabs.map((category) => (
-            <Tab
+            <ToggleButton
               key={category.value}
               value={category.value}
-              label={category.label + " (" + category.count + ")"}
-              sx={{ minHeight: 44, fontWeight: 600 }}
-            />
+            >{category.label} ({category.count})</ToggleButton>
           ))}
-          <Tab value="all" label={"Todas (" + connectionCatalog.length + ")"} sx={{ minHeight: 44, fontWeight: 600 }} />
-        </Tabs>
+          <ToggleButton value="all">Todas ({connectionCatalog.length})</ToggleButton>
+        </ToggleButtonGroup>
         {providerTabs.length > 0 && (
           <Box
             sx={{
@@ -988,27 +980,22 @@ export default function Connections() {
               mb: 2,
             }}
           >
-            <Tabs
+            <ToggleButtonGroup
+              exclusive
+              size="small"
               value={activeProvider}
-              onChange={(_, value: string) => setActiveProvider(value)}
+              onChange={(_, value: string | null) => { if (value) setActiveProvider(value); }}
               aria-label="Filtrar conexões por provedor"
-              sx={{
-                minHeight: 42,
-                "& .MuiTab-root": { minHeight: 42, py: 0.5, fontWeight: 600, textTransform: "none" },
-                "& .Mui-selected": { color: activeCategoryMeta?.color || "primary.main" },
-                "& .MuiTabs-indicator": { bgcolor: activeCategoryMeta?.color || "primary.main", height: 3, borderRadius: "3px 3px 0 0" },
-              }}
+              sx={{ minHeight: 42, flexWrap: "wrap", gap: 0.5, "& .MuiToggleButtonGroup-grouped": { border: "1px solid #E4EAF0 !important", borderRadius: "8px !important" }, "& .MuiToggleButton-root": { textTransform: "none", color: activeCategoryMeta?.color || "primary.main" } }}
             >
               {providerTabs.map((provider) => (
-                <Tab
+                <ToggleButton
                   key={provider}
                   value={provider}
-                  label={getProviderLabel(provider) + " (" + connectionCatalog.filter((connection) => connection.cloud_scope === provider && (activeCategory === "all" || categoryOfConnection(connection) === activeCategory)).length + ")"}
-                  sx={{ minHeight: 42, py: 0.5 }}
-                />
+                >{getProviderLabel(provider)} ({connectionCatalog.filter((connection) => connection.cloud_scope === provider && (activeCategory === "all" || categoryOfConnection(connection) === activeCategory)).length})</ToggleButton>
               ))}
-              <Tab value="all" label="Todos os provedores" sx={{ minHeight: 42, py: 0.5 }} />
-            </Tabs>
+              <ToggleButton value="all">Todos os provedores</ToggleButton>
+            </ToggleButtonGroup>
           </Box>
         )}
           </>
