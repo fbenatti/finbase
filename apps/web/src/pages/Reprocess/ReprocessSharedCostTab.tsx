@@ -65,7 +65,7 @@ export default function ReprocessSharedCostTab() {
         >
           Reprocessar custo compartilhado
         </Button>
-        <Button variant="outlined" onClick={() => navigate("/expected-view?shared=1")}>
+        <Button variant="outlined" onClick={() => navigate("/custos?shared=1")}>
           Abrir Visão Esperada com custo compartilhado
         </Button>
         <Button variant="text" onClick={() => navigate("/departments")}>Configurar departamentos</Button>

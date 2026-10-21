@@ -30,10 +30,10 @@ export default function Governance() {
     return <Navigate to={`/savings?tab=${requested}`} replace />;
   }
   if (requested === "reservas-legacy") {
-    return <Navigate to="/governance?tab=reservas" replace />;
+    return <Navigate to="/governanca?tab=reservas" replace />;
   }
   if (requested === "clone-rules") {
-    return <Navigate to="/governance?tab=rules&subtab=clone-rules" replace />;
+    return <Navigate to="/governanca?tab=rules&subtab=clone-rules" replace />;
   }
   const allowedTabs = TABS.filter((item) => item.perms.some((p) => hasPerm(p.module, "read", p.scope)));
   const fallback = allowedTabs[0]?.id ?? null;

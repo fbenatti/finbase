@@ -15,7 +15,7 @@ export default function Tables() {
   // Itens de governança foram movidos para a área de Governança. Preserve links antigos.
   if (rawTab === "clone-rules" || rawTab === "cost-relationship" || rawTab === "ai-cost-relationship") {
     const governanceTab = rawTab === "clone-rules" ? "clone-rules" : "cost-relationship";
-    return <Navigate to={governanceTab === "clone-rules" ? "/governance?tab=rules&subtab=clone-rules" : `/governance?tab=${governanceTab}`} replace />;
+    return <Navigate to={governanceTab === "clone-rules" ? "/governanca?tab=rules&subtab=clone-rules" : `/governance?tab=${governanceTab}`} replace />;
   }
   const normalized = rawTab === "ai-cost-relationship" ? "cost-relationship" : rawTab;
   const activeTab = TABS.some((t) => t.id === normalized) ? normalized! : "destinations";

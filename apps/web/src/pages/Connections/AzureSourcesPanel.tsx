@@ -384,7 +384,7 @@ export default function AzureSourcesPanel({ environment, connectionId }: { envir
       <Typography variant="caption" color="text.secondary">
         Fontes marcadas como <b>planejada</b> aparecem na lista para dar visibilidade do roadmap, mas
         ainda não têm coletor e não entram na carga. Veja{" "}
-        <Link href="/analysis" underline="hover">Análise</Link> para inspecionar as tabelas Bronze/Silver/Gold.
+        <Link href="/dados/explorador" underline="hover">Análise</Link> para inspecionar as tabelas Bronze/Silver/Gold.
       </Typography>
     </Box>
   );

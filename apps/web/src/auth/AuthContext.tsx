@@ -28,7 +28,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     onSessionExpired(() => {
       setUser(null);
-      navigate("/login", { replace: true });
+      navigate("/entrar", { replace: true });
     });
     // Boot: tenta /auth/me. Com bypass de DEV ativo responde 200 como dev-admin
     // (pula a tela de login); com auth ligada e sem token retorna 401.
@@ -47,7 +47,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const logout = useCallback(async () => {
     await apiLogout();
     setUser(null);
-    navigate("/login", { replace: true });
+    navigate("/entrar", { replace: true });
   }, [navigate]);
 
   const hasPerm = useCallback(

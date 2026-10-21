@@ -23,7 +23,7 @@ type TabId = (typeof TABS)[number]["id"];
 export default function Savings() {
  const [searchParams]=useSearchParams();
  const requested=searchParams.get("tab");
- if(requested==="reservas") return <Navigate to="/governance?tab=reservas" replace />;
+ if(requested==="reservas") return <Navigate to="/governanca?tab=reservas" replace />;
  const tab:TabId=TABS.some(item=>item.id===requested)?requested as TabId:"calcular";
  const [actions,setActions]=useState<SavingAction[]>([]); const [dash,setDash]=useState<SavingsDashboard|null>(null); const [tables,setTables]=useState<DestinationTable[]>([]); const [year,setYear]=useState(new Date().getFullYear()); const [dialog,setDialog]=useState(false); const [form,setForm]=useState(empty); const [columns,setColumns]=useState<Array<{name:string;type:string}>>([]); const [filterDraft,setFilterDraft]=useState({column:"",operator:"IN" as SavingFilter["operator"],values:""}); const [selected,setSelected]=useState<SavingAction|null>(null); const [measurements,setMeasurements]=useState<SavingMeasurement[]>([]); const [error,setError]=useState("");
  const load=async()=>{ try { const [a,d,t]=await Promise.all([getSavingActions(),getSavingsDashboard(year),getDestinationTables(true)]); setActions(a);setDash(d);setTables(t); } catch(e){setError(String(e));} };

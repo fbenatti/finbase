@@ -254,7 +254,7 @@ export default function Forecast() {
   };
 
   const openHistory = (run: ForecastRun, comparison: boolean) =>
-    navigate("/forecast/history/" + run.id + (comparison ? "?comparison=1" : ""));
+    navigate("/projecoes/execucoes/" + run.id + (comparison ? "?comparison=1" : ""));
 
   const cancelRun = async (run: ForecastRun) => {
     setCancellingRunId(run.id);

@@ -233,7 +233,7 @@ export default function AzurePTU() {
           </Select>
         </FormControl>
         <Chip size="small" label={`Fonte: ${data.data_source === "gold" ? "Gold Iceberg" : data.data_source === "stale" ? "Gold (parcial)" : "Azure Monitor live"}`} />
-        <Button component={RouterLink} to="/tables?tab=ai-cost-relationship" size="small" variant="outlined">Origem de custo IA</Button>
+        <Button component={RouterLink} to="/dados/catalogo?tab=ai-cost-relationship" size="small" variant="outlined">Origem de custo IA</Button>
         <Button
           size="small"
           variant="contained"

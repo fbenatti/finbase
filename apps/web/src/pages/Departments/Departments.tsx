@@ -658,7 +658,7 @@ export default function Departments({ embedded = false }: { embedded?: boolean }
                 <MenuItem
                   onClick={() => {
                     setFinancialMenu(null);
-                    navigate("/financial-planning?tab=orcamento");
+                    navigate("/planejamento?tab=orcamento");
                   }}
                 >
                   Importar orçamento
@@ -666,7 +666,7 @@ export default function Departments({ embedded = false }: { embedded?: boolean }
                 <MenuItem
                   onClick={() => {
                     setFinancialMenu(null);
-                    navigate("/financial-planning?tab=forecast-manual");
+                    navigate("/planejamento?tab=forecast-manual");
                   }}
                 >
                   Importar forecast manual
@@ -674,7 +674,7 @@ export default function Departments({ embedded = false }: { embedded?: boolean }
                 <MenuItem
                   onClick={() => {
                     setFinancialMenu(null);
-                    navigate("/financial-planning?tab=base-line-contratual");
+                    navigate("/planejamento?tab=base-line-contratual");
                   }}
                 >
                   Importar base line contratual
@@ -682,7 +682,7 @@ export default function Departments({ embedded = false }: { embedded?: boolean }
                 <MenuItem
                   onClick={() => {
                     setFinancialMenu(null);
-                    navigate("/financial-planning");
+                    navigate("/planejamento");
                   }}
                 >
                   Download modelo e editar cadastro
