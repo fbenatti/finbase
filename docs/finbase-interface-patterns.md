@@ -62,3 +62,29 @@ Foi instalada `frontend-design`, de `anthropics/skills`, em
   duas colunas quando houver espaço e rodapé cancelar/validar/salvar.
 - Fontes Azure, serviços auxiliares e importação CSV usam os mesmos ícones
   Carbon por meio de `ConnectionIcons.tsx`, com cores e dimensões do tema.
+
+## Estrutura compartilhada das grades
+
+As 24 implementações de DataGrid importam `components/FinbaseDataGrid.tsx`.
+A importação de `DataGrid` do pacote MUI fica restrita a esse componente; tipos,
+seletores e hooks continuam disponíveis diretamente pelo pacote.
+
+A estrutura inclui controles de colunas, filtros, densidade, exportação CSV,
+contagem de registros, cabeçalho de 48 px, linhas de 48 px na densidade padrão,
+foco de teclado visível e ícones Carbon. Cada módulo preserva os callbacks de
+consulta, paginação, filtros e edição, além dos destaques semânticos das linhas.
+Em grades com paginação no servidor, a opção CSV informa que exporta a página
+atual. A opção de impressão automática está oculta. `SortableTable.tsx` utiliza
+a mesma organização de busca, contagem, cabeçalho e tipografia.
+
+## Busca no workspace
+
+A navegação dos dois layouts tem um campo **Buscar menus**, com o atalho
+**Ctrl/Cmd + K**. A busca ignora acentos e maiúsculas, combina nomes de grupos e
+submenus, expande os grupos encontrados e mantém as rotas individuais.
+**Escape** ou o botão de limpar restaura a navegação completa; **Enter** abre o
+primeiro submenu encontrado. Novos módulos entram automaticamente pelo catálogo.
+
+A busca usa somente módulos visíveis, habilitados e permitidos pelo backend,
+incluindo a verificação dos ancestrais. Ela não muda permissões e não exibe
+módulos ocultos ou indisponíveis para o cliente.

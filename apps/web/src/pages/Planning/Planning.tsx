@@ -823,7 +823,7 @@ export default function Planning({
               ) : (
                 <Box
                   sx={{
-                    height: Math.min(520, Math.max(280, (scopedRows.length + 2) * 48)),
+                    height: Math.min(520, Math.max(280, (scopedRows.length + 2) * 48 + 64)),
                     width: "100%",
                     "& .planning-own .planning-hierarchy": { borderLeft: "3px solid #24a148", bgcolor: "#defbe6" },
                     "& .planning-mixed .planning-hierarchy": { borderLeft: "3px solid #f1c21b", bgcolor: "#fff1c7" },

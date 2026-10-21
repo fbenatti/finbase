@@ -150,7 +150,7 @@ export default function Layout() {
   const displayedMenuGroups = useMemo(() => visibleMenuGroups.map(group => ({ ...group, items: group.items.filter(item => matchedPaths.has(item.path)) })).filter(group => group.items.length > 0), [visibleMenuGroups, matchedPaths]);
   const searching = Boolean(menuSearch.trim());
   const openMenuSearch = () => { setExpanded(true); if (isMobile) setMobileOpen(true); setSearchFocusToken(value => value + 1); };
-  const openMenu = (path: string) => { navigate(path); setMenuSearch(""); setMobileOpen(false); };
+  const openMenu = (path: string) => { const group = visibleMenuGroups.find(group => group.items.some(item => item.path === path)); if (group) setOpenGroups([group.label]); navigate(path); setMenuSearch(""); setMobileOpen(false); };
   useEffect(() => {
     const onShortcut = (event: KeyboardEvent) => {
       if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "k") {
@@ -216,7 +216,7 @@ export default function Layout() {
               <List disablePadding sx={{ mt: 0.25, mb: 1 }}>
                 {group.items.map(item => {
                   const active = matchesMenuPath(item.path, location.pathname, location.search);
-                  return <ListItemButton key={item.path} selected={active} onClick={() => { openMenu(item.path); }}
+                  return <ListItemButton key={item.path} selected={active} onClick={event => { if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return; event.preventDefault(); openMenu(item.path); }}
                     sx={{ minHeight: 38, pl: 2, pr: 1.25, ml: 2.1, borderRadius: 1.4, borderLeft: "2px solid", borderColor: active ? "secondary.main" : "transparent", color: active ? "primary.dark" : "text.secondary", "&.Mui-selected": { bgcolor: "#EAF5F3", color: "#0D6B63" }, "&.Mui-selected:hover": { bgcolor: "#E1F0ED" }, "&:hover": { bgcolor: "#F3F7F8" } }}>
                     <ListItemIcon sx={{ minWidth: 30, color: "inherit" }}>{item.icon}</ListItemIcon>
                     <ListItemText primary={item.label} primaryTypographyProps={{ fontSize: 12.5, fontWeight: active ? 700 : 500, noWrap: true }} />
@@ -251,16 +251,16 @@ export default function Layout() {
           return group.items.length === 1 && !searching ? (
             <CarbonSideNavLink key={group.label} href={group.items[0].path} renderIcon={groupIcon}
               isActive={matchesMenuPath(group.items[0].path, location.pathname, location.search)}
-              onClick={() => { openMenu(group.items[0].path); }}>
+              onClick={event => { if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return; event.preventDefault(); openMenu(group.items[0].path); }}>
               {group.label}
             </CarbonSideNavLink>
           ) : (
-            <CarbonSideNavMenu key={`${group.label}:${menuSearch}`} title={group.label} renderIcon={groupIcon} isActive={activeGroup}
+            <CarbonSideNavMenu key={`${group.label}:${menuSearch}:${openGroups.includes(group.label)}`} title={group.label} renderIcon={groupIcon} isActive={activeGroup}
               isSideNavExpanded={isMobile ? mobileOpen : expanded} defaultExpanded={searching || openGroups.includes(group.label)}>
               {group.items.map(item => (
                 <CarbonSideNavMenuItem key={item.path} href={item.path} as="button"
                   isActive={matchesMenuPath(item.path, location.pathname, location.search)}
-                  onClick={() => { openMenu(item.path); }}>
+                  onClick={event => { if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return; event.preventDefault(); openMenu(item.path); }}>
                   {item.label}
                 </CarbonSideNavMenuItem>
               ))}
