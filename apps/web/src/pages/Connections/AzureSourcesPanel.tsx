@@ -122,7 +122,7 @@ function SourceRow({
             <Typography variant="caption" color="text.secondary">{source.description}</Typography>
           )}
           <Typography variant="caption" color="text.secondary">
-            Último teste: {source.last_test_status || "—"} em {formatWhen(source.last_tested_at)}
+            Última validação: {source.last_test_status || "—"} em {formatWhen(source.last_tested_at)}
             {source.last_ingested_at ? ` · última coleta: ${formatWhen(source.last_ingested_at)}` : ""}
           </Typography>
           {source.required_permission && (
@@ -201,7 +201,7 @@ function EnvironmentCard({
 
   const test = useCallback(async (source: AzureSourceItem) => {
     setBusyId(source.connection_id);
-    setMessage({ severity: "info", text: `Testando ${source.display_name}…` });
+    setMessage({ severity: "info", text: `Validando ${source.display_name}…` });
     try {
       const result = await testAzureSource(source.connection_id);
       setMessage({
@@ -386,7 +386,7 @@ export default function AzureSourcesPanel({ environment, connectionId }: { envir
       <Divider sx={{ my: 1 }} />
       <Typography variant="caption" color="text.secondary">
         Fontes marcadas como <b>planejada</b> aparecem na lista para dar visibilidade do planejamento, mas
-        ainda não têm coletor e não entram na carga. Veja{" "}
+        ainda não estão disponíveis para coleta. Veja{" "}
         <Link href="/dados/explorador/destinos" underline="hover">Explorador de dados</Link> para inspecionar as tabelas de origem, preparação e consolidação.
       </Typography>
     </Box>

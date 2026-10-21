@@ -52,7 +52,6 @@ const connectorLabels: Record<string, string> = {
   gcp_bigquery: "GCP BigQuery",
   oci: "Oracle Cloud (OCI)",
   mongodb_atlas: "MongoDB Atlas",
-  manual_csv: "Upload manual de CSV",
   github_billing: "Faturamento GitHub",
   github_license: "GitHub Licenças (Copilot)",
   github_token: "GitHub Tokens (Copilot)",
@@ -66,7 +65,7 @@ const connectorLabels: Record<string, string> = {
   databricks: "Consumo Databricks",
 };
 
-export const getConnectorLabel = (type: string) => connectorLabels[type] || type.replaceAll("_", " ");
+export const getConnectorLabel = (type: string) => connectorLabels[type] || type.replace(/_/g, " ");
 
 const providerLabels: Record<string, string> = {
   azure: "Azure",

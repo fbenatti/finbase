@@ -46,3 +46,19 @@ nas ações por ícone e o alinhamento à direita de valores monetários.
 Foi instalada `frontend-design`, de `anthropics/skills`, em
 `~/.codex/skills/frontend-design`. A orientação foi aplicada à hierarquia visual,
 à tipografia, à redução de elementos repetidos e à revisão visual no navegador.
+
+## Área de Fontes de dados
+
+`pages/Connections` segue o mesmo padrão, incluindo os diálogos internos:
+
+- Título do módulo: **Fontes de dados**; ação principal: **Nova conexão**.
+- Filtros na ordem categoria, provedor ou aplicação e busca; início sem filtros.
+- Ações da lista: **Atualizar lista** e **Exportar página**, que exporta somente
+  os registros da página atual. Nenhuma credencial é incluída no arquivo.
+- Colunas padrão: conexão, provedor, tipo de conexão, validação e ações.
+  Código, origem e atualização podem ser exibidos pelo menu de colunas.
+- Cada linha oferece edição e um menu com validação, histórico e exclusão.
+- Formulários usam identificação antes das credenciais, campos em português,
+  duas colunas quando houver espaço e rodapé cancelar/validar/salvar.
+- Fontes Azure, serviços auxiliares e importação CSV usam os mesmos ícones
+  Carbon por meio de `ConnectionIcons.tsx`, com cores e dimensões do tema.

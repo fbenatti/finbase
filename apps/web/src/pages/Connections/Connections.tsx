@@ -1107,7 +1107,7 @@ export default function Connections() {
 
             {form.connector_type === "azure_openai_ptu" && (
               <>
-                <Typography variant="subtitle2" sx={{ mt: 1, color: "text.primary" }}>1. Identidade</Typography>
+                <Typography variant="subtitle2" sx={{ mt: 1, color: "text.primary" }}>Credenciais de acesso</Typography>
                 <Alert severity="info">A coleta usa somente recursos e métricas já existentes. Nenhum recurso Azure será criado. O secret nunca é devolvido pela API.</Alert>
                 <TextField label="Perfil de credencial" value={form.credential_profile || "azure-4p"}
                   onChange={(e) => setForm({ ...form, credential_profile: e.target.value })}
@@ -1116,12 +1116,12 @@ export default function Connections() {
                   onChange={(e) => setForm({ ...form, tenant_id: e.target.value })} />
                 <TextField label="ID da aplicação (cliente)" value={form.client_id}
                   onChange={(e) => setForm({ ...form, client_id: e.target.value })} />
-                <TextField label="Client Secret (somente para credencial nova)" type="password" value={form.client_secret}
+                <TextField label="Segredo da aplicação (para substituir)" type="password" value={form.client_secret}
                   onChange={(e) => setForm({ ...form, client_secret: e.target.value })}
-                  helperText="Deixe vazio para manter o segredo runtime existente." />
-                <Typography variant="subtitle2" sx={{ mt: 1 }}>2. Escopo Azure</Typography>
-                <Alert severity="warning">Use Testar conexão / Scan para descobrir assinaturas, contas OpenAI e deployments PTU sem persistir métricas.</Alert>
-                <Typography variant="subtitle2" sx={{ mt: 1 }}>3. Coleta</Typography>
+                  helperText="Deixe vazio para manter o segredo já configurado." />
+                <Typography variant="subtitle2" sx={{ mt: 1 }}>Escopo da coleta</Typography>
+                <Alert severity="warning">Use Validar conexão para descobrir assinaturas, contas OpenAI e deployments PTU sem persistir métricas.</Alert>
+                <Typography variant="subtitle2" sx={{ mt: 1 }}>Execução da coleta</Typography>
                 <Typography variant="body2" color="text.secondary">PT1M → persistência horária UTC, atraso 10 min, lookback 3h, backfill 93 dias. Exibição America/Sao_Paulo.</Typography>
                 <Typography variant="subtitle2" sx={{ mt: 1 }}>4. Mapeamento de projeto</Typography>
                 <Typography variant="body2" color="text.secondary">Após salvar, cadastre projetos em Azure PTU (reservation/ondemand, global/regional, vigência).</Typography>
@@ -1138,7 +1138,7 @@ export default function Connections() {
 
             {form.connector_type === "azure_automation_jobs" && (
               <>
-                <Typography variant="subtitle2" sx={{ mt: 1, color: "text.primary" }}>1. Identidade</Typography>
+                <Typography variant="subtitle2" sx={{ mt: 1, color: "text.primary" }}>Credenciais de acesso</Typography>
                 <Alert severity="info">A coleta lê jobs e schedules das Automation Accounts via ARM API. Nenhum recurso é criado. O secret nunca é devolvido pela API.</Alert>
                 <TextField label="Perfil de credencial" value={form.credential_profile || ""}
                   onChange={(e) => setForm({ ...form, credential_profile: e.target.value })}
@@ -1147,18 +1147,18 @@ export default function Connections() {
                   onChange={(e) => setForm({ ...form, tenant_id: e.target.value })} />
                 <TextField label="ID da aplicação (cliente)" value={form.client_id}
                   onChange={(e) => setForm({ ...form, client_id: e.target.value })} />
-                <TextField label="Client Secret (somente para credencial nova)" type="password" value={form.client_secret}
+                <TextField label="Segredo da aplicação (para substituir)" type="password" value={form.client_secret}
                   onChange={(e) => setForm({ ...form, client_secret: e.target.value })}
-                  helperText="Deixe vazio para manter o segredo runtime existente." />
-                <Typography variant="subtitle2" sx={{ mt: 1 }}>2. Escopo Azure</Typography>
-                <TextField label="Subscription IDs (um por linha)" multiline rows={3}
+                  helperText="Deixe vazio para manter o segredo já configurado." />
+                <Typography variant="subtitle2" sx={{ mt: 1 }}>Escopo da coleta</Typography>
+                <TextField label="IDs das assinaturas (um por linha)" multiline rows={3}
                   value={form.automation_subscription_ids}
                   onChange={(e) => setForm({ ...form, automation_subscription_ids: e.target.value })}
                   helperText="Vazio = todas as subscriptions acessíveis pela credencial." />
-                <TextField label="Backfill (dias)" type="number" value={form.automation_backfill_days}
+                <TextField label="Histórico de coleta (dias)" type="number" value={form.automation_backfill_days}
                   onChange={(e) => setForm({ ...form, automation_backfill_days: Number(e.target.value) || 93 })}
                   helperText="Quantos dias de histórico de jobs coletar (padrão 93)." />
-                <Typography variant="subtitle2" sx={{ mt: 1 }}>3. Coleta</Typography>
+                <Typography variant="subtitle2" sx={{ mt: 1 }}>Execução da coleta</Typography>
                 <Typography variant="body2" color="text.secondary">
                   Scan descobre as Automation Accounts; a extração coleta jobs (últimos N dias) e
                   schedules atuais, persiste na base de origem e permite reprocessar para a base consolidada
@@ -1169,7 +1169,7 @@ export default function Connections() {
 
             {form.connector_type === "azure_resource_graph" && (
               <>
-                <Typography variant="subtitle2" sx={{ mt: 1, color: "text.primary" }}>1. Identidade</Typography>
+                <Typography variant="subtitle2" sx={{ mt: 1, color: "text.primary" }}>Credenciais de acesso</Typography>
                 <Alert severity="info">A coleta consulta o Azure Resource Graph (inventário + recursos órfãos). Nenhum recurso é criado. O secret nunca é devolvido pela API.</Alert>
                 <TextField label="Perfil de credencial" value={form.credential_profile || ""}
                   onChange={(e) => setForm({ ...form, credential_profile: e.target.value })}
@@ -1178,20 +1178,20 @@ export default function Connections() {
                   onChange={(e) => setForm({ ...form, tenant_id: e.target.value })} />
                 <TextField label="ID da aplicação (cliente)" value={form.client_id}
                   onChange={(e) => setForm({ ...form, client_id: e.target.value })} />
-                <TextField label="Client Secret (somente para credencial nova)" type="password" value={form.client_secret}
+                <TextField label="Segredo da aplicação (para substituir)" type="password" value={form.client_secret}
                   onChange={(e) => setForm({ ...form, client_secret: e.target.value })}
-                  helperText="Deixe vazio para manter o segredo runtime existente." />
-                <Typography variant="subtitle2" sx={{ mt: 1 }}>2. Escopo Azure</Typography>
-                <TextField label="Subscription IDs (um por linha)" multiline rows={3}
+                  helperText="Deixe vazio para manter o segredo já configurado." />
+                <Typography variant="subtitle2" sx={{ mt: 1 }}>Escopo da coleta</Typography>
+                <TextField label="IDs das assinaturas (um por linha)" multiline rows={3}
                   value={form.arg_subscription_ids}
                   onChange={(e) => setForm({ ...form, arg_subscription_ids: e.target.value })}
                   helperText="Vazio = todas as subscriptions acessíveis pela credencial. Recomendado preencher (limite de 10k linhas por query do ARG)." />
-                <Typography variant="subtitle2" sx={{ mt: 1 }}>3. Regras de órfãos (opcional)</Typography>
+                <Typography variant="subtitle2" sx={{ mt: 1 }}>Regras de recursos sem uso (opcional)</Typography>
                 <TextField label="Regras KQL customizadas (regra: KQL por linha)" multiline rows={4}
                   value={form.arg_orphan_rules}
                   onChange={(e) => setForm({ ...form, arg_orphan_rules: e.target.value })}
                   helperText="Override das regras padrão (disk_unattached, vm_deallocated, public_ip_idle, snapshot_orphan, lb_idle). Ex: vm_deallocated: resources | where ..." />
-                <Typography variant="subtitle2" sx={{ mt: 1 }}>4. Coleta</Typography>
+                <Typography variant="subtitle2" sx={{ mt: 1 }}>Execução da coleta</Typography>
                 <Typography variant="body2" color="text.secondary">
                   Scan lista as subscriptions acessíveis; a extração coleta o inventário completo e
                   os órfãos por snapshot diário, persiste na base de origem e permite reprocessar para a base consolidada
@@ -1208,16 +1208,16 @@ export default function Connections() {
                     o snapshot vai para base de origem <code>raw_azure_pricesheet</code> pelo prefixo próprio.
                   </Alert>
                 )}
-                <Typography variant="subtitle2" sx={{ mt: 1, color: "text.primary" }}>Azure Credentials</Typography>
+                <Typography variant="subtitle2" sx={{ mt: 1, color: "text.primary" }}>Credenciais Azure</Typography>
                 <TextField label="ID do diretório (tenant)" value={form.tenant_id}
                   onChange={(e) => setForm({ ...form, tenant_id: e.target.value })}
-                  helperText="Directory (tenant) ID do Azure AD" />
+                  helperText="Identificador do diretório no Microsoft Entra ID." />
                 <TextField label="ID da aplicação (cliente)" value={form.client_id}
                   onChange={(e) => setForm({ ...form, client_id: e.target.value })}
-                  helperText="Application (client) ID do App Registration" />
+                  helperText="Identificador da aplicação registrada no provedor." />
                 <TextField label="Segredo da aplicação" type="password" value={form.client_secret}
                   onChange={(e) => setForm({ ...form, client_secret: e.target.value })}
-                  helperText="Secret value do App Registration" />
+                  helperText="Valor do segredo da aplicação. Deixe vazio ao editar para manter o atual." />
                 <TextField label="Conta de armazenamento" value={form.storage_account}
                   onChange={(e) => setForm({ ...form, storage_account: e.target.value })} />
                 <TextField label="Contêiner de armazenamento" value={form.container_name}
@@ -1232,14 +1232,14 @@ export default function Connections() {
                       + "amortized_cost: reports/Report4P-amortized-cost/"
                     } />
                 ) : (
-                  <TextField label="Prefixo do Price Sheet" value="reports/report_-pricesheet/" disabled />
+                  <TextField label="Caminho dos preços contratados" value="reports/report_-pricesheet/" disabled />
                 )}
               </>
             )}
 
             {form.connector_type === "gcp_bigquery" && (
               <>
-                <Typography variant="subtitle2" sx={{ mt: 1, color: "text.primary" }}>GCP BigQuery Config</Typography>
+                <Typography variant="subtitle2" sx={{ mt: 1, color: "text.primary" }}>Configuração Google Cloud</Typography>
                 <TextField label="ID do projeto" value={form.tenant_id}
                   onChange={(e) => setForm({ ...form, tenant_id: e.target.value })}
                   helperText="ID do projeto GCP (ex: billing-344820)" />
@@ -1252,13 +1252,13 @@ export default function Connections() {
                 <TextField label="Credenciais da conta de serviço (JSON)" multiline rows={6}
                   value={form.gcp_token}
                   onChange={(e) => setForm({ ...form, gcp_token: e.target.value })}
-                  helperText="Cole o conteudo completo do JSON da service account" />
+                  helperText="Cole o conteúdo completo das credenciais JSON da conta de serviço." />
               </>
             )}
 
             {form.connector_type === "oci" && (
               <>
-                <Typography variant="subtitle2" sx={{ mt: 1, color: "text.primary" }}>Oracle Cloud (OCI) Config</Typography>
+                <Typography variant="subtitle2" sx={{ mt: 1, color: "text.primary" }}>Configuração Oracle Cloud</Typography>
                 <TextField label="ID da conta (OCID)" value={form.tenant_id}
                   onChange={(e) => setForm({ ...form, tenant_id: e.target.value })}
                   helperText="OCID da Tenancy (ex: ocid1.tenancy.oc1..aaaa...)" />
@@ -1274,7 +1274,7 @@ export default function Connections() {
                 <TextField label="Chave privada (PEM)" multiline rows={5}
                   value={form.oci_private_key}
                   onChange={(e) => setForm({ ...form, oci_private_key: e.target.value })}
-                  helperText="Cole o conteudo completo da chave privada (.pem)" />
+                  helperText="Cole o conteúdo completo da chave privada (.pem)." />
                 <TextField label="Relatórios do Blob (tipo: caminho, um por linha)" multiline rows={2}
                   value={form.blob_prefixes}
                   onChange={(e) => setForm({ ...form, blob_prefixes: e.target.value })}
@@ -1338,7 +1338,7 @@ export default function Connections() {
                 </FormControl>
                 <TextField label="Identificador da organização" value={form.tenant_id}
                   onChange={(e) => setForm({ ...form, tenant_id: e.target.value })}
-                  helperText="Slug da Enterprise no GitHub (ex: tefbr)" />
+                  helperText="Identificador da organização no GitHub Enterprise." />
                 <TextField label="Token de acesso pessoal (PAT)" type="password" value={form.client_secret}
                   onChange={(e) => setForm({ ...form, client_secret: e.target.value })}
                   helperText="Token com escopo manage_billing:enterprise" />
@@ -1369,14 +1369,14 @@ export default function Connections() {
                   helperText="Project ID no GCP (ex: telefonica-notebook-lm)" />
                 <TextField label="Número do projeto" value={form.client_id}
                   onChange={(e) => setForm({ ...form, client_id: e.target.value })}
-                  helperText="Project Number no GCP (ex: 198880944469)" />
-                <TextField label="E-mail admin do Workspace" value={form.admin_email}
+                  helperText="Número do projeto no Google Cloud." />
+                <TextField label="E-mail do administrador do Workspace" value={form.admin_email}
                   onChange={(e) => setForm({ ...form, admin_email: e.target.value })}
                   helperText="Super admin para domain-wide delegation (ex: admin@empresa.com)" />
                 <TextField label="Credenciais da conta de serviço (JSON)" value={form.gcp_token} multiline minRows={4}
                   onChange={(e) => setForm({ ...form, gcp_token: e.target.value })}
                   helperText="Cole o JSON completo da service account (type=service_account). Chave AIza não lista usuários." />
-                <TextField label="API Key (opcional / legado)" type="password" value={form.client_secret}
+                <TextField label="Chave de API (opcional)" type="password" value={form.client_secret}
                   onChange={(e) => setForm({ ...form, client_secret: e.target.value })}
                   helperText="Não substitui a service account para licenças e Reports API" />
               </>
@@ -1406,14 +1406,14 @@ export default function Connections() {
                   helperText="Project ID no GCP (ex: telefonica-notebook-lm)" />
                 <TextField label="Número do projeto" value={form.client_id}
                   onChange={(e) => setForm({ ...form, client_id: e.target.value })}
-                  helperText="Project Number no GCP (ex: 198880944469)" />
-                <TextField label="E-mail admin do Workspace" value={form.admin_email}
+                  helperText="Número do projeto no Google Cloud." />
+                <TextField label="E-mail do administrador do Workspace" value={form.admin_email}
                   onChange={(e) => setForm({ ...form, admin_email: e.target.value })}
                   helperText="Super admin para domain-wide delegation (ex: admin@empresa.com)" />
                 <TextField label="Credenciais da conta de serviço (JSON)" value={form.gcp_token} multiline minRows={4}
                   onChange={(e) => setForm({ ...form, gcp_token: e.target.value })}
                   helperText="Cole o JSON completo da service account (type=service_account). Chave AIza não lista usuários." />
-                <TextField label="API Key (opcional / legado)" type="password" value={form.client_secret}
+                <TextField label="Chave de API (opcional)" type="password" value={form.client_secret}
                   onChange={(e) => setForm({ ...form, client_secret: e.target.value })}
                   helperText="Não substitui a service account para licenças e Reports API" />
               </>
@@ -1438,10 +1438,10 @@ export default function Connections() {
                     <MenuItem value="license">Licenças — Colaboradores com licenças ativas</MenuItem>
                   </Select>
                 </FormControl>
-                <TextField label="Organização / Tenant" value={form.tenant_id}
+                <TextField label="Identificador da organização" value={form.tenant_id}
                   onChange={(e) => setForm({ ...form, tenant_id: e.target.value })}
                   helperText="Identificador da organização (ex: telefonica)" />
-                <TextField label="API Token / Admin API Key" type="password" value={form.client_secret}
+                <TextField label="Chave de API administrativa" type="password" value={form.client_secret}
                   onChange={(e) => setForm({ ...form, client_secret: e.target.value })}
                   helperText="Admin API Key com read:members (licenças) e api:admin (consumo/tokens). Sem api:admin a licença funciona e o token falha. O arquivo .env-cloude local não alimenta a conexão — cole aqui e salve." />
               </>
@@ -1449,7 +1449,7 @@ export default function Connections() {
 
             {form.connector_type === "databricks" && (
               <>
-                <Typography variant="subtitle2" sx={{ mt: 1, color: "text.primary" }}>Configuração Databricks (SQL Warehouse)</Typography>
+                <Typography variant="subtitle2" sx={{ mt: 1, color: "text.primary" }}>Configuração Databricks</Typography>
                 <TextField label="Endereço do servidor" value={form.databricks_server_hostname}
                   onChange={(e) => setForm({ ...form, databricks_server_hostname: e.target.value })}
                   helperText="Endereço do workspace (NÃO é o token). Ex: adb-7405612109211710.10.azuredatabricks.net" />
@@ -1458,10 +1458,10 @@ export default function Connections() {
                   helperText="Ex: /sql/1.0/warehouses/26efc2a4526c691f" />
                 <TextField label="Token de acesso (opcional)" type="password" value={form.databricks_token}
                   onChange={(e) => setForm({ ...form, databricks_token: e.target.value })}
-                  helperText="Opcional — token específico desta conexão (write-only). Por padrão usa DATABRICKS_TOKEN do .env-databriks." />
-                <TextField label="Tabela / alias lógico" value={form.databricks_table_name}
+                  helperText="Preencha para usar uma credencial exclusiva desta conexão. Vazio mantém a credencial configurada no ambiente." />
+                <TextField label="Tabela ou nome da origem" value={form.databricks_table_name}
                   onChange={(e) => setForm({ ...form, databricks_table_name: e.target.value })}
-                  helperText="Usado no blob path (ex: system.billing.usage)" />
+                  helperText="Identifica a origem dos registros coletados (ex.: system.billing.usage)." />
                 <TextField label="Consulta de consumo" multiline rows={4} value={form.databricks_query}
                   onChange={(e) => setForm({ ...form, databricks_query: e.target.value })}
                   helperText="SQL do consumo do Workspace. Padrão: SELECT * FROM system.billing.usage. Pode apontar para outra tabela/visão (ex: system.billing.list_purchases)." />
