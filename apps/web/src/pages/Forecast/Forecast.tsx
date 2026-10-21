@@ -305,7 +305,7 @@ export default function Forecast() {
       {/* Faixa de contexto branca */}
       <Box sx={{ mb: 3 }}>
         <Box sx={{ mb: 2 }}>
-          <Typography variant="h4" component="h1">{tab === "rules" ? "Regras de projeção" : tab === "history" ? "Histórico de projeções" : "Configuração e execução"}</Typography>
+          <Typography variant="h4" component="h1">{tab === "rules" ? "Regras de projeção" : tab === "history" ? "Histórico de projeções" : tab === "accuracy" ? "Acurácia das projeções" : "Configuração e execução"}</Typography>
           <Typography color="text.secondary" sx={{ mt: 0.5 }}>
             Projeções de custo sobre as bases consolidadas, com regras de negócio e rateio por intervalo.
           </Typography>

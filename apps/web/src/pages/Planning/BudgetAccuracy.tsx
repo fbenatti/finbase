@@ -291,15 +291,7 @@ export default function BudgetAccuracy() {
     data?.lines.filter((line) => line.status === "dentro_orcamento").length ||
     0;
   return (
-    <Box
-      sx={{
-        
-        
-        minWidth: 0,
-        
-        
-      }}
-    >
+    <Box sx={{ minWidth: 0 }}>
       <Typography variant="h4">Acurácia de Orçamento</Typography>
       <Typography color="text.secondary" sx={{ mb: 2 }}>
         {period === "annual"

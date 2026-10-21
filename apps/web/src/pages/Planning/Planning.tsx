@@ -963,12 +963,12 @@ export default function Planning({
         fullWidth
       >
         <DialogTitle sx={{ pb: 1 }}>
-          <Typography variant="overline" color="primary.main" fontWeight={700}>Edição de orçamento</Typography>
+          <Typography variant="body2" color="text.secondary">Editar valores mensais</Typography>
           <Typography variant="h6" fontWeight={800}>{edit?.name}</Typography>
           <Typography variant="body2" color="text.secondary">Altere somente os valores próprios desta linha. Os totais dos níveis superiores são recalculados automaticamente.</Typography>
         </DialogTitle>
         <DialogContent dividers sx={{ py: 2.5 }}>
-          <Box sx={{ display: "flex", justifyContent: "space-between", alignItems: "center", p: 1.5, mb: 2.5, borderRadius: 2, bgcolor: "#f8fafc", border: "1px solid", borderColor: "divider" }}>
+          <Box sx={{ display: "flex", justifyContent: "space-between", alignItems: "center", p: 1.5, mb: 2.5, borderRadius: 1, bgcolor: "background.default", border: "1px solid", borderColor: "divider" }}>
             <Box><Typography variant="caption" color="text.secondary">Centro de custo</Typography><Typography variant="body2" fontWeight={700}>{edit?.centro_custo || "Não informado"}</Typography></Box>
             <Box textAlign="right"><Typography variant="caption" color="text.secondary">Total anual editado</Typography><Typography variant="h6" color="primary.main" fontWeight={800}>{money(editValues.reduce<number>((total, value) => total + Number(value || 0), 0))}</Typography></Box>
           </Box>

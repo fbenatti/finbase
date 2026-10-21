@@ -356,7 +356,7 @@ export default function ForecastAccuracy({ embedded = false }: { embedded?: bool
       <Box sx={{ px: 3, pt: 3, bgcolor: "background.paper", borderBottom: "1px solid", borderColor: "divider", borderRadius: embedded ? "12px 12px 0 0" : 0 }}>
         <Box sx={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 2, mb: 2, flexWrap: "wrap" }}>
           <Box>
-            <Typography variant={embedded ? "h6" : "h4"}>{embedded ? "Acurácia" : "Acurácia de Forecast"}</Typography>
+            <Typography variant={embedded ? "h6" : "h4"}>{embedded ? "Acurácia" : tab === "desvios" ? "Desvios das projeções" : tab === "acks" ? "Justificativas das projeções" : "Acurácia das projeções"}</Typography>
             <Typography color="text.secondary" sx={{ mt: 0.5 }}>
               O que foi projetado no início do mês × o que realmente foi realizado.
             </Typography>
