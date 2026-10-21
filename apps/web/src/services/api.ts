@@ -1,3 +1,4 @@
+import { dataDisplayText } from "../utils/dataPresentation";
 import axios from "axios";
 
 export const api = axios.create({
@@ -772,7 +773,11 @@ export const SCANNABLE_CONNECTOR_TYPES = new Set([
   "databricks",
 ]);
 
-export function formatApiError(
+export function formatApiError(error: unknown, fallback = "Não foi possível concluir a operação"): string {
+  return dataDisplayText(apiErrorMessage(error, fallback));
+}
+
+function apiErrorMessage(
   error: unknown,
   fallback = "Request failed",
 ): string {

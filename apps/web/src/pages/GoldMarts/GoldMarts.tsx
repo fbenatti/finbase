@@ -113,7 +113,7 @@ export default function Gold({ embedded }: { embedded?: boolean } = {}) {
 
   const startReprocess = async () => {
     setError("");
-    try { await reprocessGoldCubes(selected.id ? [selected.id] : []); await load(); enqueueSnackbar("Reprocessamento base consolidada enfileirado", "info"); }
+    try { await reprocessGoldCubes(selected.id ? [selected.id] : []); await load(); enqueueSnackbar("Consolidação de dados enfileirada", "info"); }
     catch (e) { setError(formatApiError(e, "Não foi possível enfileirar o reprocessamento")); }
   };
 

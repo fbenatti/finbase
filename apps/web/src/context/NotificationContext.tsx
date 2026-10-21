@@ -1,3 +1,4 @@
+import { dataDisplayText } from "../utils/dataPresentation";
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
 import {
   Alert,
@@ -190,9 +191,9 @@ function progressCaption(task: TaskStatus): string {
     const processed = task.processed_blobs || 0;
     const gold = (task.rows_destination || 0).toLocaleString("pt-BR");
     if (total > 0) {
-      return `${processed}/${total} janelas Monitor · ${gold} registros base consolidada`;
+      return `${processed}/${total} janelas Monitor · ${gold} registros consolidados`;
     }
-    return `${gold} registros base consolidada · ARM/Monitor`;
+    return `${gold} registros consolidados · ARM/Monitor`;
   }
   return `${(task.rows_destination || 0).toLocaleString("pt-BR")} linhas · ${task.processed_blobs}/${task.total_blobs || "?"}`;
 }
@@ -539,17 +540,17 @@ export function NotificationProvider({ children }: { children: React.ReactNode }
                   <Box sx={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 1 }}>
                     <Box sx={{ flex: 1, minWidth: 0 }}>
                       <Typography variant="body2" fontWeight={600} noWrap>
-                        {item.title}
+                        {dataDisplayText(item.title)}
                       </Typography>
                       {item.scope && (
                         <Typography variant="caption" color="text.primary" sx={{ display: "block" }}>
-                          {item.scope}
+                          {dataDisplayText(item.scope)}
                         </Typography>
                       )}
                       <Typography variant="caption" color="text.secondary">
-                        {reprocessStageLabel(item)}
+                        {dataDisplayText(reprocessStageLabel(item))}
                         {isActive && item.kind === "reprocess" ? ` · ${item.progress}%` : ""}
-                        {item.kind !== "backup" && item.kind !== "reprocess" && item.current && item.current !== item.phase ? " · " + item.current : ""}
+                        {item.kind !== "backup" && item.kind !== "reprocess" && item.current && item.current !== item.phase ? " · " + dataDisplayText(item.current) : ""}
                       </Typography>
                     </Box>
                     <Box sx={{ display: "flex", alignItems: "center", gap: 0.5 }}>
@@ -612,7 +613,7 @@ export function NotificationProvider({ children }: { children: React.ReactNode }
         anchorOrigin={{ vertical: "bottom", horizontal: "center" }}
       >
         <Alert severity={snackbar.severity} onClose={closeSnackbar} sx={{ width: "100%" }}>
-          {snackbar.message}
+          {dataDisplayText(snackbar.message)}
         </Alert>
       </Snackbar>
     </NotificationContext.Provider>

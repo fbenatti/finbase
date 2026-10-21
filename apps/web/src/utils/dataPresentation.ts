@@ -37,7 +37,7 @@ export function dataDisplayText(value: string | null | undefined): string {
     .replace(/\b(?:data[ -]?lake(?:house)?|lakehouse)\b/gi, "Central de dados")
     .replace(/\b(?:Apache\s+)?Iceberg\b/gi, "acervo de dados")
     .replace(/\bPostgres(?:ql)?\b/gi, "banco de dados")
-    .replace(/\bTr[i e]no\b/gi, "serviço de consultas")
+    .replace(/\bTr(?:i|e)no\b/gi, "serviço de consultas")
     .replace(/\bNessie\b/gi, "catálogo de dados")
     .replace(/\bMinIO\b/gi, "armazenamento de arquivos")
     .replace(/\bDuckDB\b/gi, "serviço de consultas local")

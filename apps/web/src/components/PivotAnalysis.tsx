@@ -898,7 +898,7 @@ export default function PivotAnalysis({ destinations, initialTableId, showSearch
     <Dialog open={queryOpen} onClose={() => setQueryOpen(false)} fullWidth maxWidth="md">
       <DialogTitle>Query SQL do Pivot</DialogTitle>
       <DialogContent>
-        <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>A query consulta a tabela de detalhe na camada base preparada, usada pelo Pivot, e agrega pelas dimensões e medidas configuradas.</Typography>
+        <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>A query consulta a tabela de detalhe na base preparada, usada pelo Pivot, e agrega pelas dimensões e medidas configuradas.</Typography>
         <TextField fullWidth multiline minRows={8} value={generatedSql} InputProps={{ readOnly: true }} sx={{ "& textarea": { fontFamily: "monospace", fontSize: 13 } }} />
       </DialogContent>
       <DialogActions>

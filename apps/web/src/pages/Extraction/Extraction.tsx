@@ -1,3 +1,4 @@
+import { dataDisplayText } from "../../utils/dataPresentation";
 import { useState, useEffect, useRef, useCallback, useMemo } from "react";
 import {
   Box, Typography, Button, TableCell, Paper, Chip, LinearProgress,
@@ -207,7 +208,7 @@ export default function Extraction({ embedded = false }: { embedded?: boolean })
   };
 
   const doResetSource = async () => {
-    if (!connId || !confirm("Isso removerá o histórico de ingestão e o base de origem desta fonte. Os CSVs do Azure não serão apagados. Continuar?")) return;
+    if (!connId || !confirm("Isso removerá o histórico de ingestão e a base de origem desta fonte. Os CSVs do Azure não serão apagados. Continuar?")) return;
     try {
       await resetSourceForReimport(connId as number);
       setTask(null); setBlobs([]); setScanResult(null);
@@ -559,7 +560,7 @@ export default function Extraction({ embedded = false }: { embedded?: boolean })
                   {task.total_blobs > 0
                     ? `${task.processed_blobs} / ${task.total_blobs} janelas Monitor`
                     : "Coleta ARM/Monitor em andamento"}
-                  {" | "}{(task.rows_destination ?? 0).toLocaleString()} registros base consolidada
+                  {" | "}{(task.rows_destination ?? 0).toLocaleString()} registros consolidados
                 </>
               ) : (
                 <>
@@ -630,7 +631,7 @@ export default function Extraction({ embedded = false }: { embedded?: boolean })
 
               {task.phase && (
                 <Typography variant="caption" color="secondary.main" sx={{ display: "block", mt: 0.5 }}>
-                  Fase: {task.phase}
+                  Fase: {dataDisplayText(task.phase)}
                 </Typography>
               )}
 
@@ -644,7 +645,7 @@ export default function Extraction({ embedded = false }: { embedded?: boolean })
                     : "O download concluído não significa que a importação terminou. A sequência é: Leitura do arquivo → Dados de origem → Preparação e consolidação → Concluído."}
                 </Typography>
                 <Typography variant="caption" color="primary.main" sx={{ display: "block", mt: 0.25 }}>
-                  {task.phase || (isPtuTask ? "Aguardando início da coleta PTU" : "Aguardando início da importação")}
+                  {dataDisplayText(task.phase || (isPtuTask ? "Aguardando início da coleta PTU" : "Aguardando início da importação"))}
                 </Typography>
               </Box>
 
@@ -672,7 +673,7 @@ export default function Extraction({ embedded = false }: { embedded?: boolean })
               {/* Per-blob progress from DB fallback (no download bytes, but blob count is tracked) */}
               {task.current_blob && dlBlobSize === 0 && task.total_blobs > 0 && (
                 <Typography variant="caption" color="text.secondary" sx={{ display: "block" }}>
-                  blob {task.processed_blobs}/{task.total_blobs}: {task.current_blob}
+                  blob {task.processed_blobs}/{task.total_blobs}: {dataDisplayText(task.current_blob)}
                 </Typography>
               )}
             </Box>
@@ -688,7 +689,7 @@ export default function Extraction({ embedded = false }: { embedded?: boolean })
           {isTerminal && task.status === "COMPLETED_WITH_ERRORS" && (
             <Alert severity="warning" sx={{ mt: 1 }}>
               <strong>Dados de origem carregados; preparação pendente.</strong>{" "}
-              {task.phase || task.errors?.[0] || "Verifique o relacionamento origem → destino."}
+              {dataDisplayText(task.phase || task.errors?.[0] || "Verifique o relacionamento origem → destino.")}
             </Alert>
           )}
           {isTerminal && task.status === "COMPLETED" && (task.rows_raw ?? 0) > 0 && (task.rows_normalized ?? 0) === 0 && (
@@ -700,7 +701,7 @@ export default function Extraction({ embedded = false }: { embedded?: boolean })
           {/* Current blob info when no download data available */}
           {task.current_blob && dlBlobSize === 0 && !isQueued && !isRunning && (
             <Typography variant="caption" color="text.secondary" sx={{ display: "block" }}>
-              {task.current_blob}
+              {dataDisplayText(task.current_blob)}
             </Typography>
           )}
         </Box>

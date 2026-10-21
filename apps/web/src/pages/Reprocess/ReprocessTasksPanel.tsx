@@ -1,3 +1,4 @@
+import { dataDisplayText } from "../../utils/dataPresentation";
 import { useCallback, useEffect, useState } from "react";
 import {
   Alert, Box, Button, Chip, CircularProgress, LinearProgress, Paper, Typography,
@@ -113,16 +114,16 @@ export default function ReprocessTasksPanel() {
           <Box key={task.id} sx={{ mb: 1.5, p: 1.25, bgcolor: "#f8fafc", borderRadius: 1 }}>
             <Box sx={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 1, flexWrap: "wrap" }}>
               <Box>
-                <Typography variant="body2" fontWeight={600}>{label(task)}</Typography>
+                <Typography variant="body2" fontWeight={600}>{dataDisplayText(label(task))}</Typography>
                 {scope(task) && (
                   <Typography variant="caption" color="text.primary" display="block">
-                    {scope(task)}
+                    {dataDisplayText(scope(task))}
                   </Typography>
                 )}
                 <Typography variant="caption" color="text.secondary">
-                  {stageLabel}
+                  {dataDisplayText(stageLabel)}
                   {running && kind(task) === "reprocess" ? ` · ${pct}%` : ""}
-                  {kind(task) !== "reprocess" && task.current_blob && task.current_blob !== task.phase ? ` · ${task.current_blob}` : ""}
+                  {kind(task) !== "reprocess" && task.current_blob && task.current_blob !== task.phase ? ` · ${dataDisplayText(task.current_blob)}` : ""}
                 </Typography>
               </Box>
               <Box sx={{ display: "flex", alignItems: "center", gap: 1 }}>

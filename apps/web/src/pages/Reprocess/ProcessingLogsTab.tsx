@@ -1,3 +1,4 @@
+import { dataDisplayText } from "../../utils/dataPresentation";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   Accordion, AccordionDetails, AccordionSummary, Alert, Box, Chip, Dialog, DialogContent, DialogTitle, Divider, IconButton, MenuItem,
@@ -19,7 +20,7 @@ const STATUS_COLOR: Record<string, "success" | "error" | "warning" | "info" | "d
   COMPLETED: "success", COMPLETED_WITH_ERRORS: "warning", FAILED: "error", CANCELLED: "warning", RUNNING: "info", QUEUED: "default",
 };
 const dateLabel = (value?: string | null) => value ? format(new Date(value), "dd/MM/yyyy, HH:mm:ss") : "—";
-const text = (value: unknown) => value == null || value === "" ? "—" : Array.isArray(value) ? value.join(", ") : typeof value === "object" ? JSON.stringify(value) : String(value);
+const text = (value: unknown) => dataDisplayText(value == null || value === "" ? "—" : Array.isArray(value) ? value.join(", ") : typeof value === "object" ? JSON.stringify(value) : String(value));
 const FIELD_LABELS: Record<string, string> = {
   at: "Data e hora", backfill_days: "Dias consultados", billing_periods: "Períodos", blobs: "Arquivos processados",
   bronze_audit: "Auditoria base de origem", bronze_audit_task_id: "ID da auditoria base de origem", connection_codes: "Códigos das conexões",
@@ -32,17 +33,17 @@ const FIELD_LABELS: Record<string, string> = {
   rows_raw: "Linhas de origem", snapshot_dates: "Datas de referência", table: "Tabela", task_id: "ID da tarefa",
   billing_period: "Período de cobrança", blob_id: "ID do arquivo", connection_id: "ID da conexão", rule_ids: "IDs das regras",
 };
-const fieldLabel = (key: string) => FIELD_LABELS[key] || key.replace(/_/g, " ").replace(/\b\w/g, char => char.toLocaleUpperCase("pt-BR"));
+const fieldLabel = (key: string) => FIELD_LABELS[key] || dataDisplayText(key.replace(/_/g, " ").replace(/\b\w/g, char => char.toLocaleUpperCase("pt-BR")));
 const displayValue = (value: unknown, key?: string) => {
   if (typeof value === "boolean") return value ? "Sim" : "Não";
   if (key === "at" && typeof value === "string") return dateLabel(value);
   return text(value);
 };
 const sourceLabel = (value: Record<string, unknown>) => {
-  if (value.label) return String(value.label);
+  if (value.label) return text(value.label);
   const names = value.connection_names as string[] | undefined;
   const ids = value.connection_ids as number[] | undefined;
-  if (names?.length) return names.join(", ");
+  if (names?.length) return text(names);
   if (ids?.length) return ids.map(id => `Conexão #${id}`).join(", ");
   return text(value);
 };
@@ -195,7 +196,7 @@ export default function ProcessingLogsTab() {
             })}
           </Stack> : <Typography variant="body2" color="text.secondary">Nenhum evento adicional foi registrado para esta execução.</Typography>}
           {Object.keys(otherDetails).length > 0 && <><Divider /><Accordion disableGutters elevation={0} sx={{ "&:before": { display: "none" } }}><AccordionSummary expandIcon={<ExpandMore />}><Typography variant="subtitle2">Resultado e informações adicionais</Typography></AccordionSummary><AccordionDetails sx={{ pt: 0 }}><StructuredPanel value={otherDetails} /></AccordionDetails></Accordion></>}
-          {detail.etl_task_id && detail.process_type === "extraction" && <Box><Divider sx={{ mb: 1 }} /><Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>Os registros base de origem desta extração podem ser consultados na visualização especializada.</Typography><Chip clickable label="Abrir dados base de origem" onClick={() => navigate(`/operacoes/extracoes/${detail.etl_task_id}`)} /></Box>}
+          {detail.etl_task_id && detail.process_type === "extraction" && <Box><Divider sx={{ mb: 1 }} /><Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>Os registros de origem desta extração podem ser consultados na visualização especializada.</Typography><Chip clickable label="Abrir dados de origem" onClick={() => navigate(`/operacoes/extracoes/${detail.etl_task_id}`)} /></Box>}
           {detail.etl_task_id && ["QUEUED", "RUNNING"].includes(detail.status) && <Chip clickable color="error" label="Cancelar execução" onClick={async () => { await cancelEtl(detail.etl_task_id!); await load(); setSelected(null); }} sx={{ alignSelf: "flex-start" }} />}
         </Stack>}
       </DialogContent>

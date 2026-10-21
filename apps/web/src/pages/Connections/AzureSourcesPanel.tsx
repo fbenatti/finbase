@@ -101,7 +101,7 @@ function SourceRow({
           </span>
         </Tooltip>
         {source.collection_mode === "dedicated" && (
-          <Tooltip title="Baixar e validar o snapshot completo no base de origem desta conexão">
+          <Tooltip title="Baixar e validar o snapshot completo na base de origem desta conexão">
             <span>
               <IconButton size="small" onClick={onRefreshDedicated} disabled={busy}>
                 <RefreshIcon fontSize="small" />

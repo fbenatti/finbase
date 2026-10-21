@@ -1,3 +1,4 @@
+import { moduleDisplayName } from "../../utils/dataPresentation";
 import React, { useEffect, useMemo, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import {
@@ -145,7 +146,7 @@ function RolesTab() {
           </Grid>
           {modules.map((m) => (
             <Grid container spacing={1} key={m} alignItems="center">
-              <Grid item xs={2}><Typography variant="body2">{m}</Typography></Grid>
+              <Grid item xs={2}><Typography variant="body2">{moduleDisplayName(m)}</Typography></Grid>
               <Grid item xs={1}>
                 <TextField size="small" variant="standard" placeholder="escopo" title="Escopo (ex.: visao-contabil); vazio = módulo inteiro"
                   value={scopes[m] || ""} onChange={(e) => setScopes((prev) => ({ ...prev, [m]: e.target.value.trim() }))} />
@@ -161,7 +162,7 @@ function RolesTab() {
             <InputLabel>Adicionar módulo</InputLabel>
             <Select label="Adicionar módulo" value="" onChange={(e) => addModule(e.target.value)}>
               {["connections","rules","etl","analysis","forecast","planning","reservations","savings","periods","destinations","schema","fact","csv_upload","clone_rules","gold","ai_copilot","ai_dashboards","ai_provider_dashboards","azure_ptu","azure_resource_graph","azure_tag_policy","oci_operational","scheduled_shutdown","ideas","auth","users","groups","roles","audit"]
-                .filter((m) => !perms[m]).map((m) => <MenuItem key={m} value={m}>{m}</MenuItem>)}
+                .filter((m) => !perms[m]).map((m) => <MenuItem key={m} value={m}>{moduleDisplayName(m)}</MenuItem>)}
             </Select>
           </FormControl>
           <Box sx={{ mt: 3 }}>
@@ -342,7 +343,7 @@ function UsersTab() {
           <Typography variant="subtitle2">Grants diretos</Typography>
           <Stack direction="row" spacing={1} sx={{ my: 1 }} flexWrap="wrap">
             {grants.map((g) => (
-              <Chip key={g.id} label={`${g.module}:${g.action}`} onDelete={() => call(() => deleteGrant(g.id))}
+              <Chip key={g.id} label={`${moduleDisplayName(g.module)}: ${g.action}`} onDelete={() => call(() => deleteGrant(g.id))}
                 title={g.reason} />
             ))}
             {grants.length === 0 && <Typography variant="body2" color="text.secondary">nenhum</Typography>}
@@ -351,7 +352,7 @@ function UsersTab() {
             <FormControl size="small" sx={{ minWidth: 140 }}>
               <InputLabel>Módulo</InputLabel>
               <Select label="Módulo" value={grantModule} onChange={(e) => setGrantModule(e.target.value)}>
-                {["connections","rules","etl","analysis","forecast","planning","reservations","savings","periods","destinations","schema","fact","csv_upload","clone_rules","gold","ai_copilot","ai_dashboards","ai_provider_dashboards","azure_ptu","azure_resource_graph","azure_tag_policy","oci_operational","scheduled_shutdown","ideas","auth","users","groups","roles","audit"].map((m) => <MenuItem key={m} value={m}>{m}</MenuItem>)}
+                {["connections","rules","etl","analysis","forecast","planning","reservations","savings","periods","destinations","schema","fact","csv_upload","clone_rules","gold","ai_copilot","ai_dashboards","ai_provider_dashboards","azure_ptu","azure_resource_graph","azure_tag_policy","oci_operational","scheduled_shutdown","ideas","auth","users","groups","roles","audit"].map((m) => <MenuItem key={m} value={m}>{moduleDisplayName(m)}</MenuItem>)}
               </Select>
             </FormControl>
             <FormControl size="small" sx={{ minWidth: 110 }}>

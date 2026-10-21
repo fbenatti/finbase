@@ -786,7 +786,7 @@ export default function Analysis() {
                 </Box>
               )}
               <Typography variant="caption" color="text.secondary" sx={{ display: "block", mb: 1 }}>
-                Clique em uma tabela para montar a query e depois em <b>Run</b>  para executar a consulta. Os cubos analíticos agrupam os dados por mês com medidas <b>quantity</b>, <b>realizado</b> e <b>billedcost</b>.
+                Clique em uma tabela para montar a query e depois em <b>Executar</b> para executar a consulta. Os cubos analíticos agrupam os dados por mês com medidas <b>quantity</b>, <b>realizado</b> e <b>billedcost</b>.
               </Typography>
             </>
           )}
@@ -953,7 +953,7 @@ export default function Analysis() {
             <Box>
               <Typography variant="h6">Tabelas temporárias de reprocessamento</Typography>
               <Typography variant="body2" color="text.secondary">
-                tabelas temporárias órfãs podem ser removidas sem alterar a base consolidada publicada. Tabelas de destinos com reprocessamento ativo ficam protegidas.
+                Tabelas temporárias órfãs podem ser removidas sem alterar a base consolidada publicada. Tabelas de destinos com reprocessamento ativo ficam protegidas.
               </Typography>
             </Box>
             <Button

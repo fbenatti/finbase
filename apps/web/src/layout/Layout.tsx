@@ -61,7 +61,7 @@ import { useAuth } from "../auth/AuthContext";
 import { permissionTargetsForLocation } from "../auth/moduleMap";
 import LogoutIcon from "@mui/icons-material/Logout";
 import { NotificationBell, useNotifications } from "../context/NotificationContext";
-import { moduleDisplayName } from "../utils/dataPresentation";
+import { dataDisplayText, moduleDisplayName } from "../utils/dataPresentation";
 import {
   Content as CarbonContent,
   Header as CarbonHeader,
@@ -427,7 +427,7 @@ export default function Layout() {
             {(() => {
               const targets = permissionTargetsForLocation(location.pathname, location.search);
               if (targets && !targets.some(target => hasPerm(target.module, "read", target.scope))) {
-                const modules = targets.map(target => target.scope ? `${target.module}:${target.scope}` : target.module).join(" / ");
+                const modules = targets.map(target => target.scope ? `${moduleDisplayName(target.module)}: ${dataDisplayText(target.scope)}` : moduleDisplayName(target.module)).join(" / ");
                 return <Box sx={{ p: 6, textAlign: "center" }}><Typography variant="h6" sx={{ mb: 1 }}>Acesso negado</Typography><Typography color="text.secondary">Você não tem permissão de leitura no módulo <b>{modules}</b>. Solicite acesso ao administrador se precisar utilizá-lo.</Typography></Box>;
               }
               return <Outlet />;
@@ -468,7 +468,7 @@ export default function Layout() {
           {(() => {
             const targets = permissionTargetsForLocation(location.pathname, location.search);
             if (targets && !targets.some(target => hasPerm(target.module, "read", target.scope))) {
-              const modules = targets.map(target => target.scope ? `${target.module}:${target.scope}` : target.module).join(" / ");
+              const modules = targets.map(target => target.scope ? `${moduleDisplayName(target.module)}: ${dataDisplayText(target.scope)}` : moduleDisplayName(target.module)).join(" / ");
               return <Box sx={{ p: 6, textAlign: "center" }}><Typography variant="h6" sx={{ mb: 1 }}>Acesso negado</Typography><Typography color="text.secondary">Você não tem permissão de leitura no módulo <b>{modules}</b>. Solicite acesso ao administrador se precisar utilizá-lo.</Typography></Box>;
             }
             return <Outlet />;

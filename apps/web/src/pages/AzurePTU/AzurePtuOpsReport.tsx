@@ -22,7 +22,7 @@ export const widgetHelp: Record<string, string> = {
   "TBT médio": "Time Between Tokens: intervalo normalizado entre tokens durante a geração. Mede a cadência de streaming após o primeiro token.",
   "Horas ≥80%": "Quantidade de horas em que o pico válido de utilização atingiu pelo menos 80%. É uma contagem observada no período filtrado.",
   "Horas ≥95%": "Quantidade de horas em que o pico válido atingiu pelo menos 95%. É evidência de proximidade do limite, não confirmação de indisponibilidade ou custo adicional.",
-  "Pico observado": "Maior utilização válida encontrada nas agregações horárias do período. Não é P95 bruto; o base consolidada histórico não contém toda a distribuição de pontos de minuto.",
+  "Pico observado": "Maior utilização válida encontrada nas agregações horárias do período. Não é P95 bruto; o histórico consolidado não contém toda a distribuição de pontos de minuto.",
   "Cache match": "Percentual de tokens de contexto atendidos pelo cache, quando o deployment expõe essa métrica. Maior valor pode indicar reaproveitamento de contexto.",
   "Custo PTU mensal": "Soma do custo da reserva de capacidade (Microsoft.Capacity) e da PTU on-demand (Provisioned Throughput Units · 1/Month), no mês de referência da base consolidada FOCUS. Quando o on-demand do mês corrente ainda não foi lançado, usa o forecast (ou o último realizado) marcado como previsto.",
   "PTUs (reserva + on-demand)": "Unidades FATURADAS de capacidade PTU no mês de referência: reserva (Microsoft.Capacity · Purchase) + on-demand (Provisioned Throughput Units · 1/Month). O on-demand só é contabilizado para projetos com linha realizada na base consolidada (ex.: Aura Brain 100 PTUs/mês); quando o mês corrente ainda não foi lançado, usa o forecast marcado como previsto. Projetos cobertos pela reserva (ex.: Vivo Mais) não recebem on-demand fabricado. ATENÇÃO: não é a capacidade física — o inventário Azure (dest_azure_ptu_capacity) mostra os PTUs realmente configurados nos deployments (KPIs operacionais).",
@@ -225,7 +225,7 @@ export function AzurePtuOpsReport({ data, meta }: { data: any; meta: AzurePtuOps
       </Section>
 
       {/* ── 03 · Capacidade e operação ────────────────────────────────── */}
-      <Section index="03" title="Capacidade e operação" subtitle="As horas ≥80% e ≥95% são contagens observadas no base consolidada. O pico acima de 100% é mostrado como anomalia de medição/agregação até ser validado; não deve ser interpretado como cobrança extra. Possíveis ações técnicas incluem revisar distribuição de tráfego, versão/modelo, cache e arquitetura RAG — sempre após confirmar a qualidade do dado.">
+      <Section index="03" title="Capacidade e operação" subtitle="As horas ≥80% e ≥95% são contagens observadas na base consolidada. O pico acima de 100% é mostrado como anomalia de medição/agregação até ser validado; não deve ser interpretado como cobrança extra. Possíveis ações técnicas incluem revisar distribuição de tráfego, versão/modelo, cache e arquitetura RAG — sempre após confirmar a qualidade do dado.">
         <Grid container spacing={1.5} sx={{ mb: 1.5 }}>
           <KpiCard label="Horas ≥80%" value={n(risk.hours_at_or_above_80)} hint="zona de atenção" />
           <KpiCard label="Horas ≥95%" value={n(risk.hours_at_or_above_95)} hint="zona crítica observada" color="#DC2626" />

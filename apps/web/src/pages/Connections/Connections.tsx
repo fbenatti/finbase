@@ -1615,7 +1615,7 @@ export default function Connections() {
           ) : (
             <Typography>
               Você está prestes a excluir a conexão <strong>{connectionPendingDeletion?.name}</strong>.
-              A tabela base de origem associada também será removida. Esta ação não pode ser desfeita.
+              A tabela de origem associada também será removida. Esta ação não pode ser desfeita.
             </Typography>
           )}
         </DialogContent>

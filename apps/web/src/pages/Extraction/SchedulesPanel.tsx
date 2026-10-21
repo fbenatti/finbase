@@ -1,3 +1,4 @@
+import { DATA_LAYER_LABELS } from "../../utils/dataPresentation";
 import { useState, useEffect } from "react";
 import {
   Box, Typography, Button, Chip, Alert, CircularProgress, Tooltip, Dialog,
@@ -366,7 +367,7 @@ export default function SchedulesPanel({ connections }: { connections: SourceCon
                       });
                     }} />}
                     label={<Box sx={{ display: "flex", justifyContent: "space-between", gap: 2, width: 300 }}>
-                      <Typography variant="body2">{layer[0].toUpperCase() + layer.slice(1)}</Typography>
+                      <Typography variant="body2">{DATA_LAYER_LABELS[layer]}</Typography>
                       <Typography variant="body2" color="text.secondary">{formatSize(backupSizes?.[layer])}</Typography>
                     </Box>} />
                 ))}

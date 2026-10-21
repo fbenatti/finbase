@@ -259,7 +259,7 @@ export default function ManualCsvUploadDialog({
             onClose={() => setBatchResult(null)}
           >
             <strong>
-              {batchResult.length} arquivo(s) gravados no base de origem
+              {batchResult.length} arquivo(s) gravados na base de origem
               {batchResult.some(r => r.skip_gold_realizado) ? " (alguns com consolidação e projeção bloqueadas)." : "."}
             </strong>
             <ul style={{ margin: "4px 0 0", paddingLeft: 18 }}>
@@ -328,7 +328,7 @@ export default function ManualCsvUploadDialog({
                 onClick={handleIngest}
                 disabled={loading || !billingPeriod}
               >
-                {loading ? "Carregando..." : "Carregar no base de origem"}
+                {loading ? "Carregando..." : "Carregar na base de origem"}
               </Button>
             </Stack>
           </Paper>
