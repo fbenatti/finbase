@@ -948,7 +948,7 @@ export default function ExpectedViewV2({
       tipo: "realizado",
     });
     if (year) query.set("year", year);
-    navigate(`/analysis?${query.toString()}`);
+    navigate(`/dados/explorador?${query.toString()}`);
   };
   // Clique no gráfico: abre o diálogo de decomposição (estado próprio, sem
   // alterar filtros da página). O mês clicado restringe só o diálogo.

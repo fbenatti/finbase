@@ -137,7 +137,7 @@ export default function AnomalyEvolutionChart({ series, kase, currency }: {
       <Chip size="small" variant="outlined" label={`Realizado até ${dateLabel(dataEnd)}`} />
       {future.length > 0 && <Chip size="small" variant="outlined" sx={{ color: colors.forecast, borderColor: "#c7d7fa" }} label={`Forecast até ${dateLabel(future[future.length - 1].event_date)}`} />}
       {firstExcess && <Chip size="small" variant="outlined" label={`Primeiro excesso na janela: ${dateLabel(firstExcess.event_date)}`} />}
-      {reference?.forecast_run_id != null && <Button size="small" endIcon={<OpenInNewIcon sx={{ fontSize: 14 }} />} href={`/forecast/history/${reference.forecast_run_id}`} target="_blank" rel="noreferrer">Forecast #{reference.forecast_run_id}</Button>}
+      {reference?.forecast_run_id != null && <Button size="small" endIcon={<OpenInNewIcon sx={{ fontSize: 14 }} />} href={`/projecoes/execucoes/${reference.forecast_run_id}`} target="_blank" rel="noreferrer">Forecast #{reference.forecast_run_id}</Button>}
     </Stack>
     <Typography variant="caption" color="text.secondary" sx={{ mt: 1.5, display: "block", lineHeight: 1.6 }}>
       {monthly ? "Barras nas datas de cobrança; acumulado reiniciado a cada mês. " : "Verde mostra o realizado anterior ao desvio como contexto histórico; esses dias podem não ter forecast comparável. Cinza indica realizado sem comparação a partir da data do desvio. "}

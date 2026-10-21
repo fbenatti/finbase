@@ -195,7 +195,7 @@ export default function ProcessingLogsTab() {
             })}
           </Stack> : <Typography variant="body2" color="text.secondary">Nenhum evento adicional foi registrado para esta execução.</Typography>}
           {Object.keys(otherDetails).length > 0 && <><Divider /><Accordion disableGutters elevation={0} sx={{ "&:before": { display: "none" } }}><AccordionSummary expandIcon={<ExpandMore />}><Typography variant="subtitle2">Resultado e informações adicionais</Typography></AccordionSummary><AccordionDetails sx={{ pt: 0 }}><StructuredPanel value={otherDetails} /></AccordionDetails></Accordion></>}
-          {detail.etl_task_id && detail.process_type === "extraction" && <Box><Divider sx={{ mb: 1 }} /><Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>Os registros Bronze desta extração podem ser consultados na visualização especializada.</Typography><Chip clickable label="Abrir dados Bronze" onClick={() => navigate(`/extraction/history/${detail.etl_task_id}`)} /></Box>}
+          {detail.etl_task_id && detail.process_type === "extraction" && <Box><Divider sx={{ mb: 1 }} /><Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>Os registros Bronze desta extração podem ser consultados na visualização especializada.</Typography><Chip clickable label="Abrir dados Bronze" onClick={() => navigate(`/operacoes/extracoes/${detail.etl_task_id}`)} /></Box>}
           {detail.etl_task_id && ["QUEUED", "RUNNING"].includes(detail.status) && <Chip clickable color="error" label="Cancelar execução" onClick={async () => { await cancelEtl(detail.etl_task_id!); await load(); setSelected(null); }} sx={{ alignSelf: "flex-start" }} />}
         </Stack>}
       </DialogContent>
