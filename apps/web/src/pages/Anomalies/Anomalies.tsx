@@ -9,9 +9,10 @@
  * workflow por comandos explícitos.
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useSearchParams } from "react-router-dom";
 import {
   Accordion, AccordionDetails, AccordionSummary, Alert, Box, Button, Chip, CircularProgress, Divider, Drawer, IconButton, LinearProgress,
-  MenuItem, Paper, Stack, Tab, Table, TableBody, TableCell, TableHead, TableRow, Tabs,
+  MenuItem, Paper, Stack, Table, TableBody, TableCell, TableHead, TableRow,
   TextField, Tooltip, Typography,
 } from "@mui/material";
 import AnomalyCaseScope from "./AnomalyCaseScope";
@@ -181,7 +182,10 @@ const EMPTY_FORM: TransitionForm = {
 };
 
 export default function Anomalies() {
-  const [tab, setTab] = useState(0);
+  const [searchParams, setSearchParams] = useSearchParams();
+  const requestedTab = Number(searchParams.get("tab"));
+  const tab = Number.isInteger(requestedTab) && requestedTab >= 0 && requestedTab <= 7 ? requestedTab : 0;
+  const setTab = (next: number) => setSearchParams({ tab: String(next) }, { replace: true });
   const [configs, setConfigs] = useState<AnomalyConfig[]>([]);
   const [summary, setSummary] = useState<CaseSummary | null>(null);
   const [impactSummary, setImpactSummary] = useState<ImpactSummary | null>(null);
@@ -550,17 +554,6 @@ export default function Anomalies() {
           : latestRun.status === "COMPLETED" ? ` · ${latestRun.cases_created ?? 0} caso(s) novo(s), ${latestRun.cases_updated ?? 0} atualizado(s) · ${latestRun.phase ?? ""}`
             : ` · ${latestRun.phase ?? "Aguardando processamento"}`}
       </Alert>}
-
-      <Tabs value={tab} onChange={(_, value) => setTab(value)} variant="scrollable" scrollButtons="auto" allowScrollButtonsMobile sx={{ mb: 2, borderBottom: 1, borderColor: "divider" }}>
-        <Tab label="Visão geral" />
-        <Tab label="Impacto" />
-        <Tab label="Casos" />
-        <Tab label="Eventos esperados" />
-        <Tab label="Saúde do modelo" />
-        <Tab label="Retrospectiva" />
-        <Tab label="Anomalias confirmadas" />
-        <Tab label="Configurações" />
-      </Tabs>
 
       {tab === 0 && summary && (
         <Box>
