@@ -1,10 +1,9 @@
 import { useState, useEffect, useRef, useCallback, useMemo } from "react";
-import { useSearchParams } from "react-router-dom";
 import {
   Box, Typography, Button, TableCell, Paper, Chip, LinearProgress,
   Alert, Select, MenuItem, FormControl, InputLabel, Checkbox, FormHelperText,
   CircularProgress, Tooltip, Dialog, DialogTitle, DialogContent, DialogActions, TextField,
-  FormControlLabel, Switch, IconButton, Tabs, Tab, Stack, Table, TableHead, TableRow, TableBody, TableContainer,
+  FormControlLabel, Switch, IconButton, Stack, Table, TableHead, TableRow, TableBody, TableContainer,
 } from "@mui/material";
 import { PlayArrow, Refresh, Stop, Delete, DeleteForever, Block, Undo, Storage, Schedule, Add, Edit, CloudUpload, Download, TableChart, Visibility } from "@mui/icons-material";
 import { DataGrid, GridColDef } from "@mui/x-data-grid";
@@ -41,15 +40,6 @@ function formatFileSize(bytes: number): string {
 }
 
 export default function Extraction({ embedded = false }: { embedded?: boolean }) {
-  const [params, setParams] = useSearchParams();
-  const tabKey = embedded ? "extTab" : "tab";
-  const tab = embedded ? "extraction" : params.get(tabKey) || "extraction";
-  const setTab = (newTab: string) => {
-    const next = new URLSearchParams(params);
-    next.set(tabKey, newTab);
-    setParams(next, { replace: true });
-  };
-
   const [connections, setConnections] = useState<SourceConnection[]>([]);
   const [connId, setConnId] = useState<number | "">("");
   const [scanResult, setScanResult] = useState<BlobScanResult | null>(null);
@@ -433,11 +423,7 @@ export default function Extraction({ embedded = false }: { embedded?: boolean })
     <Box>
       {!embedded && <Typography variant="h4" sx={{ mb: 2 }}>Extração & Monitoramento</Typography>}
 
-      {!embedded && <Tabs value={tab} onChange={(_, val) => setTab(val)} sx={{ mb: 3, borderBottom: 1, borderColor: "divider" }}>
-        <Tab label="Extração & Agendamentos" value="extraction" />
-      </Tabs>}
-
-      {(tab === "extraction" || embedded) && (
+      <>
         <>
           <Box sx={{ display: "flex", gap: 2, mb: 3, alignItems: "flex-start", flexWrap: "wrap" }}>
             <FormControl size="small" sx={{ minWidth: 280 }}>
@@ -534,7 +520,7 @@ export default function Extraction({ embedded = false }: { embedded?: boolean })
         <Alert severity={destProcessResult.startsWith("OK") ? "success" : "error"} sx={{ mb: 2 }} onClose={() => setDestProcessResult("")}>
           {destProcessResult}
         </Alert>
-      )}
+      </>
 
       {error && <Alert severity="error" sx={{ mb: 2 }} onClose={() => setError("")}>{error}</Alert>}
       {sourceResetMessage && <Alert severity="success" sx={{ mb: 2 }} onClose={() => setSourceResetMessage("")}>{sourceResetMessage}</Alert>}
