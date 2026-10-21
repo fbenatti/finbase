@@ -51,6 +51,7 @@ import {
   AutoGraphOutlined,
   DataObjectOutlined,
   DeleteSweepOutlined,
+  CurrencyExchangeOutlined,
   SettingsOutlined,
 } from "@mui/icons-material";
 import { cancelPendingAnalysisRequests } from "../services/api";
