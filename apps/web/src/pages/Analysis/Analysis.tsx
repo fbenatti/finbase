@@ -1,7 +1,8 @@
+import { useLocation } from "react-router-dom";
 import React, { useState, useEffect, useMemo } from "react";
 import { useMenuSearchParams as useSearchParams } from "../../navigation/useMenuSearchParams";
 import { DATA_LAYER_LABELS, DATA_SERVICE_LABELS, dataDisplayText } from "../../utils/dataPresentation";
-import { canonicalExplorerParams, DATA_LAYER_STAGES, dataLayerForStage } from "../../utils/dataNavigation";
+import { canonicalExplorerParams, dataLayerForStage } from "../../utils/dataNavigation";
 import {
   Box, Typography, Button, Card, CardContent, Chip, Alert,
   FormControl, InputLabel, Select, MenuItem, Stack,
@@ -98,6 +99,7 @@ const PREBUILT: Record<string, { label: string; sql: string }[]> = {
 
 export default function Analysis() {
   const [searchParams, setSearchParams] = useSearchParams();
+  const routeLocation = useLocation();
   const publicTab = searchParams.get("tab");
   const requestedTab = (publicTab === "acervo" ? "iceberg" : publicTab === "temporarios" ? "staging" : publicTab) as AnalysisTab | null;
   const tab: AnalysisTab = requestedTab && ["destino", "fontes", "iceberg", "staging", "pivot", "busca"].includes(requestedTab) ? requestedTab : "fontes";
@@ -108,7 +110,7 @@ export default function Analysis() {
   // ─── Acervo de dados ───
   const layer = dataLayerForStage(searchParams.get("etapa") || searchParams.get("layer"));
   const [tables, setTables] = useState<AnalysisTableList>({ bronze: [], silver: [], gold: [] });
-  const [sql, setSql] = useState("");
+  const [sql, setSql] = useState(() => typeof routeLocation.state?.analysisQuery === "string" ? routeLocation.state.analysisQuery : "");
   const [result, setResult] = useState<AnalysisQueryResult | null>(null);
   const [executedSql, setExecutedSql] = useState("");
   const [sortKey, setSortKey] = useState<string | null>(null);
@@ -125,21 +127,12 @@ export default function Analysis() {
   const [tablePartitionDetails, setTablePartitionDetails] = useState<Record<string, AnalysisTablePartitionResult>>({});
   const [partitionDetailsLoading, setPartitionDetailsLoading] = useState<Set<string>>(new Set());
 
-  const setTab = (nextTab: AnalysisTab) => {
-    const next = new URLSearchParams(searchParams);
-    next.set("tab", nextTab === "iceberg" ? "acervo" : nextTab === "staging" ? "temporarios" : nextTab);
-    next.delete("layer");
-    if (nextTab !== "iceberg") next.delete("etapa");
-    setSearchParams(next, { replace: true });
-  };
-  const setLayer = (nextLayer: "bronze" | "silver" | "gold") => {
+  const openQuery = (query: string) => {
     const next = new URLSearchParams(searchParams);
     next.set("tab", "acervo");
-    next.set("etapa", DATA_LAYER_STAGES[nextLayer]);
+    next.set("etapa", "consolidacao");
     next.delete("layer");
-    setSearchParams(next, { replace: true });
-    setSelectedDataTable("");
-    setPartitionRows([]);
+    setSearchParams(next, { state: { analysisQuery: query } });
   };
 
   useEffect(() => {
@@ -1034,14 +1027,7 @@ export default function Analysis() {
               initialFilters={filtersFromSearch(searchParams)}
               autoRun={searchParams.get("tab") === "pivot"}
               showSearch
-              onOpenQuery={query => {
-                setLayer("gold");
-                setSql(query);
-                setResult(null);
-                setExecutedSql("");
-                setError("");
-                setTab("iceberg");
-              }}
+              onOpenQuery={openQuery}
             />
           : <EmptyState message="Nenhuma base consolidada ativa disponível para análise pivot." />
       )}

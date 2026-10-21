@@ -1,5 +1,6 @@
 """One deployment catalog feeds database registration, navigation and feature access."""
 import json
+import re
 from pathlib import Path
 
 from fastapi import HTTPException
@@ -19,7 +20,7 @@ def load_catalog() -> list[dict]:
         code, path = entry["code"], entry["path"]
         if code in codes or path in paths or not path.startswith("/") or any(c in path for c in "?#"):
             raise ValueError(f"Invalid or duplicate menu: {code}")
-        if len(code) > 60 or not entry["renderer"]:
+        if not re.fullmatch(r"[a-z0-9_-]{1,60}", code) or not entry["renderer"]:
             raise ValueError(f"Invalid menu identity: {code}")
         if entry["parent_code"] and entry["parent_code"] not in codes:
             raise ValueError(f"Parent must precede menu: {code}")

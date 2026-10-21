@@ -35,6 +35,11 @@ export function normalizeLegacyParams(path: string, input: URLSearchParams): URL
   if (path === "/dados/explorador") return canonicalExplorerParams(input);
   if (path === "/operacoes/execucoes") return canonicalOperationsParams(input);
   const params = new URLSearchParams(input);
+  if (path === "/governanca") {
+    if (params.get("tab") === "clone-rules") {
+      params.set("tab", "rules"); params.set("subtab", "clone-rules");
+    } else if (params.get("tab") === "reservas-legacy") params.set("tab", "reservas");
+  }
   if (path === "/planejamento") {
     const tab = params.get("tab");
     const contractTab = tab === "contract" || tab === "contrato";
