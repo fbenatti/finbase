@@ -2,15 +2,15 @@ import React, { useState, useEffect, useMemo } from "react";
 import { useSearchParams } from "react-router-dom";
 import {
   Box, Typography, Button, Card, CardContent, Chip, Alert,
-  FormControl, InputLabel, Select, MenuItem, Tabs, Tab, Stack,
+  FormControl, InputLabel, Select, MenuItem, Stack,
   TextField, Table, TableBody, TableCell, TableContainer,
   TableHead, TableRow, Paper, CircularProgress,
   TablePagination, TableSortLabel,
   Accordion, AccordionSummary, AccordionDetails,
 } from "@mui/material";
 import {
-  Storage, AttachMoney, PlayArrow, Refresh, Delete,
-  Schema as SchemaIcon, Tune, BarChart, Terminal, Search as SearchIcon, DeleteSweep, TableChart,
+  PlayArrow, Refresh, Delete,
+  Schema as SchemaIcon, BarChart, Search as SearchIcon, TableChart,
   ExpandMore,
   Add, Remove,
 } from "@mui/icons-material";
@@ -95,14 +95,16 @@ const PREBUILT: Record<string, { label: string; sql: string }[]> = {
 };
 
 export default function Analysis() {
-  const [searchParams] = useSearchParams();
-  const [tab, setTab] = useState<AnalysisTab>((searchParams.get("tab") as AnalysisTab) || "fontes");
+  const [searchParams, setSearchParams] = useSearchParams();
+  const requestedTab = searchParams.get("tab") as AnalysisTab | null;
+  const tab: AnalysisTab = requestedTab && ["destino", "fontes", "iceberg", "staging", "pivot", "busca"].includes(requestedTab) ? requestedTab : "fontes";
   const [health, setHealth] = useState<TrinoHealth>({ trino: "?", nessie: "?", minio: "?" });
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
 
   // ─── Iceberg state ───
-  const [layer, setLayer] = useState<"bronze" | "silver" | "gold">("gold");
+  const requestedLayer = searchParams.get("layer");
+  const layer: "bronze" | "silver" | "gold" = requestedLayer === "bronze" || requestedLayer === "silver" || requestedLayer === "gold" ? requestedLayer : "gold";
   const [tables, setTables] = useState<TrinoTableList>({ bronze: [], silver: [], gold: [] });
   const [sql, setSql] = useState("");
   const [result, setResult] = useState<TrinoQueryResult | null>(null);
@@ -120,6 +122,30 @@ export default function Analysis() {
   const [openPartitionNodes, setOpenPartitionNodes] = useState<Set<string>>(new Set());
   const [tablePartitionDetails, setTablePartitionDetails] = useState<Record<string, AnalysisTablePartitionResult>>({});
   const [partitionDetailsLoading, setPartitionDetailsLoading] = useState<Set<string>>(new Set());
+
+  const setTab = (nextTab: AnalysisTab) => {
+    const next = new URLSearchParams(searchParams);
+    next.set("tab", nextTab);
+    if (nextTab !== "iceberg") next.delete("layer");
+    setSearchParams(next, { replace: true });
+  };
+  const setLayer = (nextLayer: "bronze" | "silver" | "gold") => {
+    const next = new URLSearchParams(searchParams);
+    next.set("tab", "iceberg");
+    next.set("layer", nextLayer);
+    setSearchParams(next, { replace: true });
+    setSelectedIcebergTable("");
+    setPartitionRows([]);
+  };
+
+  useEffect(() => {
+    setResult(null);
+    setSrcData(null);
+    setDestData(null);
+    setError("");
+    setSelectedIcebergTable("");
+    setPartitionRows([]);
+  }, [tab, layer]);
 
   // ─── Fontes (Sources) state ───
   const [sources, setSources] = useState<SourceAnalysis[]>([]);
@@ -528,14 +554,6 @@ export default function Analysis() {
             Atualizar
           </Button>
         </Box>
-        <Tabs value={tab} onChange={(_, v) => { setTab(v); setResult(null); setSrcData(null); setDestData(null); setError(""); }} sx={{ mb: 0, minHeight: 42 }}>
-          <Tab label="Tabela Destino" value="destino" icon={<AttachMoney />} iconPosition="start" sx={{ minHeight: 42 }} />
-          <Tab label="Fontes de Origem" value="fontes" icon={<Storage />} iconPosition="start" sx={{ minHeight: 42 }} />
-          <Tab label="Iceberg / Trino" value="iceberg" icon={<Terminal />} iconPosition="start" sx={{ minHeight: 42 }} />
-          <Tab label={`Staging (${stagingTables.length})`} value="staging" icon={<DeleteSweep />} iconPosition="start" sx={{ minHeight: 42 }} />
-          <Tab label="Pivot" value="pivot" icon={<BarChart />} iconPosition="start" sx={{ minHeight: 42 }} />
-          <Tab label="Busca na Fonte" value="busca" icon={<SearchIcon />} iconPosition="start" sx={{ minHeight: 42 }} />
-        </Tabs>
       </Box>
 
       {/* Área de trabalho com campos simples de 40px */}
@@ -737,11 +755,6 @@ export default function Analysis() {
         <>
           {/* Layer sub-tabs */}
           <Paper sx={{ mb: 2 }}>
-            <Tabs value={layer} onChange={(_, v) => { setLayer(v); setSelectedIcebergTable(""); setPartitionRows([]); setResult(null); setError(""); }}>
-              <Tab label={`Bronze (${(tables.bronze || []).length})`} value="bronze" icon={<Storage />} iconPosition="start" />
-              <Tab label={`Silver (${(tables.silver || []).length})`} value="silver" icon={<Tune />} iconPosition="start" />
-              <Tab label={`Gold (${(tables.gold || []).length})`} value="gold" icon={<AttachMoney />} iconPosition="start" />
-            </Tabs>
           </Paper>
 
           {layer === "gold" && (
