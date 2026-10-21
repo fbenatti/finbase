@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { Alert, Autocomplete, Box, Button, Checkbox, Chip, Divider, FormControl, FormControlLabel, Grid, IconButton, InputLabel, List, ListItemButton, ListItemText, MenuItem, Paper, Select, Stack, Tab, Tabs, TextField, Typography } from "@mui/material";
+import { Alert, Autocomplete, Box, Button, Checkbox, Chip, Divider, FormControl, FormControlLabel, Grid, IconButton, InputLabel, List, ListItemButton, ListItemText, MenuItem, Paper, Select, Stack, TextField, ToggleButton, ToggleButtonGroup, Typography } from "@mui/material";
 import { Add, ContentCopy, Delete, Save } from "@mui/icons-material";
 import { GoldCubeRule, GoldCubeRuleSource, GoldTable, GoldColumn, formatApiError, getGoldCubeRules, getGoldTables, getGoldSchema, saveGoldCubeRule, reprocessGoldCubes, getGoldCubeHistory, GoldCubeHistoryItem, deleteGoldCubeRule, getProcessingLogCubeStatus, rebuildProcessingLogCube, ProcessingLogCubeStatus } from "../../services/api";
 import { useNotifications } from "../../context/NotificationContext";
@@ -223,10 +223,10 @@ export default function Gold({ embedded }: { embedded?: boolean } = {}) {
       </Paper></Grid>
       <Grid item xs={12} md={8}><Paper variant="outlined" sx={{ p: 2 }}>
         <Typography variant="h6" mb={2}>{selected.id ? "Editar regra" : "Nova regra"}</Typography>
-        <Tabs value={editorMode} onChange={(_, v) => setEditorMode(v)} sx={{ mb: 2 }}>
-          <Tab value="pivot" label="Pivot (Golds + filtros)" />
-          <Tab value="sql" label="SQL Custom" />
-        </Tabs>
+        <ToggleButtonGroup exclusive size="small" value={editorMode} onChange={(_, value: string | null) => { if (value) setEditorMode(value); }} sx={{ mb: 2 }}>
+          <ToggleButton value="pivot">Construtor visual</ToggleButton>
+          <ToggleButton value="sql">SQL personalizado</ToggleButton>
+        </ToggleButtonGroup>
         {selected.materialization_error && <Alert severity="error" sx={{ mb: 2 }}>Falha na última materialização: {selected.materialization_error}</Alert>}
         <Stack spacing={2}>
           <TextField label="gold_code (nome da tabela)" value={selected.code || ""} onChange={e => setSelected({ ...selected, code: e.target.value })}
