@@ -62,3 +62,25 @@ export function permissionTargetsForPath(pathname: string): PermTarget[] | null 
   }
   return null;
 }
+
+export function permissionTargetsForLocation(pathname: string, search: string): PermTarget[] | null {
+  const params = new URLSearchParams(search);
+  if (pathname === "/admin") {
+    const module = params.get("tab") === "groups" ? "groups" : params.get("tab") === "roles" ? "roles" : "users";
+    return [{ module }];
+  }
+  if (pathname === "/governance") {
+    const moduleByTab: Record<string, string> = {
+      organization: "planning",
+      classification: "rules",
+      rules: "rules",
+      "financial-contracts": "rules",
+      "cost-relationship": "rules",
+      reservas: "reservations",
+      tags: "azure_tag_policy",
+    };
+    const module = moduleByTab[params.get("tab") || ""];
+    return module ? [{ module }] : permissionTargetsForPath(pathname);
+  }
+  return permissionTargetsForPath(pathname);
+}
