@@ -1,12 +1,13 @@
 import logging
 import io
 import re
+import configparser
 import os
 from pathlib import Path
 import gzip
 import tempfile
 from collections import defaultdict
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Optional, Any
 
 import pandas as pd
@@ -73,7 +74,12 @@ def _oci_config_from_file(config_file: str, profile: str) -> dict:
     path = (root / config_file).resolve() if not Path(config_file).is_absolute() else Path(config_file).resolve()
     if root not in path.parents:
         raise ValueError(f"O arquivo de config OCI precisa estar em {root}")
-    config = oci.config.from_file(str(path), profile_name=profile)
+    parser = configparser.ConfigParser(interpolation=None)
+    if not parser.read(path):
+        raise ValueError(f"Arquivo de config OCI não encontrado: {path}")
+    if profile not in parser and profile != "DEFAULT":
+        raise ValueError(f"Perfil '{profile}' não existe em {path.name}")
+    config = dict(parser[profile])
     # O key_file do arquivo costuma apontar para o caminho da máquina de quem o
     # gerou; procura a chave pelo nome na mesma pasta do config.
     key_file = Path(str(config.get("key_file") or "")).expanduser()
@@ -82,7 +88,19 @@ def _oci_config_from_file(config_file: str, profile: str) -> dict:
         if root not in candidate.parents or not candidate.is_file():
             raise ValueError(f"Chave privada '{key_file.name}' não encontrada em {path.parent}")
         config["key_file"] = str(candidate)
+    oci.config.validate_config(config)
     return config
+
+
+USAGE_API_MODE = "usage_api"
+USAGE_API_PREFIX = "usage-api"
+USAGE_API_HISTORY_MONTHS = 12
+# A Usage API aceita no máximo 4 chaves de agrupamento: a consulta diária usa
+# as que definem a linha de custo; serviço/descrição/unidade (por SKU) e o nome
+# do compartimento vêm de consultas mensais e são juntados depois.
+USAGE_API_DAILY_GROUP_BY = ["resourceId", "skuPartNumber", "compartmentId", "region"]
+USAGE_API_SKU_GROUP_BY = ["skuPartNumber", "skuName", "service", "unit"]
+USAGE_API_COMPARTMENT_GROUP_BY = ["compartmentId", "compartmentName"]
 
 
 class OciExtractor:
@@ -142,6 +160,8 @@ class OciExtractor:
 
     def test_connection(self) -> dict:
         """Testa conexão com a OCI e valida o acesso ao bucket de relatórios."""
+        if self.uses_usage_api():
+            return self._test_usage_api()
         try:
             client = self._get_object_storage_client()
             tenancy_ocid = self._tenancy_ocid()
@@ -269,15 +289,18 @@ class OciExtractor:
         )
         skipped_paths = {row[0] for row in skipped_result}
 
+        items = self._scan_items(existing_blobs, skipped_paths)
+        items.sort(key=lambda x: x.billing_period or "", reverse=True)
+        return items
+
+    def _scan_items(self, existing_blobs: dict, skipped_paths: set[str]) -> list[BlobScanItem]:
+        if self.uses_usage_api():
+            return self._usage_api_items(existing_blobs, skipped_paths)
         prefixes = self.blob_prefixes if self.blob_prefixes else ["reports/cost-csv"]
         items: list[BlobScanItem] = []
-
         for prefix in prefixes:
             raw_objects = self._list_all_raw_objects(prefix)
-            month_items = self._aggregate_objects_by_month(raw_objects, prefix, existing_blobs, skipped_paths)
-            items.extend(month_items)
-
-        items.sort(key=lambda x: x.billing_period or "", reverse=True)
+            items.extend(self._aggregate_objects_by_month(raw_objects, prefix, existing_blobs, skipped_paths))
         return items
 
     async def scan(self, db: AsyncSession) -> BlobScanResult:
@@ -292,21 +315,15 @@ class OciExtractor:
         )
         skipped_paths = {row[0] for row in skipped_result}
 
-        prefixes = self.blob_prefixes if self.blob_prefixes else ["reports/cost-csv"]
-        items: list[BlobScanItem] = []
+        items = self._scan_items(existing_blobs, skipped_paths)
         stats = {"new": 0, "changed": 0, "unchanged": 0}
-
-        for prefix in prefixes:
-            raw_objects = self._list_all_raw_objects(prefix)
-            month_items = self._aggregate_objects_by_month(raw_objects, prefix, existing_blobs, skipped_paths)
-            for it in month_items:
-                if it.status == "NEW":
-                    stats["new"] += 1
-                elif it.status == "CHANGED":
-                    stats["changed"] += 1
-                else:
-                    stats["unchanged"] += 1
-            items.extend(month_items)
+        for it in items:
+            if it.status == "NEW":
+                stats["new"] += 1
+            elif it.status == "CHANGED":
+                stats["changed"] += 1
+            else:
+                stats["unchanged"] += 1
 
         items.sort(key=lambda x: x.billing_period or "", reverse=True)
 
@@ -318,6 +335,121 @@ class OciExtractor:
             unchanged=stats["unchanged"],
             items=items,
         )
+
+    # ── Usage API ─────────────────────────────────────────────────────────
+    # Alternativa ao bucket de relatórios (que exige a policy de endorse na
+    # tenancy da Oracle): lê os custos da própria tenancy pela Usage API, com
+    # a permissão "read usage-report". Cada mês vira um item "usage-api#period=YYYYMM"
+    # e o resultado sai com as mesmas colunas dos CSV de relatório, para que o
+    # bronze e o restante do processamento não mudem.
+
+    def uses_usage_api(self) -> bool:
+        return self.config_json.get("extraction_mode") == USAGE_API_MODE
+
+    def _usage_client(self) -> oci.usage_api.UsageapiClient:
+        return oci.usage_api.UsageapiClient(self._get_oci_config())
+
+    def _test_usage_api(self) -> dict:
+        try:
+            today = datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0)
+            start = today.replace(day=1) if today.day > 1 else (today - timedelta(days=1)).replace(day=1)
+            response = self._usage_client().request_summarized_usages(
+                oci.usage_api.models.RequestSummarizedUsagesDetails(
+                    tenant_id=self._tenancy_ocid(), time_usage_started=start, time_usage_ended=today,
+                    granularity="MONTHLY", query_type="COST",
+                )
+            )
+            total = sum(float(item.computed_amount or 0) for item in response.data.items)
+            currency = next((item.currency for item in response.data.items if item.currency), "")
+            return {"status": "OK", "message": f"Usage API da OCI acessível. Custo do mês até agora: {total:,.2f} {currency}"}
+        except oci.exceptions.ServiceError as se:
+            return {"status": "FAILED", "message": f"Erro OCI Usage API ({se.status} {se.code}): {se.message}"[:500]}
+        except Exception as e:
+            return {"status": "FAILED", "message": str(e)[:500]}
+
+    def _usage_api_items(self, existing_blobs: dict, skipped_paths: set[str]) -> list[BlobScanItem]:
+        """Um item por mês, dos últimos ``history_months`` meses até o atual."""
+        months = max(1, int(self.config_json.get("history_months") or USAGE_API_HISTORY_MONTHS))
+        now = datetime.now(timezone.utc)
+        items: list[BlobScanItem] = []
+        year, month = now.year, now.month
+        for index in range(months):
+            period = f"{year:04d}{month:02d}"
+            path = f"{USAGE_API_PREFIX}#period={period}"
+            if path not in skipped_paths:
+                existing = existing_blobs.get(path)
+                # O mês corrente e o anterior ainda recebem ajustes da Oracle.
+                status = "NEW" if not existing else "CHANGED" if index < 2 else "UNCHANGED"
+                items.append(BlobScanItem(
+                    blob_path=path, blob_prefix=USAGE_API_PREFIX, last_modified=now,
+                    content_length=0, row_count=0, status=status, billing_period=period,
+                ))
+            year, month = (year, month - 1) if month > 1 else (year - 1, 12)
+        return items
+
+    def fetch_usage_month(self, billing_period: str) -> pd.DataFrame:
+        """Custos diários do mês ``YYYYMM`` pela Usage API, nas colunas do CSV de relatório."""
+        start = datetime(int(billing_period[:4]), int(billing_period[4:6]), 1, tzinfo=timezone.utc)
+        end = datetime(start.year + (start.month == 12), start.month % 12 + 1, 1, tzinfo=timezone.utc)
+        tomorrow = datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0) + timedelta(days=1)
+        end = min(end, tomorrow)
+        if end <= start:
+            return pd.DataFrame()
+        daily = self._summarized_usages(start, end, "DAILY", USAGE_API_DAILY_GROUP_BY)
+        if not daily:
+            return pd.DataFrame()
+        skus = {
+            item.sku_part_number: item
+            for item in self._summarized_usages(start, end, "MONTHLY", USAGE_API_SKU_GROUP_BY)
+        }
+        compartments = {
+            item.compartment_id: item.compartment_name
+            for item in self._summarized_usages(start, end, "MONTHLY", USAGE_API_COMPARTMENT_GROUP_BY)
+        }
+        tenancy = self._tenancy_ocid()
+        rows: list[dict] = []
+        for item in daily:
+            sku = skus.get(item.sku_part_number)
+            rows.append({
+                "lineItem/intervalUsageStart": item.time_usage_started.strftime("%Y-%m-%d") if item.time_usage_started else None,
+                "lineItem/intervalUsageEnd": item.time_usage_ended.strftime("%Y-%m-%d") if item.time_usage_ended else None,
+                "lineItem/tenantId": tenancy,
+                "product/service": sku.service if sku else None,
+                "product/resourceId": item.resource_id,
+                "product/compartmentId": item.compartment_id,
+                "product/compartmentName": compartments.get(item.compartment_id),
+                "product/region": item.region,
+                "product/description": sku.sku_name if sku else None,
+                "cost/productSku": item.sku_part_number,
+                "cost/skuUnitDescription": sku.unit if sku else None,
+                "cost/currencyCode": item.currency,
+                "cost/myCost": item.computed_amount or 0.0,
+                "usage/billedQuantity": item.computed_quantity or 0.0,
+            })
+        frame = pd.DataFrame(rows)
+        # Linhas sem custo nem quantidade não acrescentam nada ao bronze.
+        frame = frame[(pd.to_numeric(frame["cost/myCost"]) != 0) | (pd.to_numeric(frame["usage/billedQuantity"]) != 0)]
+        return _sanitize_df(frame.reset_index(drop=True))
+
+    def _summarized_usages(self, start: datetime, end: datetime, granularity: str, group_by: list[str]) -> list:
+        """Todas as páginas de uma consulta de custo da Usage API."""
+        client = self._usage_client()
+        items: list = []
+        page = None
+        while True:
+            response = client.request_summarized_usages(
+                oci.usage_api.models.RequestSummarizedUsagesDetails(
+                    tenant_id=self._tenancy_ocid(), time_usage_started=start, time_usage_ended=end,
+                    granularity=granularity, query_type="COST", group_by=group_by,
+                    # Obrigatório com compartimento no agrupamento; 6 = o mais específico.
+                    compartment_depth=6 if any(key.startswith("compartment") for key in group_by) else None,
+                ),
+                page=page,
+            )
+            items.extend(response.data.items)
+            page = response.headers.get("opc-next-page")
+            if not page:
+                return items
 
     @staticmethod
     def _parse_csv_bytes(raw_bytes: bytes, blob_path: str = "") -> pd.DataFrame:

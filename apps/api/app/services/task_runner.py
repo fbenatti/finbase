@@ -1162,69 +1162,81 @@ def _process_oci_blob_sync(
         prefix = blob_prefix
 
     try:
-        if "#period=" in blob_path:
-            # Obter todos os arquivos do mês
-            objects_in_period = extractor.get_objects_for_period(billing_period, prefix)
-            if not objects_in_period:
-                # Se não filtrou por data, tentar listar com prefixo
-                objects_in_period = [obj for obj in extractor._list_all_raw_objects(prefix)
-                                     if derive_billing_period_oci(obj.name, obj.time_created) == billing_period]
+        if extractor.uses_usage_api():
+            # Usage API: o mês vem pronto da API, já nas colunas do CSV de relatório.
+            objects_in_period, cumulative_bytes = [], 0
+            _persist_download_progress(task_id, current_blob=blob_path, phase=f"Usage API OCI ({billing_period}): consultando custos diários")
+            _persist_download_blob(task_id, blob_path, "DOWNLOADING", 0, 0)
+            full_df = extractor.fetch_usage_month(billing_period)
+            if full_df.empty:
+                logger.warning("Nenhum dado na Usage API para o período OCI %s", billing_period)
+                return 0, 0, 0, [f"Nenhum registro para {billing_period}"]
+            full_df = OciExtractor.aggregate_df_daily(full_df)
+            raw_df_bronze = full_df.copy()
         else:
-            # Arquivo individual
-            objects_in_period = [type("Obj", (), {"name": blob_path, "size": content_length or 0, "time_created": last_modified})()]
+            if "#period=" in blob_path:
+                # Obter todos os arquivos do mês
+                objects_in_period = extractor.get_objects_for_period(billing_period, prefix)
+                if not objects_in_period:
+                    # Se não filtrou por data, tentar listar com prefixo
+                    objects_in_period = [obj for obj in extractor._list_all_raw_objects(prefix)
+                                         if derive_billing_period_oci(obj.name, obj.time_created) == billing_period]
+            else:
+                # Arquivo individual
+                objects_in_period = [type("Obj", (), {"name": blob_path, "size": content_length or 0, "time_created": last_modified})()]
 
-        total_files = len(objects_in_period)
-        total_bytes_expected = sum(getattr(obj, "size", 0) or 0 for obj in objects_in_period)
+            total_files = len(objects_in_period)
+            total_bytes_expected = sum(getattr(obj, "size", 0) or 0 for obj in objects_in_period)
 
-        _persist_download_progress(
-            task_id,
-            current_blob=blob_path,
-            current_blob_size=total_bytes_expected,
-            download_bytes=0,
-            phase=f"Download OCI ({billing_period}): 0/{total_files} arquivos",
-        )
-        _persist_download_blob(task_id, blob_path, "DOWNLOADING", 0, total_bytes_expected)
-
-        dfs: list[pd.DataFrame] = []
-        cumulative_bytes = 0
-
-        for idx, obj in enumerate(objects_in_period, 1):
-            if _check_cancelled(task_id):
-                return 0, 0, 0, ["Cancelled"]
-
-            obj_name = obj.name
-            response = client.get_object(
-                namespace_name=namespace,
-                bucket_name=tenancy_ocid,
-                object_name=obj_name,
-            )
-            raw_bytes = response.data.content
-            dl_bytes = len(raw_bytes)
-            cumulative_bytes += dl_bytes
-
-            _persist_download_delta(
-                task_id, dl_bytes, download_bytes=cumulative_bytes,
+            _persist_download_progress(
+                task_id,
                 current_blob=blob_path,
-                phase=f"Download OCI ({billing_period}): {idx}/{total_files} arquivos ({dl_bytes // 1024} KB)"
+                current_blob_size=total_bytes_expected,
+                download_bytes=0,
+                phase=f"Download OCI ({billing_period}): 0/{total_files} arquivos",
             )
+            _persist_download_blob(task_id, blob_path, "DOWNLOADING", 0, total_bytes_expected)
 
-            df_part = extractor._parse_csv_bytes(raw_bytes, obj_name)
-            if not df_part.empty:
-                # Agregação parcial imediata por arquivo para economizar memória (reduz de 15k para ~500 linhas)
-                df_part_agg = OciExtractor.aggregate_df_daily(df_part)
-                dfs.append(df_part_agg)
+            dfs: list[pd.DataFrame] = []
+            cumulative_bytes = 0
 
-        if not dfs:
-            logger.warning("Nenhum dado encontrado para o período OCI %s", billing_period)
-            return 0, 0, 0, [f"Nenhum registro para {billing_period}"]
+            for idx, obj in enumerate(objects_in_period, 1):
+                if _check_cancelled(task_id):
+                    return 0, 0, 0, ["Cancelled"]
 
-        _persist_download_blob(task_id, blob_path, "PARSING", cumulative_bytes, total_bytes_expected or cumulative_bytes)
-        _persist_download_progress(task_id, phase=f"Consolidando {len(dfs)} arquivos de {billing_period}...")
+                obj_name = obj.name
+                response = client.get_object(
+                    namespace_name=namespace,
+                    bucket_name=tenancy_ocid,
+                    object_name=obj_name,
+                )
+                raw_bytes = response.data.content
+                dl_bytes = len(raw_bytes)
+                cumulative_bytes += dl_bytes
 
-        full_df = pd.concat(dfs, ignore_index=True)
-        # Agregação diária final do mês
-        full_df = OciExtractor.aggregate_df_daily(full_df)
-        raw_df_bronze = full_df.copy()
+                _persist_download_delta(
+                    task_id, dl_bytes, download_bytes=cumulative_bytes,
+                    current_blob=blob_path,
+                    phase=f"Download OCI ({billing_period}): {idx}/{total_files} arquivos ({dl_bytes // 1024} KB)"
+                )
+
+                df_part = extractor._parse_csv_bytes(raw_bytes, obj_name)
+                if not df_part.empty:
+                    # Agregação parcial imediata por arquivo para economizar memória (reduz de 15k para ~500 linhas)
+                    df_part_agg = OciExtractor.aggregate_df_daily(df_part)
+                    dfs.append(df_part_agg)
+
+            if not dfs:
+                logger.warning("Nenhum dado encontrado para o período OCI %s", billing_period)
+                return 0, 0, 0, [f"Nenhum registro para {billing_period}"]
+
+            _persist_download_blob(task_id, blob_path, "PARSING", cumulative_bytes, total_bytes_expected or cumulative_bytes)
+            _persist_download_progress(task_id, phase=f"Consolidando {len(dfs)} arquivos de {billing_period}...")
+
+            full_df = pd.concat(dfs, ignore_index=True)
+            # Agregação diária final do mês
+            full_df = OciExtractor.aggregate_df_daily(full_df)
+            raw_df_bronze = full_df.copy()
     except Exception as e:
         logger.error("Falha ao processar período OCI %s: %s", blob_path, e)
         errors.append(f"Failed to process OCI period {blob_path}: {e}")
