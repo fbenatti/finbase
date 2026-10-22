@@ -1,0 +1,135 @@
+name: finbase
+
+services:
+  api:
+    build:
+      context: .
+      dockerfile: apps/api/Dockerfile
+    env_file:
+      - .env-databriks
+    environment: &finbase-app-environment
+      DATABASE_URL: postgresql+asyncpg://finops:${POSTGRES_PASSWORD:?defina POSTGRES_PASSWORD no .env}@postgres:5432/finbase
+      DATABASE_URL_SYNC: postgresql://finops:${POSTGRES_PASSWORD:?defina POSTGRES_PASSWORD no .env}@postgres:5432/finbase
+      TRINO_URL: http://trino:8080
+      TRINO_CATALOG: iceberg_finbase
+      ICEBERG_LOCAL_WAREHOUSE: /data/finbase-iceberg
+      ICEBERG_CANONICAL_WAREHOUSE_PATH: /data/finbase-iceberg
+      OPENFINOPS_WORKER_RUNTIME_DIR: /run/openfinops-worker
+      BOOTSTRAP_ENABLED: "false"
+      SCHEDULER_ENABLED: "false"
+      FORWARDED_ALLOW_IPS: 172.16.0.0/12
+    restart: unless-stopped
+    volumes: &finbase-app-volumes
+      - ./apps/data/iceberg:/data/finbase-iceberg
+      - ./backups/scheduled:/backups/scheduled
+      - worker_runtime:/run/openfinops-worker
+    depends_on:
+      scheduler:
+        condition: service_healthy
+    networks:
+      default:
+        aliases:
+          - finbase-api
+
+  scheduler:
+    build:
+      context: .
+      dockerfile: apps/api/Dockerfile
+    env_file:
+      - .env-databriks
+    environment:
+      <<: *finbase-app-environment
+      BOOTSTRAP_ENABLED: "true"
+      SCHEDULER_ENABLED: "true"
+    restart: unless-stopped
+    volumes: *finbase-app-volumes
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health', timeout=2).read()"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 20s
+    networks:
+      default:
+        aliases:
+          - finbase-scheduler
+
+  worker:
+    build:
+      context: .
+      dockerfile: apps/api/Dockerfile
+    command: ["python", "-u", "worker.py"]
+    env_file:
+      - .env-databriks
+    environment:
+      <<: *finbase-app-environment
+      OPENFINOPS_WORKER_CONCURRENCY: ${OPENFINOPS_WORKER_CONCURRENCY:-2}
+      OPENFINOPS_REPROCESS_SLICE_PARALLEL: ${OPENFINOPS_REPROCESS_SLICE_PARALLEL:-1}
+      AZURE_EXTRACTION_WORKERS: ${AZURE_EXTRACTION_WORKERS:-2}
+      OCI_EXTRACTION_WORKERS: ${OCI_EXTRACTION_WORKERS:-2}
+      REPROCESS_CPU_WORKERS: ${REPROCESS_CPU_WORKERS:-2}
+      REPROCESS_CLASSIFICATION_CHUNK_ROWS: ${REPROCESS_CLASSIFICATION_CHUNK_ROWS:-50000}
+      REPROCESS_BATCH_ROWS: ${REPROCESS_BATCH_ROWS:-100000}
+      REPROCESS_MEMORY_LIMIT_MB: ${REPROCESS_MEMORY_LIMIT_MB:-}
+      REPROCESS_MEMORY_MIN_AVAILABLE_RATIO: ${REPROCESS_MEMORY_MIN_AVAILABLE_RATIO:-0.10}
+      REPROCESS_WORKER_MAX_TASKS: ${REPROCESS_WORKER_MAX_TASKS:-6}
+    restart: unless-stopped
+    volumes: *finbase-app-volumes
+    depends_on:
+      scheduler:
+        condition: service_healthy
+    networks:
+      - default
+
+  supervisor:
+    build:
+      context: .
+      dockerfile: apps/api/Dockerfile
+    command: ["python", "-u", "supervisor.py"]
+    pid: "service:worker"
+    restart: unless-stopped
+    environment:
+      DATABASE_URL_SYNC: postgresql://finops:${POSTGRES_PASSWORD:?defina POSTGRES_PASSWORD no .env}@postgres:5432/finbase
+      OPENFINOPS_WORKER_RUNTIME_DIR: /run/openfinops-worker
+      SUPERVISOR_INTERVAL_SECONDS: ${SUPERVISOR_INTERVAL_SECONDS:-15}
+    volumes:
+      - worker_runtime:/run/openfinops-worker
+    depends_on:
+      worker:
+        condition: service_started
+        restart: true
+    networks:
+      - default
+
+  web:
+    build:
+      context: .
+      dockerfile: apps/web/Dockerfile
+    depends_on:
+      - api
+    networks:
+      default:
+        aliases:
+          - finbase-web
+
+  gateway:
+    image: nginx:1.27-alpine
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:5174:80"
+      - "127.0.0.1:8001:8000"
+    volumes:
+      - ./infra/nginx/finbase-gateway.conf:/etc/nginx/conf.d/default.conf:ro
+    depends_on:
+      - api
+      - web
+    networks:
+      - default
+
+volumes:
+  worker_runtime:
+
+networks:
+  default:
+    name: openfinops_default
+    external: true
