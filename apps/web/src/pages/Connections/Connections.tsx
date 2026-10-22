@@ -1,6 +1,6 @@
 import { Dialog, DialogTitle, DialogContent, DialogActions } from "../../components/FinbaseDialog";
 import { dataDisplayText } from "../../utils/dataPresentation";
-import { useState, useEffect, useMemo, useRef } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useMenuSearchParams as useSearchParams } from "../../navigation/useMenuSearchParams";
 import { Box, Typography, Button, TextField, Divider, Select, MenuItem, FormControl, InputLabel, Alert, CircularProgress, FormControlLabel, Checkbox, Paper, InputAdornment, Stack, Snackbar, Chip } from "@mui/material";
 import { Add, AutoAwesome, Cloud, Dataset, Download, MenuBook, Psychology, Search, SmartToy, Storage, Storefront, Refresh, Validate, Save } from "./ConnectionIcons";
@@ -57,21 +57,6 @@ const CATEGORY_TABS: { value: ConnectionCategory; label: string }[] = [
   { value: "ferramenta", label: "Ferramentas e plataformas" },
   { value: "marketplace", label: "Oferta no marketplace" },
 ];
-
-function categoryOfConnection(connection: { connector_type: string; cloud_scope?: string | null }): ConnectionCategory {
-  if (connection.connector_type === "mongodb_atlas" || connection.cloud_scope === "atlas") return "marketplace";
-  if (
-    connection.connector_type === "azure_openai_ptu" ||
-    connection.connector_type === "azure_automation_jobs" ||
-    connection.connector_type === "azure_resource_graph" ||
-    connection.connector_type === "databricks" ||
-    connection.connector_type.startsWith("github_") ||
-    connection.connector_type.startsWith("notebooklm_") ||
-    connection.connector_type.startsWith("gemini_") ||
-    connection.connector_type.startsWith("claude_")
-  ) return "ferramenta";
-  return "provedor";
-}
 
 // Sub-tipos de extração por ferramenta.
 const TOOL_EXTRACTION_TYPES: Record<string, { value: string; connectorType: string; cloudName: string; emoji: string; title: string; description: string }[]> = {
@@ -223,8 +208,6 @@ export default function Connections() {
   const [error, setError] = useState("");
   const [testMsgs, setTestMsgs] = useState<Record<number, ConnectionTestMessage>>({});
   const [testingId, setTestingId] = useState<number | null>(null);
-  const [activeCategory, setActiveCategory] = useState<"all" | ConnectionCategory>("all");
-  const [activeProvider, setActiveProvider] = useState("all");
   const [search, setSearch] = useState("");
   const [tabsReady, setTabsReady] = useState(false);
   // Serviços auxiliares (Jev, ServiceNow) não são fontes de dado de nuvem, mas
@@ -264,43 +247,14 @@ export default function Connections() {
 
   useEffect(() => { load(); }, []);
 
-  const visibleCatalog = useMemo(
-    () => connectionCatalog.filter((connection) => !hiddenConnectorTypes.has(connection.connector_type)),
-    [connectionCatalog, hiddenConnectorTypes],
-  );
-
   // Opção do seletor "Conectar fonte" some quando todos os seus tipos estão desligados em Conectores.
   const isPickerOptionVisible = (option: (typeof CONNECTOR_PICKER_OPTIONS)[number]) => {
     const types = option.tool ? (TOOL_EXTRACTION_TYPES[option.tool] ?? []).map((type) => type.connectorType) : [option.value];
     return types.some((type) => !hiddenConnectorTypes.has(type));
   };
 
-  const categoryTabs = useMemo(() => CATEGORY_TABS.map((category) => ({
-    ...category,
-    count: visibleCatalog.filter((connection) => categoryOfConnection(connection) === category.value).length,
-  })), [visibleCatalog]);
-
-  // Scopes de provedor presentes em uma categoria específica (ou em todas, quando "all").
-  const providerTabsFor = (category: "all" | ConnectionCategory) => Array.from(new Set(
-    visibleCatalog
-      .filter((connection) => {
-        if (!connection.cloud_scope) return false;
-        if (category === "all") return true;
-        return categoryOfConnection(connection) === category;
-      })
-      .map((connection) => connection.cloud_scope as string),
-  )).sort((left, right) => getProviderLabel(left).localeCompare(getProviderLabel(right), "pt-BR"));
-
-  // Abas de provedor (2º nível): scopes presentes nas conexões da categoria ativa.
-  const providerTabs = useMemo(() => providerTabsFor(activeCategory), [activeCategory, visibleCatalog]);
-
   // Start with every connection visible; categories and providers are filters.
   useEffect(() => { if (!loading) setTabsReady(true); }, [loading]);
-
-  const selectCategory = (category: "all" | ConnectionCategory) => {
-    setActiveCategory(category);
-    setActiveProvider("all");
-  };
 
   const loadGrid = async (query = gridQuery.current) => {
     const requestId = ++gridRequestId.current;
@@ -310,8 +264,6 @@ export default function Connections() {
         limit: query.limit,
         offset: query.offset,
         search: search || undefined,
-        category: activeCategory === "all" ? undefined : activeCategory,
-        provider: activeProvider === "all" ? undefined : activeProvider,
         sort_field: query.sort?.field,
         sort_direction: query.sort?.direction,
         filters: query.filters,
@@ -331,7 +283,7 @@ export default function Connections() {
     if (!tabsReady) return;
     gridQuery.current = { offset: 0, limit: gridQuery.current.limit, filters: [] };
     void loadGrid(gridQuery.current);
-  }, [activeCategory, activeProvider, search, tabsReady]);
+  }, [search, tabsReady]);
 
   const openNew = (connectorType = "azure_blob") => {
     setEditing(null);
@@ -431,7 +383,7 @@ export default function Connections() {
         connector_type: conn.connector_type,
         cloud_name: conn.cloud_name || "Azure-4P",
         cloud_scope: conn.cloud_scope || "azure",
-        credential_profile: cfg.credential_profile || "azure-4p",
+        credential_profile: cfg.credential_profile || "",
         tenant_id: cfg.tenant_id || "",
         client_id: cfg.client_id || "",
         eventhub_namespace: (cfg.eventhub as any)?.namespace || "",
@@ -641,7 +593,7 @@ export default function Connections() {
         configJson.scope = "BillingAccountId";
       }
     } else if (form.connector_type === "azure_openai_ptu") {
-      configJson.credential_profile = form.credential_profile || "azure-4p";
+      configJson.credential_profile = form.credential_profile || "";
       if (form.tenant_id) configJson.tenant_id = form.tenant_id;
       if (form.client_id) configJson.client_id = form.client_id;
       // Secret is write-only: only include it when explicitly entered.
@@ -657,7 +609,7 @@ export default function Connections() {
         namespace: form.eventhub_namespace || "",
         eventhub_name: form.eventhub_name || "",
         consumer_group: form.eventhub_consumer_group || "openfinops-azure-ptu",
-        credential_ref: "azure-4p",
+        credential_ref: form.credential_profile || "",
       };
     } else if (form.connector_type === "gcp_bigquery") {
       if (form.tenant_id) configJson.project_id = form.tenant_id;
@@ -933,23 +885,6 @@ export default function Connections() {
             <Box><Typography variant="h6">Conexões configuradas</Typography><Typography variant="body2" color="text.secondary">Controle as origens de dados e as credenciais de acesso.</Typography></Box>
             <Chip variant="outlined" label={`${gridTotal} ${gridTotal === 1 ? "fonte" : "fontes"}`} />
           </Stack>
-          <Stack direction={{ xs: "column", md: "row" }} gap={2} sx={{ p: { xs: 2, md: 3 } }}>
-            <FormControl sx={{ minWidth: 220, flex: 1 }}>
-              <InputLabel id="connections-category-label">Tipo de fonte</InputLabel>
-              <Select labelId="connections-category-label" label="Tipo de fonte" value={activeCategory} onChange={e => selectCategory(e.target.value as "all" | ConnectionCategory)}>
-                <MenuItem value="all">Todas as categorias ({visibleCatalog.length})</MenuItem>
-                {categoryTabs.map(category => <MenuItem key={category.value} value={category.value}>{category.label} ({category.count})</MenuItem>)}
-              </Select>
-            </FormControl>
-            <FormControl sx={{ minWidth: 180, flex: 1 }}>
-              <InputLabel id="connections-provider-label">Nuvem ou aplicação</InputLabel>
-              <Select labelId="connections-provider-label" label="Nuvem ou aplicação" value={activeProvider} onChange={e => setActiveProvider(String(e.target.value))}>
-                <MenuItem value="all">Todas as nuvens e aplicações</MenuItem>
-                {providerTabs.map(provider => <MenuItem key={provider} value={provider}>{getProviderLabel(provider)}</MenuItem>)}
-              </Select>
-            </FormControl>
-            <Button disabled={activeCategory === "all" && activeProvider === "all" && !search} onClick={() => { selectCategory("all"); setSearch(""); }}>Limpar filtros</Button>
-          </Stack>
           <Stack direction={{ xs: "column", lg: "row" }} justifyContent="space-between" gap={2} sx={{ p: 2, bgcolor: "background.default", borderTop: 1, borderBottom: 1, borderColor: "divider" }}>
             <TextField label="Localizar conexão" placeholder="Nome, identificador ou origem" value={search} onChange={event => setSearch(event.target.value)} slotProps={{ input: { startAdornment: <InputAdornment position="start"><Search fontSize="small" /></InputAdornment> } }} sx={{ width: { xs: "100%", lg: 340 }, bgcolor: "background.paper" }} />
             <Stack direction="row" gap={1} flexWrap="wrap">
@@ -958,7 +893,7 @@ export default function Connections() {
             </Stack>
           </Stack>
           <ConnectionsDataGrid
-            key={`${activeCategory}:${activeProvider}:${search}`}
+            key={search}
             connections={connections} total={gridTotal} loading={gridLoading}
             testingId={testingId} testMessages={testMsgs}
             onEdit={openEdit} onHistory={setHistoryConn}
@@ -1125,9 +1060,9 @@ export default function Connections() {
               <>
                 <Typography variant="subtitle2" sx={{ mt: 1, color: "text.primary" }}>Credenciais</Typography>
                 <Alert severity="info">A coleta usa apenas recursos e métricas já existentes. Nenhum recurso Azure será criado. O secret nunca é devolvido pela API.</Alert>
-                <TextField label="Conjunto de credenciais" value={form.credential_profile || "azure-4p"}
+                <TextField label="Conjunto de credenciais" value={form.credential_profile || ""}
                   onChange={(e) => setForm({ ...form, credential_profile: e.target.value })}
-                  helperText="Perfil de execução (recomendado: azure-4p)" />
+                  helperText="Perfil de execução" />
                 <TextField label="Diretório (tenant)" value={form.tenant_id}
                   onChange={(e) => setForm({ ...form, tenant_id: e.target.value })} />
                 <TextField label="Aplicação (client ID)" value={form.client_id}
@@ -1158,7 +1093,7 @@ export default function Connections() {
                 <Alert severity="info">A coleta lê jobs e agendamentos das Automation Accounts pela API ARM. Nenhum recurso é criado. O secret nunca é devolvido pela API.</Alert>
                 <TextField label="Conjunto de credenciais" value={form.credential_profile || ""}
                   onChange={(e) => setForm({ ...form, credential_profile: e.target.value })}
-                  helperText="Ex.: azure-4p ou azure-ti (usa o .env). Em branco = usar os campos abaixo." />
+                  helperText="Perfil do .env. Em branco = usar os campos abaixo." />
                 <TextField label="Diretório (tenant)" value={form.tenant_id}
                   onChange={(e) => setForm({ ...form, tenant_id: e.target.value })} />
                 <TextField label="Aplicação (client ID)" value={form.client_id}
@@ -1189,7 +1124,7 @@ export default function Connections() {
                 <Alert severity="info">A coleta consulta o Azure Resource Graph (inventário) (inventário e recursos ociosos). Nenhum recurso é criado. O secret nunca é devolvido pela API.</Alert>
                 <TextField label="Conjunto de credenciais" value={form.credential_profile || ""}
                   onChange={(e) => setForm({ ...form, credential_profile: e.target.value })}
-                  helperText="Ex.: azure-4p ou azure-ti (usa o .env). Em branco = usar os campos abaixo." />
+                  helperText="Perfil do .env. Em branco = usar os campos abaixo." />
                 <TextField label="Diretório (tenant)" value={form.tenant_id}
                   onChange={(e) => setForm({ ...form, tenant_id: e.target.value })} />
                 <TextField label="Aplicação (client ID)" value={form.client_id}

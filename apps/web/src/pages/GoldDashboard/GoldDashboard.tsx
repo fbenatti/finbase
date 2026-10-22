@@ -709,7 +709,7 @@ export default function GoldDashboard() {
               }}
             />
           </Box>
-          <Tooltip title="Filtra por qualquer dimensão FOCUS. Valores da mesma dimensão somam (OU); dimensões diferentes se combinam (E).">
+          <Tooltip title="Filtra por qualquer dimensão. Valores da mesma dimensão somam (OU); dimensões diferentes se combinam (E).">
             <Button size="small" variant="outlined" startIcon={<AddOutlined />} onClick={(event) => setFilterMenuAnchor(event.currentTarget)} sx={{ height: 34, borderRadius: "10px", textTransform: "none" }}>Filtro</Button>
           </Tooltip>
           <FormControlLabel control={<Switch size="small" checked={includeSharedCost} onChange={(_, checked) => setIncludeSharedCost(checked)} />} label={<Typography variant="body2">Incluir custo rateado</Typography>} sx={{ ml: 0.5, mr: 0 }} />

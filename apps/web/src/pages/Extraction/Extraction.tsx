@@ -525,7 +525,7 @@ export default function Extraction({ embedded = false }: { embedded?: boolean })
         )}
 
         <ToolbarSection title="Publicação" description="Publica os dados normalizados na tabela de destino, usando os mapeamentos de relação.">
-          <Tooltip title="Converte os dados normalizados para a tabela de destino (MODELO_FOCUS) usando os mapeamentos configurados em Relacionamento.">
+          <Tooltip title="Converte os dados normalizados para a tabela de destino usando os mapeamentos configurados em Relacionamento.">
             <Button
               variant="contained"
               color="secondary"

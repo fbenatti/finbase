@@ -51,7 +51,7 @@ function findSubAccountColumn(columnNames: string[]): string | null {
 type Props = {
   destinationTableId: number;
   columnNames: string[];
-  /** Conexão selecionada no relacionamento (ex.: azure-4p) — usada na fatia replace. */
+  /** Conexão selecionada no relacionamento — usada na fatia replace. */
   sourceConnectionId?: number | "";
   sourceConnectionLabel?: string;
   onSaved?: () => void;
@@ -188,7 +188,7 @@ export default function DestinationPartitionSettings({
           />
         ) : (
           <Typography variant="caption" color="text.secondary">
-            Selecione a fonte (ex. azure-4p) acima para ver a conexão usada na publicação.
+            Selecione a fonte acima para ver a conexão usada na publicação.
           </Typography>
         )}
       </Box>

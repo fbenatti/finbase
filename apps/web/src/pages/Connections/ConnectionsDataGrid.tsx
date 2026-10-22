@@ -93,7 +93,7 @@ function getConnectionSummary(connection: SourceConnection): string {
   const config = connection.config_json as Record<string, string>;
   switch (connection.connector_type) {
     case "azure_openai_ptu":
-      return [config.credential_profile || "azure-4p", "PTU em produção"].join(" · ");
+      return [config.credential_profile, "PTU em produção"].filter(Boolean).join(" · ");
     case "azure_blob": {
       const location = [config.storage_account, config.container_name].filter(Boolean).join(" / ");
       return location || "Conta e container não definidos";

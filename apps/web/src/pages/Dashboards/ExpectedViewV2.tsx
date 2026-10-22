@@ -1262,7 +1262,7 @@ export default function ExpectedViewV2({
                 </Stack>
                 {chartQueryError && <Alert severity="error" sx={{ mt: 1 }}>{dataDisplayText(chartQueryError)}</Alert>}
                 {chartGranularity === "daily" && dailyGold?.available === false
-                  ? <Alert severity="info" sx={{ mt: 1 }}>A fonte base preparada não disponibiliza uma data real de consumo para este recorte. Verifique a carga FOCUS de ChargePeriodStart.</Alert>
+                  ? <Alert severity="info" sx={{ mt: 1 }}>A fonte base preparada não disponibiliza uma data real de consumo para este recorte. Verifique a carga de ChargePeriodStart.</Alert>
                   : chartQueryLoading
                     ? <Stack alignItems="center" justifyContent="center" sx={{ height: 420 }} direction="row" gap={1}><CircularProgress size={22} /><Typography color="text.secondary">Carregando série de custos…</Typography></Stack>
                     : chartGranularity === "daily" && !dailyGold?.rows.length

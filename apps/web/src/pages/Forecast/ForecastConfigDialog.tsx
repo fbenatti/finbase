@@ -386,7 +386,7 @@ export default function ForecastConfigDialog({ open, initial, tables, usedDestin
               )}
               {meta && dimensions.length > 0 && !dimensions.includes("cloud_origem") && (
                 <Typography variant="caption" color="text.secondary" component="p" sx={{ mt: 0.75 }}>
-                  Inclua cloud_origem para separar azure-4p, azure-ti, gcp-4p e gcp-ti.
+                  Inclua cloud_origem para separar as origens de nuvem.
                 </Typography>
               )}
             </Step>

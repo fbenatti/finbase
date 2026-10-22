@@ -141,7 +141,7 @@ export default function SchedulesPanel({ connections }: { connections: SourceCon
   };
 
   // Existing Cloud schedules historically stored an empty Gold list to mean
-  // "automatic". Surface the actual FOCUS-related rules as checked items.
+  // "automatic". Surface the actual destination-related rules as checked items.
   useEffect(() => {
     if (!dialogOpen || !editing || form.schedule_type === "backup" || form.gold_rule_ids.length) return;
     const inferred = focusDimonIds(form.destination_table_ids);

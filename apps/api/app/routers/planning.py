@@ -23,7 +23,7 @@ from app.models.planning import BudgetDefenseRequest, FinancialType, PlanningEnt
 from app.models.contract_story import ContractStoryLedger
 from app.models.budget_accuracy import BudgetAccuracyAck
 from app.models.rules import Department
-from app.services.trino_service import execute as trino_execute
+from app.services.trino_service import TrinoError, execute as trino_execute
 from app.services import lakehouse_layers as layers
 from app.services.gold_materialization import GOLD
 
@@ -575,7 +575,13 @@ async def _budget_accuracy_actuals(
         ) facts
         GROUP BY {group_levels}, period
     """
-    return await trino_execute(sql, timeout_s=180)
+    try:
+        return await trino_execute(sql, timeout_s=180)
+    except TrinoError as exc:
+        # Ambiente sem a base consolidada publicada: sem realizado, não é erro.
+        if "does not exist" in str(exc):
+            return []
+        raise
 
 
 async def _validate_rows(rows: list[PlanningRowIn], db: AsyncSession) -> list[dict[str, Any]]:

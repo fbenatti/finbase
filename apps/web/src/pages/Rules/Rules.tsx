@@ -590,7 +590,7 @@ export default function Rules({ embedded = false }: { embedded?: boolean } = {})
             </Typography>
             {form.financial_effect === "MARKETPLACE_ALLOCATION" && <>
               <TextField label="Conexão de marketplace" value={form.marketplace_connection_code} onChange={(e) => setForm({ ...form, marketplace_connection_code: e.target.value })} placeholder="mongodb-atlas-pro" />
-              <TextField label="Conexão de nuvem" value={form.cloud_connection_code} onChange={(e) => setForm({ ...form, cloud_connection_code: e.target.value })} placeholder="azure-ti" />
+              <TextField label="Conexão de nuvem" value={form.cloud_connection_code} onChange={(e) => setForm({ ...form, cloud_connection_code: e.target.value })} />
               <TextField label="Produto de nuvem" value={form.cloud_product_name} onChange={(e) => setForm({ ...form, cloud_product_name: e.target.value })} placeholder="Oferta privada..." />
               <TextField label="SKU de nuvem" value={form.cloud_sku} onChange={(e) => setForm({ ...form, cloud_sku: e.target.value })} />
               <TextField label="Resource Group de nuvem" value={form.cloud_resource_group} onChange={(e) => setForm({ ...form, cloud_resource_group: e.target.value })} />

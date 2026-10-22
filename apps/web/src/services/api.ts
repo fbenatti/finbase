@@ -2056,7 +2056,7 @@ export interface CommitmentsDashboard {
 export async function getCommitmentsDashboard(params: {
   start_period: string;
   end_period: string;
-  source?: "all" | "azure-ti" | "azure-4p";
+  source?: string;
 }): Promise<CommitmentsDashboard> {
   return (await api.get("/otimizacao/painel-compromissos", { params })).data;
 }

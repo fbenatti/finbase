@@ -74,7 +74,7 @@ const nodeTypes = {
 
 // ─── Layout constants ──────────────────────────────────────────────────
 const X_SOURCE = 50;
-const X_FOCUS = 380;
+const X_DEST = 380;
 const X_PROCESS = 720;
 const ROW_H = 38;
 
@@ -126,7 +126,7 @@ export default function PipelineBuilder() {
       const newNodes: Node[] = [];
       const newEdges: Edge[] = [];
 
-      // Collect which FOCUS columns are actually used (mapped, classified, ruled)
+      // Collect which destination columns are actually used (mapped, classified, ruled)
       const mappedDestCols = new Set<string>();
       for (const m of allMappings) mappedDestCols.add(m.destination_column);
 
@@ -154,7 +154,7 @@ export default function PipelineBuilder() {
         ...mappedDestCols, ...referencedCols,
       ]);
 
-      // ── ZONE: FOCUS — destination table columns that are referenced ──
+      // ── ZONE: Destination — destination table columns that are referenced ──
       const focusY = new Map<string, number>();
       let focusYIdx = 0;
       destCols
@@ -164,7 +164,7 @@ export default function PipelineBuilder() {
           focusY.set(c.name, y);
           newNodes.push({
             id: "foc-" + c.name, type: "focusCol",
-            position: { x: X_FOCUS, y },
+            position: { x: X_DEST, y },
             data: { label: c.name },
           });
           focusYIdx += 1;
@@ -191,7 +191,7 @@ export default function PipelineBuilder() {
 
       let srcY = 50;
 
-      // ── ZONE: Source columns — per connection, direct edges to FOCUS ──
+      // ── ZONE: Source columns — per connection, direct edges to destination ──
       for (const cid of connIds) {
         const conn = connections.find(c => c.id === cid);
         if (!conn) continue;
@@ -287,7 +287,7 @@ export default function PipelineBuilder() {
         procY += 20;
       }
 
-      // ── Classification rules — GROUPED by FOCUS column ──
+      // ── Classification rules — GROUPED by destination column ──
       const classifGroups = new Map<string, { connIds: Set<number>; global: boolean; count: number; names: string[] }>();
       for (const c of allClassifs) {
         const fields = new Set<string>();
@@ -325,7 +325,7 @@ export default function PipelineBuilder() {
 
         newEdges.push(newEdge("e-" + gId + "-in", "foc-" + focusCol, gId, "#4caf50"));
 
-        // Saida para colunas FOCUS de destino (quando existem no schema)
+        // Saida para colunas de destino (quando existem no schema)
         for (const outCol of ["diretoria", "organograma", "centro_custo", "ambiente"]) {
           if (focusY.has(outCol)) {
             newEdges.push(newEdge("e-" + gId + "-to-" + outCol, gId, "foc-" + outCol, "#4caf50", "4 2"));
@@ -386,7 +386,7 @@ export default function PipelineBuilder() {
       <Box>
         <Typography variant="h6">Esteira de dados</Typography>
         <Typography variant="body2" color="text.secondary">
-          Fluxo de transformação: origens, colunas FOCUS, regras de negócio e classificações. Clique em um objeto para ver com quem ele se relaciona.
+          Fluxo de transformação: origens, colunas de destino, regras de negócio e classificações. Clique em um objeto para ver com quem ele se relaciona.
         </Typography>
       </Box>
 
@@ -408,7 +408,7 @@ export default function PipelineBuilder() {
           {nodes.length > 0 && (
             <Stack direction="row" gap={1} flexWrap="wrap" useFlexGap sx={{ ml: { md: "auto" } }}>
               <Chip label="Fontes" size="small" variant="outlined" sx={{ borderColor: "#0EA5C6" }} />
-              <Chip label="FOCUS" size="small" variant="outlined" sx={{ borderColor: "#0B3FA8" }} />
+              <Chip label="Destino" size="small" variant="outlined" sx={{ borderColor: "#0B3FA8" }} />
               <Chip label="Ajustes de custo" size="small" variant="outlined" sx={{ borderColor: "#ff9800" }} />
               <Chip label="Classificação por projeto" size="small" variant="outlined" sx={{ borderColor: "#4caf50" }} />
             </Stack>

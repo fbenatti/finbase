@@ -294,7 +294,7 @@ export default function CloneRules({ embedded }: { embedded?: boolean } = {}) {
           <br /><br />
           No reprocessamento da base consolidada, cada regra elegível reconstrói o <strong>preço sob demanda (OnDemand) de referência</strong> na linha original e cria uma linha sintética de <strong>estorno (Return)</strong> com valor negativo. O total financeiro se mantém; o que muda é a visibilidade do uso real para análise FinOps.
           <br /><br />
-          Templates editáveis para tabelas FOCUS são instalados automaticamente (ex.: <em>Uso de reserva Azure → devolução</em>). Se não houver preço On-Demand histórico para o medidor, a linha vai para <strong>pendências</strong> — nada é alterado em silêncio.
+          Templates editáveis para tabelas de destino são instalados automaticamente (ex.: <em>Uso de reserva Azure → devolução</em>). Se não houver preço On-Demand histórico para o medidor, a linha vai para <strong>pendências</strong> — nada é alterado em silêncio.
         </Typography>
       </Alert>
 
@@ -303,7 +303,7 @@ export default function CloneRules({ embedded }: { embedded?: boolean } = {}) {
           <Box>
             <Typography variant="h6">Compromissos de tarifa (RI e Savings Plan)</Typography>
             <Typography variant="body2" color="text.secondary">
-              Ajustes de estorno sob demanda (OnDemand) para uso coberto por compromisso — por tabela de destino FOCUS.
+              Ajustes de estorno sob demanda (OnDemand) para uso coberto por compromisso — por tabela de destino.
             </Typography>
           </Box>
           <Stack direction="row" gap={1} flexWrap="wrap" alignItems="center">

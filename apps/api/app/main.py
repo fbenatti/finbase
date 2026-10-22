@@ -532,17 +532,6 @@ async def lifespan(app: FastAPI):
             # **nunca** armazena nome de função ou Python vindo do usuário.
             "ALTER TABLE gold_rule ADD COLUMN IF NOT EXISTS materializer_key VARCHAR(60)",
             "CREATE INDEX IF NOT EXISTS ix_gold_rule_materializer ON gold_rule (materializer_key)",
-            """INSERT INTO gold_rule (code, name, description, active, dimensions, measure_columns, snapshot_mode, snapshot_col, materialization_table, materialization_status)
-               VALUES
-                 ('ai_consumption_daily', 'IA — Consumo diário (Claude/NotebookLM)', 'Gold auxiliar de consumo de IA; publicada pela fila Gold a partir de dest_consumo_ia.', TRUE, '[]'::jsonb, '[]'::jsonb, FALSE, '_snapshot_date', 'dest_dm_ai_consumption_daily', 'PENDING'),
-                 ('ai_license_snapshot', 'IA — Licenças (Claude/NotebookLM)', 'Gold auxiliar de licenças de IA; publicada pela fila Gold a partir de dest_licencas_ia.', TRUE, '[]'::jsonb, '[]'::jsonb, FALSE, '_snapshot_date', 'dest_dm_ai_license_snapshot', 'PENDING'),
-                 ('copilot_usage_daily', 'Copilot — Uso diário', 'Gold auxiliar de uso do GitHub Copilot.', TRUE, '[]'::jsonb, '[]'::jsonb, FALSE, '_snapshot_date', 'dest_dm_copilot_usage_daily', 'PENDING'),
-                 ('copilot_license_snapshot', 'Copilot — Licenças', 'Gold auxiliar de licenças do GitHub Copilot.', TRUE, '[]'::jsonb, '[]'::jsonb, FALSE, '_snapshot_date', 'dest_dm_copilot_license_snapshot', 'PENDING'),
-                 ('copilot_user_period', 'Copilot — Usuário/período', 'Gold auxiliar de adoção por usuário e período.', TRUE, '[]'::jsonb, '[]'::jsonb, FALSE, '_snapshot_date', 'dest_dm_copilot_user_period', 'PENDING')
-               ON CONFLICT (code) DO UPDATE SET name = EXCLUDED.name, description = EXCLUDED.description, active = TRUE, materialization_table = EXCLUDED.materialization_table""",
-            """INSERT INTO gold_rule (code, name, description, active, dimensions, measure_columns, snapshot_mode, snapshot_col, materialization_table, materialization_status)
-               VALUES ('vm_monthly_history', 'VM — Histórico mensal agregado', 'Cubo Gold de horas e custo por VM/mês, derivado da Silver e consumido pelo cubo Saving por desligue.', FALSE, '[]'::jsonb, '[]'::jsonb, FALSE, '_snapshot_date', 'dest_dm_cost_vm_monthly_history', 'PENDING')
-               ON CONFLICT (code) DO UPDATE SET name = EXCLUDED.name, description = EXCLUDED.description, materialization_table = EXCLUDED.materialization_table""",
             """CREATE TABLE IF NOT EXISTS shutdown_exception_rule (
               id SERIAL PRIMARY KEY,
               name VARCHAR(200) NOT NULL,
@@ -1026,10 +1015,6 @@ async def lifespan(app: FastAPI):
 
     async with async_session() as db:
         await seed(db)
-        # Registra o cubo agregado consumido pelo dashboard de compromissos;
-        # a consulta do painel não deve varrer FOCUS/planning Silver no Trino.
-        from app.services.commitments_gold import ensure_commitments_gold_rule
-        await ensure_commitments_gold_rule(db)
         await db.commit()
         # Reconcile ARG destinations for connections created before the
         # automatic setup hook existed. The setup is idempotent and also

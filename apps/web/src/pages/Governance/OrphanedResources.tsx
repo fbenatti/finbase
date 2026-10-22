@@ -195,7 +195,7 @@ export default function OrphanedResources() {
         <Alert severity="info" sx={{ mb: 2 }}>
           Um recurso entra aqui quando estava no snapshot anterior e deixa de aparecer no snapshot diário seguinte.
           Se voltar a aparecer em uma coleta posterior, ele não é contabilizado como deletado. O saving efetivado é
-          proporcional aos dias observados desde o desaparecimento, usando o último custo mensal da FOCUS.
+          proporcional aos dias observados desde o desaparecimento, usando o último custo mensal da base consolidada.
         </Alert>
         <Stack direction={{ xs: "column", sm: "row" }} spacing={2} sx={{ mb: 2 }}>
           <Paper elevation={0} sx={{ flex: 1, p: 2, border: "1px solid", borderColor: "success.main", borderRadius: 2, bgcolor: "rgba(46,125,50,0.04)" }}>
@@ -516,7 +516,7 @@ export default function OrphanedResources() {
                 <DetailRow label="Custo efetivado" value={formatBRL(detailRow.cost_brl)} />
                 <DetailRow label="BilledCost" value={formatBRL(detailRow.billedcost)} />
                 <DetailRow label="EffectiveCost" value={formatBRL(detailRow.effectivecost)} />
-                <DetailRow label="Registros FOCUS" value={String(detailRow.focus_rows ?? 0)} />
+                <DetailRow label="Registros na base" value={String(detailRow.focus_rows ?? 0)} />
               </Box>
               {detailRow.tags && (
                 <Box>

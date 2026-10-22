@@ -109,7 +109,7 @@ export default function GoldDashboardV2() {
   };
   // `/gold/info` exposes both the curated dimension list and the complete
   // physical schema. Some older Gold tables omit dimensions, so use the
-  // schema as a fallback instead of rendering an empty FOCUS menu.
+  // schema as a fallback instead of rendering an empty dimension menu.
   const dimensionColumns = useMemo(() => {
     const fromDimensions = info?.dimensions || [];
     const fromSchema = info?.columns?.filter((column) => column.type !== "measure").map((column) => column.name) || [];
@@ -205,7 +205,7 @@ export default function GoldDashboardV2() {
             {filters.map((filter) => <Stack key={filter.column} direction="row" alignItems="flex-start" gap={.5}><Box sx={{ minWidth: 0, flex: 1 }}><CascadeDimensionFilter column={filter.column} label={labelColumn(filter.column)} table={TABLE} value={filter.values} filters={scopeFilters.filter((item) => item.column !== filter.column)} filterGroups={organizationGroups} onChange={(values) => setDimensionValues(filter.column, values)} /></Box><IconButton size="small" aria-label={`Remover filtro ${labelColumn(filter.column)}`} onClick={() => setFilters((current) => current.filter((item) => item.column !== filter.column))}><CloseOutlined fontSize="small" /></IconButton></Stack>)}
           </Box>
         </Stack>}
-        <Typography variant="caption" color="text.secondary" display="block" mt={1}>Competência e filtros dimensionais FOCUS são compartilhados pelos widgets executivos. Selecione colunas e valores; vários valores na mesma coluna usam OU e colunas diferentes usam E. As opções são pesquisadas no serviço de consultas considerando os demais filtros.</Typography>
+        <Typography variant="caption" color="text.secondary" display="block" mt={1}>Competência e filtros dimensionais são compartilhados pelos widgets executivos. Selecione colunas e valores; vários valores na mesma coluna usam OU e colunas diferentes usam E. As opções são pesquisadas no serviço de consultas considerando os demais filtros.</Typography>
         {monthFrom > monthTo && <Alert severity="warning" sx={{ mt: 1 }}>A competência inicial precisa ser igual ou anterior à final.</Alert>}
       </Paper>
       {validRange ? <ExpectedViewV2 embedded table={TABLE} director={selectedNodes[0]?.path || ""} departmentId={selectedNodes.length === 1 ? selectedNodeIds[0] : undefined} organizationNodeIds={selectedNodeIds} directorView={directorView} periodFrom={monthFrom.replace("-", "")} periodTo={monthTo.replace("-", "")} scopeKey={filterContextKey} dimensionFilters={dimensionFilters} includeSharedCost={sharedCost} groupByOptions={dimensionColumns} chartHasType={Boolean(info?.columns.some((column) => column.name.toLowerCase() === "tipo"))} chartFilters={chartFilters} chartFilterGroups={organizationGroups} footer={<ExecutiveWidgetsV2 table={TABLE} info={info} filters={scopeFilters} filterGroups={organizationGroups} refreshKey={refresh} year={Number(monthFrom.slice(0, 4)) || year} onAddFilter={(column, value) => setFilters((current) => { const existing = current.find((filter) => filter.column === column); const values = [...new Set([...(existing?.values || []), value])]; return [...current.filter((filter) => filter.column !== column), { column, values }]; })} />} /> : <Alert severity="warning">A competência inicial precisa ser igual ou anterior à final. Os dados não serão consultados até corrigir o intervalo.</Alert>}

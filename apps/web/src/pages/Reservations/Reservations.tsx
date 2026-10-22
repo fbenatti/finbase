@@ -317,7 +317,7 @@ export default function Reservations() {
             Reservas Azure & Savings Plans
           </Typography>
           <Typography variant="body2" color="text.secondary">
-            Catálogo de benefícios coletado via ARM (Microsoft.Billing) na base de origem — sem normalização FOCUS.
+            Catálogo de benefícios coletado via ARM (Microsoft.Billing) na base de origem — sem normalização.
           </Typography>
         </Box>
         <Stack direction="row" spacing={1}>

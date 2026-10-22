@@ -59,7 +59,8 @@ function MetricCard({ title, value, detail, isPercent = false }: { title: string
 export default function CommitmentsDashboard() {
   const [startMonth, setStartMonth] = useState(`${currentMonth.slice(0, 4)}-01`);
   const [endMonth, setEndMonth] = useState(currentMonth);
-  const [source, setSource] = useState<"all" | "azure-ti" | "azure-4p">("all");
+  const [source, setSource] = useState("all");
+  const [sourceOptions, setSourceOptions] = useState<string[]>([]);
   const [showAllProjects, setShowAllProjects] = useState<Record<"RI" | "SavingPlan", boolean>>({ RI: false, SavingPlan: false });
   const [data, setData] = useState<CommitmentsDashboardData | null>(null);
   const [loading, setLoading] = useState(false);
@@ -79,7 +80,14 @@ export default function CommitmentsDashboard() {
       end_period: toPeriod(endMonth),
       source,
     })
-      .then((result) => { if (active) setData(result); })
+      .then((result) => {
+        if (!active) return;
+        setData(result);
+        // As opções de fonte vêm das próprias linhas retornadas sem filtro.
+        if (source === "all") {
+          setSourceOptions(Array.from(new Set(result.monthly.map((row) => String(row.source ?? "")).filter(Boolean))).sort());
+        }
+      })
       .catch((cause: unknown) => {
         if (active) setError(cause instanceof Error ? cause.message : String(cause));
       })
@@ -131,10 +139,9 @@ export default function CommitmentsDashboard() {
           <TextField label="Fim" type="month" size="small" value={endMonth} onChange={(event) => setEndMonth(event.target.value)} InputLabelProps={{ shrink: true }} />
           <FormControl size="small" sx={{ minWidth: 150 }}>
             <InputLabel>Fonte</InputLabel>
-            <Select label="Fonte" value={source} onChange={(event) => setSource(event.target.value as typeof source)}>
+            <Select label="Fonte" value={source} onChange={(event) => setSource(event.target.value)}>
               <MenuItem value="all">Todas as fontes</MenuItem>
-              <MenuItem value="azure-ti">Azure TI</MenuItem>
-              <MenuItem value="azure-4p">Azure 4P</MenuItem>
+              {sourceOptions.map((option) => <MenuItem key={option} value={option}>{option}</MenuItem>)}
             </Select>
           </FormControl>
         </Stack>

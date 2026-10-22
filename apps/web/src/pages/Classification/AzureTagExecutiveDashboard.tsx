@@ -59,7 +59,7 @@ export default function AzureTagExecutiveDashboard() {
   useEffect(() => {
     getAzureTenants().then((items) => {
       setTenants(items);
-      const preferred = items.find((item) => item.code === "azure-ti") ?? items[0];
+      const preferred = items[0];
       if (preferred) setConnectionId(preferred.connection_id);
     }).catch((cause) => setError(cause?.response?.data?.detail || "Não foi possível carregar as conexões Azure."));
   }, []);

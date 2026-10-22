@@ -23,7 +23,7 @@ export const FORECAST_CONFIG_FIELD_HELP = {
   minDays:
     "Mínimo de pontos diários na janela para considerá-la válida. Séries com menos dados ignoram aquela janela ou usam fallback (MEAN_AVAILABLE).",
   dimensions:
-    "Colunas que definem cada série independente (chave de agrupamento).\n\nMais dimensões = mais séries e execução mais pesada. Inclua cloud_origem para separar azure-4p, azure-ti, gcp-4p, gcp-ti. Pode ficar vazio para uma série única.",
+    "Colunas que definem cada série independente (chave de agrupamento).\n\nMais dimensões = mais séries e execução mais pesada. Inclua cloud_origem para separar as origens de nuvem. Pode ficar vazio para uma série única.",
   intervalConnections:
     "Conexões cuja fatura mensal deve ser alocada uniformemente entre a coluna de data e o fim do intervalo (ex.: IBM com ChargePeriodStart → ChargePeriodEnd).\n\nDemais conexões usam série diária normal, sem alocação.",
   chargeEnd:
@@ -36,7 +36,7 @@ export const FORECAST_RULE_FIELD_HELP = {
     "Como localizar linhas na base consolidada:\n• Coluna única — um campo e lista de valores.\n• Cláusulas OR — qualquer cláusula (coluna + valores) que coincidir.",
   column: "Coluna da base consolidada usada para identificar registros afetados por esta regra.",
   values: "Valores exatos (separados por vírgula) que devem coincidir na coluna de identificação.",
-  chargeType: "Tipo de cobrança FOCUS filtrado pela regra (Usage, Purchase, Refund, etc.).",
+  chargeType: "Tipo de cobrança filtrado pela regra (Usage, Purchase, Refund, etc.).",
   behavior:
     "O que fazer com os dados:\n• Excluir da origem — remove da base consolidada antes da agregação quando o campo começa com o valor informado; o campo não precisa ser dimensão.\n• Média de 30 dias — separa a origem e calcula esse componente com a média diária dos últimos 30 dias; ideal para overage que reinicia no ciclo mensal.\n• Ratear fatura mensal — distribui valor no intervalo Start→End.\n• Recorrente — replica compra nos meses seguintes.\n• Cancelar em refund — encerra ao detectar estorno.\n• Substituir — troca por valor fixo.",
   scope:

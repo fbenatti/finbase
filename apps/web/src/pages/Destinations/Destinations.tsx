@@ -593,8 +593,7 @@ export default function Destinations({ embedded: _embedded }: { embedded?: boole
         <DialogContent>
           <Box sx={{ display: "flex", flexDirection: "column", gap: 2, mt: 1 }}>
             <TextField label="Nome da tabela" value={newTable.name}
-              onChange={(e) => setNewTable({ ...newTable, name: e.target.value })}
-              helperText="Ex.: MODELO_FOCUS, MODELO_GCP" />
+              onChange={(e) => setNewTable({ ...newTable, name: e.target.value })} />
             <TextField label="Finalidade (opcional)" value={newTable.description}
               onChange={(e) => setNewTable({ ...newTable, description: e.target.value })}
               multiline rows={2} />

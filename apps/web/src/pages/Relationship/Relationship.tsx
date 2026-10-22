@@ -366,7 +366,7 @@ export default function Relationship({ embedded }: { embedded?: boolean } = {}) 
 
   // ─── Auto-suggest ───
   const autoSuggest = () => {
-    // Provider names rarely match FOCUS names literally. Keep these aliases
+    // Provider names rarely match destination names literally. Keep these aliases
     // explicit and reviewable; suggestions are still only saved after the
     // user clicks "Salvar".
     const aliases: Record<string, string[]> = {
@@ -533,7 +533,7 @@ export default function Relationship({ embedded }: { embedded?: boolean } = {}) 
       }
       return next;
     });
-    setSuccess("Mapeamento Azure → FOCUS aplicado aos campos críticos. Revise e clique em Salvar.");
+    setSuccess("Mapeamento Azure aplicado aos campos críticos. Revise e clique em Salvar.");
   };
 
   // ─── Save ───
@@ -923,7 +923,7 @@ export default function Relationship({ embedded }: { embedded?: boolean } = {}) 
             </Button>
             {String(connName).toLowerCase().includes("azure") && (
               <Button size="small" variant="outlined" color="secondary" startIcon={<span>☁️</span>} onClick={autoSuggestAzureFocus}>
-                Perfil Azure → FOCUS
+                Perfil Azure
               </Button>
             )}
             <Button variant="contained" startIcon={<SaveOutlined />} onClick={saveAll}
@@ -941,7 +941,7 @@ export default function Relationship({ embedded }: { embedded?: boolean } = {}) 
               Partição base preparada (destino)
             </Typography>
             <Typography variant="body2" color="text.secondary">
-              Escolha <strong>Fonte</strong> (ex. azure-4p) e <strong>Tabela de destino</strong> (ex. MODELO FOCUS).
+              Escolha <strong>Fonte</strong> e <strong>Tabela de destino</strong>.
               A fatia de replace usa <code>_billing_period</code> + <code>source_connection_id</code>; extras como
               <code>SubAccountName</code> aparecem abaixo.
             </Typography>

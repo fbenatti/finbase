@@ -618,7 +618,7 @@
       "tab": "destinations"
     },
     "permission_module": "destinations",
-    "position": 2,
+    "position": 3,
     "icon": "TableChartOutlined",
     "required": false,
     "development_only": false,
@@ -635,12 +635,13 @@
       "tab": "relationship"
     },
     "permission_module": "destinations",
-    "position": 3,
+    "position": 99,
     "icon": "AccountTreeOutlined",
     "required": false,
     "development_only": false,
     "legacy_path": "/dados/catalogo",
-    "api_prefixes": []
+    "api_prefixes": [],
+    "visible": false
   },
   {
     "code": "dados_fluxos",
@@ -660,7 +661,7 @@
   {
     "code": "operacoes_dados",
     "parent_code": "section_dados",
-    "label": "Execuções de carga",
+    "label": "Processamento",
     "path": "/operacoes/dados",
     "renderer": "Reprocess",
     "view_params": {
@@ -677,7 +678,7 @@
   {
     "code": "operacoes_projecoes",
     "parent_code": "section_dados",
-    "label": "Rodadas de previsão",
+    "label": "Previsão",
     "path": "/operacoes/projecoes",
     "renderer": "Reprocess",
     "view_params": {
@@ -695,7 +696,7 @@
   {
     "code": "operacoes_acuracia",
     "parent_code": "section_dados",
-    "label": "Qualidade das previsões",
+    "label": "Qualidade da previsão",
     "path": "/operacoes/precisao",
     "renderer": "Reprocess",
     "view_params": {
@@ -713,7 +714,7 @@
   {
     "code": "operacoes_rateios",
     "parent_code": "section_dados",
-    "label": "Alocação de custo compartilhado",
+    "label": "Custo compartilhado",
     "path": "/operacoes/rateios",
     "renderer": "Reprocess",
     "view_params": {
@@ -748,14 +749,14 @@
   {
     "code": "operacoes_extracoes",
     "parent_code": "section_dados",
-    "label": "Coletas da origem",
+    "label": "Extração",
     "path": "/operacoes/extracoes",
     "renderer": "Reprocess",
     "view_params": {
       "tab": "extraction"
     },
     "permission_module": "etl",
-    "position": 11,
+    "position": 2,
     "icon": "CloudOutlined",
     "required": false,
     "development_only": false,
@@ -765,14 +766,14 @@
   {
     "code": "operacoes_agendamentos",
     "parent_code": "section_dados",
-    "label": "Agendamentos de execução",
+    "label": "Agendamentos",
     "path": "/operacoes/agendamentos",
     "renderer": "Reprocess",
     "view_params": {
       "tab": "schedules"
     },
     "permission_module": "etl",
-    "position": 12,
+    "position": 11,
     "icon": "ScheduleOutlined",
     "required": false,
     "development_only": false,
@@ -782,14 +783,14 @@
   {
     "code": "operacoes_historico",
     "parent_code": "section_dados",
-    "label": "Log de execuções",
+    "label": "Logs de execução",
     "path": "/operacoes/historico",
     "renderer": "Reprocess",
     "view_params": {
       "tab": "logs"
     },
     "permission_module": "etl",
-    "position": 13,
+    "position": 12,
     "icon": "HistoryOutlined",
     "required": false,
     "development_only": false,
@@ -798,15 +799,15 @@
   },
   {
     "code": "dados_explorador_destinos",
-    "parent_code": "section_dados",
-    "label": "Análise: tabelas de destino",
+    "parent_code": "section_consultas",
+    "label": "Tabelas de destino",
     "path": "/dados/explorador/destinos",
     "renderer": "Analysis",
     "view_params": {
       "tab": "destino"
     },
     "permission_module": "analysis",
-    "position": 14,
+    "position": 2,
     "icon": "TableChartOutlined",
     "required": false,
     "development_only": false,
@@ -815,15 +816,15 @@
   },
   {
     "code": "dados_explorador_fontes",
-    "parent_code": "section_dados",
-    "label": "Análise: fontes de origem",
+    "parent_code": "section_consultas",
+    "label": "Fontes de origem",
     "path": "/dados/explorador/fontes",
     "renderer": "Analysis",
     "view_params": {
       "tab": "fontes"
     },
     "permission_module": "analysis",
-    "position": 15,
+    "position": 3,
     "icon": "CloudOutlined",
     "required": false,
     "development_only": false,
@@ -832,7 +833,7 @@
   },
   {
     "code": "dados_explorador_origem",
-    "parent_code": "section_dados",
+    "parent_code": "section_consultas",
     "label": "Dados brutos (origem)",
     "path": "/dados/explorador/origem",
     "renderer": "Analysis",
@@ -841,7 +842,7 @@
       "etapa": "origem"
     },
     "permission_module": "analysis",
-    "position": 16,
+    "position": 4,
     "icon": "StorageOutlined",
     "required": false,
     "development_only": false,
@@ -850,7 +851,7 @@
   },
   {
     "code": "dados_explorador_preparados",
-    "parent_code": "section_dados",
+    "parent_code": "section_consultas",
     "label": "Dados preparados",
     "path": "/dados/explorador/preparados",
     "renderer": "Analysis",
@@ -859,7 +860,7 @@
       "etapa": "preparacao"
     },
     "permission_module": "analysis",
-    "position": 17,
+    "position": 5,
     "icon": "DataObjectOutlined",
     "required": false,
     "development_only": false,
@@ -868,7 +869,7 @@
   },
   {
     "code": "dados_explorador_consolidados",
-    "parent_code": "section_dados",
+    "parent_code": "section_consultas",
     "label": "Dados consolidados",
     "path": "/dados/explorador/consolidados",
     "renderer": "Analysis",
@@ -877,7 +878,7 @@
       "etapa": "consolidacao"
     },
     "permission_module": "analysis",
-    "position": 18,
+    "position": 6,
     "icon": "PaidOutlined",
     "required": false,
     "development_only": false,
@@ -886,7 +887,7 @@
   },
   {
     "code": "dados_explorador_temporarios",
-    "parent_code": "section_dados",
+    "parent_code": "section_consultas",
     "label": "Área de staging",
     "path": "/dados/explorador/temporarios",
     "renderer": "Analysis",
@@ -894,7 +895,7 @@
       "tab": "temporarios"
     },
     "permission_module": "analysis",
-    "position": 19,
+    "position": 7,
     "icon": "DeleteSweepOutlined",
     "required": false,
     "development_only": false,
@@ -928,7 +929,7 @@
       "tab": "busca"
     },
     "permission_module": "analysis",
-    "position": 2,
+    "position": 8,
     "icon": "ScienceOutlined",
     "required": false,
     "development_only": false,

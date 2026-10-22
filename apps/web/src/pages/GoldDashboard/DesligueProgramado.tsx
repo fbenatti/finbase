@@ -575,7 +575,7 @@ export default function DesligueProgramado({ embedded }: { embedded?: boolean })
           </Typography>
           {(tagDelta?.total_resources ?? 0) > 0 && (tagDelta?.total_with_tag ?? 0) === 0 && (
             <Alert severity="warning" sx={{ mb: 1.5 }}>
-              A tag <b>shutdown=auto</b> não foi encontrada em nenhum recurso do billing FOCUS. A decisão de
+              A tag <b>shutdown=auto</b> não foi encontrada em nenhum recurso do billing. A decisão de
               desligue é controlada por <b>schedules do Azure Automation</b> (aba Inventário/Governança), não por tags.
             </Alert>
           )}
@@ -775,7 +775,7 @@ export default function DesligueProgramado({ embedded }: { embedded?: boolean })
                 <Box>
                   <Typography variant="h6">Consumo diário — {usageDialog.resource}</Typography>
                   <Typography variant="body2" color="text.secondary">
-                    {monthLabel(realizadoPeriod)} (efetivado) · horas faturadas da VM dia a dia (base consolidada FOCUS)
+                    {monthLabel(realizadoPeriod)} (efetivado) · horas faturadas da VM dia a dia (base consolidada)
                   </Typography>
                 </Box>
                 <Button size="small" onClick={() => setUsageDialog(null)}>Fechar</Button>

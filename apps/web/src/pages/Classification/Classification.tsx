@@ -293,7 +293,7 @@ const ClassificationRuleDialog = memo(function ClassificationRuleDialog({
           </Box>
           <Typography variant="caption" color="text.secondary" sx={{ display: "block", mt: -0.5 }}>
             Use | nos valores para OR entre opções do mesmo campo.
-            {destColumns.length === 0 ? " Os campos FOCUS serão sugeridos assim que a tabela estiver pronta." : ""}
+            {destColumns.length === 0 ? " Os campos de destino serão sugeridos assim que a tabela estiver pronta." : ""}
           </Typography>
 
           <Box
@@ -790,7 +790,7 @@ function MappingRow({ mapping, focusFields, onSave }: {
     <TextField size="small" label="Nome da tag Azure" value={draft.tag_key} onChange={(e) => setDraft({ ...draft, tag_key: e.target.value })} />
     <Autocomplete size="small" options={focusFields} value={draft.focus_field}
       onChange={(_, value) => setDraft({ ...draft, focus_field: value || "" })}
-      renderInput={(params) => <TextField {...params} label="Coluna FOCUS" />} />
+      renderInput={(params) => <TextField {...params} label="Coluna de destino" />} />
     <Box sx={{ display: "flex", gap: .75, alignItems: "center", justifyContent: "flex-start", flexWrap: "wrap" }}>
       <Switch size="small" checked={draft.active} onChange={(e) => setDraft({ ...draft, active: e.target.checked })} />
       {changed && <Chip size="small" color="warning" label="Não gravado" />}
@@ -831,21 +831,21 @@ function TagMappingsTab() {
   return <Box>
     <Typography variant="h6" sx={{ mb: .5 }}>Dicionário global de tags Azure</Typography>
     <Typography variant="body2" color="text.secondary" sx={{ mb: 3 }}>
-      A chave é a tag criada no Azure; o valor vem do campo FOCUS selecionado. As mudanças valem para todos os tenants na próxima geração de policies.
+      A chave é a tag criada no Azure; o valor vem do campo de destino selecionado. As mudanças valem para todos os tenants na próxima geração de policies.
     </Typography>
     {error && <Alert severity="error" sx={{ mb: 2 }} onClose={() => setError("")}>{dataDisplayText(error)}</Alert>}
     {success && <Alert severity="success" sx={{ mb: 2 }} onClose={() => setSuccess("")}>{dataDisplayText(success)}</Alert>}
     {loading ? <CircularProgress size={26} /> : <Box sx={{ maxWidth: 900, border: "1px solid", borderColor: "divider", borderRadius: 2, p: 2 }}>
       <Box sx={{ display: "grid", gridTemplateColumns: "minmax(180px, 1fr) minmax(260px, 1.4fr) minmax(270px, auto)", gap: 1.5, alignItems: "center" }}>
         <Typography variant="subtitle2">Nome da tag</Typography>
-        <Typography variant="subtitle2">Coluna FOCUS (valor)</Typography>
+        <Typography variant="subtitle2">Coluna de destino (valor)</Typography>
         <Typography variant="subtitle2">Estado e ações</Typography>
         {mappings.map((mapping) => <MappingRow key={mapping.id} mapping={mapping} focusFields={focusFields} onSave={saveMapping} />)}
         <Divider sx={{ gridColumn: "1 / -1", my: .5 }} />
         <TextField size="small" label="Nova tag" placeholder="ex.: unidade_negocio" value={newMapping.tag_key} onChange={(e) => setNewMapping({ ...newMapping, tag_key: e.target.value })} />
         <Autocomplete size="small" options={focusFields} value={newMapping.focus_field}
           onChange={(_, value) => setNewMapping({ ...newMapping, focus_field: value || "" })}
-          renderInput={(params) => <TextField {...params} label="Coluna FOCUS" placeholder="ex.: service_name" />} />
+          renderInput={(params) => <TextField {...params} label="Coluna de destino" placeholder="ex.: service_name" />} />
         <Button variant="contained" startIcon={<AddOutlined />} disabled={!newMapping.tag_key.trim() || !newMapping.focus_field.trim()} onClick={() => saveMapping(newMapping)}>Incluir</Button>
       </Box>
     </Box>}

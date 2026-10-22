@@ -760,7 +760,7 @@ export default function Analysis() {
                 <Chip label={`${goldTablesCount} tabela(s)`} size="small" color="primary" variant="outlined" />
               </Box>
               {goldTablesCount === 0 ? (
-                <Alert severity="info" sx={{ mb: 2 }}>Nenhuma base consolidada gerada ainda. Ela é criada automaticamente ao final do reprocessamento do destino MODELO FOCUS (padrão).</Alert>
+                <Alert severity="info" sx={{ mb: 2 }}>Nenhuma base consolidada gerada ainda. Ela é criada automaticamente ao final do reprocessamento da tabela de destino.</Alert>
               ) : (
                 <Box sx={{ display: "flex", gap: 1, mb: 2, flexWrap: "wrap" }}>
                   {(tables.gold || []).map((t) => (
@@ -1015,7 +1015,7 @@ export default function Analysis() {
         destinations.length > 0
           ? <PivotAnalysis
               destinations={destinations}
-              initialTableId={destinations.find(d => d.id > 0 && d.name.toUpperCase() === "MODELO FOCUS (padrão)")?.id || destinations.find(d => d.id > 0)?.id}
+              initialTableId={destinations.find(d => d.id > 0)?.id}
               initialMeasure={searchParams.get("measure") || "realizado"}
               initialFilters={filtersFromSearch(searchParams)}
               autoRun={searchParams.get("tab") === "pivot"}
@@ -1026,7 +1026,7 @@ export default function Analysis() {
       )}
       {tab === "busca" && (
         destinations.length > 0
-          ? <SourceSearch destinations={destinations} initialTableId={destinations.find(d => d.name.toUpperCase() === "MODELO FOCUS (padrão)")?.id} />
+          ? <SourceSearch destinations={destinations} initialTableId={destinations.find(d => d.id > 0)?.id} />
           : <EmptyState message="Nenhuma base consolidada ativa disponível para busca." />
       )}
       </Paper>
