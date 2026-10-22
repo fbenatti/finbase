@@ -355,9 +355,12 @@ async def seed(db: AsyncSession):
         return
 
     # Insert connections
+    existing_codes_result = await db.execute(text("SELECT code FROM source_connection"))
+    existing_codes = {row[0] for row in existing_codes_result.all()}
     connections = _build_connections()
     for conn_data in connections:
-        db.add(SourceConnection(**conn_data))
+        if conn_data["code"] not in existing_codes:
+            db.add(SourceConnection(**conn_data))
     await db.flush()
 
     # Fetch all connection IDs
