@@ -12,33 +12,15 @@ import {
 } from "../../services/api";
 import { api } from "../../services/api";
 import EmptyState from "../../components/EmptyState";
+import SourceSetupWizard from "./SourceSetupWizard";
+import { CONNECTOR_TYPES, SOURCE_PROVIDERS, SourceProvider, kindOf, providerOf, visibleKinds } from "./sourceCatalog";
+
+export { CONNECTOR_TYPES };
 import ConnectionsDataGrid, { ConnectionTestMessage, getProviderLabel, getConnectorLabel } from "./ConnectionsDataGrid";
 import RecordHistory from "../../components/RecordHistory";
 import AzureSourcesPanel from "./AzureSourcesPanel";
 import IntegrationsPanel from "./IntegrationsPanel";
 import VersionHistorySection from "../../components/VersionHistorySection";
-
-export const CONNECTOR_TYPES = [
-  { value: "azure_mca_invoice", label: "Azure MCA: faturas e contratos", scope: "azure" },
-  { value: "azure_blob", label: "Azure: relatórios de custo em arquivo", scope: "azure" },
-  { value: "azure_pricesheet", label: "Azure: tabela de preços contratados", scope: "azure" },
-  { value: "azure_openai_ptu", label: "Azure OpenAI (PTU)", scope: "azure" },
-  { value: "azure_automation_jobs", label: "Azure Automation (jobs)", scope: "azure" },
-  { value: "azure_resource_graph", label: "Azure Resource Graph (inventário)", scope: "azure" },
-  { value: "gcp_bigquery", label: "GCP: BigQuery", scope: "gcp" },
-  { value: "oci", label: "Oracle Cloud Infrastructure (OCI)", scope: "oci" },
-  { value: "mongodb_atlas", label: "Atlas (MongoDB)", scope: "atlas" },
-  { value: "github_billing", label: "GitHub: faturamento (Copilot)", scope: "github" },
-  { value: "github_license", label: "GitHub: licenças (Copilot)", scope: "github" },
-  { value: "github_token", label: "GitHub: tokens (Copilot)", scope: "github" },
-  { value: "notebooklm_license", label: "NotebookLM: licenças", scope: "notebooklm" },
-  { value: "notebooklm_token", label: "NotebookLM: tokens", scope: "notebooklm" },
-  { value: "gemini_license", label: "Gemini: licenças", scope: "gemini" },
-  { value: "gemini_token", label: "Gemini: tokens", scope: "gemini" },
-  { value: "claude_license", label: "Claude: licenças (Enterprise)", scope: "claude" },
-  { value: "claude_token", label: "Claude: tokens (Enterprise)", scope: "claude" },
-  { value: "databricks", label: "Databricks: consumo do workspace", scope: "databricks" },
-];
 
 function describeConnectionLoadError(error: unknown, endpoint: string, fallback: string): string {
   const response = typeof error === "object" && error !== null && "response" in error
@@ -48,15 +30,6 @@ function describeConnectionLoadError(error: unknown, endpoint: string, fallback:
   const detail = error instanceof Error ? error.message : fallback;
   return `${endpoint}${status}: ${detail}`;
 }
-
-// Tipo de fontes da página de Conexões.
-export type ConnectionCategory = "provedor" | "ferramenta" | "marketplace";
-
-const CATEGORY_TABS: { value: ConnectionCategory; label: string }[] = [
-  { value: "provedor", label: "Nuvens e provedores" },
-  { value: "ferramenta", label: "Ferramentas e plataformas" },
-  { value: "marketplace", label: "Oferta no marketplace" },
-];
 
 // Sub-tipos de extração por ferramenta.
 const TOOL_EXTRACTION_TYPES: Record<string, { value: string; connectorType: string; cloudName: string; emoji: string; title: string; description: string }[]> = {
@@ -78,48 +51,6 @@ const TOOL_EXTRACTION_TYPES: Record<string, { value: string; connectorType: stri
     { value: "license", connectorType: "claude_license", cloudName: "claude-license", emoji: "license", title: "Licenças por colaborador", description: "Colaboradores com licença em uso" },
   ],
 };
-
-const TOOL_LABELS: Record<string, string> = {
-  github: "GitHub Enterprise",
-  notebooklm: "NotebookLM",
-  gemini: "Google Gemini",
-  claude: "Claude (Anthropic, Enterprise)",
-};
-
-const CONNECTOR_PICKER_OPTIONS: { value: string; label: string; description: string; icon: React.ReactNode; category: ConnectionCategory; tool?: string }[] = [
-  // Provedores Cloud
-  { value: "azure_mca_invoice", label: "Azure MCA", description: "Faturas e compromissos firmados", icon: <Cloud />, category: "provedor" },
-  { value: "azure_blob", label: "Azure", description: "Relatórios de custo em arquivos CSV", icon: <Cloud />, category: "provedor" },
-  { value: "azure_pricesheet", label: "Azure: tabela de preços contratados", description: "Tabela de preços negociados", icon: <Cloud />, category: "provedor" },
-  { value: "azure_openai_ptu", label: "Azure OpenAI", description: "PTU (capacidade provisionada)", icon: <SmartToy />, category: "ferramenta" },
-  { value: "azure_automation_jobs", label: "Azure Automation", description: "Jobs de liga e desliga de VMs", icon: <Cloud />, category: "ferramenta" },
-  { value: "azure_resource_graph", label: "Azure Resource Graph (inventário)", description: "Inventário e recursos ociosos", icon: <Search />, category: "ferramenta" },
-  { value: "gcp_bigquery", label: "GCP", description: "BigQuery", icon: <Storage />, category: "provedor" },
-  { value: "oci", label: "OCI", description: "Oracle Cloud", icon: <Cloud />, category: "provedor" },
-  // Ferramentas Cloud
-  { value: "github", label: "GitHub Enterprise", description: "Copilot: faturamento, tokens e licenças", icon: <Cloud />, category: "ferramenta", tool: "github" },
-  { value: "notebooklm", label: "NotebookLM", description: "Licenças e tokens de IA", icon: <MenuBook />, category: "ferramenta", tool: "notebooklm" },
-  { value: "gemini", label: "Gemini", description: "Licenças e tokens de IA", icon: <AutoAwesome />, category: "ferramenta", tool: "gemini" },
-  { value: "claude", label: "Claude", description: "Claude.ai e API Anthropic", icon: <Psychology />, category: "ferramenta", tool: "claude" },
-  { value: "databricks", label: "Databricks", description: "Consumo do workspace", icon: <Storage />, category: "ferramenta" },
-  // Oferta no marketplace
-  { value: "mongodb_atlas", label: "MongoDB", description: "Atlas", icon: <Dataset />, category: "marketplace" },
-];
-
-const CLOUD_SCOPES = [
-  { value: "azure", label: "Azure" },
-  { value: "gcp", label: "GCP" },
-  { value: "ibm", label: "IBM Cloud" },
-  { value: "aws", label: "AWS" },
-  { value: "oci", label: "Oracle Cloud Infrastructure (OCI)" },
-  { value: "atlas", label: "Atlas (MongoDB)" },
-  { value: "github", label: "GitHub Enterprise" },
-  { value: "notebooklm", label: "NotebookLM" },
-  { value: "gemini", label: "Google Gemini (IA)" },
-  { value: "claude", label: "Claude (Anthropic, Enterprise)" },
-  { value: "databricks", label: "Databricks" },
-  { value: "other", label: "Outra ou não identificada" },
-];
 
 const emptyForm = {
   code: "", name: "", connector_type: "azure_blob", cloud_name: "", cloud_scope: "azure",
@@ -209,6 +140,8 @@ export default function Connections() {
   const [testMsgs, setTestMsgs] = useState<Record<number, ConnectionTestMessage>>({});
   const [testingId, setTestingId] = useState<number | null>(null);
   const [search, setSearch] = useState("");
+  // Fonte recém-criada: abre o passo a passo até o agendamento da coleta.
+  const [setupConnection, setSetupConnection] = useState<SourceConnection | null>(null);
   const [tabsReady, setTabsReady] = useState(false);
   // Serviços auxiliares (Jev, ServiceNow) não são fontes de dado de nuvem, mas
   // seguem o mesmo princípio de configuração — por isso vivem aqui, e não numa
@@ -216,7 +149,8 @@ export default function Connections() {
   const gridQuery = useRef<{ offset: number; limit: number; sort?: { field: string; direction: "asc" | "desc" }; filters: Array<{ field: string; operator: "equals" | "notEquals"; value: string }> }>({ offset: 0, limit: 25, filters: [] });
   const gridRequestId = useRef(0);
   const [connectorPickerOpen, setConnectorPickerOpen] = useState(false);
-  const [toolSubPicker, setToolSubPicker] = useState<string | null>(null);
+  // Seletor em dois passos: provedor e depois o tipo de dado.
+  const [pickerProvider, setPickerProvider] = useState<SourceProvider | null>(null);
   const [dialogOpen, setDialogOpen] = useState(false);
   const [savingConnection, setSavingConnection] = useState(false);
   const [editing, setEditing] = useState<SourceConnection | null>(null);
@@ -247,11 +181,8 @@ export default function Connections() {
 
   useEffect(() => { load(); }, []);
 
-  // Opção do seletor "Conectar fonte" some quando todos os seus tipos estão desligados em Conectores.
-  const isPickerOptionVisible = (option: (typeof CONNECTOR_PICKER_OPTIONS)[number]) => {
-    const types = option.tool ? (TOOL_EXTRACTION_TYPES[option.tool] ?? []).map((type) => type.connectorType) : [option.value];
-    return types.some((type) => !hiddenConnectorTypes.has(type));
-  };
+  // Provedores que ainda têm algum tipo de dado habilitado em Conectores.
+  const pickerProviders = SOURCE_PROVIDERS.filter((provider) => visibleKinds(provider, hiddenConnectorTypes).length > 0);
 
   // Start with every connection visible; categories and providers are filters.
   useEffect(() => { if (!loading) setTabsReady(true); }, [loading]);
@@ -289,7 +220,7 @@ export default function Connections() {
     setEditing(null);
     setError("");
     setFormTestMessage(null);
-    const scope = CONNECTOR_TYPES.find((type) => type.value === connectorType)?.scope || "";
+    const scope = providerOf(connectorType)?.key || "";
     const latestPeriod = latestMcaInvoiceMonth();
     const initialForm = { ...emptyForm, connector_type: connectorType, cloud_scope: scope, mca_start_period: latestPeriod, mca_end_period: latestPeriod };
     if (connectorType === "azure_pricesheet") {
@@ -307,19 +238,24 @@ export default function Connections() {
     setDialogOpen(true);
   };
 
-  const chooseConnector = (connectorType: string) => {
-    const option = CONNECTOR_PICKER_OPTIONS.find((candidate) => candidate.value === connectorType);
-    if (option?.tool) {
-      setConnectorPickerOpen(false);
-      setToolSubPicker(option.tool);
-      return;
-    }
-    setConnectorPickerOpen(false);
-    openNew(connectorType);
+  const closePicker = () => { setConnectorPickerOpen(false); setPickerProvider(null); };
+
+  const chooseKind = (connectorType: string) => {
+    closePicker();
+    const tool = Object.keys(TOOL_EXTRACTION_TYPES).find((key) => TOOL_EXTRACTION_TYPES[key].some((type) => type.connectorType === connectorType));
+    const toolType = tool ? TOOL_EXTRACTION_TYPES[tool].find((type) => type.connectorType === connectorType) : undefined;
+    if (tool && toolType) chooseToolType(tool, toolType);
+    else openNew(connectorType);
+  };
+
+  const chooseProvider = (provider: SourceProvider) => {
+    const kinds = visibleKinds(provider, hiddenConnectorTypes);
+    // Um único tipo de dado: não há o que perguntar.
+    if (kinds.length === 1) chooseKind(kinds[0].connectorType);
+    else setPickerProvider(provider);
   };
 
   const chooseToolType = (tool: string, type: { connectorType: string; cloudName: string; title: string }) => {
-    setToolSubPicker(null);
     setEditing(null);
     setFormTestMessage(null);
     const toolScope: Record<string, string> = { github: "github", notebooklm: "notebooklm", gemini: "gemini", claude: "claude" };
@@ -327,7 +263,7 @@ export default function Connections() {
     const geminiExtraction = (type.connectorType.startsWith("notebooklm_") || type.connectorType.startsWith("gemini_")) ? type.connectorType.split("_")[1] : "token";
     setForm({
       ...emptyForm,
-      name: (TOOL_LABELS[tool] || tool) + " " + type.title,
+      name: `${providerOf(type.connectorType)?.label ?? tool} ${type.title}`,
       code: type.connectorType,
       connector_type: type.connectorType,
       cloud_scope: toolScope[tool] || tool,
@@ -732,7 +668,7 @@ export default function Connections() {
       }
       const body = buildConnectionBody();
       if (editing) await updateConnection(editing.id, body);
-      else await createConnection(body);
+      else setSetupConnection(await createConnection(body));
       setDialogOpen(false);
       void load();
       void loadGrid();
@@ -896,94 +832,52 @@ export default function Connections() {
             key={search}
             connections={connections} total={gridTotal} loading={gridLoading}
             testingId={testingId} testMessages={testMsgs}
-            onEdit={openEdit} onHistory={setHistoryConn}
+            onEdit={openEdit} onHistory={setHistoryConn} onSetup={setSetupConnection}
             onTest={connection => void runTest(connection)} onDelete={setConnectionPendingDeletion}
             onQuery={query => { gridQuery.current = { ...gridQuery.current, ...query }; void loadGrid(gridQuery.current); }}
           />
         </Paper>
       )}
 
-      <Dialog open={connectorPickerOpen} onClose={() => setConnectorPickerOpen(false)} maxWidth="md" fullWidth>
-        <DialogTitle sx={{ pb: 0 }}>Conectar fonte</DialogTitle>
+      <Dialog open={connectorPickerOpen} onClose={closePicker} maxWidth="md" fullWidth>
+        <DialogTitle sx={{ pb: 0 }}>{pickerProvider ? `${pickerProvider.label}: o que coletar?` : "Conectar fonte"}</DialogTitle>
         <DialogContent sx={{ pt: "16px !important", pb: 4 }}>
           <Typography color="text.secondary" sx={{ mb: 3 }}>
-            Selecione o provedor ou formato de origem para configurar uma nova conexão.
+            {pickerProvider ? "Escolha o tipo de dado que essa fonte vai trazer." : "Escolha de onde vêm os dados."}
           </Typography>
-          {CATEGORY_TABS.map((category) => {
-            const options = CONNECTOR_PICKER_OPTIONS.filter((option) => option.category === category.value && isPickerOptionVisible(option));
-            return (
-              <Box key={category.value} sx={{ mb: 2.5 }}>
-                <Typography variant="subtitle2" fontWeight={700} color="text.secondary" sx={{ mb: 1 }}>
-                  {category.label}
-                </Typography>
-                <Box sx={{ display: "grid", gridTemplateColumns: { xs: "1fr", sm: "repeat(2, minmax(0, 1fr))" }, gap: 1 }}>
-                  {options.map((option) => (
-                    <Button
-                      key={option.value}
-                      variant="outlined"
-                      color="inherit"
-                      onClick={() => chooseConnector(option.value)}
-                      sx={{
-                        width: "100%",
-                        minHeight: 80,
-                        justifyContent: "flex-start",
-                        textAlign: "left",
-                        gap: 2,
-                        borderColor: "divider",
-                        color: "text.primary",
-                        "&:hover": { borderColor: "primary.main", bgcolor: "action.hover" },
-                      }}
-                    >
-                      <Box sx={{ color: "primary.main", display: "flex", "& svg": { width: 24, height: 24 } }}>{option.icon}</Box>
-                      <Box><Typography variant="body2" fontWeight={600}>{option.label}</Typography><Typography variant="caption" color="text.secondary">{option.description}</Typography></Box>
-                    </Button>
-                  ))}
-                </Box>
-              </Box>
-            );
-          })}
-        </DialogContent>
-        <DialogActions sx={{ px: 3, pb: 2 }}>
-          <Button onClick={() => setConnectorPickerOpen(false)}>Cancelar</Button>
-        </DialogActions>
-        </Dialog>
-
-      {/* Sub-seletor de tipo de extração por ferramenta (Copilot / NotebookLM / Gemini / Claude) */}
-      <Dialog open={toolSubPicker !== null} onClose={() => setToolSubPicker(null)} maxWidth="sm" fullWidth>
-        <DialogTitle sx={{ pb: 0, display: "flex", alignItems: "center", gap: 1 }}>
-          <AutoAwesome color="primary" />
-          {toolSubPicker ? TOOL_LABELS[toolSubPicker] || toolSubPicker : ""} — Tipo de informação
-        </DialogTitle>
-        <DialogContent sx={{ pt: "16px !important", pb: 4 }}>
-          <Typography color="text.secondary" sx={{ mb: 3 }}>
-            Selecione qual tipo de dado da ferramenta você deseja extrair:
-          </Typography>
-          <Stack direction="column" gap={1.5}>
-            {toolSubPicker && TOOL_EXTRACTION_TYPES[toolSubPicker]?.filter((type) => !hiddenConnectorTypes.has(type.connectorType)).map((type) => (
+          {pickerProviders.length === 0 && <Alert severity="info">Nenhum tipo de fonte está habilitado. Habilite em Configurações › Conectores.</Alert>}
+          <Box sx={{ display: "grid", gridTemplateColumns: { xs: "1fr", sm: "repeat(2, minmax(0, 1fr))" }, gap: 1 }}>
+            {(pickerProvider
+              ? visibleKinds(pickerProvider, hiddenConnectorTypes).map((kind) => ({ key: kind.connectorType, label: kind.label, description: kind.description, icon: pickerProvider.icon, onClick: () => chooseKind(kind.connectorType) }))
+              : pickerProviders.map((provider) => ({ key: provider.key, label: provider.label, description: provider.description, icon: provider.icon, onClick: () => chooseProvider(provider) }))
+            ).map((option) => (
               <Button
-                key={type.value}
-                variant="outlined" color="inherit" fullWidth
-                onClick={() => chooseToolType(toolSubPicker, type)}
-                sx={{ justifyContent: "flex-start", gap: 2, p: 2, borderColor: "divider",
-                  "&:hover": { borderColor: "primary.main", bgcolor: "action.hover" } }}
+                key={option.key}
+                variant="outlined"
+                color="inherit"
+                onClick={option.onClick}
+                sx={{
+                  width: "100%",
+                  minHeight: 80,
+                  justifyContent: "flex-start",
+                  textAlign: "left",
+                  gap: 2,
+                  borderColor: "divider",
+                  color: "text.primary",
+                  "&:hover": { borderColor: "primary.main", bgcolor: "action.hover" },
+                }}
               >
-                <Box sx={{ display: "flex", color: "primary.main" }}>{type.value === "license" ? <Cloud /> : type.value === "billing" ? <Download /> : <Storage />}</Box>
-                <Box textAlign="left">
-                  <Typography fontWeight={700}>{type.title}</Typography>
-                  <Typography variant="caption" color="text.secondary">
-                    {type.description}
-                  </Typography>
-                </Box>
+                <Box sx={{ color: "primary.main", display: "flex", "& svg": { width: 24, height: 24 } }}>{option.icon}</Box>
+                <Box><Typography variant="body2" fontWeight={600}>{option.label}</Typography><Typography variant="caption" color="text.secondary">{option.description}</Typography></Box>
               </Button>
             ))}
-          </Stack>
+          </Box>
         </DialogContent>
         <DialogActions sx={{ px: 3, pb: 2 }}>
-          <Button onClick={() => setToolSubPicker(null)}>Cancelar</Button>
+          {pickerProvider && <Button onClick={() => setPickerProvider(null)}>Voltar</Button>}
+          <Button onClick={closePicker}>Cancelar</Button>
         </DialogActions>
       </Dialog>
-
-
 
       <Dialog open={dialogOpen} onClose={() => { if (!savingConnection) setDialogOpen(false); }} maxWidth="md" fullWidth>
         <DialogTitle>{editing ? "Alterar conexão" : "Definir parâmetros da conexão"}</DialogTitle>
@@ -995,17 +889,18 @@ export default function Connections() {
             <Typography variant="subtitle2">Dados de identificação</Typography>
             <TextField label="Nome da fonte" value={form.name} onChange={e => setForm({ ...form, name: e.target.value })} />
             <TextField label="Identificador da conexão" value={form.code} disabled={form.connector_type === "azure_pricesheet"} onChange={e => setForm({ ...form, code: e.target.value })} helperText="Chave usada nos fluxos de coleta." />
+            <TextField label="Provedor" value={providerOf(form.connector_type)?.label ?? "Outro"} disabled />
             <FormControl fullWidth>
-              <InputLabel id="connection-type-label">Tipo de integração</InputLabel>
-              <Select labelId="connection-type-label" value={form.connector_type} label="Tipo de integração" onChange={e => { const type = e.target.value; const scope = CONNECTOR_TYPES.find(t => t.value === type)?.scope || ""; setForm({ ...form, connector_type: type, cloud_scope: scope }); }}>
-                {CONNECTOR_TYPES.map(t => <MenuItem key={t.value} value={t.value}>{t.label}</MenuItem>)}
-                {form.connector_type === "manual_csv" && <MenuItem value="manual_csv">Carga manual de CSV</MenuItem>}
-              </Select>
-            </FormControl>
-            <FormControl fullWidth>
-              <InputLabel id="connection-provider-label">Nuvem ou aplicação</InputLabel>
-              <Select labelId="connection-provider-label" value={form.cloud_scope || "other"} label="Nuvem ou aplicação" onChange={e => setForm({ ...form, cloud_scope: e.target.value })}>
-                {CLOUD_SCOPES.map(scope => <MenuItem key={scope.value} value={scope.value}>{scope.label}</MenuItem>)}
+              <InputLabel id="connection-kind-label">O que coletar</InputLabel>
+              <Select labelId="connection-kind-label" value={form.connector_type} label="O que coletar" onChange={e => { const type = e.target.value; setForm({ ...form, connector_type: type, cloud_scope: providerOf(type)?.key ?? form.cloud_scope }); }}>
+                {(() => {
+                  const provider = providerOf(form.connector_type);
+                  const kinds = provider ? visibleKinds(provider, hiddenConnectorTypes) : [];
+                  // Mantém o tipo atual na lista mesmo se foi desabilitado depois.
+                  const current = kindOf(form.connector_type);
+                  const options = current && !kinds.includes(current) ? [current, ...kinds] : kinds;
+                  return options.map((kind) => <MenuItem key={kind.connectorType} value={kind.connectorType}>{kind.label}</MenuItem>);
+                })()}
               </Select>
             </FormControl>
             <TextField label="Conta ou ambiente de faturamento" value={form.cloud_name} onChange={e => setForm({ ...form, cloud_name: e.target.value })} />
@@ -1476,6 +1371,7 @@ export default function Connections() {
         </DialogContent>
         <DialogActions><Button onClick={() => setHistoryConn(null)}>Fechar histórico</Button></DialogActions>
       </Dialog>
+      <SourceSetupWizard connection={setupConnection} onClose={() => { setSetupConnection(null); void loadGrid(); }} />
     </Box>
   );
 }

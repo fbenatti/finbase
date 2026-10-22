@@ -19,6 +19,7 @@ import {
   History,
   FilterAlt, More,
 } from "./ConnectionIcons";
+import { PlaylistAddCheck } from "@mui/icons-material";
 import { GridColDef, GridFilterModel, GridPaginationModel, GridSortModel, useGridApiRef } from "@mui/x-data-grid";
 import { SourceConnection } from "../../services/api";
 import { RowAction } from "../../components/RowAction";
@@ -38,6 +39,7 @@ type Props = {
   testMessages: Record<number, ConnectionTestMessage>;
   onEdit: (connection: SourceConnection) => void;
   onHistory: (connection: SourceConnection) => void;
+  onSetup: (connection: SourceConnection) => void;
   onTest: (connection: SourceConnection) => void;
   onDelete: (connection: SourceConnection) => void;
   onQuery: (query: { offset: number; limit: number; sort?: { field: string; direction: "asc" | "desc" }; filters: ConnectionGridFilter[] }) => void;
@@ -145,6 +147,7 @@ export default function ConnectionsDataGrid({
   testMessages,
   onEdit,
   onHistory,
+  onSetup,
   onTest,
   onDelete,
   onQuery,
@@ -393,6 +396,7 @@ export default function ConnectionsDataGrid({
         />
       </Box>
       <Menu anchorEl={rowMenu?.anchor} open={Boolean(rowMenu)} onClose={() => setRowMenu(null)}>
+        <MenuItem onClick={() => { if (rowMenu) onSetup(rowMenu.connection); setRowMenu(null); }}><ListItemIcon><PlaylistAddCheck /></ListItemIcon>Configurar passo a passo</MenuItem>
         <MenuItem disabled={testingId === rowMenu?.connection.id} onClick={() => { if (rowMenu) onTest(rowMenu.connection); setRowMenu(null); }}><ListItemIcon><Cable /></ListItemIcon>Testar conexão</MenuItem>
         <MenuItem onClick={() => { if (rowMenu) onHistory(rowMenu.connection); setRowMenu(null); }}><ListItemIcon><History /></ListItemIcon>Abrir log de alterações</MenuItem>
         <Divider />
