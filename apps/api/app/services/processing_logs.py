@@ -35,7 +35,7 @@ def _is_missing_processing_log_cube_error(exc: Exception) -> bool:
 async def _maintain_processing_log_cube_snapshots() -> bool:
     """Keep only the latest hour of snapshot history for the derived log cube."""
     from app.services.iceberg_service import _get_catalog
-    from app.services.trino_service import TRINO_URL, TRINO_USER
+    from app.services.trino_service import TRINO_CATALOG, TRINO_URL, TRINO_USER, qualify_sql_catalog
 
     table = _get_catalog().load_table(("gold", PROCESSING_LOG_CUBE))
     if table.current_snapshot() is None or "_stg_" in str(table.location()):
@@ -44,14 +44,14 @@ async def _maintain_processing_log_cube_snapshots() -> bool:
     retention = "1h"
     headers = {
         "X-Trino-User": TRINO_USER,
-        "X-Trino-Catalog": "iceberg",
+        "X-Trino-Catalog": TRINO_CATALOG,
         "X-Trino-Schema": "gold",
         "X-Trino-Session": (
             f"iceberg.expire_snapshots_min_retention={retention},"
             f"iceberg.remove_orphan_files_min_retention={retention}"
         ),
     }
-    statements = (
+    statements = tuple(qualify_sql_catalog(sql) for sql in (
         f"ALTER TABLE iceberg.gold.{PROCESSING_LOG_CUBE} SET PROPERTIES "
         "delete_after_commit_enabled = true, max_previous_versions = 10",
         f"ALTER TABLE iceberg.gold.{PROCESSING_LOG_CUBE} EXECUTE optimize",
@@ -59,7 +59,7 @@ async def _maintain_processing_log_cube_snapshots() -> bool:
         f"EXECUTE expire_snapshots(retention_threshold => '{retention}')",
         f"ALTER TABLE iceberg.gold.{PROCESSING_LOG_CUBE} "
         f"EXECUTE remove_orphan_files(retention_threshold => '{retention}')",
-    )
+    ))
     async with httpx.AsyncClient(timeout=httpx.Timeout(300.0)) as client:
         for sql in statements:
             response = await client.post(
