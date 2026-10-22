@@ -209,7 +209,7 @@ async function tryRefresh(): Promise<string | null> {
     refreshPromise = (async () => {
       try {
         const { data } = await axios.post(
-          "/api/auth/refresh",
+          "/api/autenticacao/atualizar",
           {},
           { withCredentials: true },
         );
@@ -267,7 +267,7 @@ export async function apiLogin(
   password: string,
 ): Promise<{ must_change_password: boolean }> {
   const { data } = await axios.post(
-    "/api/auth/login",
+    "/api/autenticacao/entrar",
     { username, password },
     { withCredentials: true },
   );
@@ -277,7 +277,7 @@ export async function apiLogin(
 
 export async function apiLogout(): Promise<void> {
   try {
-    await axios.post("/api/auth/logout", {}, { withCredentials: true });
+    await axios.post("/api/autenticacao/sair", {}, { withCredentials: true });
   } finally {
     setAccessToken(null);
   }

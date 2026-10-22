@@ -45,7 +45,7 @@ export default function Login() {
         return;
       }
       const query = `?login_hint=${encodeURIComponent(identifier.trim())}`;
-      window.location.href = `/api/auth/sso/${encodeURIComponent(oidcProvider.name)}/login${query}`;
+      window.location.href = `/api/autenticacao/sso/${encodeURIComponent(oidcProvider.name)}/entrar${query}`;
       return;
     }
 
@@ -77,7 +77,7 @@ export default function Login() {
 
   const samlLogin = (provider: SsoPublicProvider) => {
     setError(null);
-    window.location.href = `/api/auth/sso/${encodeURIComponent(provider.name)}/login`;
+    window.location.href = `/api/autenticacao/sso/${encodeURIComponent(provider.name)}/entrar-saml`;
   };
 
   const canSubmit = isCorporate ? Boolean(identifier.trim()) : Boolean(identifier && password);
