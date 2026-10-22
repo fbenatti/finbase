@@ -1308,8 +1308,8 @@ async def padroes_recursos(period: str | None = None, padrao: str | None = None)
 
 
 class SavingOrganogramaItem(BaseModel):
-    organograma_nivel_4: str | None
-    organograma_nivel_5: str | None
+    hierarquia_4: str | None
+    hierarquia_5: str | None
     vms: int
     saved_hours: float
     saving_brl: float
@@ -1497,10 +1497,10 @@ SavingDepartamentoResponse = SavingOrganogramaResponse
 @router.get("/economia-organograma", response_model=SavingOrganogramaResponse)
 @router.get("/economia-departamento", response_model=SavingOrganogramaResponse, include_in_schema=False)
 async def saving_organograma(period: str | None = None):
-    """Saving por desligue agrupado por organograma_nivel_4 e organograma_nivel_5 (FOCUS).
+    """Saving por desligue agrupado por hierarquia_4 e hierarquia_5 (FOCUS).
 
     Junta a Gold de saving (por resource_id) com dest_modelo_focus para
-    obter organograma_nivel_4/5 de cada recurso (via MAX na camada de detalhe).
+    obter hierarquia_4/5 de cada recurso (via MAX na camada de detalhe).
     ``period`` opcional (YYYYMM); default = mês mais recente.
     """
     if not period:
@@ -1514,7 +1514,7 @@ async def saving_organograma(period: str | None = None):
             pass
     if not period:
         return SavingOrganogramaResponse(billing_period="", rows=[])
-    # Junta a Gold (saving) com a Gold para obter organograma_nivel_4/5 por
+    # Junta a Gold (saving) com a Gold para obter hierarquia_4/5 por
     # recurso. O join é restrito aos resource_ids da Gold (pequeno), então o
     # scan da Gold é filtrado pelo mês — sem varrer tudo por requisição.
     sql = f"""
@@ -1527,16 +1527,16 @@ async def saving_organograma(period: str | None = None):
     gold_dept AS (
         SELECT
             LOWER(TRIM(g."ResourceId")) AS rid,
-            MAX(g.organograma_nivel_4) AS n4,
-            MAX(g.organograma_nivel_5) AS n5
+            MAX(g.hierarquia_4) AS n4,
+            MAX(g.hierarquia_5) AS n5
         FROM iceberg.{layers.detail_layer()}.dest_modelo_focus g
         JOIN gold_vms d ON LOWER(TRIM(g."ResourceId")) = LOWER(TRIM(d.resource_id))
         WHERE g._billing_period = '{period}'
         GROUP BY 1
     )
     SELECT
-        COALESCE(g.n4, 'SEM DEPARTAMENTO') AS organograma_nivel_4,
-        COALESCE(g.n5, 'SEM PROJETO') AS organograma_nivel_5,
+        COALESCE(g.n4, 'SEM DEPARTAMENTO') AS hierarquia_4,
+        COALESCE(g.n5, 'SEM PROJETO') AS hierarquia_5,
         COUNT(DISTINCT d.resource_id) AS vms,
         COALESCE(SUM(d.saved_hours), 0) AS saved_hours,
         COALESCE(SUM(d.saving_brl), 0) AS saving_brl
@@ -1553,8 +1553,8 @@ async def saving_organograma(period: str | None = None):
         billing_period=period,
         rows=[
             SavingOrganogramaItem(
-                organograma_nivel_4=str(r["organograma_nivel_4"]),
-                organograma_nivel_5=str(r["organograma_nivel_5"]),
+                hierarquia_4=str(r["hierarquia_4"]),
+                hierarquia_5=str(r["hierarquia_5"]),
                 vms=int(r["vms"] or 0),
                 saved_hours=round(float(r["saved_hours"] or 0), 0),
                 saving_brl=round(float(r["saving_brl"] or 0), 2),

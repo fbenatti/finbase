@@ -365,7 +365,7 @@ async def lifespan(app: FastAPI):
             )""",
             """INSERT INTO azure_tag_mapping (tag_key, focus_field, active)
                SELECT seed.tag_key, seed.focus_field, TRUE
-               FROM (VALUES ('projeto', 'organograma_nivel_5'), ('diretoria', 'organograma_nivel_4'), ('centro-de-custos', 'centro_custo')) AS seed(tag_key, focus_field)
+               FROM (VALUES ('projeto', 'hierarquia_5'), ('diretoria', 'hierarquia_4'), ('centro-de-custos', 'centro_custo')) AS seed(tag_key, focus_field)
                WHERE NOT EXISTS (SELECT 1 FROM azure_tag_mapping)""",
             """UPDATE azure_tag_mapping AS old
                SET tag_key = 'centro-de-custos', updated_at = now()
@@ -600,51 +600,51 @@ async def lifespan(app: FastAPI):
                    json_build_object('period_mode', 'all', 'accuracy', TRUE, 'shared_cost', FALSE, 'forecast_config_ids', '[]'::json, 'gold_rule_ids', '[]'::json), 'reprocess'
             WHERE NOT EXISTS (SELECT 1 FROM scheduled_task WHERE schedule_type = 'reprocess')
         """)
-        await _execute_migration(conn, """
-            DO $$ BEGIN
-              IF to_regclass('fact_cost') IS NOT NULL THEN
-                ALTER TABLE fact_cost ADD COLUMN IF NOT EXISTS organograma_nivel_6 VARCHAR(200);
-                ALTER TABLE fact_cost ADD COLUMN IF NOT EXISTS organograma_nivel_7 VARCHAR(200);
-              END IF;
-            END $$
-        """)
-        await _execute_migration(conn, """
+        # Colunas de nível com nomes antigos viram hierarquia_N (sem limite de níveis).
+        await _execute_migration(conn, r"""
             DO $$
-            DECLARE level int;
+            DECLARE rec record;
             BEGIN
               IF to_regclass('fact_cost') IS NOT NULL THEN
-                FOR level IN 1..7 LOOP
-                  IF EXISTS (
+                FOR rec IN
+                  SELECT column_name AS old_name,
+                         'hierarquia_' || substring(column_name FROM '(\d+)$') AS new_name
+                  FROM information_schema.columns
+                  WHERE table_schema = current_schema() AND table_name = 'fact_cost'
+                    AND column_name ~ '^(departamento|organograma)_nivel_\d+$'
+                LOOP
+                  IF NOT EXISTS (
                     SELECT 1 FROM information_schema.columns
-                    WHERE table_schema = 'public' AND table_name = 'fact_cost'
-                      AND column_name = 'departamento_nivel_' || level
-                  ) AND NOT EXISTS (
-                    SELECT 1 FROM information_schema.columns
-                    WHERE table_schema = 'public' AND table_name = 'fact_cost'
-                      AND column_name = 'organograma_nivel_' || level
+                    WHERE table_schema = current_schema() AND table_name = 'fact_cost'
+                      AND column_name = rec.new_name
                   ) THEN
-                    EXECUTE format(
-                      'ALTER TABLE fact_cost RENAME COLUMN departamento_nivel_%s TO organograma_nivel_%s',
-                      level, level
-                    );
+                    EXECUTE format('ALTER TABLE fact_cost RENAME COLUMN %I TO %I', rec.old_name, rec.new_name);
                   END IF;
                 END LOOP;
               END IF;
             END $$
         """)
         # Hierarquia (Fase 1, aditiva): caminho raiz→folha em JSONB e id da folha.
-        # Os níveis fixos organograma_nivel_* continuam como fallback de leitura.
-        await _execute_migration(conn, """
-            DO $$ BEGIN
+        await _execute_migration(conn, r"""
+            DO $$
+            DECLARE level_cols text;
+            BEGIN
               IF to_regclass('fact_cost') IS NOT NULL THEN
                 ALTER TABLE fact_cost ADD COLUMN IF NOT EXISTS hierarquia JSONB;
                 ALTER TABLE fact_cost ADD COLUMN IF NOT EXISTS hierarquia_id INTEGER;
-                UPDATE fact_cost
-                SET hierarquia = to_jsonb(ARRAY_REMOVE(ARRAY[
-                      organograma_nivel_1, organograma_nivel_2, organograma_nivel_3,
-                      organograma_nivel_4, organograma_nivel_5, organograma_nivel_6,
-                      organograma_nivel_7], NULL))
-                WHERE hierarquia IS NULL;
+                -- Colunas hierarquia_N antigas (quantas existirem) viram o caminho em JSON.
+                SELECT string_agg(format('%I', column_name), ', '
+                                  ORDER BY substring(column_name FROM '(\d+)$')::int)
+                INTO level_cols
+                FROM information_schema.columns
+                WHERE table_schema = current_schema() AND table_name = 'fact_cost'
+                  AND column_name ~ '^hierarquia_\d+$';
+                IF level_cols IS NOT NULL THEN
+                  EXECUTE format(
+                    'UPDATE fact_cost SET hierarquia = to_jsonb(ARRAY_REMOVE(ARRAY[%s], NULL)) WHERE hierarquia IS NULL',
+                    level_cols
+                  );
+                END IF;
                 -- Id da folha: caminho de nomes da árvore department (menor id em empate).
                 WITH RECURSIVE tree AS (
                   SELECT id, name, ARRAY[name]::TEXT[] AS path
@@ -679,26 +679,26 @@ async def lifespan(app: FastAPI):
               END IF;
             END $$
         """)
-        await _execute_migration(conn, """
+        legacy_config_sql = """
             DO $$
             DECLARE
               rec record;
             BEGIN
               IF to_regclass('azure_tag_mapping') IS NOT NULL THEN
                 UPDATE azure_tag_mapping
-                SET focus_field = REPLACE(focus_field, 'departamento_nivel_', 'organograma_nivel_')
+                SET focus_field = REPLACE(focus_field, 'departamento_nivel_', 'hierarquia_')
                 WHERE focus_field LIKE 'departamento_nivel_%';
                 UPDATE azure_tag_mapping
-                SET focus_field = 'organograma_nivel_5', updated_at = now()
+                SET focus_field = 'hierarquia_5', updated_at = now()
                 WHERE tag_key = 'projeto' AND focus_field LIKE 'departamento%';
                 UPDATE azure_tag_mapping
-                SET focus_field = 'organograma_nivel_4', updated_at = now()
+                SET focus_field = 'hierarquia_4', updated_at = now()
                 WHERE tag_key = 'diretoria' AND focus_field LIKE 'departamento%';
               END IF;
 
               IF to_regclass('destination_column') IS NOT NULL THEN
                 UPDATE destination_column
-                SET column_name = REPLACE(column_name, 'departamento_nivel_', 'organograma_nivel_')
+                SET column_name = REPLACE(column_name, 'departamento_nivel_', 'hierarquia_')
                 WHERE column_name LIKE 'departamento_nivel_%';
                 UPDATE destination_column
                 SET column_name = 'organograma'
@@ -708,8 +708,8 @@ async def lifespan(app: FastAPI):
               IF to_regclass('source_destination_mapping') IS NOT NULL THEN
                 UPDATE source_destination_mapping
                 SET
-                  source_column = REPLACE(source_column, 'departamento_nivel_', 'organograma_nivel_'),
-                  destination_column = REPLACE(destination_column, 'departamento_nivel_', 'organograma_nivel_')
+                  source_column = REPLACE(source_column, 'departamento_nivel_', 'hierarquia_'),
+                  destination_column = REPLACE(destination_column, 'departamento_nivel_', 'hierarquia_')
                 WHERE source_column LIKE 'departamento_nivel_%'
                    OR destination_column LIKE 'departamento_nivel_%';
                 UPDATE source_destination_mapping
@@ -724,8 +724,8 @@ async def lifespan(app: FastAPI):
               IF to_regclass('etl_mapping') IS NOT NULL THEN
                 UPDATE etl_mapping
                 SET
-                  source_column = REPLACE(source_column, 'departamento_nivel_', 'organograma_nivel_'),
-                  target_column = REPLACE(target_column, 'departamento_nivel_', 'organograma_nivel_')
+                  source_column = REPLACE(source_column, 'departamento_nivel_', 'hierarquia_'),
+                  target_column = REPLACE(target_column, 'departamento_nivel_', 'hierarquia_')
                 WHERE source_column LIKE 'departamento_nivel_%'
                    OR target_column LIKE 'departamento_nivel_%';
                 UPDATE etl_mapping
@@ -738,7 +738,7 @@ async def lifespan(app: FastAPI):
 
               IF to_regclass('classification_field_value') IS NOT NULL THEN
                 UPDATE classification_field_value
-                SET field = REPLACE(field, 'departamento_nivel_', 'organograma_nivel_')
+                SET field = REPLACE(field, 'departamento_nivel_', 'hierarquia_')
                 WHERE field LIKE 'departamento_nivel_%';
                 UPDATE classification_field_value
                 SET field = 'organograma'
@@ -748,8 +748,8 @@ async def lifespan(app: FastAPI):
               IF to_regclass('classification_rule') IS NOT NULL THEN
                 UPDATE classification_rule
                 SET
-                  source_field = REPLACE(source_field, 'departamento_nivel_', 'organograma_nivel_'),
-                  target_field = REPLACE(target_field, 'departamento_nivel_', 'organograma_nivel_')
+                  source_field = REPLACE(source_field, 'departamento_nivel_', 'hierarquia_'),
+                  target_field = REPLACE(target_field, 'departamento_nivel_', 'hierarquia_')
                 WHERE source_field LIKE 'departamento_nivel_%'
                    OR target_field LIKE 'departamento_nivel_%';
                 UPDATE classification_rule
@@ -762,7 +762,7 @@ async def lifespan(app: FastAPI):
 
               IF to_regclass('business_rule') IS NOT NULL THEN
                 UPDATE business_rule
-                SET target_column = REPLACE(target_column, 'departamento_nivel_', 'organograma_nivel_')
+                SET target_column = REPLACE(target_column, 'departamento_nivel_', 'hierarquia_')
                 WHERE target_column LIKE 'departamento_nivel_%';
                 UPDATE business_rule
                 SET target_column = 'organograma'
@@ -771,7 +771,7 @@ async def lifespan(app: FastAPI):
 
               IF to_regclass('gold_rule') IS NOT NULL THEN
                 UPDATE gold_rule
-                SET sql_template = REPLACE(sql_template, 'departamento_nivel_', 'organograma_nivel_')
+                SET sql_template = REPLACE(sql_template, 'departamento_nivel_', 'hierarquia_')
                 WHERE sql_template IS NOT NULL
                   AND sql_template LIKE '%departamento_nivel_%';
                 UPDATE gold_rule
@@ -828,14 +828,14 @@ async def lifespan(app: FastAPI):
                    ) THEN
                   IF rec.storage_type = 'jsonb' THEN
                     EXECUTE format(
-                      'UPDATE %I SET %I = replace(%I::text, ''departamento_nivel_'', ''organograma_nivel_'')::jsonb
+                      'UPDATE %I SET %I = replace(%I::text, ''departamento_nivel_'', ''hierarquia_'')::jsonb
                        WHERE %I IS NOT NULL AND %I::text LIKE ''%%departamento_nivel_%%''',
                       rec.table_name, rec.column_name, rec.column_name,
                       rec.column_name, rec.column_name
                     );
                   ELSE
                     EXECUTE format(
-                      'UPDATE %I SET %I = replace(%I::text, ''departamento_nivel_'', ''organograma_nivel_'')::json
+                      'UPDATE %I SET %I = replace(%I::text, ''departamento_nivel_'', ''hierarquia_'')::json
                        WHERE %I IS NOT NULL AND %I::text LIKE ''%%departamento_nivel_%%''',
                       rec.table_name, rec.column_name, rec.column_name,
                       rec.column_name, rec.column_name
@@ -909,7 +909,10 @@ async def lifespan(app: FastAPI):
                 END IF;
               END LOOP;
             END $$
-        """)
+        """
+        # Configurações salvas (regras, filtros, dashboards) com nomes antigos de nível.
+        for legacy_prefix in ("departamento_nivel_", "organograma_nivel_"):
+            await _execute_migration(conn, legacy_config_sql.replace("departamento_nivel_", legacy_prefix))
         await _execute_migration(conn, """
             DO $$ DECLARE fk_name text; BEGIN
               SELECT conname INTO fk_name FROM pg_constraint

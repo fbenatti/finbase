@@ -28,6 +28,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy import select, func, text, and_, or_
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.hierarchy import hierarchy_columns_in, hierarchy_level, is_hierarchy_column
 from app.database import get_db
 from app.core.sql_guard import SqlRejected, check_read_only_select
 from app.models.destination import DestinationTable
@@ -607,7 +608,6 @@ def shared_cost_base_destination_id(destination_id: int) -> int:
 _FORECAST_MANUAL_PIVOT_NAME = "forecast_manual_planning"
 _FORECAST_MANUAL_SCHEMA = {
     "period": "varchar", "tipo": "varchar", "organograma": "varchar",
-    **{f"organograma_nivel_{level}": "varchar" for level in range(1, 8)},
     "id_orcamento": "varchar", "cloud_origem": "varchar", "value": "double",
 }
 
@@ -1075,7 +1075,6 @@ async def pivot_metadata(destination_table_id: int, db: AsyncSession = Depends(g
         financial_columns.add("business_rule")
     org_columns = ({
         "organograma", "centro_custo", "id_orcamento", "ambiente", "custom_fields",
-        *(f"organograma_nivel_{level}" for level in range(1, 8)),
     } if classification_rules else set())
     org_columns.update(
         str(rule.target_field).lower()
@@ -1102,7 +1101,7 @@ async def pivot_metadata(destination_table_id: int, db: AsyncSession = Depends(g
             "numeric": name in numeric_set,
             "enrichment": (
                 "financial" if name.lower() in financial_columns
-                else "organization" if name.lower() in org_columns
+                else "organization" if name.lower() in org_columns or (classification_rules and is_hierarchy_column(name))
                 else None
             ),
         } for name in ordered],
@@ -1168,10 +1167,7 @@ async def _search_pivot_table_core(
                 "servicename", "resourcename", "tags", "custom_fields",
                 "chargedescription", "invoicedetaildescription",
                 "source_resource_group_name", "organograma",
-                "organograma_nivel_1", "organograma_nivel_2",
-                "organograma_nivel_3", "organograma_nivel_4",
-                "organograma_nivel_5", "organograma_nivel_6",
-                "organograma_nivel_7", "cloud_origem",
+                *hierarchy_columns_in(text_columns), "cloud_origem",
             ) if name in text_columns
         ]
         ordered_text_columns = priority + [name for name in text_columns if name not in priority]
@@ -2011,7 +2007,7 @@ def _expected_view_cloud_filter(
 
 @router.post("/visao-esperada")
 async def expected_view(body: ExpectedViewRequest, request: Request, db: AsyncSession = Depends(get_db)):
-    """Executive view for any node of the seven-level organization tree."""
+    """Executive view for any node of the organization tree."""
     async with _ClientCancelScope(request, timeout_s=120) as scope:
         try:
             return await _expected_view_core(body, db, scope.trino_kwargs)
@@ -2025,12 +2021,12 @@ async def _expected_view_period_detail_core(
     interactive: dict[str, Any],
 ) -> dict[str, Any]:
     """Dinâmica de um mês: valor realizado ou forecast de cada departamento,
-    de todos os níveis (1..7), dentro do escopo selecionado."""
+    de todos os níveis da hierarquia, dentro do escopo selecionado."""
     await wait_until_ready(timeout_s=20)
     table = body.gold_table.strip().replace('"', "")
     schema = await _describe_layer_schema(table, max_retries=2, namespace=GOLD)
     columns = {name.lower(): name for name in schema}
-    for required in ("period", "realizado", "tipo", "organograma_nivel_1"):
+    for required in ("period", "realizado", "tipo", "hierarquia_1"):
         if required not in columns:
             raise HTTPException(status_code=422, detail=f"A tabela de cubo Gold não possui a coluna {required}")
     period_col = _quote_ident(columns.get("_billing_period") or columns["period"])
@@ -2053,13 +2049,11 @@ async def _expected_view_period_detail_core(
         scope_path.reverse()
     else:
         scope_path = [body.director]
-    if len(scope_path) > 7:
-        raise HTTPException(status_code=422, detail="A Visão Esperada suporta até 7 níveis")
 
     def scope_filter() -> str:
         checks: list[str] = []
         for level, name in enumerate(scope_path, start=1):
-            key = f"organograma_nivel_{level}"
+            key = f"hierarquia_{level}"
             if key not in columns:
                 raise HTTPException(status_code=422, detail=f"A tabela não possui {key}")
             checks.append(f"TRIM(CAST({_quote_ident(columns[key])} AS VARCHAR)) = {_quote_literal(name.strip())}")
@@ -2078,7 +2072,7 @@ async def _expected_view_period_detail_core(
                 planning_name, max_retries=2, namespace=layers.detail_layer(),
             )
             planning_columns = {name.lower(): name for name in planning_schema}
-            if {"period", "tipo", "organograma_nivel_1"}.issubset(planning_columns):
+            if {"period", "tipo", "hierarquia_1"}.issubset(planning_columns):
                 columns = planning_columns
                 period_col = _quote_ident(columns["period"])
                 value_col = _quote_ident(columns.get("value") or columns.get("realizado") or "value")
@@ -2092,8 +2086,8 @@ async def _expected_view_period_detail_core(
     else:
         tipo_sql = f"lower(CAST({type_col} AS VARCHAR)) IN ('forecast', 'forecast-manual')"
 
-    level_cols = [f"organograma_nivel_{level}" for level in range(1, 8)]
-    group_cols = [_quote_ident(columns[col]) for col in level_cols if col in columns]
+    level_cols = hierarchy_columns_in(columns)
+    group_cols = [_quote_ident(columns[col]) for col in level_cols]
     cloud_filter = _expected_view_cloud_filter(scope_path, selected, columns)
     sql = f"""
       SELECT {', '.join(group_cols)}, SUM(COALESCE(TRY_CAST({value_col} AS DOUBLE), 0)) AS value
@@ -2117,8 +2111,9 @@ async def _expected_view_period_detail_core(
         path: list[str] = []
         value = float(row.get("value") or 0)
         total += value
-        for level in range(1, 8):
-            name = str(row.get(f"organograma_nivel_{level}") or "").strip()
+        for column in hierarchy_columns_in({str(key).lower(): key for key in row}):
+            level = hierarchy_level(column)
+            name = str(row.get(column) or "").strip()
             if not name:
                 break
             path.append(name)
@@ -2175,11 +2170,11 @@ async def _expected_view_core(
     actual_columns = {name.lower(): name for name in actual_schema}
     forecast_columns = {name.lower(): name for name in forecast_schema}
     measure_column = body.measure_column if body.measure_column in {"realizado", "realizado_cloud"} else "realizado"
-    required_actual = {"_billing_period", measure_column, "organograma_nivel_1"}
+    required_actual = {"_billing_period", measure_column, "hierarquia_1"}
     # Forecast planning publishes both measures for financial contracts. Use
     # the same measure selected for actuals; this keeps the dashboard switch
     # aligned across realized and forecast rows.
-    required_forecast = {"period", "tipo", "organograma_nivel_1"}
+    required_forecast = {"period", "tipo", "hierarquia_1"}
     if measure_column not in forecast_columns and "value" not in forecast_columns:
         required_forecast.add(measure_column)
     missing_actual = sorted(required_actual - set(actual_columns))
@@ -2236,9 +2231,11 @@ async def _expected_view_core(
         scope_path = department_path(selected)
     else:
         scope_path = [part.strip() for part in body.director.split(" > ") if part.strip()] if body.director_view else ([body.director] if body.director.strip() else [])
-    if len(scope_path) > 7:
-        raise HTTPException(status_code=422, detail="A Visão Esperada suporta até 7 níveis de departamento")
-    scope_level_order = [1, 2, 4, 3, 5, 6] if body.director_view else list(range(1, len(scope_path) + 1))
+    # Visão Diretoria inverte os níveis 3 e 4; os demais seguem em ordem, sem limite.
+    scope_level_order = (
+        [1, 2, 4, 3, *range(5, max(len(scope_path) + 2, 7))] if body.director_view
+        else list(range(1, len(scope_path) + 1))
+    )
 
     def scope_filter(columns: dict[str, str], path: list[str]) -> str:
         checks: list[str] = []
@@ -2249,15 +2246,15 @@ async def _expected_view_core(
         pairs = list(zip(scope_level_order, path))
         if len(path) >= 5 and path[1] in _CLOUD_BRANCHES:
             pairs = [(level, name) for level, name in pairs if level != 2]
-            if body.director_view and "organograma_nivel_3" in columns and "organograma_nivel_4" in columns:
+            if body.director_view and "hierarquia_3" in columns and "hierarquia_4" in columns:
                 first = _quote_literal(path[2])
                 second = _quote_literal(path[3])
-                level3 = _quote_ident(columns["organograma_nivel_3"])
-                level4 = _quote_ident(columns["organograma_nivel_4"])
+                level3 = _quote_ident(columns["hierarquia_3"])
+                level4 = _quote_ident(columns["hierarquia_4"])
                 checks.append(f"(({level3} = {first} AND {level4} = {second}) OR ({level3} = {second} AND {level4} = {first}))")
                 pairs = [(level, name) for level, name in pairs if level not in (3, 4)]
         for level, name in pairs:
-            key = f"organograma_nivel_{level}"
+            key = f"hierarquia_{level}"
             if key not in columns:
                 raise HTTPException(status_code=422, detail=f"A tabela não possui {key}; reprocese os dados após ajustar o organograma")
             checks.append(
@@ -2342,14 +2339,14 @@ async def _expected_view_core(
     if body.director_view and len(scope_path) < len(scope_level_order):
         driver_level = scope_level_order[len(scope_path)]
     else:
-        driver_level = min(len(scope_path) + 1, 7)
-    driver_key = f"organograma_nivel_{driver_level}"
+        driver_level = len(scope_path) + 1
+    driver_key = f"hierarquia_{driver_level}"
     # dict.get evaluates its default eagerly. At the root (empty scope_path)
-    # the old fallback tried to resolve organograma_nivel_0 even when level 1
+    # the old fallback tried to resolve hierarquia_0 even when level 1
     # existed, causing the whole executive view request to fail with HTTP 500.
-    fallback_driver_key = f"organograma_nivel_{max(1, len(scope_path))}"
-    actual_driver_column = actual_columns.get(driver_key) or actual_columns.get(fallback_driver_key) or actual_columns.get("organograma_nivel_1")
-    forecast_driver_column = forecast_columns.get(driver_key) or forecast_columns.get(fallback_driver_key) or forecast_columns.get("organograma_nivel_1")
+    fallback_driver_key = f"hierarquia_{max(1, len(scope_path))}"
+    actual_driver_column = actual_columns.get(driver_key) or actual_columns.get(fallback_driver_key) or actual_columns.get("hierarquia_1")
+    forecast_driver_column = forecast_columns.get(driver_key) or forecast_columns.get(fallback_driver_key) or forecast_columns.get("hierarquia_1")
     if not actual_driver_column or not forecast_driver_column:
         raise HTTPException(status_code=422, detail="A tabela Gold não possui uma coluna de organograma para detalhar os drivers")
     actual_driver = _quote_ident(actual_driver_column)
@@ -2922,7 +2919,7 @@ async def get_summary(
                 COUNT(*) AS total_rows,
                 SUM(COALESCE("BilledCost", 0)) AS total_billed,
                 SUM(COALESCE("EffectiveCost", 0)) AS total_effective,
-                COUNT(DISTINCT "organograma_nivel_1") AS num_diretorias,
+                COUNT(DISTINCT "hierarquia_1") AS num_diretorias,
                 COUNT(DISTINCT "ServiceName") AS num_services
             FROM iceberg.{layers.detail_layer()}.dest_modelo_focus
             WHERE {' AND '.join(where)}

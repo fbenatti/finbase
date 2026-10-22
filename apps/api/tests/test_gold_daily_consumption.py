@@ -13,7 +13,7 @@ async def test_daily_consumption_reads_silver_with_gold_scope(monkeypatch):
         if sql.startswith("DESCRIBE"):
             return [{"Column": name} for name in (
                 "_billing_period", "ChargePeriodStart", "realizado", "tipo",
-                "servicecategory", "organograma_nivel_4",
+                "servicecategory", "hierarquia_4",
             )]
         return [{"day": "2026-08-03", "servicecategory": "Compute", "realizado": 123.0}]
 
@@ -25,7 +25,7 @@ async def test_daily_consumption_reads_silver_with_gold_scope(monkeypatch):
             gold.GoldQueryFilter(column="servicecategory", values=["Compute", "Storage"]),
         ],
         filter_groups=[[
-            gold.GoldQueryFilter(column="organograma_nivel_4", values=["Cloud"]),
+            gold.GoldQueryFilter(column="hierarquia_4", values=["Cloud"]),
         ]],
         group_by="servicecategory",
     )
@@ -40,7 +40,7 @@ async def test_daily_consumption_reads_silver_with_gold_scope(monkeypatch):
     assert "FROM iceberg.silver.dest_modelo_focus" in query
     assert "ChargePeriodStart" in query
     assert "servicecategory" in query
-    assert "organograma_nivel_4" in query
+    assert "hierarquia_4" in query
     assert "_billing_period" in query
 
 

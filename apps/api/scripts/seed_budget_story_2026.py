@@ -49,10 +49,10 @@ async def january_forecast_reference(by_path: dict[tuple[str, ...], int]) -> dic
     repetido como run-rate inicial, antes das variações deliberadas da defesa.
     """
     rows = await trino_execute("""
-      SELECT CAST(organograma_nivel_1 AS VARCHAR) AS l1, CAST(organograma_nivel_2 AS VARCHAR) AS l2,
-             CAST(organograma_nivel_3 AS VARCHAR) AS l3, CAST(organograma_nivel_4 AS VARCHAR) AS l4,
-             CAST(organograma_nivel_5 AS VARCHAR) AS l5, CAST(organograma_nivel_6 AS VARCHAR) AS l6,
-             CAST(organograma_nivel_7 AS VARCHAR) AS l7,
+      SELECT CAST(hierarquia_1 AS VARCHAR) AS l1, CAST(hierarquia_2 AS VARCHAR) AS l2,
+             CAST(hierarquia_3 AS VARCHAR) AS l3, CAST(hierarquia_4 AS VARCHAR) AS l4,
+             CAST(hierarquia_5 AS VARCHAR) AS l5, CAST(hierarquia_6 AS VARCHAR) AS l6,
+             CAST(hierarquia_7 AS VARCHAR) AS l7,
              SUM(COALESCE(TRY_CAST(realizado AS DOUBLE), 0)) AS value
       FROM iceberg.gold.dest_modelo_focus
       WHERE CAST(_billing_period AS VARCHAR) = '202601' AND (tipo = 'realizado' OR tipo IS NULL)

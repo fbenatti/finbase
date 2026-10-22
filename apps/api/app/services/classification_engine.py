@@ -335,7 +335,7 @@ def _build_department_path(
     # dimension. department_nivel_1 is the root (diretoria), increasing toward
     # the leaf. Levels beyond the actual depth remain empty.
     for i, dept in enumerate(visited, start=1):
-        info[f"organograma_nivel_{i}"] = dept.name or ""
+        info[f"hierarquia_{i}"] = dept.name or ""
 
     if visited:
         info["organograma"] = visited[-1].name or ""

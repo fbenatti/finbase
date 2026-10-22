@@ -11,6 +11,7 @@ import io
 from pydantic import BaseModel, Field
 from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
+from app.core.hierarchy import hierarchy_column, hierarchy_columns_in, hierarchy_level
 from app.database import get_db
 from app.models.destination import DestinationTable
 from app.models.forecast import ForecastConfig, ForecastAdjustment, ForecastBusinessRule, ForecastRun, ForecastAck, ForecastAckHistory
@@ -1106,9 +1107,20 @@ def _accuracy_snapshot_context(run: ForecastRun, snapshot: dict[str, Any], schem
     return run.result_table, actual_source, date_expr, measure, type_col, type_filter
 
 
+async def _shared_hierarchy_columns(*sources: str) -> list[str]:
+    """Níveis hierarquia_N presentes em todas as tabelas comparadas."""
+    common: set[str] | None = None
+    for source in sources:
+        rows = await trino_execute(f"DESCRIBE {source}", timeout_s=30)
+        names = {str(row.get("Column") or row.get("column_name") or "").lower() for row in rows}
+        found = set(hierarchy_columns_in(names))
+        common = found if common is None else common & found
+    return hierarchy_columns_in(common or {hierarchy_column(1)})
+
+
 def _department_scope_filter(department: str | None) -> str:
     """AND-chain that matches the selected department path prefix against
-    organograma_nivel_{1..7} (children are included because deeper levels are
+    hierarquia_1, hierarquia_2, ... (children are included because deeper levels are
     not constrained) — same semantics as the ExpectedView director filter."""
     if not department or not str(department).strip():
         return ""
@@ -1116,9 +1128,8 @@ def _department_scope_filter(department: str | None) -> str:
     if not parts:
         return ""
     checks = [
-        f"TRIM({_qi(f'organograma_nivel_{level}')}) = {_ql(name)}"
+        f"TRIM({_qi(f'hierarquia_{level}')}) = {_ql(name)}"
         for level, name in enumerate(parts, start=1)
-        if level <= 7
     ]
     return (" AND " + " AND ".join(checks)) if checks else ""
 
@@ -1126,12 +1137,12 @@ def _department_scope_filter(department: str | None) -> str:
 def _accuracy_mode_filter(mode: str) -> str:
     """showback (default) excludes Chargeback; chargeback keeps only it."""
     if mode == "chargeback":
-        return f" AND {_qi('organograma_nivel_2')} = 'Chargeback'"
+        return f" AND {_qi('hierarquia_2')} = 'Chargeback'"
     if mode == "showback":
         return (
-            f" AND ({_qi('organograma_nivel_2')} <> 'Chargeback'"
-            f" OR {_qi('organograma_nivel_2')} IS NULL"
-            f" OR {_qi('organograma_nivel_2')} = '')"
+            f" AND ({_qi('hierarquia_2')} <> 'Chargeback'"
+            f" OR {_qi('hierarquia_2')} IS NULL"
+            f" OR {_qi('hierarquia_2')} = '')"
         )
     return ""
 
@@ -1485,7 +1496,7 @@ async def accuracy_delta(
         }
 
     driver_level = _driver_level(scope_path)
-    dim = f"organograma_nivel_{driver_level}"
+    dim = f"hierarquia_{driver_level}"
     null_label = str(snapshot.get("null_dimension_label") or "Não classificado")
     dim_expr = f"COALESCE(CAST({_qi(dim)} AS VARCHAR), {_ql(null_label)})"
     period_col = snapshot.get("period_column")
@@ -1603,11 +1614,11 @@ async def _desvios_grain(
         if period_col else f"date_format({date_expr}, '%Y%m') = {_ql(target)}"
     )
     scope_filter = "".join(
-        f" AND {_qi(f'organograma_nivel_{index + 1}')} = {_ql(name)}"
+        f" AND {_qi(f'hierarquia_{index + 1}')} = {_ql(name)}"
         for index, name in enumerate(scope_path)
-        if index < 7
     )
-    levels = ", ".join(_qi(f"organograma_nivel_{level}") for level in range(1, 8))
+    level_columns = await _shared_hierarchy_columns(actual_source, f"iceberg.forecast.{run.result_table}")
+    levels = ", ".join(_qi(column) for column in level_columns)
     try:
         a_records = await trino_execute(
             f"SELECT {levels}, SUM(COALESCE(TRY_CAST({_qi(measure)} AS DOUBLE),0)) AS av "
@@ -1624,7 +1635,7 @@ async def _desvios_grain(
         raise HTTPException(503, f"Falha ao agregar desvios: {exc}")
 
     def key_of(row: dict[str, Any]) -> tuple[Any, ...]:
-        return tuple(row.get(f"organograma_nivel_{level}") for level in range(1, 8))
+        return tuple(row.get(column) for column in level_columns)
 
     actual_grain = {key_of(r): float(r.get("av") or 0) for r in a_records}
     forecast_grain = {key_of(r): float(r.get("fv") or 0) for r in f_records}
@@ -1683,11 +1694,11 @@ async def _desvios_subcat_grain(
         if period_col else f"date_format({date_expr}, '%Y%m') = {_ql(target)}"
     )
     scope_filter = "".join(
-        f" AND {_qi(f'organograma_nivel_{index + 1}')} = {_ql(name)}"
+        f" AND {_qi(f'hierarquia_{index + 1}')} = {_ql(name)}"
         for index, name in enumerate(scope_path)
-        if index < 7
     )
-    levels = ", ".join(_qi(f"organograma_nivel_{level}") for level in range(1, 8))
+    level_columns = await _shared_hierarchy_columns(actual_source, f"iceberg.forecast.{run.result_table}")
+    levels = ", ".join(_qi(column) for column in level_columns)
     subcat = _qi("servicesubcategory")
     try:
         a_records = await trino_execute(
@@ -1705,7 +1716,7 @@ async def _desvios_subcat_grain(
         raise HTTPException(503, f"Falha ao agregar subcategorias: {exc}")
 
     def key_of(row: dict[str, Any]) -> tuple[Any, ...]:
-        return tuple(row.get(f"organograma_nivel_{level}") for level in range(1, 8)) + (row.get("subcat"),)
+        return tuple(row.get(column) for column in level_columns) + (row.get("subcat"),)
 
     amap = {key_of(r): float(r.get("av") or 0) for r in a_records}
     fmap = {key_of(r): float(r.get("fv") or 0) for r in f_records}
@@ -1890,15 +1901,16 @@ async def accuracy_delta_series(
     )
     depth = len(leaf)
     scope_filter = "".join(
-        f" AND TRIM({_qi(f'organograma_nivel_{index + 1}')}) = {_ql(name)}"
+        f" AND TRIM({_qi(f'hierarquia_{index + 1}')}) = {_ql(name)}"
         for index, name in enumerate(leaf)
-        if index < 7
     )
     # A folha não tem filhos: os níveis abaixo do caminho devem estar vazios,
     # igual à semântica de _desvios_subcat.
+    level_columns = await _shared_hierarchy_columns(actual_source, f"iceberg.forecast.{run.result_table}")
     deeper_filter = "".join(
-        f" AND TRIM(COALESCE(CAST({_qi(f'organograma_nivel_{level}')} AS VARCHAR), '')) = ''"
-        for level in range(depth + 1, 8)
+        f" AND TRIM(COALESCE(CAST({_qi(column)} AS VARCHAR), '')) = ''"
+        for column in level_columns
+        if hierarchy_level(column) > depth
     )
     subcat_filter = _subcategory_filter(subcategory)
 

@@ -169,7 +169,7 @@ export default function CostSummary({ table, director, departmentId, path, inclu
   const [dailyRows, setDailyRows] = useState<DailyRow[]>([]);
   const [dailyLoading, setDailyLoading] = useState(false);
 
-  const hierarchyColumn = `organograma_nivel_${Math.min(path.length + 1, 6)}`;
+  const hierarchyColumn = `hierarquia_${Math.min(path.length + 1, 6)}`;
   const hierarchyLabel = HIERARCHY_LABELS[Math.min(path.length, 5)];
   const breakdownDefs = useMemo(() => [
     { column: "servicename", title: "Por serviço" },

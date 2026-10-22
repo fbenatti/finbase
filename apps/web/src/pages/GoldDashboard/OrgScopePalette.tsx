@@ -58,7 +58,7 @@ export default function OrgScopePalette({ tree, path, levelLabels, onSelect, onC
   useEffect(() => {
     if (!open) return;
     let alive = true;
-    const levels = [1, 2, 3, 4, 5, 6].map((n) => `organograma_nivel_${n}`);
+    const levels = [1, 2, 3, 4, 5, 6].map((n) => `hierarquia_${n}`);
     queryDimonTable({ table, rows: levels, measures: [{ column: measure, aggregation: "SUM" }], filters: periodFilters, row_limit: 10000, sort_column: null, sort_direction: "desc" })
       .then((result) => {
         if (!alive) return;

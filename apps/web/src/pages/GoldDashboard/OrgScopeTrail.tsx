@@ -44,8 +44,8 @@ export default function OrgScopeTrail({ tree, path, levelLabels, onSelect, onCle
     setSearch("");
     setCosts({});
     setLoadingCosts(true);
-    const column = `organograma_nivel_${menu.depth + 1}`;
-    const parent = path.slice(0, menu.depth).map((name, i) => ({ column: `organograma_nivel_${i + 1}`, operator: "IN" as const, values: [name] }));
+    const column = `hierarquia_${menu.depth + 1}`;
+    const parent = path.slice(0, menu.depth).map((name, i) => ({ column: `hierarquia_${i + 1}`, operator: "IN" as const, values: [name] }));
     queryDimonTable({ table, rows: [column], measures: [{ column: measure, aggregation: "SUM" }], filters: [...periodFilters, ...parent], row_limit: 1000, sort_column: null, sort_direction: "desc" })
       .then((result) => {
         if (!alive) return;

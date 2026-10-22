@@ -26,7 +26,7 @@ class EtlMapping(Base):
 
 
 class Department(Base):
-    """Hierarchical department tree materialized in seven reporting levels."""
+    """Hierarchical department tree; each depth becomes a hierarquia_N column."""
     __tablename__ = "department"
 
     id = Column(Integer, primary_key=True, autoincrement=True)

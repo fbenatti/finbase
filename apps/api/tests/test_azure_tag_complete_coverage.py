@@ -37,7 +37,7 @@ def configured_service(monkeypatch, count=48):
 
     for name, value in {
         '_load_classification_rules': rules, '_load_departments': departments,
-        '_tag_mappings': [{'tag_key': 'projeto', 'focus_field': 'organograma_nivel_1'},
+        '_tag_mappings': [{'tag_key': 'projeto', 'focus_field': 'hierarquia_1'},
                           {'tag_key': 'centro-de-custos', 'focus_field': 'centro_custo'}],
         '_subscription_home_tenants': {SUB: 'tenant'},
         '_subscription_catalog': ({'Test': [SUB]}, [SUB], None),
@@ -141,7 +141,7 @@ def test_evidence_dependent_tags_cannot_replace_exact_scope_with_an_unrelated_ol
     result = service._concrete_items(
         rule, [{'scope': SCOPE_RG, 'field': 'name', 'operator': '=', 'values': ['rg-current']}],
         [{'subscription_id': SUB, 'resource_group_name': 'rg-old', 'evidence_count': 1}],
-        {'organograma_nivel_1': 'A'}, [{'tag_key': 'projeto', 'focus_field': 'organograma_nivel_1'}],
+        {'hierarquia_1': 'A'}, [{'tag_key': 'projeto', 'focus_field': 'hierarquia_1'}],
         True, [], force_resource_group_scope=True)
     assert not result
 
@@ -153,7 +153,7 @@ def test_empty_billed_rg_does_not_erase_native_rule_for_future_resources():
     result = service._concrete_items(
         rule, [{'scope': SCOPE_RG, 'field': 'name', 'operator': '~', 'values': ['prisma']}],
         [{'subscription_id': SUB, 'resource_group_name': '', 'evidence_count': 1}],
-        {'organograma_nivel_1': 'Prisma'}, [{'tag_key': 'projeto', 'focus_field': 'organograma_nivel_1'}],
+        {'hierarquia_1': 'Prisma'}, [{'tag_key': 'projeto', 'focus_field': 'hierarquia_1'}],
         True, diagnostics, force_resource_group_scope=True, preserve_source_selectors=True)
     assert len(result) == 1
     assert result[0]['assignment_scope_kind'] == 'subscription'

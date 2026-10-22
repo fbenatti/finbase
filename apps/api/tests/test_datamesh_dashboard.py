@@ -4,7 +4,7 @@ from app.services.datamesh_dashboard import build_dashboard, classify_cost, load
 
 
 def row(**values):
-    base = {"period": "202608", "tipo": "realizado", "organograma_nivel_6": "Projeto A", "servicename": "Azure Databricks", "servicesubcategory": "Analytics", "skumeter": "DBU", "realized": 100}
+    base = {"period": "202608", "tipo": "realizado", "hierarquia_6": "Projeto A", "servicename": "Azure Databricks", "servicesubcategory": "Analytics", "skumeter": "DBU", "realized": 100}
     base.update(values)
     return base
 
@@ -16,7 +16,7 @@ def test_cost_classification():
 
 
 def test_forecast_precedence_rateio_and_project_fallback():
-    result = build_dashboard([row(period="202607", realized=100), row(period="202607", tipo="rateio", realized=20), row(tipo="realizado", realized=50), row(tipo="forecast", realized=200), row(servicename="Storage Accounts", organograma_nivel_6=None, tipo="forecast", realized=30)], open_period="202608")
+    result = build_dashboard([row(period="202607", realized=100), row(period="202607", tipo="rateio", realized=20), row(tipo="realizado", realized=50), row(tipo="forecast", realized=200), row(servicename="Storage Accounts", hierarquia_6=None, tipo="forecast", realized=30)], open_period="202608")
     assert result["monthly"][0]["total"] == 120
     # Com a correção de Bug #2: mês aberto exibe realizado_parcial + forecast_restante.
     # Databricks: realizado=50 + forecast=200 = 250 (antes exibia apenas 200).
@@ -25,7 +25,7 @@ def test_forecast_precedence_rateio_and_project_fallback():
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("physical_column", ["organograma_nivel_6", "departamento_nivel_6", "organograma"])
+@pytest.mark.parametrize("physical_column", ["hierarquia_6", "departamento_nivel_6", "organograma"])
 async def test_query_uses_available_level_six_column(monkeypatch, physical_column):
     statements = []
 
@@ -42,6 +42,6 @@ async def test_query_uses_available_level_six_column(monkeypatch, physical_colum
     result = await load_datamesh_dashboard()
 
     assert result["projects"][0]["project"] == "Projeto A"
-    assert f'"{physical_column}" AS organograma_nivel_6' in statements[1]
+    assert f'"{physical_column}" AS hierarquia_6' in statements[1]
     assert "CAST(NULL AS VARCHAR) AS centro_custo" in statements[1]
-    assert f"{physical_column} AS organograma_nivel_6" not in statements[1]
+    assert f"{physical_column} AS hierarquia_6" not in statements[1]

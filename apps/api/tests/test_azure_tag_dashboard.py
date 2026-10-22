@@ -19,8 +19,8 @@ def test_managed_tag_status_uses_case_insensitive_keys_and_nonempty_values():
 def test_managed_tag_status_recognizes_silver_field_aliases_in_azure_tag_keys():
     keys = ["projeto", "diretoria", "centro-de-custos"]
     mappings = [
-        {"tag_key": "projeto", "focus_field": "organograma_nivel_5"},
-        {"tag_key": "diretoria", "focus_field": "organograma_nivel_4"},
+        {"tag_key": "projeto", "focus_field": "hierarquia_5"},
+        {"tag_key": "diretoria", "focus_field": "hierarquia_4"},
         {"tag_key": "centro-de-custos", "focus_field": "centro_custo"},
     ]
     tags = {
@@ -115,8 +115,8 @@ def test_executive_summary_reads_snapshot_and_does_not_call_resource_graph(monke
     service._connection = get_connection
     service._tag_keys = tag_keys
     async def tag_mappings():
-        return [{"tag_key": "projeto", "focus_field": "organograma_nivel_5"},
-                {"tag_key": "diretoria", "focus_field": "organograma_nivel_4"}]
+        return [{"tag_key": "projeto", "focus_field": "hierarquia_5"},
+                {"tag_key": "diretoria", "focus_field": "hierarquia_4"}]
     service._tag_mappings = tag_mappings
     service._latest_inventory = inventory
     service._silver_subscription_names = forbidden_names
@@ -157,8 +157,8 @@ def test_subscription_resources_filters_in_bronze_and_uses_snapshot_name():
     service._connection = get_connection
     service._tag_keys = tag_keys
     async def tag_mappings():
-        return [{"tag_key": "projeto", "focus_field": "organograma_nivel_5"},
-                {"tag_key": "diretoria", "focus_field": "organograma_nivel_4"},
+        return [{"tag_key": "projeto", "focus_field": "hierarquia_5"},
+                {"tag_key": "diretoria", "focus_field": "hierarquia_4"},
                 {"tag_key": "centro-de-custos", "focus_field": "centro_custo"}]
     async def expected_tags(_connection, _subscription_id, rows, _mappings):
         return {rows[0]["resource_id"].casefold(): {
@@ -172,7 +172,7 @@ def test_subscription_resources_filters_in_bronze_and_uses_snapshot_name():
 
     result = asyncio.run(service.subscription_resources(2, subscription_id))
     assert result["subscription_name"] == "Terra Brasil Dev"
-    assert result["tag_mappings"][0] == {"tag_key": "projeto", "focus_field": "organograma_nivel_5"}
+    assert result["tag_mappings"][0] == {"tag_key": "projeto", "focus_field": "hierarquia_5"}
     assert len(result["resources"]) == 1
     assert result["resources"][0]["tag_status"] == "complete"
     assert result["resources"][0]["expected_tags"] == {
@@ -197,8 +197,8 @@ def test_resource_details_mark_alias_keys_as_managed_when_silver_expectation_is_
 
     async def tag_mappings():
         return [
-            {"tag_key": "projeto", "focus_field": "organograma_nivel_5"},
-            {"tag_key": "diretoria", "focus_field": "organograma_nivel_4"},
+            {"tag_key": "projeto", "focus_field": "hierarquia_5"},
+            {"tag_key": "diretoria", "focus_field": "hierarquia_4"},
             {"tag_key": "centro-de-custos", "focus_field": "centro_custo"},
         ]
 
@@ -250,8 +250,8 @@ def test_silver_expectations_prefer_resource_evidence_and_use_unique_group_fallb
          "resource_type": "microsoft.compute/virtualmachines"},
     ]
     mappings = [
-        {"tag_key": "projeto", "focus_field": "organograma_nivel_5"},
-        {"tag_key": "diretoria", "focus_field": "organograma_nivel_4"},
+        {"tag_key": "projeto", "focus_field": "hierarquia_5"},
+        {"tag_key": "diretoria", "focus_field": "hierarquia_4"},
         {"tag_key": "centro-de-custos", "focus_field": "centro_custo"},
     ]
 

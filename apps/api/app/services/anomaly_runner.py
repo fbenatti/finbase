@@ -34,6 +34,7 @@ from typing import Any, Callable, Mapping, Sequence
 import pandas as pd
 from sqlalchemy import select
 
+from app.core.hierarchy import MIN_LEVELS, hierarchy_columns, hierarchy_depth_of
 from app.database import async_session
 from app.services import iceberg_service as iceberg
 from app.services import lakehouse_layers as layers
@@ -86,7 +87,7 @@ from app.services.anomaly_schema import (
     ASSESSMENT_TABLE,
     ASSESSMENT_TIPO,
     REFERENCE_TABLE,
-    SERIES_DIMENSIONS,
+    series_dimensions,
 )
 
 logger = logging.getLogger(__name__)
@@ -439,7 +440,7 @@ def to_assessment_rows(
         # Todas as dimensões do contrato entram na linha, mesmo as que não
         # participam da série: a tabela publicada tem de ter o conjunto fixo de
         # colunas, compatível com Planning.
-        for dim in SERIES_DIMENSIONS:
+        for dim in series_dimensions(hierarchy_depth_of(detection.series_dimensions)):
             row[dim] = detection.series_dimensions.get(dim)
         rows.append(row)
     return rows
@@ -1061,11 +1062,18 @@ async def execute_detection(
         report(6, 6, "Publicando referência e avaliações")
         from app.services.anomaly_schema import assessment_columns, reference_columns
 
+        reference_dicts = [row.as_dict() for row in outcome.reference_rows]
+        # Séries de profundidades diferentes: a tabela leva o nível mais fundo e
+        # os níveis que faltam numa linha ficam nulos.
+        depth = max((hierarchy_depth_of(row) for row in [*reference_dicts, *outcome.assessments]), default=MIN_LEVELS)
+        for row in [*reference_dicts, *outcome.assessments]:
+            for column in hierarchy_columns(depth):
+                row.setdefault(column, None)
         published = publish_iceberg(
-            reference_rows=[row.as_dict() for row in outcome.reference_rows],
+            reference_rows=reference_dicts,
             assessment_rows=outcome.assessments,
-            reference_columns=[name for name, _ in reference_columns()],
-            assessment_columns=[name for name, _ in assessment_columns()],
+            reference_columns=[name for name, _ in reference_columns(depth)],
+            assessment_columns=[name for name, _ in assessment_columns(depth)],
             reference_table=REFERENCE_TABLE,
             assessment_table=ASSESSMENT_TABLE,
             namespace=layers.detail_layer(),

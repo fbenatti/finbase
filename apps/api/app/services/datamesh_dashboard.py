@@ -78,9 +78,9 @@ def build_dashboard(rows: list[dict[str, Any]], *, open_period: str | None = Non
     # Keep project attribution honest: it uses the newest period with level 6
     # data, which can be the August realized load while the executive headline
     # already uses the August forecast.
-    project_periods = [key for key in scoped if key <= period and any(_text(row.get("organograma_nivel_6")) for row in scoped[key])]
+    project_periods = [key for key in scoped if key <= period and any(_text(row.get("hierarquia_6")) for row in scoped[key])]
     project_period = max(project_periods) if project_periods else None
-    project_type = "forecast" if project_period and project_period >= open_period and any(_text(row.get("tipo")).lower() == "forecast" and _text(row.get("organograma_nivel_6")) for row in scoped[project_period]) else None
+    project_type = "forecast" if project_period and project_period >= open_period and any(_text(row.get("tipo")).lower() == "forecast" and _text(row.get("hierarquia_6")) for row in scoped[project_period]) else None
     for row in scoped[period]:
         tipo = _text(row.get("tipo")).lower()
         if (chosen_type and tipo != chosen_type) or (not chosen_type and tipo not in ("realizado", "rateio")):
@@ -94,7 +94,7 @@ def build_dashboard(rows: list[dict[str, Any]], *, open_period: str | None = Non
             tipo = _text(row.get("tipo")).lower()
             if (project_type and tipo != project_type) or (not project_type and tipo not in ("realizado", "rateio")):
                 continue
-            project = _text(row.get("organograma_nivel_6")) or "Não informado"
+            project = _text(row.get("hierarquia_6")) or "Não informado"
             project_costs[project][row["bucket"]] += row["amount"]
     projects = []
     for name, composition in sorted(project_costs.items(), key=lambda item: sum(item[1].values()), reverse=True):
@@ -137,7 +137,7 @@ async def load_datamesh_dashboard(*, cancel_event: asyncio.Event | None = None) 
     rows = await trino_execute(f"""
         SELECT _billing_period AS period, tipo,
                {optional_column("cloud_origem", "cloud_origem")},
-               {optional_column("organograma_nivel_6", "organograma_nivel_6", "departamento_nivel_6", "organograma")},
+               {optional_column("hierarquia_6", "hierarquia_6", "departamento_nivel_6", "organograma")},
                {optional_column("centro_custo", "centro_custo")},
                {optional_column("subaccountname", "subaccountname")},
                {optional_column("regionname", "regionname")},

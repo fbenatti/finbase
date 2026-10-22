@@ -85,9 +85,9 @@ export default function CostDrillDialog({ open, onClose, table, measureColumn, f
     let alive = true;
     setLoading(true);
     setError("");
-    const column = mode === "hierarchy" ? `organograma_nivel_${level}` : mode;
+    const column = mode === "hierarchy" ? `hierarquia_${level}` : mode;
     const drillFilters: GoldQueryFilter[] = mode === "hierarchy"
-      ? drill.map((name, index) => ({ column: `organograma_nivel_${basePath.length + index + 1}`, operator: "IN", values: [name] }) as GoldQueryFilter)
+      ? drill.map((name, index) => ({ column: `hierarquia_${basePath.length + index + 1}`, operator: "IN", values: [name] }) as GoldQueryFilter)
       : [];
     const previousFilters = previousPeriodFilters(filters);
     const request = (scoped: GoldQueryFilter[]) => queryDimonTable({

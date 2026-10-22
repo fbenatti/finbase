@@ -16,6 +16,7 @@ from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.deps import get_current_user, require
+from app.core.hierarchy import MIN_LEVELS, hierarchy_column, hierarchy_columns_in
 from app.database import get_db
 from app.models.destination import DestinationTable
 from app.models.identity import User
@@ -30,8 +31,28 @@ from app.services.gold_materialization import GOLD
 router = APIRouter(prefix="/planejamento", tags=["planning"])
 
 MONTHS = ["jan", "fev", "mar", "abr", "mai", "jun", "jul", "ago", "set", "out", "nov", "dez"]
-LEVELS = [f"Departamento nível {i}" for i in range(1, 8)]
-HEADERS = [*LEVELS, *MONTHS]
+_LEVEL_HEADER_RE = re.compile(r"^(hierarquia|departamento nível) (\d+)$", re.IGNORECASE)
+
+
+def _level_headers(depth: int) -> list[str]:
+    """Uma coluna "Hierarquia N" por nível da árvore (sem limite fixo)."""
+    return [f"Hierarquia {level}" for level in range(1, max(depth, MIN_LEVELS) + 1)]
+
+
+def _headers(depth: int) -> list[str]:
+    return [*_level_headers(depth), *MONTHS]
+
+
+def _header_depth(header: list[str]) -> int:
+    """Quantidade de colunas de nível no cabeçalho, se ele for um modelo válido."""
+    depth = 0
+    while depth < len(header) and (match := _LEVEL_HEADER_RE.match(header[depth])) and int(match.group(2)) == depth + 1:
+        depth += 1
+    return depth if depth >= MIN_LEVELS and header[depth:] == MONTHS else 0
+
+
+def _tree_depth(departments: dict[int, Department]) -> int:
+    return max((len(_levels(d, departments)) for d in departments.values() if d.active), default=MIN_LEVELS)
 SYSTEM_CODES = {"realizado", "forecast"}
 DEFAULT_TYPES = [("realizado", "Realizado"), ("forecast", "Forecast (projetado)"), ("saldo-contratual", "Saldo contratual"), ("orcamento", "Orçamento"), ("forecast-manual", "Forecast manual"), ("base-line-contratual", "Base Line Contratual"), ("carta-credito", "Carta de Credito"), ("defesa-orcamentaria", "Defesa Orçamentária")]
 EVENT_TYPES = {"CARGA_INICIAL", "DEFESA", "APROVACAO", "CORTE", "AJUSTE", "INCLUSAO_PROJETO", "REALOCACAO", "RESTAURACAO", "OUTRO"}
@@ -515,10 +536,17 @@ async def _budget_accuracy_actuals(
     scope_cloud: str | None = None,
     scope_path: list[str] | None = None,
 ) -> list[dict[str, Any]]:
-    levels = ", ".join(
-        f'CAST("organograma_nivel_{level}" AS VARCHAR) AS organograma_nivel_{level}'
-        for level in range(1, 8)
-    )
+    try:
+        schema_rows = await trino_execute(f"DESCRIBE iceberg.{GOLD}.dest_dm_cost_visao_completa", timeout_s=30)
+    except TrinoError as exc:
+        # Ambiente sem a base consolidada publicada: sem realizado, não é erro.
+        if "does not exist" in str(exc):
+            return []
+        raise
+    level_keys = hierarchy_columns_in(
+        str(row.get("Column") or row.get("column_name") or "").lower() for row in schema_rows
+    ) or [hierarchy_column(1)]
+    levels = ", ".join(f'CAST("{key}" AS VARCHAR) AS {key}' for key in level_keys)
     periods = ", ".join(f"'{year}{month:02d}'" for month in months)
     cloud_filter = ""
     if scope_cloud:
@@ -546,12 +574,12 @@ async def _budget_accuracy_actuals(
         candidate_sql = []
         for levels_order in candidates:
             checks = [
-                f'TRIM(CAST("organograma_nivel_{physical_level}" AS VARCHAR)) = \'{escaped[index]}\''
+                f'TRIM(CAST("hierarquia_{physical_level}" AS VARCHAR)) = \'{escaped[index]}\''
                 for index, physical_level in enumerate(levels_order[:len(escaped)])
             ]
             candidate_sql.append(" AND ".join(checks))
         scope_filter = " AND (" + " OR ".join(f"({item})" for item in candidate_sql) + ")"
-    group_levels = ", ".join(f'"organograma_nivel_{level}"' for level in range(1, 8))
+    group_levels = ", ".join(f'"{key}"' for key in level_keys)
     sql = f"""
         SELECT {levels}, period, SUM(actual_value) AS actual_value, SUM(forecast_value) AS forecast_value, MAX(has_actual) AS has_actual
         FROM (
@@ -666,10 +694,11 @@ async def list_types(db: AsyncSession = Depends(get_db)):
 async def download_template(year: int, db: AsyncSession = Depends(get_db)):
     if year <= 0: raise HTTPException(422, "Ano inválido")
     departments, _ = await _organization(db)
-    wb = openpyxl.Workbook(); ws = wb.active; ws.title = "Cadastro financeiro"; ws.append(HEADERS)
+    depth = _tree_depth(departments)
+    wb = openpyxl.Workbook(); ws = wb.active; ws.title = "Cadastro financeiro"; ws.append(_headers(depth))
     for department in sorted((d for d in departments.values() if d.active), key=lambda d: _levels(d, departments)):
         levels = _levels(department, departments)
-        ws.append([*levels, *([""] * (7 - len(levels))), *([0] * 12)])
+        ws.append([*levels, *([""] * (depth - len(levels))), *([0] * 12)])
     ws.freeze_panes = "A2"; ws.auto_filter.ref = ws.dimensions
     for col in ws.columns:
         ws.column_dimensions[col[0].column_letter].width = max(14, min(35, max(len(str(c.value or "")) for c in col) + 2))
@@ -705,14 +734,14 @@ async def download_simulated_budget(
         columns = {str(row.get("Column") or row.get("column_name") or "").lower(): str(row.get("Column") or row.get("column_name") or "") for row in schema_rows}
         if "_billing_period" not in columns or "realizado" not in columns:
             raise HTTPException(422, "A tabela Gold selecionada não possui _billing_period e realizado")
-        level_columns = [columns.get(f"organograma_nivel_{level}") for level in range(1, 8)]
-        level_select = [f'CAST("{column}" AS VARCHAR) AS organograma_nivel_{index}' if column else f'CAST(NULL AS VARCHAR) AS organograma_nivel_{index}' for index, column in enumerate(level_columns, 1)]
+        level_keys = hierarchy_columns_in(columns) or [hierarchy_column(1)]
+        level_select = [f'CAST("{columns[key]}" AS VARCHAR) AS {key}' if key in columns else f'CAST(NULL AS VARCHAR) AS {key}' for key in level_keys]
         suggested_column = next((column for key, column in columns.items() if key.replace("_", "") in {"servicename", "metercategory"}), None)
         selected_detail_column = columns.get((detail_column or "").lower()) or suggested_column
-        detail_select = f', COALESCE(NULLIF(TRIM(CAST("{selected_detail_column}" AS VARCHAR)), \'\'), \'Sem sugestão FOCUS\') AS focus_detail_suggestion' if detailed and selected_detail_column else ", 'Sem sugestão FOCUS' AS focus_detail_suggestion" if detailed else ""
+        detail_select = f', COALESCE(NULLIF(TRIM(CAST("{selected_detail_column}" AS VARCHAR)), \'\'), \'Sem sugestão\') AS focus_detail_suggestion' if detailed and selected_detail_column else ", 'Sem sugestão' AS focus_detail_suggestion" if detailed else ""
         type_filter = f"AND (tipo = 'realizado' OR tipo IS NULL)" if "tipo" in columns else ""
         cloud_filter = _cloud_filter_sql(cloud, columns)
-        group_by = ", ".join(str(index) for index in range(1, 8 + (1 if detailed else 0)))
+        group_by = ", ".join(str(index) for index in range(1, len(level_keys) + 1 + (1 if detailed else 0)))
         source_rows = await trino_execute(f"""
             SELECT {', '.join(level_select)}{detail_select},
               SUM(COALESCE(TRY_CAST(realizado AS DOUBLE), 0)) AS value
@@ -731,7 +760,7 @@ async def download_simulated_budget(
     by_path = {tuple(_levels(d, departments)): d for d in departments.values() if d.active}
     baseline_by_department: dict[int, float] = defaultdict(float)
     for row in source_rows:
-        path = tuple(str(row.get(f"organograma_nivel_{level}") or "").strip() for level in range(1, 8))
+        path = tuple(str(row.get(key) or "").strip() for key in level_keys)
         path = tuple(level for level in path if level)
         department = by_path.get(path)
         if department:
@@ -741,21 +770,22 @@ async def download_simulated_budget(
     if detailed:
         ws.title = "Forecast detalhado"
         detail_label = detail_column or suggested_column or "MeterCategory"
-        detailed_headers = [*LEVELS, f"{detail_label} FOCUS (sugestão)", "Valor de referência", *MONTHS]
+        detailed_headers = [*_level_headers(len(level_keys)), f"{detail_label} (sugestão)", "Valor de referência", *MONTHS]
         ws.append(detailed_headers)
         for row in source_rows:
-            levels = [str(row.get(f"organograma_nivel_{level}") or "").strip() for level in range(1, 8)]
+            levels = [str(row.get(key) or "").strip() for key in level_keys]
             value = float(row.get("value") or 0)
-            ws.append([*levels, str(row.get("focus_detail_suggestion") or "Sem sugestão FOCUS"), value, *([value] * 12)])
+            ws.append([*levels, str(row.get("focus_detail_suggestion") or "Sem sugestão"), value, *([value] * 12)])
     else:
         ws.title = "Forecast simulado"
-        ws.append(HEADERS)
+        depth = _tree_depth(departments)
+        ws.append(_headers(depth))
         for department in sorted((d for d in departments.values() if d.active), key=lambda d: _levels(d, departments)):
             levels = _levels(department, departments)
             monthly_value = baseline_by_department.get(department.id, 0.0)
             if cloud and monthly_value == 0:
                 continue
-            ws.append([*levels, *([""] * (7 - len(levels))), *([monthly_value] * 12)])
+            ws.append([*levels, *([""] * (depth - len(levels))), *([monthly_value] * 12)])
     ws.freeze_panes = "A2"; ws.auto_filter.ref = ws.dimensions
     for col in ws.columns:
         ws.column_dimensions[col[0].column_letter].width = max(14, min(35, max(len(str(c.value or "")) for c in col) + 2))
@@ -785,11 +815,13 @@ async def _parse_excel(raw: bytes, db: AsyncSession, create_missing_departments:
         workbook = openpyxl.load_workbook(io.BytesIO(raw), data_only=True, read_only=True)
     except Exception as exc:
         raise HTTPException(422, f"Arquivo Excel inválido: {exc}")
-    sheet = next((candidate for candidate in workbook.worksheets if _sheet_header(candidate) == HEADERS), workbook.active)
+    sheet = next((candidate for candidate in workbook.worksheets if _header_depth(_sheet_header(candidate))), workbook.active)
     header = _sheet_header(sheet)
-    if header != HEADERS:
+    depth = _header_depth(header)
+    if not depth:
         received = ", ".join(header) if header else "(vazio)"
-        raise HTTPException(422, {"message": "Modelo Excel inválido", "errors": [f"Cabeçalhos esperados: {', '.join(HEADERS)}", f"Cabeçalhos recebidos: {received}"]})
+        expected = f"{', '.join(_level_headers(2))}, ... (uma por nível), {', '.join(MONTHS)}"
+        raise HTTPException(422, {"message": "Modelo Excel inválido", "errors": [f"Cabeçalhos esperados: {expected}", f"Cabeçalhos recebidos: {received}"]})
     departments, children = await _organization(db)
     parsed: list[PlanningRowIn] = []
     errors: list[str] = []
@@ -798,8 +830,8 @@ async def _parse_excel(raw: bytes, db: AsyncSession, create_missing_departments:
     for line, values in enumerate(sheet.iter_rows(min_row=2, values_only=True), 2):
         vals = list(values)
         if not any(v not in (None, "") for v in vals): continue
-        names = [name for name in (_cell_str(value) for value in vals[:7]) if name]
-        if not names[0]: errors.append(f"Linha {line}: Departamento nível 1 é obrigatório"); continue
+        names = [name for name in (_cell_str(value) for value in vals[:depth]) if name]
+        if not names: errors.append(f"Linha {line}: Hierarquia 1 é obrigatória"); continue
         path = tuple(names)
         parent: int | None = None; department: Department | None = None; broken = False
         for level, name in enumerate(names, 1):
@@ -824,7 +856,7 @@ async def _parse_excel(raw: bytes, db: AsyncSession, create_missing_departments:
                 skipped.append(f"Linha {line}: {' > '.join(names)}")
             continue
         monthly: list[float] = []
-        for month, value in zip(MONTHS, vals[7:19]):
+        for month, value in zip(MONTHS, vals[depth:depth + 12]):
             try:
                 if value is None or str(value).strip() == "": raise ValueError()
                 monthly.append(float(value))
@@ -1209,7 +1241,7 @@ async def budget_accuracy(
         actual_total += actual_value
         if not row.get("has_actual") or period_key == current_month_key:
             forecast_total += forecast_value
-        path = tuple(str(row.get(f"organograma_nivel_{level}") or "").strip() for level in range(1, 8))
+        path = tuple(str(row.get(key) or "").strip() for key in hierarchy_columns_in(row))
         path = tuple(item for item in path if item)
         current_id = path_to_department.get(path)
         if consolidate_selected_project and department_id is not None:
@@ -1298,7 +1330,7 @@ async def budget_accuracy_detail(
     scope_checks = []
     for order in candidates:
         scope_checks.append(" AND ".join(
-            f'TRIM(CAST("organograma_nivel_{physical}" AS VARCHAR)) = \'{escaped_path[index]}\''
+            f'TRIM(CAST("hierarquia_{physical}" AS VARCHAR)) = \'{escaped_path[index]}\''
             for index, physical in enumerate(order[:len(escaped_path)])
         ))
     scope_sql = " AND (" + " OR ".join(f"({item})" for item in scope_checks) + ")"
@@ -1511,8 +1543,6 @@ async def create_defense_project(
     parent = departments.get(body.parent_id)
     if not parent or not parent.active:
         raise HTTPException(422, "Selecione um nó ativo do organograma para receber o projeto")
-    if len(_levels(parent, departments)) >= 7:
-        raise HTTPException(422, "A hierarquia suporta no máximo 7 níveis")
     name = (body.name or "").strip()
     if not name:
         raise HTTPException(422, "Informe o nome do projeto")

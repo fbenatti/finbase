@@ -5,7 +5,7 @@ from app.services.sinfonia_dashboard import build_dashboard, ia_family_for, load
 
 def row(**values):
     base = {"period": "202608", "tipo": "realizado", "cloud_origem": "azure-ti",
-            "organograma_nivel_5": " Fábrica de Agente", "organograma_nivel_6": "Fábrica de Agente - Comercial",
+            "hierarquia_5": " Fábrica de Agente", "hierarquia_6": "Fábrica de Agente - Comercial",
             "servicename": "Azure OpenAI", "servicesubcategory": "Azure OpenAI", "skumeter": "Tokens", "realized": 100}
     base.update(values)
     return base
@@ -13,8 +13,8 @@ def row(**values):
 
 def test_normalizes_portfolio_and_excludes_legacy_sinfonia_ia():
     assert normalize_row(row())["project"] == "Comercial"
-    assert normalize_row(row(organograma_nivel_5="Sinfonia - Watson ", organograma_nivel_6=None))["cloud"] == "IBM"
-    assert normalize_row(row(organograma_nivel_5="Sinfonia IA", organograma_nivel_6=None)) is None
+    assert normalize_row(row(hierarquia_5="Sinfonia - Watson ", hierarquia_6=None))["cloud"] == "IBM"
+    assert normalize_row(row(hierarquia_5="Sinfonia IA", hierarquia_6=None)) is None
 
 
 def test_current_month_prefers_forecast_and_includes_rateio_in_closed_month():
@@ -36,7 +36,7 @@ def test_identifies_ibm_and_azure_ai_families():
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("level5,level6", [
-    ("organograma_nivel_5", "organograma_nivel_6"),
+    ("hierarquia_5", "hierarquia_6"),
     ("departamento_nivel_5", "departamento_nivel_6"),
 ])
 async def test_factory_subprojects_use_gold_hierarchy(monkeypatch, level5, level6):
@@ -49,15 +49,15 @@ async def test_factory_subprojects_use_gold_hierarchy(monkeypatch, level5, level
                 "_billing_period", "tipo", "realizado", level5, level6,
                 "servicename", "servicesubcategory", "skumeter",
             )]
-        return [row(organograma_nivel_5="Fábrica de Agentes",
-                    organograma_nivel_6="Fábrica de Agentes - Comercial")]
+        return [row(hierarquia_5="Fábrica de Agentes",
+                    hierarquia_6="Fábrica de Agentes - Comercial")]
 
     monkeypatch.setattr("app.services.sinfonia_dashboard.trino_execute", execute)
     result = await load_sinfonia_dashboard()
 
     assert result["kpis"]["factory"] == 100
-    assert '"' + level5 + '" AS organograma_nivel_5' in statements[1]
-    assert '"' + level6 + '" AS organograma_nivel_6' in statements[1]
+    assert '"' + level5 + '" AS hierarquia_5' in statements[1]
+    assert '"' + level6 + '" AS hierarquia_6' in statements[1]
 
 
 @pytest.mark.asyncio
@@ -68,8 +68,8 @@ async def test_factory_hierarchy_uses_populated_department_when_organogram_is_bl
         statements.append(sql)
         if sql.lstrip().startswith("DESCRIBE"):
             return [{"Column": name} for name in (
-                "_billing_period", "tipo", "realizado", "organograma_nivel_5",
-                "departamento_nivel_5", "organograma_nivel_6", "departamento_nivel_6",
+                "_billing_period", "tipo", "realizado", "hierarquia_5",
+                "departamento_nivel_5", "hierarquia_6", "departamento_nivel_6",
             )]
         return []
 

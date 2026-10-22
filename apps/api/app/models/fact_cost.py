@@ -51,13 +51,9 @@ class FactCost(Base):
     department_path = Column(String(500), nullable=True)
     centro_custo = Column(String(50), nullable=True)
     ambiente = Column(String(50), nullable=True)
-    organograma_nivel_1 = Column(String(200), nullable=True)
-    organograma_nivel_2 = Column(String(200), nullable=True)
-    organograma_nivel_3 = Column(String(200), nullable=True)
-    organograma_nivel_4 = Column(String(200), nullable=True)
-    organograma_nivel_5 = Column(String(200), nullable=True)
-    organograma_nivel_6 = Column(String(200), nullable=True)
-    organograma_nivel_7 = Column(String(200), nullable=True)
+    # Caminho raiz→folha (hierarquia_1 > hierarquia_2 > ...), sem limite de níveis.
+    hierarquia = Column(JSON, nullable=True)
+    hierarquia_id = Column(Integer, nullable=True)
     modelo_ai = Column(String(100), nullable=True)
 
     # Tags e campos extras (datasource-specific)

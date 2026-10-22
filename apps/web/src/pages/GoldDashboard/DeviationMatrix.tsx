@@ -297,8 +297,8 @@ function DrillPanel({ kind, monthKey, monthLabel, runId, anomalies, table, filte
         const subs = drill.length || !groups.size ? (await getForecastAccuracyDesviosSubcategories(runId, monthKey, base.join(" > "))).records : [];
         return { rows: [...groups.values()], services: subs };
       }
-      const column = `organograma_nivel_${depth + 1}`;
-      const scoped = [...filters.filter((f) => !f.column.startsWith("organograma_nivel_")), ...pathSegmentFilters(base, false)];
+      const column = `hierarquia_${depth + 1}`;
+      const scoped = [...filters.filter((f) => !f.column.startsWith("hierarquia_")), ...pathSegmentFilters(base, false)];
       const result = await queryDimonTable({ table, rows: [column, "subaccountname", "servicename"], filters: scoped, row_limit: 10000, sort_column: null, sort_direction: "desc" });
       const childOf = new Map<string, string>();
       result.rows.forEach((row) => {

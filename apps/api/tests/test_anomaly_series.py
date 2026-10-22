@@ -298,8 +298,8 @@ def test_contribuintes_preservam_organograma_e_reconciliam_desvio(monkeypatch):
     from types import SimpleNamespace
     import app.services.anomaly_series as service
     members = [
-        {"series_id": "a", "dimensions": {"subaccountname": "Production", "organograma_nivel_5": "Projeto A"}},
-        {"series_id": "b", "dimensions": {"subaccountname": "Development", "organograma_nivel_5": "Sem projeto"}},
+        {"series_id": "a", "dimensions": {"subaccountname": "Production", "hierarquia_5": "Projeto A"}},
+        {"series_id": "b", "dimensions": {"subaccountname": "Development", "hierarquia_5": "Sem projeto"}},
     ]
     refs = [reference(series_id=member["series_id"], reference_id=member["series_id"], forecast_run_id=397,
                       data_cutoff="2026-10-11", coverage_start="2026-10-12", covered_days=20,
@@ -321,14 +321,14 @@ def test_contribuintes_preservam_organograma_e_reconciliam_desvio(monkeypatch):
         publication=SimpleNamespace(data_cutoff="2026-10-11", reference_table="ref"),
         reference_namespace="silver", source_namespace="silver", source_table="focus", date_column="chargeperiodstart",
         period_column="_billing_period", type_column="tipo", measure_column="realizado_cloud",
-        dimensions=["subaccountname", "organograma_nivel_5"], analysis_data_end=date(2026, 10, 12), contributor_series=members,
+        dimensions=["subaccountname", "hierarquia_5"], analysis_data_end=date(2026, 10, 12), contributor_series=members,
     ))
     rows = result["contributor_breakdown"]
     event = next(point for point in result["items"] if point["event_date"] == "2026-10-12")
     assert [row["observed_cloud"] for row in rows] == [500, 300]
     for key in ("observed_cloud", "expected_cloud", "delta_cloud"):
         assert sum(row[key] for row in rows) == pytest.approx(event[key])
-    assert rows[1]["dimensions"]["organograma_nivel_5"] == "Sem projeto"
+    assert rows[1]["dimensions"]["hierarquia_5"] == "Sem projeto"
     for row in rows:
         selected_day = next(point for point in row["items"] if point["event_date"] == row["event_date"])
         assert selected_day["observed_cloud"] == row["observed_cloud"]

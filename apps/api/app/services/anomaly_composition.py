@@ -21,6 +21,7 @@ from __future__ import annotations
 
 from typing import Any, Iterable, Mapping, Sequence
 
+from app.core.hierarchy import MIN_LEVELS, hierarchy_columns
 from app.services import lakehouse_layers as layers
 from app.services.anomaly_schema import (
     ASSESSMENT_TABLE,
@@ -31,21 +32,17 @@ from app.services.anomaly_schema import (
 #: Tipos financeiros que podem aparecer em resumos de custo.
 FINANCIAL_TIPOS: tuple[str, ...] = ("realizado", "forecast", "forecast-manual", "rateio", "shared_cost")
 
-#: Colunas comuns entre a Planning e a avaliação de anomalia.
-COMMON_COLUMNS: tuple[str, ...] = (
+#: Colunas comuns entre a Planning e a avaliação de anomalia; os níveis
+#: hierarquia_1..N entram depois de centro_custo, conforme a profundidade.
+_COMMON_BEFORE_LEVELS: tuple[str, ...] = (
     "cloud_origem",
     "marketplaceproductname",
     "marketplacebillingmodel",
     "servicename",
     "subaccountname",
     "centro_custo",
-    "organograma_nivel_1",
-    "organograma_nivel_2",
-    "organograma_nivel_3",
-    "organograma_nivel_4",
-    "organograma_nivel_5",
-    "organograma_nivel_6",
-    "organograma_nivel_7",
+)
+_COMMON_AFTER_LEVELS: tuple[str, ...] = (
     "chargecategory",
     "serviceprovidername",
     "servicesubcategory",
@@ -59,6 +56,10 @@ COMMON_COLUMNS: tuple[str, ...] = (
 )
 
 
+def common_columns(depth: int = MIN_LEVELS) -> tuple[str, ...]:
+    return (*_COMMON_BEFORE_LEVELS, *hierarchy_columns(depth), *_COMMON_AFTER_LEVELS)
+
+
 def anomaly_not_financial_additive() -> dict[str, Any]:
     """Invariantes da linha de anomalia (plano §4.3)."""
     return {
@@ -69,9 +70,9 @@ def anomaly_not_financial_additive() -> dict[str, Any]:
     }
 
 
-def planning_projection(*, planning_table: str = "dest_modelo_focus_planning", alias: str = "p") -> str:
+def planning_projection(*, planning_table: str = "dest_modelo_focus_planning", alias: str = "p", depth: int = MIN_LEVELS) -> str:
     """Projeção explícita da Planning, sem ``SELECT *``."""
-    columns = ", ".join(f"{alias}.{_quote(column)}" for column in COMMON_COLUMNS)
+    columns = ", ".join(f"{alias}.{_quote(column)}" for column in common_columns(depth))
     return (
         f"SELECT {columns}, CAST(NULL AS DOUBLE) AS is_financial_additive, "
         f"CAST(NULL AS BIGINT) AS case_id, CAST(NULL AS VARCHAR) AS assessment_id, "
@@ -80,12 +81,12 @@ def planning_projection(*, planning_table: str = "dest_modelo_focus_planning", a
     )
 
 
-def anomaly_projection(*, anomaly_table: str = ASSESSMENT_TABLE, alias: str = "a") -> str:
+def anomaly_projection(*, anomaly_table: str = ASSESSMENT_TABLE, alias: str = "a", depth: int = MIN_LEVELS) -> str:
     """Projeção da tabela de avaliações, alinhada à Planning.
 
     ``realizado_cloud`` recebe ``anomalous_cost_cloud``; ``realizado`` é nulo.
     """
-    columns = ", ".join(f"{alias}.{_quote(column)}" for column in COMMON_COLUMNS)
+    columns = ", ".join(f"{alias}.{_quote(column)}" for column in common_columns(depth))
     return (
         f"SELECT {columns}, "
         f"CAST(FALSE AS BOOLEAN) AS is_financial_additive, "
@@ -102,6 +103,7 @@ def sister_table_union_sql(
     planning_table: str = "dest_modelo_focus_planning",
     anomaly_table: str = ASSESSMENT_TABLE,
     extra_predicate: str | None = None,
+    depth: int = MIN_LEVELS,
 ) -> str:
     """UNION ALL explícito entre Planning e anomalias.
 
@@ -109,9 +111,9 @@ def sister_table_union_sql(
     """
     where = f" WHERE {extra_predicate}" if extra_predicate else ""
     return (
-        f"{planning_projection(planning_table=planning_table)}\n"
+        f"{planning_projection(planning_table=planning_table, depth=depth)}\n"
         f"UNION ALL\n"
-        f"{anomaly_projection(anomaly_table=anomaly_table)}{where}"
+        f"{anomaly_projection(anomaly_table=anomaly_table, depth=depth)}{where}"
     )
 
 

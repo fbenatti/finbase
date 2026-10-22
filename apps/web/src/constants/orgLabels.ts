@@ -1,6 +1,6 @@
 /**
  * Rótulos de UI da hierarquia.
- * Backend/API mantém nomenclatura técnica (organograma, organograma_nivel_*, department_id).
+ * Backend/API mantém nomenclatura técnica (organograma, hierarquia_*, department_id).
  */
 export const ORG = {
   modelTitle: "Modelo da hierarquia",
@@ -26,7 +26,7 @@ export const ORG = {
   deleteAction: "Excluir nó",
   financialTooltip: "Cadastro financeiro deste nó",
   configureModel: "Configurar hierarquia",
-  /** Nível 5 da hierarquia de custo (coluna organograma_nivel_5) */
+  /** Nível 5 da hierarquia de custo (coluna hierarquia_5) */
   level5: "Área",
   directorViewChain: "Segmento → Modelo → Diretoria → Cloud → Projeto → SubProjeto",
   directorViewLevels: "1→2→4→3→5→6",

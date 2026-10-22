@@ -78,7 +78,7 @@ async def test_legacy_unscoped_snapshot_rows_are_filtered_by_selected_cloud(monk
 async def test_parse_excel_ignores_empty_trailing_header_cells(monkeypatch):
     workbook = openpyxl.Workbook()
     worksheet = workbook.active
-    worksheet.append([*planning.HEADERS, "", ""])
+    worksheet.append([*planning._headers(7), "", ""])
     content = io.BytesIO()
     workbook.save(content)
 
@@ -94,7 +94,7 @@ async def test_parse_excel_uses_the_sheet_with_planning_headers(monkeypatch):
     workbook = openpyxl.Workbook()
     workbook.active.append(["Cloud", "Valor Realizado", "Provisão"])
     planning_sheet = workbook.create_sheet("Importação")
-    planning_sheet.append(planning.HEADERS)
+    planning_sheet.append(planning._headers(7))
     content = io.BytesIO()
     workbook.save(content)
 
@@ -111,7 +111,7 @@ async def test_parse_excel_ignores_blank_department_levels(monkeypatch):
     child = SimpleNamespace(id=2, parent_id=1, name="Filho", active=True)
     workbook = openpyxl.Workbook()
     worksheet = workbook.active
-    worksheet.append(planning.HEADERS)
+    worksheet.append(planning._headers(7))
     worksheet.append(["Raiz", "", "Filho", "", "", "", "", *([0] * 12)])
     content = io.BytesIO()
     workbook.save(content)
@@ -129,7 +129,7 @@ async def test_parse_excel_ignores_blank_department_levels(monkeypatch):
 async def test_parse_excel_reports_received_headers_for_detailed_workbook():
     workbook = openpyxl.Workbook()
     worksheet = workbook.active
-    received = [*planning.LEVELS, "FOCUS", "Valor de referência", *planning.MONTHS]
+    received = [*planning._level_headers(7), "FOCUS", "Valor de referência", *planning.MONTHS]
     worksheet.append(received)
     content = io.BytesIO()
     workbook.save(content)

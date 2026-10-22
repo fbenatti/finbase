@@ -11,6 +11,7 @@ from typing import Any, Mapping
 
 from sqlalchemy import text
 
+from app.core.hierarchy import hierarchy_columns_in, hierarchy_level
 from app.database import async_session
 from app.services.anomaly_v2.baseline import expected_for_day, expected_from_reference
 from app.services.anomaly_v2.settings import detector_settings
@@ -66,13 +67,6 @@ async def read_v2_case_series(case: Any, config: Any, *, as_of: date) -> dict[st
 
 # Coluna física → chave que o drilldown do frontend já conhece.
 _BREAKDOWN_COLUMNS: tuple[tuple[str, str, str], ...] = (
-    ("organograma_nivel_1", "organograma_nivel_1", "Organograma · nível 1"),
-    ("organograma_nivel_2", "organograma_nivel_2", "Organograma · nível 2"),
-    ("organograma_nivel_3", "organograma_nivel_3", "Organograma · nível 3"),
-    ("organograma_nivel_4", "organograma_nivel_4", "Organograma · nível 4"),
-    ("organograma_nivel_5", "organograma_nivel_5", "Organograma · nível 5"),
-    ("organograma_nivel_6", "organograma_nivel_6", "Organograma · nível 6"),
-    ("organograma_nivel_7", "organograma_nivel_7", "Organograma · nível 7"),
     ("subaccountname", "subaccountname", "Assinatura / subconta"),
     ("subaccountid", "subscription_id", "ID da assinatura"),
     ("source_resource_group_name", "resource_group", "Resource group"),
@@ -459,7 +453,11 @@ async def _read_v2_case_series(case: Any, config: Any, *, as_of: date) -> dict[s
         source_read_metadata(namespace, table),
         connection_ids_for_cloud(dimensions.get("cloud_origem")),
     )
-    specs = [item for item in _BREAKDOWN_COLUMNS if item[0] in column_types]
+    # Um detalhamento por nível de hierarquia existente na tabela, sem limite.
+    specs = [
+        *((column, column, f"Hierarquia {hierarchy_level(column)}") for column in hierarchy_columns_in(column_types)),
+        *(item for item in _BREAKDOWN_COLUMNS if item[0] in column_types),
+    ]
     periods = periods_overlapping(start, end)
     connection_column = str(getattr(config, "connection_id_column", None) or "source_connection_id")
     if connection_column.lower() not in column_types:

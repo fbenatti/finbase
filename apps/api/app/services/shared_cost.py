@@ -6,6 +6,7 @@ import logging
 from dataclasses import dataclass, field, replace
 from typing import Any
 
+from app.core.hierarchy import hierarchy_column, hierarchy_columns, hierarchy_columns_in, hierarchy_depth_of, hierarchy_level, path_to_levels
 from app.models.rules import Department, DepartmentSharedCost
 
 logger = logging.getLogger(__name__)
@@ -335,7 +336,15 @@ def accumulate_series(
 
 
 def hierarchy_fields(path: list[str]) -> dict[str, str]:
-    return {f"organograma_nivel_{level}": path[level - 1] if level <= len(path) else "" for level in range(1, 8)}
+    return path_to_levels(path)
+
+
+def _level_key(row: dict[str, Any]) -> tuple[str, ...]:
+    """Caminho do registro sem os níveis vazios do fim, para agrupar."""
+    values = [str(row.get(column) or "") for column in hierarchy_columns_in(row)]
+    while values and not values[-1]:
+        values.pop()
+    return tuple(values)
 
 
 def build_rateio_rows(
@@ -417,7 +426,7 @@ def build_rateio_rows(
             row["period"],
             row["rateio_medida"],
             row["tipo"],
-            tuple(row[f"organograma_nivel_{level}"] for level in range(1, 8)),
+            _level_key(row),
             row.get("cloud_origem") or "",
         )
         current = collapsed.get(key)
@@ -425,7 +434,13 @@ def build_rateio_rows(
             collapsed[key] = dict(row)
         else:
             current["realizado"] = float(current["realizado"]) + float(row["realizado"])
-    return [row for row in collapsed.values() if abs(float(row["realizado"])) >= 1e-12]
+    result = [row for row in collapsed.values() if abs(float(row["realizado"])) >= 1e-12]
+    # Todas as linhas com os mesmos níveis: os que faltam num caminho curto ficam vazios.
+    depth = max((hierarchy_depth_of(row) for row in result), default=0)
+    for row in result:
+        for column in hierarchy_columns(depth):
+            row.setdefault(column, "")
+    return result
 
 
 def apply_rateio_facts(
@@ -557,8 +572,8 @@ def _schema_map(rows: list[dict[str, Any]]) -> dict[str, str]:
 
 def _hierarchy_select_sql(columns: dict[str, str]) -> str:
     parts: list[str] = []
-    for level in range(1, 8):
-        key = f"organograma_nivel_{level}"
+    for key in hierarchy_columns_in(columns) or [hierarchy_column(1)]:
+        level = hierarchy_level(key)
         if key in columns:
             parts.append(
                 f"COALESCE(NULLIF(TRIM(CAST({_quote_ident(columns[key])} AS VARCHAR)), ''), '') AS nivel_{level}"
@@ -570,7 +585,9 @@ def _hierarchy_select_sql(columns: dict[str, str]) -> str:
 
 def _row_hierarchy_path(row: dict[str, Any]) -> list[str]:
     path: list[str] = []
-    for level in range(1, 8):
+    level = 0
+    while f"nivel_{level + 1}" in row:
+        level += 1
         name = str(row.get(f"nivel_{level}") or "").strip()
         if not name:
             break
@@ -667,7 +684,7 @@ def _build_allocation_rows_for_cloud(configs, actual_rows, forecast_rows):
 
     def key(row):
         return (row["period"], row["tipo"], row["rateio_medida"], row["cloud_origem"],
-                *(row[f"organograma_nivel_{level}"] for level in range(1, 8)))
+                *_level_key(row))
 
     indexed = {key(row): row for row in rows}
     for row in rows:
@@ -745,7 +762,7 @@ async def run_shared_cost_job(
             "period": "period",
             "realizado": "realizado",
             "tipo": "tipo",
-            **{f"organograma_nivel_{level}": f"organograma_nivel_{level}" for level in range(1, 8)},
+            **{column: column for column in hierarchy_columns_in(gold_schema)},
         }
     if "period" not in planning_schema or "realizado" not in planning_schema or "tipo" not in planning_schema:
         raise RuntimeError("A tabela de planejamento não possui as colunas necessárias para o rateio")
@@ -757,6 +774,9 @@ async def run_shared_cost_job(
     rateio_rows = build_allocation_rows(resolved, actual_rows, forecast_rows)
     import pandas as pd
     rateio_df = pd.DataFrame(rateio_rows)
+    # Caminhos de tamanhos diferentes: níveis que faltam ficam vazios.
+    level_columns = hierarchy_columns_in(rateio_df.columns)
+    rateio_df[level_columns] = rateio_df[level_columns].fillna("")
     replace_types = (
         {SHARED_COST_TIPO if item == "rateio" else RATEIO_TIPO for item in allocation_types}
         if allocation_types is not None

@@ -224,7 +224,7 @@ async def _query_cost_rows(
                     THEN 1 ELSE 0 END AS is_ondemand_ptu,
                COALESCE(SUM(TRY_CAST(realizado AS DOUBLE)), 0) AS realized
         FROM {table_sql}
-        WHERE lower(CAST(organograma_nivel_5 AS VARCHAR)) = '{source_project}'
+        WHERE lower(CAST(hierarquia_5 AS VARCHAR)) = '{source_project}'
           AND {_COST_CLASS_SQL} <> '__excluded__'
         GROUP BY 1, 2, 3, 4, 5, 6, 7, 8
     """
@@ -245,7 +245,7 @@ async def _query_subaccounts(
         SELECT subaccountname,
                COALESCE(SUM(TRY_CAST(realizado AS DOUBLE)), 0) AS realized
         FROM {table_sql}
-        WHERE lower(CAST(organograma_nivel_5 AS VARCHAR)) = '{source_project}'
+        WHERE lower(CAST(hierarquia_5 AS VARCHAR)) = '{source_project}'
           AND _billing_period = '{period}'
           AND tipo = 'realizado'
           AND {_COST_CLASS_SQL} <> '__excluded__'

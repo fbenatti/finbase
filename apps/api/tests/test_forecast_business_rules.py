@@ -387,13 +387,13 @@ def test_source_exclusion_prefix_uses_gold_field_without_forecast_dimension():
         identification_column="skumeter",
         identification_values=["Provisioned Managed"],
         behavior="SOURCE_EXCLUDE_PREFIX",
-        scope={"organograma_nivel_5": "Aura Brain", "servicename": "Microsoft.CognitiveServices"},
+        scope={"hierarquia_5": "Aura Brain", "servicename": "Microsoft.CognitiveServices"},
         start_period="202512",
     )
     sql_filter, applied = _source_exclusion_filter(
         [rule],
         {"columns": [
-            {"name": "skumeter"}, {"name": "organograma_nivel_5"},
+            {"name": "skumeter"}, {"name": "hierarquia_5"},
             {"name": "servicename"}, {"name": "_billing_period"},
         ]},
         "_billing_period",
@@ -401,7 +401,7 @@ def test_source_exclusion_prefix_uses_gold_field_without_forecast_dimension():
     assert applied == [rule.name]
     assert 'CAST("skumeter" AS VARCHAR)' in sql_filter
     assert "Provisioned Managed" in sql_filter
-    assert 'CAST("organograma_nivel_5" AS VARCHAR) = \'Aura Brain\'' in sql_filter
+    assert 'CAST("hierarquia_5" AS VARCHAR) = \'Aura Brain\'' in sql_filter
     assert 'CAST("_billing_period" AS VARCHAR) >= \'202512\'' in sql_filter
 
 

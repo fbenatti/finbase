@@ -49,8 +49,8 @@ def _text(value: Any) -> str:
 
 def normalize_row(row: dict[str, Any]) -> dict[str, str] | None:
     """Map a Gold row to the portfolio hierarchy, excluding Sinfonia IA."""
-    level5 = _text(row.get("organograma_nivel_5"))
-    level6 = _text(row.get("organograma_nivel_6"))
+    level5 = _text(row.get("hierarquia_5"))
+    level6 = _text(row.get("hierarquia_6"))
     key5 = level5.lower()
     mapping = _PROJECTS.get(key5)
     if not mapping:
@@ -181,8 +181,8 @@ async def load_sinfonia_dashboard(*, cancel_event: asyncio.Event | None = None) 
     rows = await trino_execute(f"""
         SELECT _billing_period AS period, tipo,
                {optional_column("cloud_origem", "cloud_origem")},
-               {optional_column("organograma_nivel_5", "organograma_nivel_5", "departamento_nivel_5", "organograma")},
-               {optional_column("organograma_nivel_6", "organograma_nivel_6", "departamento_nivel_6")},
+               {optional_column("hierarquia_5", "hierarquia_5", "departamento_nivel_5", "organograma")},
+               {optional_column("hierarquia_6", "hierarquia_6", "departamento_nivel_6")},
                {optional_column("servicename", "servicename")},
                {optional_column("servicesubcategory", "servicesubcategory")},
                {optional_column("skumeter", "skumeter")},

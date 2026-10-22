@@ -291,7 +291,7 @@ export default function PivotAnalysis({ destinations, initialTableId, showSearch
       const isSharedCostSource = destinations.some(item => item.id === tableId && item.analysis_kind === "shared_cost");
       const isPlanning = tableId < 0 && dimensions.has("period") && dimensions.has("tipo") && next.measures.includes("value");
       if (isSharedCostSource) {
-        setRows(["organograma_nivel_1", "organograma_nivel_2", "organograma_nivel_3", "organograma_nivel_4"].filter(name => dimensions.has(name)));
+        setRows(["hierarquia_1", "hierarquia_2", "hierarquia_3", "hierarquia_4"].filter(name => dimensions.has(name)));
         setCols(dimensions.has("period") ? ["period"] : []);
         const measure = [initialMeasure, "realizado", next.default_measure].find(name => name && next.measures.includes(name));
         setMeasures(measure ? [{ column: measure, aggregation: "SUM" }] : []);

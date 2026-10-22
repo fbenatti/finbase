@@ -7,6 +7,7 @@ from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, text, delete as sa_delete, or_, String, cast, func
 import json
+from app.core.hierarchy import depth_from_departments, hierarchy_columns, hierarchy_columns_in, hierarchy_depth_of, path_to_levels
 from app.database import get_db
 from app.models.source_connection import SourceConnection
 from app.models.ingested_blob import IngestedBlob
@@ -1768,10 +1769,6 @@ def _reprocess_destination_sync(
             )
         output_cols = {'organograma', 'centro_custo', 'id_orcamento',
                        'ambiente', 'custom_fields', 'subscription_rg',
-                       'organograma_nivel_1', 'organograma_nivel_2',
-                       'organograma_nivel_3', 'organograma_nivel_4',
-                       'organograma_nivel_5', 'organograma_nivel_6',
-                       'organograma_nivel_7',
                        'CostBRL', 'ContractedCost', 'ListCost', 'TaxBRL',
                        'EffectiveCost', 'Tax_Base', 'Tax_Marketplace',
                        'realizado_cloud', 'consumo_realizado', 'ajuste_contratual',
@@ -1906,6 +1903,8 @@ def _reprocess_destination_sync(
             _hierarchy_cache: dict = {}
             depts = session.execute(select(Department)).scalars().all()
             _dept_cache = {d.id: d for d in depts}
+            # Um nível de hierarquia por profundidade da árvore (sem limite fixo).
+            output_cols.update(hierarchy_columns(depth_from_departments(depts)))
 
             if _crules:
                 dept_ids_needed = {r.department_id for r in _crules if r.department_id}
@@ -1917,7 +1916,7 @@ def _reprocess_destination_sync(
                     visited = [dept]
                     cur = dept.parent_id
                     depth = 0
-                    while cur and depth < 7:
+                    while cur and depth < len(_dept_cache):  # só evita ciclo; sem limite de níveis
                         parent = _dept_cache.get(cur)
                         if parent:
                             visited.append(parent)
@@ -2365,7 +2364,7 @@ def _reprocess_destination_sync(
                 },
             )
             missing_hierarchy = contractual.get(
-                "organograma_nivel_1", pd.Series(index=contractual.index, dtype="object")
+                "hierarquia_1", pd.Series(index=contractual.index, dtype="object")
             ).fillna("").astype(str).str.strip().eq("")
             for index in contractual.index[missing_hierarchy]:
                 scope = (
@@ -2386,10 +2385,8 @@ def _reprocess_destination_sync(
                     current = dept_cache.get(current.parent_id) if current.parent_id else None
                 chain.reverse()
                 contractual.at[index, "organograma"] = chain[-1].name
-                for level in range(1, 8):
-                    contractual.at[index, f"organograma_nivel_{level}"] = (
-                        chain[level - 1].name if len(chain) >= level else None
-                    )
+                for column, name in path_to_levels([node.name for node in chain], hierarchy_depth_of(contractual.columns)).items():
+                    contractual.at[index, column] = name or None
                 for field in ("centro_custo", "ambiente"):
                     inherited = next(
                         (getattr(node, field) for node in reversed(chain) if getattr(node, field, None)),
@@ -2788,7 +2785,7 @@ def _reclassify_destination_sync(task_id: int, destination_table_id: int, connec
                     # Rows with prior classification (or empty dimensions) are
                     # safe to recompute from the current classification rules.
                     reset_mask = was_classified | frame.get("organograma", pd.Series(None, index=frame.index)).isna()
-                    for col in ("organograma", "centro_custo", "id_orcamento", "ambiente", "custom_fields", "subscription_rg", "organograma_nivel_1", "organograma_nivel_2", "organograma_nivel_3", "organograma_nivel_4", "organograma_nivel_5", "organograma_nivel_6", "organograma_nivel_7"):
+                    for col in ("organograma", "centro_custo", "id_orcamento", "ambiente", "custom_fields", "subscription_rg", *hierarchy_columns_in(frame.columns)):
                         if col in frame.columns:
                             frame.loc[reset_mask, col] = None
                     _apply_classifications_sync(frame, rules, None, dept_map=depts, hierarchy_cache=hierarchy_cache)

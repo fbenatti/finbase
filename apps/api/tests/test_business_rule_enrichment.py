@@ -126,8 +126,8 @@ def test_cloud_fallback_classifies_only_rows_left_unmapped():
     _apply_classifications_sync(df, [fallback], dept_map={1: infra, 2: project})
 
     assert df.loc[0, "organograma"] == "SEM PROJETO DEFINIDO"
-    assert df.loc[0, "organograma_nivel_1"] == "DIR INFRAESTRUTURA E CLOUD"
-    assert df.loc[0, "organograma_nivel_2"] == "SEM PROJETO DEFINIDO"
+    assert df.loc[0, "hierarquia_1"] == "DIR INFRAESTRUTURA E CLOUD"
+    assert df.loc[0, "hierarquia_2"] == "SEM PROJETO DEFINIDO"
     assert df.loc[1, "organograma"] == "Datamesh"
     assert pd.isna(df.loc[1, "business_rule"])
 
@@ -181,9 +181,9 @@ def test_specific_vivo_ia_rule_wins_before_cloud_fallback():
     )
 
     assert df.loc[0, "organograma"] == "Vivo IA"
-    assert df.loc[0, "organograma_nivel_1"] == "DIR DADOS E INTELIGENCIA ARTIFICIAL"
+    assert df.loc[0, "hierarquia_1"] == "DIR DADOS E INTELIGENCIA ARTIFICIAL"
     assert df.loc[1, "organograma"] == "SEM PROJETO DEFINIDO"
-    assert df.loc[1, "organograma_nivel_1"] == "DIR INFRAESTRUTURA E CLOUD"
+    assert df.loc[1, "hierarquia_1"] == "DIR INFRAESTRUTURA E CLOUD"
 
 
 def test_ptax_rule_records_financial_rule():
@@ -309,9 +309,9 @@ def test_unlinked_classification_resolves_department_by_cloud_path():
     )
 
     assert frame.loc[0, "organograma"] == "Condominio"
-    assert frame.loc[0, "organograma_nivel_1"] == "Consumo Cloud"
-    assert frame.loc[0, "organograma_nivel_2"] == "IBM"
-    assert frame.loc[0, "organograma_nivel_3"] == "Condominio"
+    assert frame.loc[0, "hierarquia_1"] == "Consumo Cloud"
+    assert frame.loc[0, "hierarquia_2"] == "IBM"
+    assert frame.loc[0, "hierarquia_3"] == "Condominio"
     assert frame.loc[0, "id_orcamento"] == "EXTERNO-IBM"
     envelope = json.loads(frame.loc[0, "business_rule"])
     assert envelope["classification"]["department_id"] == 5
@@ -340,7 +340,7 @@ def test_oci_scope_resolves_renamed_oracle_level_without_provider_hardcode():
         hierarchy_cache={},
     )
 
-    assert frame.loc[0, "organograma_nivel_3"] == "ORACLE"
+    assert frame.loc[0, "hierarquia_3"] == "ORACLE"
     assert frame.loc[0, "id_orcamento"] == "ID2534-OCI"
 
 
@@ -362,7 +362,7 @@ def test_duplicate_legacy_departments_same_parent_use_stable_id():
         hierarchy_cache={},
     )
 
-    assert frame.loc[0, "organograma_nivel_4"] == "Compra RIs"
+    assert frame.loc[0, "hierarquia_4"] == "Compra RIs"
 
 
 def test_financial_fallback_cannot_overwrite_commitment_rule():

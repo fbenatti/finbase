@@ -166,7 +166,7 @@ def test_explicit_subscription_expands_historical_silver_rg_to_rg_scoped_policy(
         return [rule]
 
     async def tag_mappings():
-        return [{"tag_key": "projeto", "focus_field": "organograma_nivel_1"}]
+        return [{"tag_key": "projeto", "focus_field": "hierarquia_1"}]
 
     async def home_tenants(_conn):
         return {selected: connection.config_json["tenant_id"], other: connection.config_json["tenant_id"]}
@@ -274,8 +274,8 @@ def test_selected_subscription_preserves_contains_exact_and_subscription_predica
     async def load_rules(_conn): return [other_subscription, prisma, other_contains_rule, other_rg_rule, foundation]
     async def tag_mappings():
         return [
-            {"tag_key": "projeto", "focus_field": "organograma_nivel_2"},
-            {"tag_key": "diretoria", "focus_field": "organograma_nivel_1"},
+            {"tag_key": "projeto", "focus_field": "hierarquia_2"},
+            {"tag_key": "diretoria", "focus_field": "hierarquia_1"},
             {"tag_key": "centro-de-custos", "focus_field": "centro_custo"},
         ]
     async def home_tenants(_conn): return {selected: "tenant"}
@@ -640,8 +640,8 @@ def test_hierarchy():
     root = Department(id=1, name="TI", centro_custo="CC1", ambiente="Prod")
     project = Department(id=2, name="Terra Brasil", parent_id=1)
     tags = service._hierarchy(project, {1: root, 2: project})
-    assert tags["organograma_nivel_1"] == "TI"
-    assert tags["organograma_nivel_2"] == "Terra Brasil"
+    assert tags["hierarquia_1"] == "TI"
+    assert tags["hierarquia_2"] == "Terra Brasil"
     assert tags["centro_custo"] == "CC1"
 
 
@@ -653,8 +653,8 @@ def test_tag_mapping_uses_global_key_and_focus_field_value():
         [{"scope": SCOPE_SUBSCRIPTION, "field": "subscriptionId", "operator": "=", "values": ["ignored"]}],
         [{"subscription_id": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", "evidence_count": 1,
           "tag_value_0": "Terra Brasil", "tag_value_1": "Financeiro"}],
-        {"organograma_nivel_5": "Terra Brasil"},
-        [{"tag_key": "projeto", "focus_field": "organograma_nivel_5"},
+        {"hierarquia_5": "Terra Brasil"},
+        [{"tag_key": "projeto", "focus_field": "hierarquia_5"},
          {"tag_key": "area", "focus_field": "billing_account_name"}],
         True, diagnostics,
     )
@@ -897,7 +897,7 @@ def test_prior_rule_exclusion_uses_active_rule_without_recent_billing_evidence()
         "tags": {"projeto": "fundacao telefonica"}, "observed": {},
     }
     exclusions = service._prior_rule_exclusions(item, [prisma, foundation], departments, {},
-                                                 [{"tag_key": "projeto", "focus_field": "organograma_nivel_5"}], [])
+                                                 [{"tag_key": "projeto", "focus_field": "hierarquia_5"}], [])
     assert [entry["rule_id"] for entry in exclusions] == [78]
     assert exclusions[0]["selector"]["allOf"][1]["anyOf"][0] == {
         "field": "name", "contains": "PCCAGENTLESSSCANRESOURCEGROUP",
@@ -923,7 +923,7 @@ def test_billed_higher_priority_rule_without_department_still_excludes_broad_pol
     exclusions = service._prior_rule_exclusions(
         item, [security, terra], departments,
         {"Terra-Brasil-Dev": ["aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"]},
-        [{"tag_key": "projeto", "focus_field": "organograma_nivel_5"}], [],
+        [{"tag_key": "projeto", "focus_field": "hierarquia_5"}], [],
         "Terra-Brasil-Dev", {3605},
     )
 
@@ -946,7 +946,7 @@ def test_prior_rule_exclusion_drops_proven_disjoint_subscription():
                        "values": ["aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"]}],
             "tags": {"projeto": "Fundacao"}, "observed": {}}
     assert service._prior_rule_exclusions(item, [other, foundation], departments, {},
-                                          [{"tag_key": "projeto", "focus_field": "organograma_nivel_5"}], []) == []
+                                          [{"tag_key": "projeto", "focus_field": "hierarquia_5"}], []) == []
 
 
 def test_current_arg_target_matches_contains_case_insensitively():
@@ -1176,7 +1176,7 @@ def test_subscription_pattern_excludes_higher_priority_rg_with_its_full_selector
     for name,value in {
         '_load_departments': {10: Department(id=10,name='Vivo+',parent_id=None),20: Department(id=20,name='PDV',parent_id=None)},
         '_load_classification_rules': [vivo,pdv],
-        '_tag_mappings': [{'tag_key':'projeto','focus_field':'organograma_nivel_1'}],
+        '_tag_mappings': [{'tag_key':'projeto','focus_field':'hierarquia_1'}],
         '_subscription_home_tenants': {subscription:'tenant'},
         '_subscription_catalog': ({'Test':[subscription]},[subscription],None),
         '_azure_rule_targets': (targets,None), '_silver_billed_rg_evidence': (evidence,None),

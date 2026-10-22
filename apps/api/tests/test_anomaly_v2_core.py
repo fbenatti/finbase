@@ -134,7 +134,7 @@ def test_case_series_reads_the_cloud_partition_without_casting_it():
         measure="realizado_cloud",
         scope_filter="TRUE",
         event_day=date(2026, 10, 13),
-        specs=[("organograma_nivel_1", "organograma_nivel_1", "Organograma")],
+        specs=[("hierarquia_1", "hierarquia_1", "Organograma")],
     )
     assert daily.count("FROM iceberg.") == 1
     assert "CAST(\"_billing_period\" AS VARCHAR) IN" not in daily
@@ -144,23 +144,23 @@ def test_case_series_reads_the_cloud_partition_without_casting_it():
     assert detail.count("FROM iceberg.") == 1
     assert "202608" not in detail
     assert "'10/13/2026'" in detail
-    assert "organograma_nivel_1" in detail
+    assert "hierarquia_1" in detail
 
 
 def test_breakdown_keeps_organogram_and_subscription_path():
     from app.services.anomaly_v2.case_series import breakdown_from_rows
 
     specs = [
-        ("organograma_nivel_1", "organograma_nivel_1", "Organograma · nível 1"),
+        ("hierarquia_1", "hierarquia_1", "Hierarquia 1"),
         ("subaccountname", "subaccountname", "Assinatura / subconta"),
         ("resourcename", "resource_name", "Recurso"),
     ]
     rows = [
-        {"organograma_nivel_1": "TI", "subaccountname": "Aura", "resource_name": "disk-a", "observed_cloud": 300},
-        {"organograma_nivel_1": "TI", "subaccountname": "Aura", "resource_name": "disk-b", "observed_cloud": 120},
+        {"hierarquia_1": "TI", "subaccountname": "Aura", "resource_name": "disk-a", "observed_cloud": 300},
+        {"hierarquia_1": "TI", "subaccountname": "Aura", "resource_name": "disk-b", "observed_cloud": 120},
     ]
     dimensions, items, common = breakdown_from_rows(rows, specs)
-    assert [item["key"] for item in dimensions] == ["organograma_nivel_1", "subaccountname", "resource_name"]
-    assert common == {"organograma_nivel_1": "TI", "subaccountname": "Aura"}
+    assert [item["key"] for item in dimensions] == ["hierarquia_1", "subaccountname", "resource_name"]
+    assert common == {"hierarquia_1": "TI", "subaccountname": "Aura"}
     assert len(items) == 2
     assert {item["dimensions"]["resource_name"] for item in items} == {"disk-a", "disk-b"}

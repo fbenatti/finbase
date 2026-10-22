@@ -49,8 +49,8 @@ export default function OrgScopeDrawer({ tree, path, levelLabels, onSelect, onCl
     let alive = true;
     setLoading(true);
     setStats(null);
-    const column = `organograma_nivel_${browse.length + 1}`;
-    const parent: GoldQueryFilter[] = browse.map((name, i) => ({ column: `organograma_nivel_${i + 1}`, operator: "IN", values: [name] }));
+    const column = `hierarquia_${browse.length + 1}`;
+    const parent: GoldQueryFilter[] = browse.map((name, i) => ({ column: `hierarquia_${i + 1}`, operator: "IN", values: [name] }));
     const sorted = [...months].sort();
     const last = sorted[sorted.length - 1];
     const prev = sorted[sorted.length - 2];

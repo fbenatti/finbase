@@ -19,6 +19,7 @@ import pandas as pd
 from sqlalchemy import select, or_, update as sa_update
 from sqlalchemy.orm import Session
 
+from app.core.hierarchy import depth_from_departments, hierarchy_columns
 from app.database import async_session, SyncSession
 from app.models.source_connection import SourceConnection
 from app.models.etl_task import EtlTask
@@ -664,7 +665,7 @@ def _apply_classifications_sync(df: pd.DataFrame, class_rules: list[Classificati
         visited = [dept]
         current_id = dept.parent_id
         depth = 0
-        while current_id and depth < 7:
+        while current_id and depth < len(dept_map):  # só evita ciclo; sem limite de níveis
             parent = dept_map.get(current_id)
             if parent:
                 visited.append(parent)
@@ -727,10 +728,8 @@ def _apply_classifications_sync(df: pd.DataFrame, class_rules: list[Classificati
     # ── Ensure ALL hierarchy columns exist BEFORE rule application ──
     for col in ['organograma', 'centro_custo', 'id_orcamento', 'ambiente',
                 'custom_fields', 'subscription_rg',
-                'organograma_nivel_1', 'organograma_nivel_2',
-                'organograma_nivel_3', 'organograma_nivel_4',
-                'organograma_nivel_5', 'organograma_nivel_6',
-                'organograma_nivel_7', 'business_rule']:
+                *hierarchy_columns(depth_from_departments(dept_map.values())),
+                'business_rule']:
         if col not in df.columns:
             df[col] = None
 
@@ -807,7 +806,7 @@ def _apply_classifications_sync(df: pd.DataFrame, class_rules: list[Classificati
                 # first-class dimension. nivel_1 = root (diretoria).
                 root_to_leaf = list(reversed(chain))
                 for i, d in enumerate(root_to_leaf, start=1):
-                    col_name = f"organograma_nivel_{i}"
+                    col_name = f"hierarquia_{i}"
                     if col_name not in df.columns:
                         df[col_name] = None
                     df.loc[effective_mask, col_name] = d.name or ""

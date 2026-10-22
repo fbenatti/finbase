@@ -4589,8 +4589,8 @@ export async function getPadroesRecursos(
 }
 
 export interface SavingOrganogramaItem {
-  organograma_nivel_4: string | null;
-  organograma_nivel_5: string | null;
+  hierarquia_4: string | null;
+  hierarquia_5: string | null;
   vms: number;
   saved_hours: number;
   saving_brl: number;

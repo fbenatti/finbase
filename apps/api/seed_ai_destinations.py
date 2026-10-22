@@ -20,13 +20,13 @@ PLATFORM_COLUMNS = [
     ("tipo", "TEXT"),
     ("organograma", "TEXT"),
     ("centro_custo", "TEXT"),
-    ("organograma_nivel_1", "TEXT"),
-    ("organograma_nivel_2", "TEXT"),
-    ("organograma_nivel_3", "TEXT"),
-    ("organograma_nivel_4", "TEXT"),
-    ("organograma_nivel_5", "TEXT"),
-    ("organograma_nivel_6", "TEXT"),
-    ("organograma_nivel_7", "TEXT"),
+    ("hierarquia_1", "TEXT"),
+    ("hierarquia_2", "TEXT"),
+    ("hierarquia_3", "TEXT"),
+    ("hierarquia_4", "TEXT"),
+    ("hierarquia_5", "TEXT"),
+    ("hierarquia_6", "TEXT"),
+    ("hierarquia_7", "TEXT"),
 ]
 
 LICENSE_COLUMNS = [

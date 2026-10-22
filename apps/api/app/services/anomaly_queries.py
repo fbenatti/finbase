@@ -44,7 +44,7 @@ SELECT_COLUMNS = (
 
 DIMENSION_COLUMNS = (
     "cloud_origem", "servicename", "subaccountname", "centro_custo",
-    "organograma_nivel_1", "chargecategory", "pricingcategory",
+    "hierarquia_1", "chargecategory", "pricingcategory",
 )
 
 

@@ -21,6 +21,7 @@ import re
 import time
 from typing import Any
 
+from app.core.hierarchy import hierarchy_columns_in, is_hierarchy_column
 from app.models.destination import DestinationTable
 from app.models.source_connection import SourceConnection
 from app.models.gold_mart_rule import GoldMartRule, GoldMartRuleSource
@@ -97,15 +98,15 @@ def _alias_for_missing(schema: dict[str, str], requested: str) -> str | None:
     # Resolve a filter field that a table lacks onto an equivalent column.
     # Gold and its *_planning mirror share the same normalized structure except
     # for small naming differences: the Gold exposes organograma (folha) while the
-    # planning mirror only keeps organograma_nivel_1..7. When a source unites
+    # planning mirror only keeps hierarquia_1, hierarquia_2, ... When a source unites
     # both tables, a filter on organograma must apply on the planning side
-    # as organograma_nivel_1 so the union stays a single clean dataset.
+    # as hierarquia_1 so the union stays a single clean dataset.
     key = str(requested or "").strip().lower()
     if key == "organograma":
-        candidate = schema.get("organograma_nivel_1")
+        candidate = schema.get("hierarquia_1")
         if candidate:
             return candidate
-    if key.startswith("organograma_nivel_"):
+    if is_hierarchy_column(key):
         candidate = schema.get(key)
         if candidate:
             return candidate
@@ -307,6 +308,9 @@ async def preview_source(*, gold_table: str, filter_json: dict[str, Any] | None,
     }
 
 
+# Marca na lista abaixo: entra cada hierarquia_N existente na fonte, em ordem.
+_ALL_HIERARCHY_LEVELS = "hierarquia_*"
+
 # Analytic dimensions used by default when a rule does not declare its own.
 # Grouping by high-cardinality columns (ResourceId, tags, custom_fields...)
 # neither shrinks the table nor helps dashboards and explodes Trino memory on
@@ -318,13 +322,7 @@ _ANALYTIC_DIMENSIONS = (
     "tipo",
     "cloud_origem",
     "organograma",
-    "organograma_nivel_1",
-    "organograma_nivel_2",
-    "organograma_nivel_3",
-    "organograma_nivel_4",
-    "organograma_nivel_5",
-    "organograma_nivel_6",
-    "organograma_nivel_7",
+    _ALL_HIERARCHY_LEVELS,
     "servicecategory",
     "servicename",
     "servicesubcategory",
@@ -360,9 +358,11 @@ def _default_dimensions(schema_by_gold: dict[str, dict[str, str]]) -> list[str]:
     lookup = {key: physical for key, physical in _merged_lookup(schema_by_gold)}
     dims: list[str] = []
     for logical in _ANALYTIC_DIMENSIONS:
-        physical = lookup.get(logical.lower())
-        if physical and physical not in dims:
-            dims.append(physical)
+        names = hierarchy_columns_in(lookup) if logical == _ALL_HIERARCHY_LEVELS else [logical.lower()]
+        for name in names:
+            physical = lookup.get(name)
+            if physical and physical not in dims:
+                dims.append(physical)
     return dims
 
 
@@ -1345,8 +1345,8 @@ async def materialize_saving_history(
         resource_type VARCHAR,
         connection_code VARCHAR,
         subscription_name VARCHAR,
-        organograma_nivel_4 VARCHAR,
-        organograma_nivel_5 VARCHAR,
+        hierarquia_4 VARCHAR,
+        hierarquia_5 VARCHAR,
         _billing_period VARCHAR,
         billing_period VARCHAR,
         total_hours DOUBLE,
@@ -1431,8 +1431,8 @@ async def materialize_saving_history(
         gold_dept AS (
             SELECT
                 LOWER(TRIM(g."ResourceId")) AS rid,
-                MAX(g.organograma_nivel_4) AS n4,
-                MAX(g.organograma_nivel_5) AS n5
+                MAX(g.hierarquia_4) AS n4,
+                MAX(g.hierarquia_5) AS n5
             FROM iceberg.silver.dest_modelo_focus g
             JOIN stats s ON LOWER(TRIM(g."ResourceId")) = LOWER(TRIM(s.resource_id))
             WHERE g._billing_period = '{target}'
@@ -1445,8 +1445,8 @@ async def materialize_saving_history(
                 CASE WHEN POSITION('virtualMachineScaleSets' IN s.resource_id) > 0 THEN 'VMSS' ELSE 'VM' END AS resource_type,
                 s.connection_code,
                 s.subscription_name,
-                COALESCE(g.n4, 'SEM DEPARTAMENTO') AS organograma_nivel_4,
-                COALESCE(g.n5, 'SEM PROJETO') AS organograma_nivel_5,
+                COALESCE(g.n4, 'SEM DEPARTAMENTO') AS hierarquia_4,
+                COALESCE(g.n5, 'SEM PROJETO') AS hierarquia_5,
                 '{target}' AS _billing_period,
                 '{target}' AS billing_period,
                 s.cur_hours AS total_hours,

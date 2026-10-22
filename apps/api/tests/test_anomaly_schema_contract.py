@@ -63,13 +63,15 @@ def test_referencia_e_compacta_por_mes_nao_por_dia():
 
 
 def test_avaliacao_preserva_dimensoes_compativeis_com_planning():
-    names = {name for name, _ in assessment_columns()}
+    names = {name for name, _ in assessment_columns(9)}
     for dim in (
         "cloud_origem", "servicename", "subaccountname", "centro_custo",
-        "organograma_nivel_1", "organograma_nivel_7", "chargecategory",
+        "hierarquia_1", "hierarquia_9", "chargecategory",
         "pricingcategory", "commitmentdiscounttype",
     ):
         assert dim in names
+    # Sem limite fixo: só existem os níveis da profundidade pedida.
+    assert "hierarquia_10" not in names
 
 
 def test_nomes_de_tabela_sao_os_do_plano():

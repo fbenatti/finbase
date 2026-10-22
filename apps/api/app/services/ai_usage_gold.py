@@ -10,6 +10,7 @@ import logging
 import time
 from typing import Any
 
+from app.core.hierarchy import hierarchy_columns_in
 from app.services.trino_service import execute as trino_execute
 from app.services import lakehouse_layers as layers
 from app.services.gold_materialization import GOLD
@@ -75,11 +76,20 @@ async def _publish(
     return resultado.rows
 
 
-def _consumption_select() -> str:
+async def _source_levels(table: str) -> list[str]:
+    """Níveis hierarquia_N da tabela de origem (sem limite fixo)."""
+    try:
+        rows = await trino_execute(f"DESCRIBE iceberg.silver.{table}", timeout_s=30)
+    except Exception:  # noqa: BLE001 — origem ausente: o cubo sai sem níveis
+        return []
+    return hierarchy_columns_in(str(row.get("Column") or row.get("column_name") or "").lower() for row in rows)
+
+
+def _consumption_select(levels: list[str]) -> str:
     dimensions = [
         "provider", "productname", "modelname", "recordtype", "useremail", "userlogin",
         "aggregationlevel", "editor", "language", "organograma",
-        *(f"organograma_nivel_{level}" for level in range(1, 8)),
+        *levels,
     ]
     dim_select = ",\n        ".join(f"CAST({name} AS VARCHAR) AS {name}" for name in dimensions)
     group_positions = ", ".join(str(position) for position in range(1, 3 + len(dimensions)))
@@ -107,8 +117,9 @@ def _consumption_select() -> str:
     """
 
 
-def _license_select() -> str:
-    return """
+def _license_select(levels: list[str]) -> str:
+    level_select = "".join(f"\n        CAST({name} AS VARCHAR) AS {name}," for name in levels)
+    return f"""
       SELECT
         CAST(useremail AS VARCHAR) AS useremail,
         CAST(userlogin AS VARCHAR) AS userlogin,
@@ -126,14 +137,7 @@ def _license_select() -> str:
         CAST(activitystatus AS VARCHAR) AS activitystatus,
         TRY_CAST(allocatedlicensecost AS DOUBLE) AS allocatedlicensecost,
         TRY_CAST(listcost AS DOUBLE) AS listcost,
-        CAST(organograma AS VARCHAR) AS organograma,
-        CAST(organograma_nivel_1 AS VARCHAR) AS organograma_nivel_1,
-        CAST(organograma_nivel_2 AS VARCHAR) AS organograma_nivel_2,
-        CAST(organograma_nivel_3 AS VARCHAR) AS organograma_nivel_3,
-        CAST(organograma_nivel_4 AS VARCHAR) AS organograma_nivel_4,
-        CAST(organograma_nivel_5 AS VARCHAR) AS organograma_nivel_5,
-        CAST(organograma_nivel_6 AS VARCHAR) AS organograma_nivel_6,
-        CAST(organograma_nivel_7 AS VARCHAR) AS organograma_nivel_7,
+        CAST(organograma AS VARCHAR) AS organograma,{level_select}
         CAST(snapshotdate AS VARCHAR) AS snapshotdate,
         CAST(_billing_period AS VARCHAR) AS _billing_period
       FROM (
@@ -359,9 +363,11 @@ async def refresh_ai_usage_gold_cubes(only_tables: list[str] | None = None) -> d
     (licenças) seguem numa consulta. Os derivados rodam por último, porque leem o
     cubo de origem já publicado.
     """
+    consumption_levels = await _source_levels("dest_consumo_ia")
+    license_levels = await _source_levels("dest_licencas_ia")
     definitions = [
-        (AI_CONSUMPTION_TABLE, _consumption_select),
-        (AI_LICENSE_TABLE, _license_select),
+        (AI_CONSUMPTION_TABLE, lambda: _consumption_select(consumption_levels)),
+        (AI_LICENSE_TABLE, lambda: _license_select(license_levels)),
         (COPILOT_USAGE_TABLE, _copilot_usage_select),
         (COPILOT_LICENSE_TABLE, _copilot_license_select),
         (COPILOT_USER_PERIOD_TABLE, _copilot_user_period_select),

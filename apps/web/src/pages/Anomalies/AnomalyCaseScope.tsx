@@ -8,7 +8,13 @@ import { caseLineageNodes, detailScopeChain, dimensionValue, filterMembers, obse
 const money = (value: number | null | undefined, currency: string) => value == null ? "—" : value.toLocaleString("pt-BR", { style: "currency", currency });
 const pct = (value: number) => `${value.toLocaleString("pt-BR", { maximumFractionDigits: 1 })}%`;
 const day = (value: string) => new Date(`${value.slice(0, 10)}T00:00:00Z`).toLocaleDateString("pt-BR", { day: "2-digit", month: "short", timeZone: "UTC" }).replace(/\.$/, "");
-const orgPath = (dimensions: Record<string, string | null>) => Array.from({ length: 7 }, (_, i) => dimensions[`organograma_nivel_${i + 1}`]).filter((value): value is string => Boolean(value));
+// Caminho hierarquia_1 > hierarquia_2 > ...; quantos níveis houver nas dimensões.
+const orgPath = (dimensions: Record<string, string | null>) => Object.keys(dimensions)
+  .map((key) => ({ key, level: Number(/^hierarquia_(\d+)$/.exec(key)?.[1]) }))
+  .filter((item) => item.level > 0)
+  .sort((left, right) => left.level - right.level)
+  .map((item) => dimensions[item.key])
+  .filter((value): value is string => Boolean(value));
 const branchColors = ["#db525e", "#e59051", "#9b719e", "#0F62FE"];
 
 export default function AnomalyCaseScope({ kase, series, currency }: {

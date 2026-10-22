@@ -8,7 +8,7 @@ const point = (day: string, actual: number | null, expected: number | null): Ano
   delta_cloud: actual != null && expected != null ? actual - expected : null, anomalous_cost_cloud: null, above_band: null,
 });
 const member = (project: string, actual: number, expected: number, account: string): Member => ({
-  series_id: `${project}-${account}`, dimensions: { organograma_nivel_4: "Diretoria", organograma_nivel_5: project, subaccountname: account },
+  series_id: `${project}-${account}`, dimensions: { hierarquia_4: "Diretoria", hierarquia_5: project, subaccountname: account },
   event_date: "2026-10-12", observed_cloud: actual, expected_cloud: expected, delta_cloud: actual - expected,
   items: [point("2026-10-12", actual, expected), point("2026-10-13", null, expected)],
 });
@@ -17,21 +17,21 @@ describe("decomposição de desvio", () => {
   it("reconcilia aumentos e reduções sem transformar participação em custo duplicado", () => {
     const members = [member("Projeto A", 500, 100, "Prod"), member("Projeto B", 50, 100, "Dev")];
     const { dimension, groups } = scopeBranches(members, []);
-    expect(dimension?.field).toBe("organograma_nivel_5");
+    expect(dimension?.field).toBe("hierarquia_5");
     expect(groups.map(group => group.delta)).toEqual([400, -50]);
     expect(groups.reduce((sum, group) => sum + group.delta!, 0)).toBe(350);
     expect(scopeTimeline(members)[0].delta_cloud).toBe(350);
   });
   it("selecionar projeto filtra a mesma conta e o mesmo forecast do gráfico", () => {
     const members = [member("A", 500, 100, "Prod"), member("B", 300, 200, "Dev")];
-    const filters = [{ field: "organograma_nivel_5", value: "B" }];
+    const filters = [{ field: "hierarquia_5", value: "B" }];
     const selected = filterMembers(members, filters);
     expect(scopeTimeline(selected)[0]).toMatchObject({ observed_cloud: 300, expected_cloud: 200, delta_cloud: 100, reference_id: "frozen" });
     expect(scopeTimeline(selected)[1].observed_cloud).toBeNull();
   });
   it("mantém a decomposição encadeada até contas distintas de um projeto", () => {
     const selected = [member("A", 500, 100, "Prod"), member("A", 300, 200, "Dev")];
-    expect(scopeBranches(selected, [{ field: "organograma_nivel_5", value: "A" }]).dimension?.field).toBe("subaccountname");
+    expect(scopeBranches(selected, [{ field: "hierarquia_5", value: "A" }]).dimension?.field).toBe("subaccountname");
   });
   it("prioriza assinatura e resource group antes de produto e SKU", () => {
     const chain = detailScopeChain();
@@ -40,7 +40,7 @@ describe("decomposição de desvio", () => {
       { ...member("A", 300, 200, "Dev"), dimensions: { ...member("A", 300, 200, "Dev").dimensions, servicename: "Compute", servicesubcategory: "VM", skumeter: "D8" } },
       { ...member("A", 200, 100, "Prod"), dimensions: { ...member("A", 200, 100, "Prod").dimensions, servicename: "Compute", servicesubcategory: "VM", skumeter: "D8" } },
     ];
-    const project = [{ field: "organograma_nivel_5", value: "A" }];
+    const project = [{ field: "hierarquia_5", value: "A" }];
     expect(scopeBranches(members, project, chain).dimension?.field).toBe("subaccountname");
     expect(scopeBranches(members, [...project, { field: "subaccountname", value: "Prod" }], chain).dimension?.field).toBe("skumeter");
     expect(chain.some(item => item.field === "centro_custo" || item.field === "servicename")).toBe(false);

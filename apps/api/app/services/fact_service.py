@@ -7,9 +7,11 @@ import pandas as pd
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, text
 
+from app.core.hierarchy import hierarchy_level
 from app.models.fact_cost import FactCost
 from app.models.cost_lines import NormalizedCostLine
 from app.models.ingested_blob import IngestedBlob
+
 
 logger = logging.getLogger(__name__)
 
@@ -48,13 +50,6 @@ JSON_TO_FACT_MAP = {
     "department_path": "department_path",
     "centro_custo": "centro_custo",
     "ambiente": "ambiente",
-    "organograma_nivel_1": "organograma_nivel_1",
-    "organograma_nivel_2": "organograma_nivel_2",
-    "organograma_nivel_3": "organograma_nivel_3",
-    "organograma_nivel_4": "organograma_nivel_4",
-    "organograma_nivel_5": "organograma_nivel_5",
-    "organograma_nivel_6": "organograma_nivel_6",
-    "organograma_nivel_7": "organograma_nivel_7",
     "DiretorResp": "diretor_resp",
 }
 
@@ -66,12 +61,18 @@ def _json_record_to_fact_row(record: dict) -> dict:
     row = {}
     extra = {}
     tags = None
+    levels: dict[int, str] = {}
 
     for key, value in record.items():
         if key in SKIP_KEYS:
             continue
         if key.lower() == "tags" and isinstance(value, dict):
             tags = value
+            continue
+
+        level = hierarchy_level(key)
+        if level is not None:
+            levels[level] = value
             continue
 
         fact_col = JSON_TO_FACT_MAP.get(key)
@@ -82,6 +83,8 @@ def _json_record_to_fact_row(record: dict) -> dict:
 
     row["tags"] = tags
     row["extra"] = extra if extra else None
+    path = [str(levels[level]) for level in sorted(levels) if levels[level]]
+    row["hierarquia"] = path or None
 
     return row
 

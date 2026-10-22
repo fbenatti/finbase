@@ -80,7 +80,7 @@ def test_sql_de_contagem():
 
 def test_sql_de_avaliacoes_projeta_dimensoes_do_plano():
     sql = assessments_sql(namespace="silver", table="t", statuses=["OPEN"], limit=10, offset=0)
-    for column in ("cloud_origem", "servicename", "centro_custo", "organograma_nivel_1", "chargecategory"):
+    for column in ("cloud_origem", "servicename", "centro_custo", "hierarquia_1", "chargecategory"):
         assert f'"{column}"' in sql
     assert "assessment_id" in sql and "anomalous_cost_cloud" in sql
 

@@ -36,6 +36,8 @@ from pyiceberg.transforms import IdentityTransform
 
 from app.services import lakehouse_layers as layers
 
+from app.core.hierarchy import legacy_to_hierarchy
+
 logger = logging.getLogger(__name__)
 _STAGING_TABLE_RE = re.compile(r"^(?P<base>[a-z0-9_]+)_stg_(?P<timestamp>\d{16,20})$")
 _STAGING_TABLE_RE = re.compile(r"^(?P<base>[a-z0-9_]+)_stg_(?P<timestamp>\d{16,20})$")
@@ -1886,7 +1888,7 @@ def publish_staged_partition(
 
     # A partial reprocess publishes one connection/month at a time.  The
     # staging table can legitimately contain newly materialized organizational
-    # dimensions (for example organograma_nivel_6 and organograma_nivel_7) while the existing
+    # dimensions (for example a new hierarquia_N level) while the existing
     # Gold table still has the prior schema.  Evolve the target by name before
     # appending Arrow batches; otherwise PyArrow rejects the new fields and the
     # atomic publication fails after all processing has completed.
@@ -2459,7 +2461,7 @@ def table_exists(physical_name: str, namespace: str = layers.GOLD) -> bool:
 
 
 def rename_legacy_organograma_columns(namespace: str) -> dict[str, list[tuple[str, str]]]:
-    """Rename legacy departamento_* columns to organograma_* on existing Iceberg tables."""
+    """Rename legacy level columns (departamento_nivel_N, organograma_nivel_N) to hierarquia_N."""
     cat = _get_catalog()
     _ensure_namespace(namespace)
     renamed: dict[str, list[tuple[str, str]]] = {}
@@ -2471,10 +2473,9 @@ def rename_legacy_organograma_columns(namespace: str) -> dict[str, list[tuple[st
             continue
         field_names = {field.name for field in tbl.schema().fields}
         pairs: list[tuple[str, str]] = []
-        for level in range(1, 8):
-            old_name = f"departamento_nivel_{level}"
-            new_name = f"organograma_nivel_{level}"
-            if old_name in field_names and new_name not in field_names:
+        for old_name in sorted(field_names):
+            new_name = legacy_to_hierarchy(old_name)
+            if new_name != old_name and new_name not in field_names:
                 pairs.append((old_name, new_name))
         if "departamento" in field_names and "organograma" not in field_names:
             pairs.append(("departamento", "organograma"))

@@ -12,6 +12,7 @@ from typing import Any
 
 import pandas as pd
 
+from app.core.hierarchy import hierarchy_columns_in, hierarchy_level
 from app.services.trino_service import execute as trino_execute
 from app.services import iceberg_service as iceberg
 
@@ -1980,16 +1981,16 @@ async def _enrich_planning_snapshot(
             "cloud_origem": version.scope_cloud,
         }
         for index, name in enumerate(path, 1):
-            record[f"organograma_nivel_{index}"] = name
+            record[f"hierarquia_{index}"] = name
         # Preserve any forecast dimensions that the organization snapshot can
         # represent by matching conventional dimension names.
         for normalized_name, column in normalized_dimensions.items():
             source = dimension_aliases.get(normalized_name)
             if source and record.get(source) is not None:
                 record[column] = record[source]
-            elif normalized_name.startswith("organogramanivel"):
+            elif normalized_name.startswith(("hierarquia", "organogramanivel")):
                 try:
-                    level = int(normalized_name.removeprefix("organogramanivel"))
+                    level = int(normalized_name.removeprefix("hierarquia").removeprefix("organogramanivel"))
                     record[column] = path[level - 1] if level <= len(path) else None
                 except ValueError:
                     pass
@@ -1998,10 +1999,9 @@ async def _enrich_planning_snapshot(
             normalized = re.sub(r"[^a-z0-9]", "", target)
             if normalized in normalized_available:
                 record[target] = record[source]
-        for level in range(1, 8):
-            target = f"organograma_nivel_{level}"
-            if re.sub(r"[^a-z0-9]", "", target) in normalized_available:
-                record[target] = path[level - 1] if level <= len(path) else None
+        for target in hierarchy_columns_in(forecast_output.columns):
+            level = hierarchy_level(target)
+            record[target] = path[level - 1] if level <= len(path) else None
         records.append(record)
 
     if not records:

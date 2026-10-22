@@ -450,11 +450,11 @@ export default function DesligueProgramado({ embedded }: { embedded?: boolean })
                     data={[{
                       type: "bar",
                       orientation: "h",
-                      y: savingDept.rows.slice(0, 10).map(r => r.organograma_nivel_4),
+                      y: savingDept.rows.slice(0, 10).map(r => r.hierarquia_4),
                       x: savingDept.rows.slice(0, 10).map(r => r.saving_brl),
                       marker: { color: PURPLE },
                       hovertemplate: "%{y}<br>%{x:,.2f} · %{customdata}<extra></extra>",
-                      customdata: savingDept.rows.slice(0, 10).map(r => `${r.organograma_nivel_5} · ${r.vms} VMs`),
+                      customdata: savingDept.rows.slice(0, 10).map(r => `${r.hierarquia_5} · ${r.vms} VMs`),
                     }]}
                     layout={{
                       height: Math.max(240, Math.min(savingDept.rows.slice(0, 10).length, 10) * 40),

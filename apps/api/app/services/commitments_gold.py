@@ -9,12 +9,13 @@ from __future__ import annotations
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.hierarchy import hierarchy_columns, hierarchy_depth
 from app.models.gold_mart_rule import GoldMartRule
 
 COMMITMENTS_GOLD_CODE = "commitments_dashboard"
 COMMITMENTS_GOLD_TABLE = "dest_dm_cost_commitments_dashboard"
 
-COMMITMENTS_GOLD_SQL = """
+_COMMITMENTS_GOLD_SQL_TEMPLATE = """
 WITH synthetic_returns AS (
     SELECT source_connection_id, _billing_period, clone_source_record_id,
            clone_rule_id, SUM(realizado_cloud) AS return_realized
@@ -92,13 +93,7 @@ WITH synthetic_returns AS (
            LOWER(cloud_origem) AS source,
            CASE WHEN LOWER(commitmentdiscounttype) = 'reservation'
                 THEN 'RI' ELSE 'SavingPlan' END AS commitment_type,
-           COALESCE(NULLIF(TRIM(organograma_nivel_7), ''),
-                    NULLIF(TRIM(organograma_nivel_6), ''),
-                    NULLIF(TRIM(organograma_nivel_5), ''),
-                    NULLIF(TRIM(organograma_nivel_4), ''),
-                    NULLIF(TRIM(organograma_nivel_3), ''),
-                    NULLIF(TRIM(organograma_nivel_2), ''),
-                    NULLIF(TRIM(organograma_nivel_1), ''),
+           COALESCE({deepest_levels}
                     'Sem projeto') AS project,
            SUM(CASE WHEN LOWER(chargecategory) = 'purchase'
                     THEN realizado_cloud ELSE 0 END) AS forecast_purchase,
@@ -138,12 +133,22 @@ UNION ALL SELECT * FROM forecast_total_rows
 """.strip()
 
 
+def commitments_gold_sql(depth: int) -> str:
+    """SQL do cubo; o projeto é o nível mais profundo preenchido, até ``depth``."""
+    deepest = "".join(
+        f"NULLIF(TRIM({column}), ''),\n                    "
+        for column in reversed(hierarchy_columns(depth))
+    )
+    return _COMMITMENTS_GOLD_SQL_TEMPLATE.replace("{deepest_levels}", deepest.rstrip())
+
+
 async def ensure_commitments_gold_rule(db: AsyncSession) -> GoldMartRule:
     """Idempotently register/update the dashboard's governed Gold materializer."""
     result = await db.execute(
         select(GoldMartRule).where(GoldMartRule.code == COMMITMENTS_GOLD_CODE)
     )
     rule = result.scalar_one_or_none()
+    sql_template = commitments_gold_sql(await hierarchy_depth(db))
     if rule is None:
         rule = GoldMartRule(
             code=COMMITMENTS_GOLD_CODE,
@@ -155,13 +160,13 @@ async def ensure_commitments_gold_rule(db: AsyncSession) -> GoldMartRule:
             active=True,
             dimensions=[],
             measure_columns=[],
-            sql_template=COMMITMENTS_GOLD_SQL,
+            sql_template=sql_template,
             materialization_table=COMMITMENTS_GOLD_TABLE,
             materialization_status="PENDING",
         )
         db.add(rule)
-    elif rule.sql_template != COMMITMENTS_GOLD_SQL:
-        rule.sql_template = COMMITMENTS_GOLD_SQL
+    elif rule.sql_template != sql_template:
+        rule.sql_template = sql_template
         rule.name = "Compras de RI e SavingPlan — painel executivo"
         rule.description = (
             "Cubo mensal por origem, compromisso e projeto; materializa "

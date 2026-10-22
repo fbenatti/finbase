@@ -7,12 +7,12 @@ import { GoldInfo, GoldQueryFilter, GoldQueryResult, queryDimonTable } from "../
 // Same order and field path as the consumption decomposition, through SKU.
 const LENSES: Array<{ label: string; field: string }> = [
   { label: "Cloud", field: "cloud_origem" },
-  { label: "Segmento", field: "organograma_nivel_1" },
-  { label: "Modelo", field: "organograma_nivel_2" },
-  { label: "Plataforma", field: "organograma_nivel_3" },
-  { label: "Diretoria", field: "organograma_nivel_4" },
-  { label: "Projeto", field: "organograma_nivel_5" },
-  { label: "SubProjeto", field: "organograma_nivel_6" },
+  { label: "Segmento", field: "hierarquia_1" },
+  { label: "Modelo", field: "hierarquia_2" },
+  { label: "Plataforma", field: "hierarquia_3" },
+  { label: "Diretoria", field: "hierarquia_4" },
+  { label: "Projeto", field: "hierarquia_5" },
+  { label: "SubProjeto", field: "hierarquia_6" },
   { label: "Serviço", field: "servicename" },
   { label: "ServiceSubcategory", field: "servicesubcategory" },
   { label: "Subserviço", field: "skumeter" },

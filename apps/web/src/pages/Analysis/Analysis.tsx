@@ -36,7 +36,7 @@ function filtersFromSearch(params: URLSearchParams): PivotFilter[] {
   const filters: PivotFilter[] = [];
   const path = params.get("path") || "";
   path.split(" > ").map(part => part.trim()).filter(Boolean).forEach((name, index) => {
-    filters.push({ column: `organograma_nivel_${index + 1}`, values: [name], operator: "IN" });
+    filters.push({ column: `hierarquia_${index + 1}`, values: [name], operator: "IN" });
   });
   const year = params.get("year");
   if (year) filters.push({ column: "_billing_period", values: [year], operator: "CONTAINS" });

@@ -40,7 +40,6 @@ router = APIRouter(tags=["rules"])
 # Keep references to background refresh tasks so they are not garbage-collected.
 _refresh_tasks: set[asyncio.Task] = set()
 
-MAX_DEPARTMENT_LEVELS = 7
 FINANCIAL_EFFECTS = {"NONE", "DIRECT_REALIZED", "BUDGET_COMMITMENT"}
 
 
@@ -144,17 +143,11 @@ async def _move_department(
             raise HTTPException(status_code=422, detail="O novo departamento pai deve existir e estar ativo")
         if new_parent_id in _subtree_ids(department.id, departments):
             raise HTTPException(status_code=422, detail="A movimentação criaria um ciclo na hierarquia")
-        if len(_department_path(new_parent_id, departments)) + 1 > MAX_DEPARTMENT_LEVELS:
-            raise HTTPException(status_code=422, detail="A hierarquia suporta no máximo 7 níveis")
     old_parent_id = department.parent_id
     old_path = _department_path(department.id, departments)
     impacted_ids = _subtree_ids(department.id, departments)
     department.parent_id = new_parent_id
     new_path = _department_path(department.id, departments)
-    for department_id in impacted_ids:
-        if len(_department_path(department_id, departments)) > MAX_DEPARTMENT_LEVELS:
-            department.parent_id = old_parent_id
-            raise HTTPException(status_code=422, detail="A movimentação deixaria um descendente acima do nível 7")
     # Persist the in-memory parent change before querying entries; the session
     # may otherwise autoflush only when the SELECT runs, after its identity map
     # has already loaded stale planning rows.
@@ -929,8 +922,6 @@ async def create_department(data: DepartmentCreate, db: AsyncSession = Depends(g
     if data.parent_id is not None:
         if data.parent_id not in departments or not departments[data.parent_id].active:
             raise HTTPException(status_code=422, detail="O departamento pai deve existir e estar ativo")
-        if len(_department_path(data.parent_id, departments)) >= MAX_DEPARTMENT_LEVELS:
-            raise HTTPException(status_code=422, detail="A hierarquia suporta no máximo 7 níveis")
     if _duplicate_project_department(data.name, data.parent_id, departments):
         raise HTTPException(
             status_code=409,

@@ -33,7 +33,7 @@ def test_allocation_uses_source_cloud_even_when_organogram_filter_is_stale():
     for cloud, billed, consumption in [("gcp-ttech", 100.0, 20.0), ("gcp-ti", 30.0, 6.0)]:
         source_rows = [row for row in rows if row["cloud_origem"] == cloud]
         assert len(source_rows) == 2
-        receiver = next(row for row in source_rows if row["organograma_nivel_5"] == "Projeto")
+        receiver = next(row for row in source_rows if row["hierarquia_5"] == "Projeto")
         assert receiver["realizado"] == billed
         assert receiver["realizado_cloud"] == consumption
         assert sum(row["realizado"] for row in source_rows) == 0
@@ -64,7 +64,7 @@ def test_normal_allocation_conserves_billed_and_cloud_measures_independently():
         actual = [{"period": "202609", "path": config.donor_path,
                    "value": billed, "cloud_value": cloud}]
         rows = build_allocation_rows([config], actual, [])
-        receiver = next(row for row in rows if row["organograma_nivel_2"] == "Destino")
+        receiver = next(row for row in rows if row["hierarquia_2"] == "Destino")
         assert receiver["realizado"] == billed
         assert receiver["realizado_cloud"] == cloud
         assert sum(row["realizado"] for row in rows) == 0
@@ -90,12 +90,12 @@ def test_normal_rateio_moves_forecast_in_realized_month_but_condominium_skips_it
     forecast = [{"period": "202609", "path": config.donor_path, "value": 50, "cloud_value": 10}]
     rows = build_allocation_rows([config], actual, forecast)
     projected = [row for row in rows if row["rateio_medida"] == "forecast"]
-    recipient = next(row for row in projected if row["organograma_nivel_2"] == "Destino")
+    recipient = next(row for row in projected if row["hierarquia_2"] == "Destino")
     assert recipient["realizado"] == 40
     assert recipient["realizado_cloud"] == 8
     assert sum(row["realizado"] for row in projected) == 0
     assert sum(row["realizado_cloud"] for row in projected) == 0
-    assert 50 + sum(row["realizado"] for row in projected if row["organograma_nivel_2"] == "Origem") == 10
+    assert 50 + sum(row["realizado"] for row in projected if row["hierarquia_2"] == "Origem") == 10
     config.allocation_type = "shared_cost"
     assert all(row["rateio_medida"] == "realizado" for row in build_allocation_rows([config], actual, forecast))
 
@@ -205,8 +205,8 @@ def test_rateio_rows_are_positive_on_consumer_negative_on_donor():
          {"period": "202601", "path": ["Consumo Cloud", "Showback", "Azure", "DIR A", "Proj X"], "value": 50.0}],
         [],
     )
-    donor = next(row for row in rows if row["organograma_nivel_4"] == "Rateio Azure")
-    consumer = next(row for row in rows if row["organograma_nivel_5"] == "Proj X")
+    donor = next(row for row in rows if row["hierarquia_4"] == "Rateio Azure")
+    consumer = next(row for row in rows if row["hierarquia_5"] == "Proj X")
     assert donor["tipo"] == "rateio"
     assert donor["rateio_medida"] == "realizado"
     assert donor["realizado"] == -100
@@ -347,7 +347,7 @@ def test_forecast_rateio_when_only_other_projects_have_gold_in_the_month():
     ]
     rows = build_rateio_rows([config], actual, forecast)
     assert {row["rateio_medida"] for row in rows} == {"forecast"}
-    donor = next(row for row in rows if row["organograma_nivel_4"] == "Rateio Azure")
+    donor = next(row for row in rows if row["hierarquia_4"] == "Rateio Azure")
     assert donor["realizado"] == -80
 
 
@@ -376,7 +376,7 @@ def test_forecast_rateio_follows_actual_consumption_mix():
     ]
     rows = build_rateio_rows([config], actual, forecast)
     sep = [row for row in rows if row["period"] == "202609" and row["realizado"] > 0]
-    by_proj = {row["organograma_nivel_5"]: row["realizado"] for row in sep}
+    by_proj = {row["hierarquia_5"]: row["realizado"] for row in sep}
     assert by_proj["Proj X"] == 60
     assert by_proj["Proj Y"] == 20
 
@@ -477,7 +477,7 @@ def test_consumption_splits_parent_project_and_sibling_leaf():
         ],
         [],
     )
-    consumers = {(row["organograma_nivel_5"] or "").strip(): row["realizado"] for row in rows if row["realizado"] > 0}
+    consumers = {(row["hierarquia_5"] or "").strip(): row["realizado"] for row in rows if row["realizado"] > 0}
     assert consumers["Sinfonia - Watson"] == 50
     assert consumers["Sinfonia - VivoCog"] == 50
     assert "env" not in consumers

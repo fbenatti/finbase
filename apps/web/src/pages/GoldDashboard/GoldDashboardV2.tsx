@@ -11,7 +11,7 @@ const TABLE = "dest_dm_cost_visao_completa";
 const EXECUTIVE_DEPARTMENT_STORAGE_KEY = "openfinops.executiveDepartmentId";
 const EXECUTIVE_DIRECTOR_VIEW_STORAGE_KEY = "openfinops.executiveDirectorView";
 type DimFilter = { column: string; values: string[] };
-const FRIENDLY: Record<string, string> = { cloud_origem: "Cloud", organograma_nivel_1: "Segmento", organograma_nivel_2: "Modelo", organograma_nivel_3: "VP", organograma_nivel_4: "Diretoria", organograma_nivel_5: "Projeto", organograma_nivel_6: "SubProjeto", servicename: "Serviço", servicecategory: "Família de serviço", regionname: "Região", subaccountname: "Subconta" };
+const FRIENDLY: Record<string, string> = { cloud_origem: "Cloud", hierarquia_1: "Segmento", hierarquia_2: "Modelo", hierarquia_3: "VP", hierarquia_4: "Diretoria", hierarquia_5: "Projeto", hierarquia_6: "SubProjeto", servicename: "Serviço", servicecategory: "Família de serviço", regionname: "Região", subaccountname: "Subconta" };
 const MONTHS_PT = ["janeiro", "fevereiro", "março", "abril", "maio", "junho", "julho", "agosto", "setembro", "outubro", "novembro", "dezembro"];
 const toMonthValue = (date: Date) => `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}`;
 const shiftMonth = (value: string, delta: number) => { const [y, m] = value.split("-").map(Number); return toMonthValue(new Date(y, m - 1 + delta, 1)); };
@@ -134,13 +134,13 @@ export default function GoldDashboardV2() {
   const chartFilters = scopeFilters;
   const organizationGroups = useMemo<GoldQueryFilter[][]>(() => selectedNodes.map((node) => {
     const path = node.path.split(" > ");
-    // O caminho da árvore já começa no valor físico de organograma_nivel_1
+    // O caminho da árvore já começa no valor físico de hierarquia_1
     // ("Consumo de nuvem"). Removê-lo deslocava todos os níveis: Showback era
     // enviado como nivel_1, Azure como nivel_2 etc., zerando agrupamentos e
     // Cost Concentration assim que um nó abaixo da raiz era selecionado.
     if (directorView && path.length >= 4) [path[2], path[3]] = [path[3], path[2]];
     const levels = directorView ? [1, 2, 4, 3, 5, 6] : [1, 2, 3, 4, 5, 6];
-    return path.slice(0, 6).map((value, index) => ({ column: `organograma_nivel_${levels[index] || index + 1}`, operator: "IN" as const, values: [value] }));
+    return path.slice(0, 6).map((value, index) => ({ column: `hierarquia_${levels[index] || index + 1}`, operator: "IN" as const, values: [value] }));
   }).filter((group) => group.length > 0), [selectedNodes, directorView]);
   const filterContextKey = JSON.stringify({ monthFrom, monthTo, nodes: selectedNodes.map((n) => n.id), directorView, filters, sharedCost, refresh });
   const highlightsWidget = <Paper variant="outlined" sx={{ p: 2, mt: 2, borderRadius: "18px", borderColor: "#E1E8F0", boxShadow: "0 6px 20px rgba(24, 39, 75, 0.035)" }}>
