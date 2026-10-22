@@ -44,7 +44,7 @@ from app.services import lakehouse_layers as layers  # noqa: E402
 
 API = os.getenv("OPENFINOPS_API_URL", "http://localhost:8001")
 #: Tabela de destino FOCUS detalhada (destination_table.id = 1).
-FOCUS_DESTINATION = os.getenv("OPENFINOPS_FOCUS_DESTINATION", "dest_modelo_focus")
+FOCUS_DESTINATION = os.getenv("OPENFINOPS_FOCUS_DESTINATION", "dest_billing_cloud")
 FOCUS_DESTINATION_ID = int(os.getenv("OPENFINOPS_FOCUS_DESTINATION_ID", "1"))
 
 

@@ -32,7 +32,7 @@ def test_merged_dimensions_uses_analytic_default():
         "realizado": "realizado",
         "resourcename": "resourcename",  # high-cardinality — not in default
     }
-    dims = _merged_dimensions({"dest_modelo_focus": schema}, [])
+    dims = _merged_dimensions({"dest_billing_cloud": schema}, [])
     assert "_billing_period" in dims
     assert "servicename" in dims
     assert "hierarquia_1" in dims
@@ -61,21 +61,21 @@ async def test_preview_source_reads_the_detail_layer(monkeypatch):
 
     monkeypatch.setattr("app.services.gold_materialization.execute", fake_execute)
     result = await preview_source(
-        gold_table="dest_modelo_focus",
+        gold_table="dest_billing_cloud",
         filter_json={"conditions": [{"column": "servicename", "operator": "=", "values": ["GitHub"]}]},
     )
     assert result["row_count"] == 10
     assert result["total_value"] == 123.45
     # A fonte do cubo é o detalhe (Silver), resolvido em um único ponto.
-    assert f"iceberg.{layers.detail_layer()}.dest_modelo_focus" in calls[-1]
+    assert f"iceberg.{layers.detail_layer()}.dest_billing_cloud" in calls[-1]
 
 
 def test_source_gold_tables_list_kept_in_order():
     """A source binds one or more Gold tables with the same structure."""
     source = SimpleNamespace(
         id=1,
-        gold_table="dest_modelo_focus",
-        gold_tables=["dest_modelo_focus", "dest_modelo_focus_planning"],
+        gold_table="dest_billing_cloud",
+        gold_tables=["dest_billing_cloud", "dest_billing_cloud_planning"],
         filter_json={"conditions": [{"column": "ServiceName", "operator": "=", "values": ["GitHub"]}]},
         value_column="realizado",
         percent=100.0,

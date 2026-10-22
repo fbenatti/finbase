@@ -44,7 +44,7 @@ def focus_date_predicate_sql(
     chargeperiodstart: str = '"chargeperiodstart"',
     billingperiodstart: str = '"billingperiodstart"',
 ) -> str:
-    """Bounded date filter for dest_modelo_focus (never compare ISO strings to MM/DD/YYYY)."""
+    """Bounded date filter for dest_billing_cloud (never compare ISO strings to MM/DD/YYYY)."""
     date_expr = focus_date_sql_expr(chargeperiodstart, billingperiodstart)
     clauses: list[str] = []
     if date_from:

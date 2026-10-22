@@ -302,7 +302,7 @@ def test_ops_overview_endpoint_has_no_focus_queries():
     from app.routers import azure_ptu as router_mod
 
     source = inspect.getsource(router_mod.dashboard_ops_overview)
-    assert "dest_modelo_focus" not in source
+    assert "dest_billing_cloud" not in source
     assert "_query_focus_dashboard_costs" not in source
     assert "_build_cost_series" not in source
     assert "_origin_cost_rows" not in source

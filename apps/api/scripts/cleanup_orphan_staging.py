@@ -166,14 +166,14 @@ def run_cleanup(dry_run: bool = False) -> None:
     # Validação de integridade pós-limpeza da tabela principal
     print("\nVerificando integridade das tabelas ativas...")
     try:
-        tbl_focus = cat.load_table(("gold", "dest_modelo_focus"))
-        print(f"   [OK] Tabela gold.dest_modelo_focus acessível!")
+        tbl_focus = cat.load_table(("gold", "dest_billing_cloud"))
+        print(f"   [OK] Tabela gold.dest_billing_cloud acessível!")
         print(f"   [OK] Localização: {tbl_focus.location()}")
         print(f"   [OK] Quantidade de Snapshots mantidos: {len(tbl_focus.snapshots())}")
         current_snap = tbl_focus.current_snapshot()
         print(f"   [OK] Snapshot Atual ID: {current_snap.snapshot_id if current_snap else 'Nenhum'}")
     except Exception as exc:
-        print(f"   [ERRO CRÍTICO] Falha ao verificar gold.dest_modelo_focus: {exc}")
+        print(f"   [ERRO CRÍTICO] Falha ao verificar gold.dest_billing_cloud: {exc}")
 
     print("=" * 70)
 

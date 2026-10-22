@@ -18,7 +18,7 @@ from app.models.ai_cost import (
 
 logger = logging.getLogger(__name__)
 
-FOCUS_TABLE = "dest_modelo_focus"
+FOCUS_TABLE = "dest_billing_cloud"
 LICENSES_TABLE = "dest_licencas_ia"
 CONSUMPTION_TABLE = "dest_consumo_ia"
 

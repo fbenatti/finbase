@@ -47,7 +47,7 @@ def referenced_tables(sql: str) -> set[str]:
     return tables - ctes
 
 
-# Destinos são guardados sem schema (ex.: "dest_modelo_focus"). A tabela real fica
+# Destinos são guardados sem schema (ex.: "dest_billing_cloud"). A tabela real fica
 # no schema silver, e as consultas prontas do front usam gold. O nome simples
 # libera só esses dois schemas, nenhum outro.
 DESTINATION_SCHEMAS = ("silver", "gold")

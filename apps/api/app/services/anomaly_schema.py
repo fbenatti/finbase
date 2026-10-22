@@ -4,8 +4,8 @@ Os nomes são os do plano (§4.2, §4.3) e ficam em um único lugar para que o
 escritor (worker, E6), o leitor (API) e o dashboard (E9) não divirjam:
 
 ```text
-silver.dest_modelo_focus_anomaly_reference   referências compactas, imutáveis
-silver.dest_modelo_focus_anomalies           avaliações compatíveis com Planning
+silver.dest_billing_cloud_anomaly_reference   referências compactas, imutáveis
+silver.dest_billing_cloud_anomalies           avaliações compatíveis com Planning
 gold.dest_dm_cost_anomalies                  avaliação financeira consolidada
 ```
 
@@ -26,9 +26,9 @@ from app.core.hierarchy import MIN_LEVELS, hierarchy_columns
 from typing import Any, Iterable
 
 REFERENCE_NAMESPACE = "silver"
-REFERENCE_TABLE = "dest_modelo_focus_anomaly_reference"
+REFERENCE_TABLE = "dest_billing_cloud_anomaly_reference"
 ASSESSMENT_NAMESPACE = "silver"
-ASSESSMENT_TABLE = "dest_modelo_focus_anomalies"
+ASSESSMENT_TABLE = "dest_billing_cloud_anomalies"
 GOLD_NAMESPACE = "gold"
 GOLD_TABLE = "dest_dm_cost_anomalies"
 

@@ -19,7 +19,7 @@ _COMMITMENTS_GOLD_SQL_TEMPLATE = """
 WITH synthetic_returns AS (
     SELECT source_connection_id, _billing_period, clone_source_record_id,
            clone_rule_id, SUM(realizado_cloud) AS return_realized
-    FROM iceberg.silver.dest_modelo_focus
+    FROM iceberg.silver.dest_billing_cloud
     WHERE is_synthetic = TRUE AND clone_rule_id IN (1, 2)
     GROUP BY 1, 2, 3, 4
 ), baseline_by_project AS (
@@ -31,7 +31,7 @@ WITH synthetic_returns AS (
                     NULLIF(TRIM(f.source_resource_group_name), ''),
                     'Sem projeto') AS project,
            SUM(-r.return_realized) AS ondemand_baseline
-    FROM iceberg.silver.dest_modelo_focus f
+    FROM iceberg.silver.dest_billing_cloud f
     INNER JOIN synthetic_returns r
       ON f.source_connection_id = r.source_connection_id
      AND f._billing_period = r._billing_period
@@ -53,7 +53,7 @@ WITH synthetic_returns AS (
            CASE WHEN LOWER(commitmentdiscounttype) = 'reservation'
                 THEN 'RI' ELSE 'SavingPlan' END AS commitment_type,
            SUM(realizado_cloud) AS purchase
-    FROM iceberg.silver.dest_modelo_focus
+    FROM iceberg.silver.dest_billing_cloud
     WHERE chargecategory = 'Purchase'
       AND LOWER(commitmentdiscounttype) IN ('reservation', 'savingsplan')
     GROUP BY 1, 2, 3
@@ -99,7 +99,7 @@ WITH synthetic_returns AS (
                     THEN realizado_cloud ELSE 0 END) AS forecast_purchase,
            SUM(CASE WHEN LOWER(chargecategory) = 'return'
                     THEN realizado_cloud ELSE 0 END) AS forecast_return
-    FROM iceberg.silver.dest_modelo_focus_planning
+    FROM iceberg.silver.dest_billing_cloud_planning
     WHERE tipo = 'forecast'
       AND UPPER(financial_effect) = 'DIRECT_REALIZED'
       AND LOWER(commitmentdiscounttype) IN ('reservation', 'savingsplan')

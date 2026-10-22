@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 """Medição e verificação de contaminação do destino FOCUS — P1B.
 
-Lê `iceberg.silver.dest_modelo_focus` via Trino (a tabela não cabe em pandas:
+Lê `iceberg.silver.dest_billing_cloud` via Trino (a tabela não cabe em pandas:
 ~40M linhas) e responde três perguntas:
 
 1. qual a soma de `realizado` por período e origem;
@@ -34,7 +34,7 @@ from sqlalchemy import create_engine, text  # noqa: E402
 from app.services import lakehouse_layers as layers  # noqa: E402
 
 TRINO = os.getenv("TRINO_URL", "http://localhost:8080")
-FOCUS_TABLE = os.getenv("OPENFINOPS_FOCUS_TABLE", "dest_modelo_focus")
+FOCUS_TABLE = os.getenv("OPENFINOPS_FOCUS_TABLE", "dest_billing_cloud")
 
 
 def trino(sql: str, tries: int = 12) -> list[list]:

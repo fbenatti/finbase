@@ -45,7 +45,7 @@ _ANALYTIC_WRITER_TASK_TYPES = {
 def parallel_reprocess_slices_enabled() -> bool:
     """When >= 2, reprocess tasks of different slices skip the single writer lock.
 
-    ``dest_modelo_focus`` is one Iceberg table. Two commits at once make the
+    ``dest_billing_cloud`` is one Iceberg table. Two commits at once make the
     loser rewrite the whole month (``branch main has changed``). Keep this off
     unless that publish path retries metadata only. The per-slice lock still
     stops two workers from publishing the same source and month.

@@ -107,7 +107,7 @@ def test_cell_filters_remap_period_and_drop_unknown_columns():
 
 
 def test_schema_cache_key_is_namespace_qualified():
-    assert _schema_cache_key("gold", "dest_modelo_focus") == "gold.dest_modelo_focus"
+    assert _schema_cache_key("gold", "dest_billing_cloud") == "gold.dest_billing_cloud"
     assert _schema_cache_key("gold", "dest_dm_cost") == "gold.dest_dm_cost"
 
 

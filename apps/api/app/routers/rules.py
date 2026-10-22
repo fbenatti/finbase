@@ -264,8 +264,8 @@ async def list_business_rules(
     if destination_table_id is not None:
         destination = await db.get(DestinationTable, destination_table_id)
         is_focus_destination = bool(destination and (
-            (destination.name or "").strip().upper() == "MODELO FOCUS"
-            or (destination.physical_name or "").strip().lower() == "dest_modelo_focus"
+            (destination.name or "").strip().upper() == "BILLING_CLOUD"
+            or (destination.physical_name or "").strip().lower() == "dest_billing_cloud"
         ))
         destination_filter = BusinessRule.destination_table_id == destination_table_id
         if is_focus_destination:
@@ -473,7 +473,7 @@ def _classification_rule_out(rule: ClassificationRule) -> ClassificationRuleOut:
 
 async def _default_focus_table_id(db: AsyncSession) -> int | None:
     return (await db.execute(
-        text("SELECT id FROM destination_table WHERE upper(name) = 'MODELO FOCUS' LIMIT 1")
+        text("SELECT id FROM destination_table WHERE upper(name) = 'BILLING_CLOUD' LIMIT 1")
     )).scalar()
 
 

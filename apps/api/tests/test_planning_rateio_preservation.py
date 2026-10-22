@@ -68,7 +68,7 @@ def _planning_frame() -> pd.DataFrame:
 def test_merge_reads_from_the_detail_layer(monkeypatch):
     """A leitura precisa acontecer na mesma camada em que a publicação escreve."""
     namespace = layers.detail_layer()
-    catalog = _FakeCatalog({(namespace, "dest_modelo_focus_planning"): _planning_frame()})
+    catalog = _FakeCatalog({(namespace, "dest_billing_cloud_planning"): _planning_frame()})
     published: list[tuple[str, pd.DataFrame]] = []
 
     monkeypatch.setattr(ice, "_get_catalog", lambda: catalog)
@@ -81,10 +81,10 @@ def test_merge_reads_from_the_detail_layer(monkeypatch):
     rateio = pd.DataFrame(
         {"period": ["202608"], "tipo": ["rateio"], "servicename": ["Virtual Machines"], "realizado": [222.0]}
     )
-    written = ice.merge_planning_rateio("dest_modelo_focus_planning", rateio)
+    written = ice.merge_planning_rateio("dest_billing_cloud_planning", rateio)
 
     assert written == 1
-    assert catalog.loaded == [(namespace, "dest_modelo_focus_planning")], (
+    assert catalog.loaded == [(namespace, "dest_billing_cloud_planning")], (
         "o merge deve ler da camada de detalhe; ler de gold reproduz o bug de perda de dado"
     )
     assert published, "a tabela combinada precisa ser publicada"
@@ -93,7 +93,7 @@ def test_merge_reads_from_the_detail_layer(monkeypatch):
 def test_merge_preserves_realizado_forecast_and_rateio(monkeypatch):
     """Gate de P1: nenhum dos três tipos pode desaparecer no merge."""
     namespace = layers.detail_layer()
-    catalog = _FakeCatalog({(namespace, "dest_modelo_focus_planning"): _planning_frame()})
+    catalog = _FakeCatalog({(namespace, "dest_billing_cloud_planning"): _planning_frame()})
     published: list[pd.DataFrame] = []
 
     monkeypatch.setattr(ice, "_get_catalog", lambda: catalog)
@@ -106,7 +106,7 @@ def test_merge_preserves_realizado_forecast_and_rateio(monkeypatch):
     rateio = pd.DataFrame(
         {"period": ["202608"], "tipo": ["rateio"], "servicename": ["Virtual Machines"], "realizado": [333.0]}
     )
-    ice.merge_planning_rateio("dest_modelo_focus_planning", rateio)
+    ice.merge_planning_rateio("dest_billing_cloud_planning", rateio)
 
     combined = published[-1]
     counts = ice._type_counts(combined)
@@ -132,13 +132,13 @@ def test_merge_aborts_when_it_cannot_read_existing_rows(monkeypatch):
 
     rateio = pd.DataFrame({"period": ["202608"], "tipo": ["rateio"], "realizado": [1.0]})
     with pytest.raises(RuntimeError, match="recusando publicar|perder"):
-        ice.merge_planning_rateio("dest_modelo_focus_planning", rateio)
+        ice.merge_planning_rateio("dest_billing_cloud_planning", rateio)
 
 
 def test_merge_guard_blocks_dropping_a_preserved_type(monkeypatch):
     """Guarda explícita: se um tipo preservado sumir, o merge levanta erro."""
     namespace = layers.detail_layer()
-    catalog = _FakeCatalog({(namespace, "dest_modelo_focus_planning"): _planning_frame()})
+    catalog = _FakeCatalog({(namespace, "dest_billing_cloud_planning"): _planning_frame()})
 
     monkeypatch.setattr(ice, "_get_catalog", lambda: catalog)
     # Simula um merge defeituoso que descarta tudo antes de publicar.
@@ -154,7 +154,7 @@ def test_merge_guard_blocks_dropping_a_preserved_type(monkeypatch):
     monkeypatch.setattr(ice.pd, "concat", broken_concat)
     rateio = pd.DataFrame({"period": ["202608"], "tipo": ["rateio"], "realizado": [1.0]})
     with pytest.raises(RuntimeError, match="realizado|forecast"):
-        ice.merge_planning_rateio("dest_modelo_focus_planning", rateio)
+        ice.merge_planning_rateio("dest_billing_cloud_planning", rateio)
 
 
 def test_merge_creates_table_when_absent(monkeypatch):
@@ -171,7 +171,7 @@ def test_merge_creates_table_when_absent(monkeypatch):
     )
 
     rateio = pd.DataFrame({"period": ["202608"], "tipo": ["rateio"], "realizado": [10.0]})
-    assert ice.merge_planning_rateio("dest_modelo_focus_planning", rateio) == 1
+    assert ice.merge_planning_rateio("dest_billing_cloud_planning", rateio) == 1
     assert ice._type_counts(published[-1]) == {"rateio": 1}
 
 
@@ -180,20 +180,20 @@ def test_nothing_to_merge_returns_zero(monkeypatch):
     namespace = layers.detail_layer()
     sem_rateio = _planning_frame()
     sem_rateio = sem_rateio[sem_rateio["tipo"] != "rateio"].reset_index(drop=True)
-    catalog = _FakeCatalog({(namespace, "dest_modelo_focus_planning"): sem_rateio})
+    catalog = _FakeCatalog({(namespace, "dest_billing_cloud_planning"): sem_rateio})
     monkeypatch.setattr(ice, "_get_catalog", lambda: catalog)
     monkeypatch.setattr(
         ice,
         "_publish_planning_dataframe",
         lambda *_a, **_k: pytest.fail("sem rateio não deve republicar"),
     )
-    assert ice.merge_planning_rateio("dest_modelo_focus_planning", pd.DataFrame()) == 0
+    assert ice.merge_planning_rateio("dest_billing_cloud_planning", pd.DataFrame()) == 0
 
 
 def test_empty_rateio_clears_previous_rateio_rows(monkeypatch):
     """Rateio vazio com rateio anterior precisa remover as linhas antigas."""
     namespace = layers.detail_layer()
-    catalog = _FakeCatalog({(namespace, "dest_modelo_focus_planning"): _planning_frame()})
+    catalog = _FakeCatalog({(namespace, "dest_billing_cloud_planning"): _planning_frame()})
     published: list[pd.DataFrame] = []
     monkeypatch.setattr(ice, "_get_catalog", lambda: catalog)
     monkeypatch.setattr(
@@ -201,7 +201,7 @@ def test_empty_rateio_clears_previous_rateio_rows(monkeypatch):
         "_publish_planning_dataframe",
         lambda safe_name, df, value_column: published.append(df) or safe_name,
     )
-    assert ice.merge_planning_rateio("dest_modelo_focus_planning", pd.DataFrame()) == 0
+    assert ice.merge_planning_rateio("dest_billing_cloud_planning", pd.DataFrame()) == 0
     counts = ice._type_counts(published[-1])
     assert counts == {"realizado": 1, "forecast": 1}, counts
 

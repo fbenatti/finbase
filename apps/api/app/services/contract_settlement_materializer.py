@@ -62,7 +62,7 @@ async def _silver_monthly_inputs(
                sum(coalesce(consumo_realizado, realizado_cloud, 0)) AS consumption,
                sum(coalesce(realizado, 0)) AS realized,
                sum(coalesce(ajuste_contratual, 0)) AS adjustment
-          FROM iceberg.silver.dest_modelo_focus
+          FROM iceberg.silver.dest_billing_cloud
          WHERE financial_contract_id = {int(contract_id)}
            AND upper(coalesce(financial_effect, '')) = 'BUDGET_COMMITMENT'
            AND _billing_period BETWEEN '{period_from}' AND '{period_until}'

@@ -1545,11 +1545,11 @@ def _reprocess_destination_sync(
             )
         publish_by_partition = True
         is_focus_destination = (
-            (dest_info.name or "").strip().upper() == "MODELO FOCUS"
-            or (phys_name or "").strip().lower() == "dest_modelo_focus"
+            (dest_info.name or "").strip().upper() == "BILLING_CLOUD"
+            or (phys_name or "").strip().lower() == "dest_billing_cloud"
         )
         # O cubo Gold agregado é gerado ao final do reprocess SOMENTE para o
-        # destino MODELO FOCUS, reutilizando os DataFrames em memória (não
+        # destino BILLING_CLOUD, reutilizando os DataFrames em memória (não
         # varre a Gold de milhões de linhas).
         # Estrutura Gold única = regras (gold_rule + gold_materialization),
         # geradas sob demanda via /gold/reprocess. A geração automática
@@ -1613,7 +1613,7 @@ def _reprocess_destination_sync(
                 candidates = [c for c in candidates if c[2].startswith("arg/inventory/")]
             elif phys_name.lower() == "dest_cloud_orphan_resources":
                 candidates = [c for c in candidates if c[2].startswith("arg/orphans/")]
-            elif phys_name.lower() == "dest_modelo_focus" and conn:
+            elif phys_name.lower() == "dest_billing_cloud" and conn:
                 from app.services.cost_sources import bronze_blob_eligible_for_focus
 
                 candidates = [
@@ -1627,7 +1627,7 @@ def _reprocess_destination_sync(
             if billing_periods:
                 for period in billing_periods:
                     physical.extend(iceberg.list_bronze_slices(_bronze_code(conn, cid), str(period)))
-            if phys_name.lower() == "dest_modelo_focus" and conn:
+            if phys_name.lower() == "dest_billing_cloud" and conn:
                 from app.services.cost_sources import bronze_blob_eligible_for_focus
 
                 physical = [
@@ -1772,13 +1772,12 @@ def _reprocess_destination_sync(
                 "Reference prices prepared: curated=%d, Price Sheet fallback candidates=%d",
                 len(clone_reference_prices), len(clone_price_sheet_prices),
             )
+        # Só colunas de classificação e do resultado financeiro; colunas que
+        # uma regra de negócio grava (ex.: CostBRL) entram pela regra abaixo.
         output_cols = {'organograma', 'centro_custo', 'id_orcamento',
-                       'ambiente', 'custom_fields', 'subscription_rg',
-                       'CostBRL', 'ContractedCost', 'ListCost', 'TaxBRL',
-                       'EffectiveCost', 'Tax_Base', 'Tax_Marketplace',
+                       'ambiente', 'custom_fields',
                        'realizado_cloud', 'consumo_realizado', 'ajuste_contratual',
-                       'financial_effect', 'financial_contract_id',
-                       'VL_CUSTO_FINAL_BRL'}
+                       'financial_effect', 'financial_contract_id'}
         # These columns are part of the Gold technical contract even when a
         # batch generates no synthetic rows.  Without a stable contract the
         # first no-clone batch created a narrower staging schema and the next
@@ -2507,7 +2506,7 @@ def _reprocess_destination_sync(
             # in BRL after the normal Silver publication succeeds.
             if (
                 int(connection_ids[0]) in {5, 11}
-                and phys_name == "dest_modelo_focus"
+                and phys_name == "dest_billing_cloud"
                 and len(billing_periods) == 1
             ):
                 from app.services.marketplace_allocation_reprocess import (
@@ -2530,7 +2529,7 @@ def _reprocess_destination_sync(
         finally:
             stop_publish_heartbeat.set()
 
-        # ── Gold agregado (só MODELO FOCUS): publica a pré-agregação mensal
+        # ── Gold agregado (só BILLING_CLOUD): publica a pré-agregação mensal
         # gerada dos frames em memória. Se falhar, reconstrói da Gold (fallback)
         # para manter consistência; a Gold já publicada permanece a fonte da
         # verdade e o erro fica auditável no resultado da tarefa.
@@ -2742,7 +2741,7 @@ def _reclassify_destination_sync(task_id: int, destination_table_id: int, connec
         if not dest:
             return {"success": False, "error": "Tabela destino nao encontrada", "rows_written": 0}
         depts = {d.id: d for d in session.execute(select(Department)).scalars().all()}
-        is_focus = (dest.physical_name or "").lower() == "dest_modelo_focus"
+        is_focus = (dest.physical_name or "").lower() == "dest_billing_cloud"
         expected_total = sum(
             iceberg.estimate_destination_slice_rows(
                 dest.physical_name,
@@ -2790,7 +2789,7 @@ def _reclassify_destination_sync(task_id: int, destination_table_id: int, connec
                     # Rows with prior classification (or empty dimensions) are
                     # safe to recompute from the current classification rules.
                     reset_mask = was_classified | frame.get("organograma", pd.Series(None, index=frame.index)).isna()
-                    for col in ("organograma", "centro_custo", "id_orcamento", "ambiente", "custom_fields", "subscription_rg", *hierarchy_columns_in(frame.columns)):
+                    for col in ("organograma", "centro_custo", "id_orcamento", "ambiente", "custom_fields", *hierarchy_columns_in(frame.columns)):
                         if col in frame.columns:
                             frame.loc[reset_mask, col] = None
                     _apply_classifications_sync(frame, rules, None, dept_map=depts, hierarchy_cache=hierarchy_cache)

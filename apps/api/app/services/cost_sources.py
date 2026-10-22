@@ -1,6 +1,6 @@
 """Classificação explícita de conexões como fonte de custo.
 
-O destino FOCUS (`dest_modelo_focus`) é o livro financeiro. Aceitar mapping de
+O destino FOCUS (`dest_billing_cloud`) é o livro financeiro. Aceitar mapping de
 qualquer conexão permitiu que Azure Automation e Azure Resource Graph — fontes
 operacionais, sem valor financeiro — escrevessem 22.747 linhas com `realizado`
 nulo dentro dele (ver `docs/ai/azure-finops-execution-log.md`, achado D9/P1B).

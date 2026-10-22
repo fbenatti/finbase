@@ -11,7 +11,7 @@ def test_write_destination_blocks_silver_dest_append():
         "cost": [1.0],
     })
     with pytest.raises(RuntimeError, match="desabilitado"):
-        iceberg.write_destination("dest_modelo_focus", frame)
+        iceberg.write_destination("dest_billing_cloud", frame)
 
 
 def test_publish_appends_staged_batches_in_one_snapshot():

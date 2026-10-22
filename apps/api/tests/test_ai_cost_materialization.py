@@ -45,7 +45,7 @@ async def test_router_scans_focus_once_per_period_for_all_links(monkeypatch):
     assert statements[0].startswith("CREATE TABLE")
     assert statements[1].startswith("INSERT INTO")
     for statement in statements:
-        assert statement.count("iceberg.silver.dest_modelo_focus") == 1
+        assert statement.count("iceberg.silver.dest_billing_cloud") == 1
         assert "CAST(1 AS BIGINT)" in statement
         assert "CAST(5 AS BIGINT)" in statement
 

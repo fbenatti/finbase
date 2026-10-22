@@ -5,7 +5,7 @@ Separação de responsabilidades (plano §4.1):
 * PostgreSQL guarda **controle e workflow** — configuração versionada, execuções,
   publicação corrente, casos, histórico imutável, ações e notificações.
 * Valores financeiros e séries ficam no Iceberg
-  (`silver.dest_modelo_focus_anomaly_reference`, `silver.dest_modelo_focus_anomalies`,
+  (`silver.dest_billing_cloud_anomaly_reference`, `silver.dest_billing_cloud_anomalies`,
   `gold.dest_dm_cost_anomalies`).
 
 `anomaly_case` pode guardar nota, classificação e os três valores escalares de

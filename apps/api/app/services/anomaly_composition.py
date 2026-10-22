@@ -70,7 +70,7 @@ def anomaly_not_financial_additive() -> dict[str, Any]:
     }
 
 
-def planning_projection(*, planning_table: str = "dest_modelo_focus_planning", alias: str = "p", depth: int = MIN_LEVELS) -> str:
+def planning_projection(*, planning_table: str = "dest_billing_cloud_planning", alias: str = "p", depth: int = MIN_LEVELS) -> str:
     """Projeção explícita da Planning, sem ``SELECT *``."""
     columns = ", ".join(f"{alias}.{_quote(column)}" for column in common_columns(depth))
     return (
@@ -100,7 +100,7 @@ def anomaly_projection(*, anomaly_table: str = ASSESSMENT_TABLE, alias: str = "a
 
 def sister_table_union_sql(
     *,
-    planning_table: str = "dest_modelo_focus_planning",
+    planning_table: str = "dest_billing_cloud_planning",
     anomaly_table: str = ASSESSMENT_TABLE,
     extra_predicate: str | None = None,
     depth: int = MIN_LEVELS,
@@ -119,7 +119,7 @@ def sister_table_union_sql(
 
 def financial_totals_sql(
     *,
-    planning_table: str = "dest_modelo_focus_planning",
+    planning_table: str = "dest_billing_cloud_planning",
     anomaly_table: str = ASSESSMENT_TABLE,
 ) -> str:
     """Totais financeiros **com** e **sem** a camada de anomalia.

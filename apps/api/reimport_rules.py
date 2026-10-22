@@ -24,7 +24,7 @@ CLOUD_TO_CONN_ID = {
 
 
 def load_src_to_dest(session):
-    """Load source_column → destination_column mapping from DB (MODELO FOCUS, dest_table_id=1)."""
+    """Load source_column → destination_column mapping from DB (BILLING_CLOUD, dest_table_id=1)."""
     rows = session.execute(text(
         "SELECT DISTINCT source_column, destination_column FROM source_destination_mapping "
         "WHERE destination_table_id = 1"

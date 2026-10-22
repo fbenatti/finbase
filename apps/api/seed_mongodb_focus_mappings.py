@@ -1,5 +1,5 @@
 """
-Seed MongoDB Atlas (bronze raw_{connection_code}) → MODELO FOCUS mappings.
+Seed MongoDB Atlas (bronze raw_{connection_code}) → BILLING_CLOUD mappings.
 
 O extrator `app/services/mongodb_extractor.py` grava line items achatados das
 invoices da Atlas Admin API com as colunas: sku, clusterName, quantity,

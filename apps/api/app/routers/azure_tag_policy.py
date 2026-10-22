@@ -43,7 +43,7 @@ def _mapping_dict(item: AzureTagMapping) -> dict:
 async def _focus_fields(db: AsyncSession) -> list[str]:
     result = await db.execute(select(DestinationColumn.column_name).join(
         DestinationTable, DestinationColumn.destination_table_id == DestinationTable.id,
-    ).where((DestinationTable.name.ilike("%FOCUS%")) | (DestinationTable.physical_name == "dest_modelo_focus"))
+    ).where((DestinationTable.name.ilike("%FOCUS%")) | (DestinationTable.physical_name == "dest_billing_cloud"))
                          .order_by(DestinationColumn.position, DestinationColumn.column_name))
     return [row[0] for row in result.all()]
 
@@ -56,7 +56,7 @@ async def _validated_mapping(body: TagMappingBody, db: AsyncSession) -> tuple[st
         raise HTTPException(status_code=422, detail="O campo FOCUS deve ser um nome de coluna válido, por exemplo centro_custo")
     focus_fields = await _focus_fields(db)
     if focus_field not in focus_fields:
-        raise HTTPException(status_code=422, detail="Selecione um campo existente no MODELO FOCUS")
+        raise HTTPException(status_code=422, detail="Selecione um campo existente no BILLING_CLOUD")
     return tag_key, focus_field
 
 

@@ -111,7 +111,7 @@ def test_case_series_reads_the_cloud_partition_without_casting_it():
     assert normalize_charge_day("09/07/2026", "202609") == "2026-09-07"
     daily = build_case_daily_sql(
         namespace="silver",
-        table="dest_modelo_focus",
+        table="dest_billing_cloud",
         date_column="chargeperiodstart",
         type_filter="TRUE",
         period_column="_billing_period",
@@ -124,7 +124,7 @@ def test_case_series_reads_the_cloud_partition_without_casting_it():
     )
     detail = build_case_detail_sql(
         namespace="silver",
-        table="dest_modelo_focus",
+        table="dest_billing_cloud",
         date_column="chargeperiodstart",
         type_filter="TRUE",
         period_column="_billing_period",

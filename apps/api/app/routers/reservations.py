@@ -43,7 +43,7 @@ CATALOG_BASE = "reservations_catalog"
 UTILIZATION_BASE = "benefit_utilization"
 ADVISOR_BASE = "advisor_recommendations"
 BENEFIT_REC_BASE = "benefit_recommendations"
-FOCUS_DETAIL_TABLE = f"iceberg.{layers.detail_layer()}.dest_modelo_focus"
+FOCUS_DETAIL_TABLE = f"iceberg.{layers.detail_layer()}.dest_billing_cloud"
 TRINO_TIMEOUT_S = 60.0
 
 _CATALOG_COLUMNS = [

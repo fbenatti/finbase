@@ -71,7 +71,7 @@ def test_configuracao_inicial_e_desabilitada_e_versionada(engine):
         assert required in columns
 
     with Session(engine) as session:
-        config = models.AnomalyConfig(name="teste", destination_physical_name="dest_modelo_focus",
+        config = models.AnomalyConfig(name="teste", destination_physical_name="dest_billing_cloud",
                                       date_column="chargeperiodstart")
         session.add(config)
         session.commit()

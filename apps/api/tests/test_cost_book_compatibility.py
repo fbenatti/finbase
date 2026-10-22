@@ -1,7 +1,7 @@
 """Testes da compatibilidade entre os dois livros de custo (G2).
 
 Contexto: `silver.resource_cost` (canônico, 13.519.512 linhas) e
-`silver.dest_modelo_focus` (legado, 36.434.762 linhas) convivem. A decisão de
+`silver.dest_billing_cloud` (legado, 36.434.762 linhas) convivem. A decisão de
 direção mantém o legado servindo os consumidores atuais até o cutover, o que
 torna obrigatório **medir** a diferença em vez de supor que ela não existe.
 """
@@ -131,5 +131,5 @@ def test_divergence_row_shape_is_api_ready():
 def test_legacy_book_is_not_the_canonical_one():
     """A decisão de direção: `resource_cost` é o canônico, não o legado."""
     assert CANONICAL_COST_TABLE == "resource_cost"
-    assert LEGACY_COST_TABLE == "dest_modelo_focus"
+    assert LEGACY_COST_TABLE == "dest_billing_cloud"
     assert CANONICAL_COST_TABLE != LEGACY_COST_TABLE

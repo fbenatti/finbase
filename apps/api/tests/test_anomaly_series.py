@@ -144,11 +144,11 @@ def test_pesos_aceitam_json_em_texto():
 def test_sql_da_referencia_filtra_serie_e_meses():
     sql = reference_series_sql(
         namespace="silver",
-        reference_table="dest_modelo_focus_anomaly_reference",
+        reference_table="dest_billing_cloud_anomaly_reference",
         series_id="abc123",
         months=["202610", "202611"],
     )
-    assert 'FROM iceberg.silver."dest_modelo_focus_anomaly_reference"' in sql
+    assert 'FROM iceberg.silver."dest_billing_cloud_anomaly_reference"' in sql
     assert "series_id = 'abc123'" in sql
     assert "'202610'" in sql and "'202611'" in sql
     assert "weekday_weights" in sql and "daily_band_upper_offset" in sql
@@ -157,7 +157,7 @@ def test_sql_da_referencia_filtra_serie_e_meses():
 def test_sql_do_observado_le_realizado_cloud_por_dia():
     sql = observed_daily_sql(
         source_namespace="silver",
-        table="dest_modelo_focus",
+        table="dest_billing_cloud",
         date_column="chargeperiodstart",
         period_column="_billing_period",
         type_column="tipo",
@@ -346,7 +346,7 @@ def test_drilldown_resolve_apenas_dimensoes_disponiveis_e_nao_duplica_grao_forec
         ("subscription", "SubscriptionName"), ("resource_group", "ResourceGroupName"),
         ("resource_id", "ResourceId"), ("sku", "SkuMeter")
     ]
-    sql = detailed_event_sql(source_namespace="silver", source_table="dest_modelo_focus",
+    sql = detailed_event_sql(source_namespace="silver", source_table="dest_billing_cloud",
         date_column="chargeperiodstart", period_column="_billing_period", type_column="tipo",
         measure_column="realizado_cloud", dimensions=["servicename"], detail_dimensions=dims,
         member_filters=["\"servicename\" = 'Compute'"], event_day=date(2026, 10, 12))

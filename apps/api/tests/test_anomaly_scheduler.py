@@ -55,7 +55,7 @@ def schedule(**overrides):
 def config(db, *, enabled: bool, name: str = "cfg") -> AnomalyConfig:
     row = AnomalyConfig(
         name=name,
-        destination_physical_name="dest_modelo_focus",
+        destination_physical_name="dest_billing_cloud",
         date_column="chargeperiodstart",
         enabled=enabled,
         version=3,

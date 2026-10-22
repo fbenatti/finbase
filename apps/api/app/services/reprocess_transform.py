@@ -139,8 +139,10 @@ def transform_reprocess_chunk(payload: dict[str, Any]) -> list[dict[str, Any]]:
     from app.services.task_runner import _apply_business_rule_sync, _apply_classifications_sync, fill_inherited_org_fields
 
     chunk = pd.DataFrame(payload["records"])
+    # _billing_period fica disponível para mapeamentos (ex.: MONTH_START);
+    # apply_mappings só devolve as colunas mapeadas.
     df_chunk = chunk.drop(
-        columns=[c for c in ["_billing_period", "_blob_path", "_ingested_at"] if c in chunk.columns]
+        columns=[c for c in ["_blob_path", "_ingested_at"] if c in chunk.columns]
     )
     cmapps = [_namespace(item) for item in payload["cmapps"]]
     brules = [_namespace(item) for item in payload["brules"]]

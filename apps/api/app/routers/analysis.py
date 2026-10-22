@@ -509,7 +509,7 @@ _SCHEMA_INFLIGHT: dict[str, asyncio.Task[tuple[str, dict[str, str]]]] = {}
 
 # Partition trees in Analysis only need Iceberg metadata (manifest stats), not
 # Postgres operational tables. Cache responses to avoid hammering Trino on
-# every expand of large tables such as dest_modelo_focus.
+# every expand of large tables such as dest_billing_cloud.
 _PARTITION_META_CACHE: dict[str, tuple[float, dict[str, Any]]] = {}
 _PARTITION_META_CACHE_TTL_S = float(os.getenv("ANALYSIS_PARTITION_CACHE_TTL_S", "120"))
 
@@ -2066,7 +2066,7 @@ async def _expected_view_period_detail_core(
     source_layer = GOLD
     source_table = table
     if tipo == "forecast":
-        planning_base = {"dest_dm_cost_visao_completa": "dest_modelo_focus"}.get(table, table)
+        planning_base = {"dest_dm_cost_visao_completa": "dest_billing_cloud"}.get(table, table)
         planning_name = f"{planning_base}_planning"
         try:
             planning_schema = await _describe_layer_schema(
@@ -2155,7 +2155,7 @@ async def _expected_view_core(
     # budget, and manual forecast use the Silver planning snapshot.
     actual_name = body.gold_table.strip().replace('"', "")
     gold_schema = await _describe_layer_schema(actual_name, max_retries=2, namespace=GOLD)
-    planning_base = {"dest_dm_cost_visao_completa": "dest_modelo_focus"}.get(actual_name, actual_name)
+    planning_base = {"dest_dm_cost_visao_completa": "dest_billing_cloud"}.get(actual_name, actual_name)
     planning_name = planning_base + "_planning"
     try:
         forecast_schema = await _describe_layer_schema(
@@ -2773,7 +2773,7 @@ async def run_query(req: QueryRequest, request: Request, db: AsyncSession = Depe
 
     Examples:
       SELECT * FROM iceberg.bronze.raw_azure_4p WHERE _billing_period = '202504' LIMIT 10
-      SELECT SUM("BilledCost") AS total_billed FROM iceberg.silver.dest_modelo_focus WHERE "_billing_period" = '202504'
+      SELECT SUM("BilledCost") AS total_billed FROM iceberg.silver.dest_billing_cloud WHERE "_billing_period" = '202504'
     """
     allowed = set((await db.execute(select(DestinationTable.physical_name).where(DestinationTable.active.is_(True)))).scalars().all())
     # Bases de origem (bronze) das fontes cadastradas: bronze.raw_<identificador>.
@@ -2813,12 +2813,12 @@ async def run_query(req: QueryRequest, request: Request, db: AsyncSession = Depe
 def _run_local_gold_query(sql: str) -> list[dict[str, Any]] | None:
     """Fallback for the supported Gold analysis query when Trino has no table."""
     normalized = " ".join(sql.split())
-    if not re.search(rf"from\s+iceberg\.{layers.detail_layer()}\.dest_modelo_focus\b", normalized, re.I):
+    if not re.search(rf"from\s+iceberg\.{layers.detail_layer()}\.dest_billing_cloud\b", normalized, re.I):
         return None
 
     generic = re.search(r"select\s+\*.*?limit\s+(\d+)", normalized, re.I)
     if generic:
-        table = get_catalog().load_table((layers.detail_layer(), "dest_modelo_focus"))
+        table = get_catalog().load_table((layers.detail_layer(), "dest_billing_cloud"))
         frame = table.scan().to_pandas().head(int(generic.group(1)))
         return json.loads(frame.to_json(orient="records", date_format="iso"))
 
@@ -2830,7 +2830,7 @@ def _run_local_gold_query(sql: str) -> list[dict[str, Any]] | None:
     if not match:
         # Generic FinOps aggregation used by the predefined queries.
         generic = re.search(
-            rf"select\s+(.+?)\s*,\s*sum\(\s*\"?BilledCost\"?\s*\)\s+as\s+total_billed.*?count\(\s*\*\s*\).*?from\s+iceberg\.{layers.detail_layer()}\.dest_modelo_focus\s+group\s+by\s+(.+?)(?:\s+order\s+by|\s+limit|$)",
+            rf"select\s+(.+?)\s*,\s*sum\(\s*\"?BilledCost\"?\s*\)\s+as\s+total_billed.*?count\(\s*\*\s*\).*?from\s+iceberg\.{layers.detail_layer()}\.dest_billing_cloud\s+group\s+by\s+(.+?)(?:\s+order\s+by|\s+limit|$)",
             normalized,
             re.I,
         )
@@ -2840,7 +2840,7 @@ def _run_local_gold_query(sql: str) -> list[dict[str, Any]] | None:
         allowed = {"organograma", "projeto_nome", "_billing_period", "RegionName", "cloud_origem", "ServiceName"}
         if not fields or any(f not in allowed for f in fields):
             return None
-        table = get_catalog().load_table((layers.detail_layer(), "dest_modelo_focus"))
+        table = get_catalog().load_table((layers.detail_layer(), "dest_billing_cloud"))
         needed = fields + ["BilledCost"]
         if "EffectiveCost" in normalized:
             needed.append("EffectiveCost")
@@ -2855,7 +2855,7 @@ def _run_local_gold_query(sql: str) -> list[dict[str, Any]] | None:
             grouped = grouped.join(extra)
         return json.loads(grouped.reset_index().to_json(orient="records"))
 
-    table = get_catalog().load_table((layers.detail_layer(), "dest_modelo_focus"))
+    table = get_catalog().load_table((layers.detail_layer(), "dest_billing_cloud"))
     frame = table.scan().select("ServiceName", "BilledCost").to_pandas()
     frame["BilledCost"] = pd.to_numeric(frame["BilledCost"], errors="coerce").fillna(0)
     result = (
@@ -2926,7 +2926,7 @@ async def get_summary(
                 SUM(COALESCE("EffectiveCost", 0)) AS total_effective,
                 COUNT(DISTINCT "hierarquia_1") AS num_diretorias,
                 COUNT(DISTINCT "ServiceName") AS num_services
-            FROM iceberg.{layers.detail_layer()}.dest_modelo_focus
+            FROM iceberg.{layers.detail_layer()}.dest_billing_cloud
             WHERE {' AND '.join(where)}
             GROUP BY "cloud_origem", "source_connection_id", "_billing_period"
             ORDER BY "_billing_period" DESC, "cloud_origem"

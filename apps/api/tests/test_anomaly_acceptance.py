@@ -79,10 +79,10 @@ def contract(*, run_id=399, cutoff="2026-10-12", finished="2026-10-14T01:00:00-0
         cutoff_date=cutoff,
         finished_at=finished,
         started_at=finished,
-        destination_physical_name="dest_modelo_focus",
+        destination_physical_name="dest_billing_cloud",
         source_snapshot_id=None,
         config_snapshot={
-            "destination_physical_name": "dest_modelo_focus",
+            "destination_physical_name": "dest_billing_cloud",
             "measure_column": measure,
             "dimensions": DIMS,
         },

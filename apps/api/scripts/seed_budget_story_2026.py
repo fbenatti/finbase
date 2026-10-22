@@ -54,7 +54,7 @@ async def january_forecast_reference(by_path: dict[tuple[str, ...], int]) -> dic
              CAST(hierarquia_5 AS VARCHAR) AS l5, CAST(hierarquia_6 AS VARCHAR) AS l6,
              CAST(hierarquia_7 AS VARCHAR) AS l7,
              SUM(COALESCE(TRY_CAST(realizado AS DOUBLE), 0)) AS value
-      FROM iceberg.gold.dest_modelo_focus
+      FROM iceberg.gold.dest_billing_cloud
       WHERE CAST(_billing_period AS VARCHAR) = '202601' AND (tipo = 'realizado' OR tipo IS NULL)
       GROUP BY 1,2,3,4,5,6,7
     """, timeout_s=120)

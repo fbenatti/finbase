@@ -194,7 +194,7 @@ async def _query_focus_dashboard_costs(
         {category} AS cost_class,
         CAST("servicename" AS VARCHAR) AS service_name,
         COALESCE(SUM(TRY_CAST("realizado" AS DOUBLE)), 0) AS realized
-      FROM iceberg.{layers.detail_layer()}.dest_modelo_focus
+      FROM iceberg.{layers.detail_layer()}.dest_billing_cloud
       WHERE lower(CAST("cloud_origem" AS VARCHAR)) LIKE 'azure%'
         AND {_focus_date_predicate(date_from, date_to)}
         AND ({dept} LIKE '%aura brain%' OR {dept} LIKE '%vivo mais%')
@@ -571,7 +571,7 @@ async def _build_cost_series(
           SELECT {period_expr} AS period,
                  COALESCE(SUM(CASE WHEN {ptu_expr} = 1 THEN TRY_CAST("realizado" AS DOUBLE) ELSE 0 END), 0) AS realized_cost,
                  COALESCE(SUM(CASE WHEN {ptu_expr} = 1 THEN TRY_CAST("billedcost" AS DOUBLE) ELSE 0 END), 0) AS billed_cost
-          FROM iceberg.{layers.detail_layer()}.dest_modelo_focus
+          FROM iceberg.{layers.detail_layer()}.dest_billing_cloud
           WHERE lower(CAST("cloud_origem" AS VARCHAR)) LIKE 'azure%'
             AND {ptu_expr} = 1{date_filter}
           GROUP BY 1

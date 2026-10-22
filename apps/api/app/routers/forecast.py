@@ -1062,7 +1062,7 @@ def _accuracy_actual_context(snapshot: dict[str, Any]) -> tuple[str, str, str, s
     Returns (actual_source, date_expr, measure, type_col, type_filter).
     """
     dest = str(snapshot.get("destination_physical_name") or "")
-    if dest.replace("-", "_").replace(".", "_").lower() == "dest_modelo_focus":
+    if dest.replace("-", "_").replace(".", "_").lower() == "dest_billing_cloud":
         actual_source = f"iceberg.silver.{dest}"
         period_col = snapshot.get("period_column") or "_billing_period"
         date_expr = gold_date_expr(period_col, period_col)

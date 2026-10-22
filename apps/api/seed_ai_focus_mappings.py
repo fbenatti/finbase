@@ -1,5 +1,5 @@
 """
-Seed AI token cost mappings → MODELO FOCUS (ChargeCategory Usage).
+Seed AI token cost mappings → BILLING_CLOUD (ChargeCategory Usage).
 
 Only rows with real billed cost are mapped:
   - claude_token: record_type = cost_report (Anthropic Admin API)
@@ -23,7 +23,7 @@ from app.database import SyncSession
 from app.models.destination import DestinationTable
 from app.models.source_connection import SourceConnection
 
-FOCUS_PHYSICAL_NAME = "dest_modelo_focus"
+FOCUS_PHYSICAL_NAME = "dest_billing_cloud"
 COST_RECORD_TYPES = {
     "claude_token": "cost_report",
     "notebooklm_token": "billing_export",

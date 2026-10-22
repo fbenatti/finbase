@@ -33,11 +33,11 @@ async def test_daily_consumption_reads_silver_with_gold_scope(monkeypatch):
     result = await gold.query_gold_daily_consumption(request)
 
     assert result["available"] is True
-    assert result["source"] == "silver.dest_modelo_focus"
+    assert result["source"] == "silver.dest_billing_cloud"
     assert result["day_column"] == "ChargePeriodStart"
     assert result["rows"][0]["realizado"] == 123.0
     query = calls[-1]
-    assert "FROM iceberg.silver.dest_modelo_focus" in query
+    assert "FROM iceberg.silver.dest_billing_cloud" in query
     assert "ChargePeriodStart" in query
     assert "servicecategory" in query
     assert "hierarquia_4" in query

@@ -19,7 +19,7 @@ def test_snapshot_date_from_license_month_blob():
 
 
 def test_default_grain_for_focus_is_billing_period():
-    cfg = resolve_destination_slice_config("dest_modelo_focus", None)
+    cfg = resolve_destination_slice_config("dest_billing_cloud", None)
     assert cfg.grain == "billing_period"
     assert cfg.replace_columns == ("_billing_period", "source_connection_id")
 
@@ -41,13 +41,13 @@ def test_licencas_ia_uses_snapshotdate_column():
 
 
 def test_build_slice_row_filter_billing():
-    cfg = resolve_destination_slice_config("dest_modelo_focus", None)
+    cfg = resolve_destination_slice_config("dest_billing_cloud", None)
     expr = build_slice_row_filter(cfg, connection_id=7, billing_period="202501")
     assert isinstance(expr, And)
 
 
 def test_validate_staging_rejects_mixed_periods():
-    cfg = resolve_destination_slice_config("dest_modelo_focus", None)
+    cfg = resolve_destination_slice_config("dest_billing_cloud", None)
     frame = pd.DataFrame({
         "source_connection_id": [1, 1],
         "_billing_period": ["202501", "202502"],
@@ -116,7 +116,7 @@ def test_partition_spec_json_extra_requires_column():
         "extra_partitions": [{"column": "subaccountname", "transform": "bucket", "bucket_count": 16}],
     }
     cfg = resolve_destination_slice_config(
-        "dest_modelo_focus",
+        "dest_billing_cloud",
         spec,
         column_names={"_billing_period", "source_connection_id", "subaccountname"},
     )

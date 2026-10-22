@@ -8,7 +8,7 @@ import pytest  # noqa: E402
 
 from app.core.sql_guard import SqlRejected, check_read_only_select, referenced_tables  # noqa: E402
 
-ALLOWED = {"gold.modelo_focus", "silver.dest_x"}
+ALLOWED = {"gold.billing_cloud", "silver.dest_x"}
 
 
 def ok(sql: str) -> None:
@@ -22,7 +22,7 @@ def bad(sql: str, fragment: str = "") -> None:
 
 
 def test_select_simples_em_tabela_liberada():
-    ok("SELECT * FROM iceberg.gold.modelo_focus LIMIT 10")
+    ok("SELECT * FROM iceberg.gold.billing_cloud LIMIT 10")
 
 
 def test_with_e_cte_nao_contam_como_tabela():
@@ -31,32 +31,32 @@ def test_with_e_cte_nao_contam_como_tabela():
 
 
 def test_join_checa_todas_as_tabelas():
-    bad("SELECT * FROM iceberg.gold.modelo_focus m JOIN iceberg.bronze.raw_azure r ON 1=1", "bronze.raw_azure")
+    bad("SELECT * FROM iceberg.gold.billing_cloud m JOIN iceberg.bronze.raw_azure r ON 1=1", "bronze.raw_azure")
 
 
 def test_drop_e_delete_sao_recusados():
-    bad("DROP TABLE iceberg.gold.modelo_focus", "Só são permitidas")
-    bad("DELETE FROM iceberg.gold.modelo_focus", "Só são permitidas")
+    bad("DROP TABLE iceberg.gold.billing_cloud", "Só são permitidas")
+    bad("DELETE FROM iceberg.gold.billing_cloud", "Só são permitidas")
 
 
 def test_escrita_disfarcada_em_select_e_recusada():
-    bad("SELECT 1 FROM iceberg.gold.modelo_focus WHERE 1=1 OR (DELETE FROM x)", "DELETE")
+    bad("SELECT 1 FROM iceberg.gold.billing_cloud WHERE 1=1 OR (DELETE FROM x)", "DELETE")
 
 
 def test_multiplas_instrucoes_sao_recusadas():
-    bad("SELECT 1 FROM iceberg.gold.modelo_focus; DROP TABLE x", "uma instrução")
+    bad("SELECT 1 FROM iceberg.gold.billing_cloud; DROP TABLE x", "uma instrução")
 
 
 def test_ponto_e_virgula_dentro_de_string_nao_quebra_leitura():
-    ok("SELECT 'a;b' AS x FROM iceberg.gold.modelo_focus")
+    ok("SELECT 'a;b' AS x FROM iceberg.gold.billing_cloud")
 
 
 def test_palavra_de_escrita_dentro_de_string_nao_bloqueia():
-    ok("SELECT 'DROP TABLE' AS txt FROM iceberg.gold.modelo_focus")
+    ok("SELECT 'DROP TABLE' AS txt FROM iceberg.gold.billing_cloud")
 
 
 def test_comentario_nao_esconde_escrita():
-    bad("SELECT 1 FROM iceberg.gold.modelo_focus /* ok */ ; DROP TABLE x", "uma instrução")
+    bad("SELECT 1 FROM iceberg.gold.billing_cloud /* ok */ ; DROP TABLE x", "uma instrução")
 
 
 def test_comentario_de_linha_com_escrita_e_ignorado_mas_tabela_e_checada():
@@ -64,7 +64,7 @@ def test_comentario_de_linha_com_escrita_e_ignorado_mas_tabela_e_checada():
 
 
 def test_tabela_com_aspas_normaliza():
-    ok('SELECT * FROM "iceberg"."gold"."modelo_focus"')
+    ok('SELECT * FROM "iceberg"."gold"."billing_cloud"')
 
 
 def test_consulta_vazia_e_recusada():
@@ -75,18 +75,18 @@ def test_show_e_describe_nao_sao_select():
     bad("SHOW TABLES", "Só são permitidas")
 
 
-DESTINATIONS = {"dest_modelo_focus"}
+DESTINATIONS = {"dest_billing_cloud"}
 
 
 def test_destino_com_nome_simples_aceita_silver_e_gold():
-    check_read_only_select("SELECT * FROM iceberg.silver.dest_modelo_focus LIMIT 10", DESTINATIONS)
-    check_read_only_select("SELECT * FROM silver.dest_modelo_focus", DESTINATIONS)
-    check_read_only_select("SELECT * FROM iceberg.gold.dest_modelo_focus", DESTINATIONS)
-    check_read_only_select("SELECT * FROM dest_modelo_focus", DESTINATIONS)
+    check_read_only_select("SELECT * FROM iceberg.silver.dest_billing_cloud LIMIT 10", DESTINATIONS)
+    check_read_only_select("SELECT * FROM silver.dest_billing_cloud", DESTINATIONS)
+    check_read_only_select("SELECT * FROM iceberg.gold.dest_billing_cloud", DESTINATIONS)
+    check_read_only_select("SELECT * FROM dest_billing_cloud", DESTINATIONS)
 
 
 def test_destino_com_nome_simples_nao_libera_outro_schema():
     with pytest.raises(SqlRejected):
-        check_read_only_select("SELECT * FROM iceberg.bronze.dest_modelo_focus", DESTINATIONS)
+        check_read_only_select("SELECT * FROM iceberg.bronze.dest_billing_cloud", DESTINATIONS)
     with pytest.raises(SqlRejected):
         check_read_only_select("SELECT * FROM iceberg.silver.dest_outro", DESTINATIONS)

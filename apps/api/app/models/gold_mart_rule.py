@@ -2,13 +2,13 @@
 
 Uma regra Gold seleciona uma ou mais **fontes Silver**. Cada fonte aponta para
 uma ou mais tabelas Silver com a mesma estrutura normalizada — por exemplo
-`resource_cost` para os cubos financeiros, ou `dest_modelo_focus` e o espelho
-`dest_modelo_focus_planning` para os cubos organizacionais legados. As tabelas de
+`resource_cost` para os cubos financeiros, ou `dest_billing_cloud` e o espelho
+`dest_billing_cloud_planning` para os cubos organizacionais legados. As tabelas de
 uma fonte são unidas (mesmos filtros em cada uma) num único conjunto e só então
 agregadas.
 
 O texto anterior descrevia as fontes como "Gold tables". A camada errada no
-docstring sugeria um cruzamento que não existia: `dest_modelo_focus` é Silver
+docstring sugeria um cruzamento que não existia: `dest_billing_cloud` é Silver
 detalhada, e o cruzamento é justamente o que o materializador produz.
 """
 
@@ -81,7 +81,7 @@ class GoldMartRuleSource(Base):
     """Uma fonte que contribui linhas para o cubo Gold.
 
     Liga uma ou mais tabelas **Silver** de mesma estrutura normalizada (por
-    exemplo `dest_modelo_focus` + `dest_modelo_focus_planning`). Filtros, coluna
+    exemplo `dest_billing_cloud` + `dest_billing_cloud_planning`). Filtros, coluna
     de valor e percentual aplicam-se a toda tabela da fonte; as tabelas são
     unidas num único conjunto antes da agregação.
     """

@@ -33,7 +33,7 @@ def _append_rule(value: object, mapping: dict) -> str:
 def _cloud_pool_brl(period: str, mapping: dict) -> Decimal:
     rows = asyncio.run(trino_execute(
         f"""SELECT sum(realizado) pool_brl
-              FROM iceberg.silver.dest_modelo_focus
+              FROM iceberg.silver.dest_billing_cloud
              WHERE _billing_period = '{period}'
                AND source_connection_id = {CLOUD_CONNECTION_ID}
                AND organograma = 'MongoDB'
@@ -51,7 +51,7 @@ def _cloud_pool_brl(period: str, mapping: dict) -> Decimal:
 def apply_mongodb_marketplace_allocation(period: str, *, connection_id: int = 5, publish: bool = True) -> dict:
     """Rateia o pool Azure fechado nas linhas MongoDB do mesmo período."""
     frames = list(iceberg.read_destination_slice_batches(
-        "dest_modelo_focus", billing_period=period,
+        "dest_billing_cloud", billing_period=period,
         connection_id=connection_id, batch_size=100_000, namespace="silver",
     ))
     mongo = pd.concat(frames, ignore_index=True) if frames else pd.DataFrame()
@@ -76,10 +76,10 @@ def apply_mongodb_marketplace_allocation(period: str, *, connection_id: int = 5,
 
     if publish:
         staged = iceberg.write_destination_staged(
-            "dest_modelo_focus", mongo, namespace="silver", partition_spec_json=None,
+            "dest_billing_cloud", mongo, namespace="silver", partition_spec_json=None,
         )
         iceberg.publish_staged_partition(
-            "dest_modelo_focus", staged, billing_period=period,
+            "dest_billing_cloud", staged, billing_period=period,
             connection_id=connection_id, namespace="silver",
             expected_row_count=len(mongo),
         )

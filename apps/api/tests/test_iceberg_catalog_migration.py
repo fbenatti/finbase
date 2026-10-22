@@ -48,18 +48,18 @@ def test_missing_location_falls_back_to_latest_valid_snapshot(tmp_path):
 
 def test_missing_stg_location_falls_back_to_published_table(tmp_path):
     warehouse = tmp_path / "iceberg"
-    published = warehouse / "gold.db/dest_modelo_focus/metadata"
+    published = warehouse / "gold.db/dest_billing_cloud/metadata"
     _metadata(published / "00040-live.metadata.json")
 
     repaired, status = repair_metadata_location(
-        "file:///data/iceberg/gold.db/dest_modelo_focus_stg_1786997602245996000/"
+        "file:///data/iceberg/gold.db/dest_billing_cloud_stg_1786997602245996000/"
         "metadata/01193-gone.metadata.json",
         warehouse,
     )
 
     assert status == "fallback"
     assert repaired == (
-        f"{CANONICAL_WAREHOUSE_URI}/gold.db/dest_modelo_focus/metadata/00040-live.metadata.json"
+        f"{CANONICAL_WAREHOUSE_URI}/gold.db/dest_billing_cloud/metadata/00040-live.metadata.json"
     )
 
 

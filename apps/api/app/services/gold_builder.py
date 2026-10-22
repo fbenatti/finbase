@@ -1,6 +1,6 @@
 """Gold agregada gerada DENTRO do reprocess (reutiliza os DataFrames em memória).
 
-Ao final do reprocessamento do destino MODELO FOCUS, além de publicar a Gold,
+Ao final do reprocessamento do destino BILLING_CLOUD, além de publicar a Gold,
 este módulo acumula a agregação das mesmas linhas já processadas em memória e
 publica a tabela pré-agregada ``dest_dm_cost_focus``:
 
@@ -27,9 +27,9 @@ from app.services import iceberg_service as iceberg
 
 logger = logging.getLogger(__name__)
 
-# Tabela Gold principal gerada ao final do reprocess do MODELO FOCUS.
+# Tabela Gold principal gerada ao final do reprocess do BILLING_CLOUD.
 GOLD_TABLE = os.getenv("GOLD_GOLD_TABLE", "dest_dm_cost_focus")
-GOLD_GOLD_SOURCE = os.getenv("GOLD_GOLD_SOURCE", "dest_modelo_focus")
+GOLD_GOLD_SOURCE = os.getenv("GOLD_GOLD_SOURCE", "dest_billing_cloud")
 
 # Dimensões analíticas (colunas físicas da Gold, minúsculas). A agregação usa
 # somente as dimensões presentes no frame processado — as demais entram nulas,

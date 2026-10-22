@@ -7,8 +7,8 @@ Refuses to start while reprocess tasks are queued or running (use --force to
 override) and holds the warehouse write lock for the whole run.
 
 Usage:
-    PYTHONPATH=apps/api ./.venv/bin/python apps/api/scripts/compact_iceberg_table.py silver.dest_modelo_focus
-    PYTHONPATH=apps/api ./.venv/bin/python apps/api/scripts/compact_iceberg_table.py silver.dest_modelo_focus --dry-run
+    PYTHONPATH=apps/api ./.venv/bin/python apps/api/scripts/compact_iceberg_table.py silver.dest_billing_cloud
+    PYTHONPATH=apps/api ./.venv/bin/python apps/api/scripts/compact_iceberg_table.py silver.dest_billing_cloud --dry-run
 """
 from __future__ import annotations
 
@@ -65,7 +65,7 @@ def active_reprocess_tasks() -> list[int]:
 
 def main() -> int:
     parser = argparse.ArgumentParser()
-    parser.add_argument("table", help="namespace.table, e.g. silver.dest_modelo_focus")
+    parser.add_argument("table", help="namespace.table, e.g. silver.dest_billing_cloud")
     parser.add_argument("--retention", default="10m")
     parser.add_argument("--dry-run", action="store_true", help="only print table stats")
     parser.add_argument("--force", action="store_true", help="run even with reprocess tasks in the queue")

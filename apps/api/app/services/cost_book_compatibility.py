@@ -5,15 +5,15 @@ Em 23/09/2026 convivem duas tabelas de custo no mesmo lakehouse:
 - ``silver.resource_cost`` — o livro canônico novo (13.519.512 linhas,
   R$ 37.356.361,47), usado pelos quatro cubos MVP e escolhido como fonte de
   C1–C3;
-- ``silver.dest_modelo_focus`` — o livro FOCUS legado (36.434.762 linhas), que
+- ``silver.dest_billing_cloud`` — o livro FOCUS legado (36.434.762 linhas), que
   ainda atende as regras Gold organizacionais (ids 3–16 em `gold_rule`).
 
-Os dois não medem a mesma coisa. `dest_modelo_focus` é o FOCUS no grão da linha
+Os dois não medem a mesma coisa. `dest_billing_cloud` é o FOCUS no grão da linha
 de custo do provedor; `resource_cost` é o modelo canônico com o grão declarado em
 `silver_models.py`. Contar linhas de um e comparar com o outro não prova
 divergência.
 
-A decisão de direção mantém `dest_modelo_focus` servindo os consumidores legados
+A decisão de direção mantém `dest_billing_cloud` servindo os consumidores legados
 até o cutover. Isso torna obrigatório **medir** a diferença em vez de supor que
 ela não existe: se a tela nova mostrar um total e a antiga mostrar outro, o usuário
 precisa saber qual é a diferença e por quê.
@@ -29,7 +29,7 @@ from typing import Any
 
 #: Livro canônico (novo) e livro legado.
 CANONICAL_COST_TABLE = "resource_cost"
-LEGACY_COST_TABLE = "dest_modelo_focus"
+LEGACY_COST_TABLE = "dest_billing_cloud"
 
 #: Tolerância de divergência relativa a partir da qual a diferença é material.
 #: Abaixo disso a diferença é ruído de modelagem; acima, precisa ser explicada.

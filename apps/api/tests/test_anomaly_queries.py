@@ -47,13 +47,13 @@ def row(**overrides):
 def test_sql_de_avaliacoes_filtra_status_periodo_e_pagina():
     sql = assessments_sql(
         namespace="silver",
-        table="dest_modelo_focus_anomalies",
+        table="dest_billing_cloud_anomalies",
         statuses=[EXPECTED_EVENT_STATUS],
         period="202610",
         limit=25,
         offset=50,
     )
-    assert 'FROM iceberg.silver."dest_modelo_focus_anomalies"' in sql
+    assert 'FROM iceberg.silver."dest_billing_cloud_anomalies"' in sql
     assert f"'{EXPECTED_EVENT_STATUS}'" in sql
     assert "'202610'" in sql
     assert "OFFSET 50 LIMIT 25" in sql

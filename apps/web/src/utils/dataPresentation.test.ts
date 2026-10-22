@@ -11,7 +11,7 @@ describe("data presentation boundaries", () => {
   });
 
   it("preserves task codes and physical identifiers embedded in feedback", () => {
-    const identifiers = "gold_reprocess bronze_audit raw_iceberg_costs dest_modelo_focus source_record_id";
+    const identifiers = "gold_reprocess bronze_audit raw_iceberg_costs dest_billing_cloud source_record_id";
     expect(dataDisplayText(identifiers)).toBe(identifiers);
   });
 

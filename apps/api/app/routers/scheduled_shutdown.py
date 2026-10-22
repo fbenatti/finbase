@@ -559,7 +559,7 @@ async def _savings_from_gold_fallback(body: SavingsFilter, db: AsyncSession) -> 
             SUM(COALESCE(TRY_CAST("ConsumedQuantity" AS DOUBLE), 0)) AS hours_billed,
             SUM(COALESCE(TRY_CAST("EffectiveCost" AS DOUBLE), 0)) AS total_effective_cost,
             MIN(TRY(date_parse("ChargePeriodStart", '%m/%d/%Y'))) AS first_seen
-        FROM iceberg.{layers.detail_layer()}.dest_modelo_focus
+        FROM iceberg.{layers.detail_layer()}.dest_billing_cloud
         WHERE LOWER(CAST("ServiceSubcategory" AS VARCHAR)) LIKE '%virtual machines%'
           AND ("ChargeCategory" = 'Usage' OR "ChargeCategory" IS NULL)
           AND LOWER(COALESCE(CAST("ResourceName" AS VARCHAR), '')) NOT LIKE '%savings plan%'
@@ -608,7 +608,7 @@ async def _savings_from_gold_fallback(body: SavingsFilter, db: AsyncSession) -> 
                 WHEN COALESCE(TRY_CAST("ConsumedQuantity" AS DOUBLE), 0) > 0
                 THEN date_parse("ChargePeriodStart", '%m/%d/%Y')
             END) AS last_seen
-        FROM iceberg.{layers.detail_layer()}.dest_modelo_focus
+        FROM iceberg.{layers.detail_layer()}.dest_billing_cloud
         WHERE _billing_period = '{period}'
           AND "ChargePeriodStart" IS NOT NULL
           AND LOWER(CAST("ServiceSubcategory" AS VARCHAR)) LIKE '%virtual machines%'
@@ -918,7 +918,7 @@ async def _cost_since_removal_by_name(vm_name: str, snapshot_date: str) -> tuple
     price_sql = f"""
     SELECT
         AVG(COALESCE(TRY_CAST("BilledCost" AS DOUBLE), 0) / NULLIF(COALESCE(TRY_CAST("ConsumedQuantity" AS DOUBLE), 0), 0)) AS avg_price_hour
-    FROM iceberg.{layers.detail_layer()}.dest_modelo_focus
+    FROM iceberg.{layers.detail_layer()}.dest_billing_cloud
     WHERE LOWER(TRIM(element_at(split(CAST("ResourceId" AS VARCHAR), '/'), -1))) = LOWER(TRIM('{vm_name.replace("'", "''")}'))
       AND LOWER(CAST("ServiceSubcategory" AS VARCHAR)) LIKE '%virtual machines%'
       AND ("ChargeCategory" = 'Usage' OR "ChargeCategory" IS NULL)
@@ -957,7 +957,7 @@ async def _cost_since_removal(resource_id: str, subscription_id: str, snapshot_d
     price_sql = f"""
     SELECT
         AVG(COALESCE(TRY_CAST("ListUnitPrice" AS DOUBLE), 0)) AS avg_price_hour
-    FROM iceberg.{layers.detail_layer()}.dest_modelo_focus
+    FROM iceberg.{layers.detail_layer()}.dest_billing_cloud
     WHERE LOWER(TRIM("ResourceId")) = LOWER(TRIM('{resource_id.replace("'", "''")}'))
       AND LOWER(CAST("ServiceSubcategory" AS VARCHAR)) LIKE '%virtual machines%'
       AND ("ChargeCategory" = 'Usage' OR "ChargeCategory" IS NULL)
@@ -1499,7 +1499,7 @@ SavingDepartamentoResponse = SavingOrganogramaResponse
 async def saving_organograma(period: str | None = None):
     """Saving por desligue agrupado por hierarquia_4 e hierarquia_5 (FOCUS).
 
-    Junta a Gold de saving (por resource_id) com dest_modelo_focus para
+    Junta a Gold de saving (por resource_id) com dest_billing_cloud para
     obter hierarquia_4/5 de cada recurso (via MAX na camada de detalhe).
     ``period`` opcional (YYYYMM); default = mês mais recente.
     """
@@ -1529,7 +1529,7 @@ async def saving_organograma(period: str | None = None):
             LOWER(TRIM(g."ResourceId")) AS rid,
             MAX(g.hierarquia_4) AS n4,
             MAX(g.hierarquia_5) AS n5
-        FROM iceberg.{layers.detail_layer()}.dest_modelo_focus g
+        FROM iceberg.{layers.detail_layer()}.dest_billing_cloud g
         JOIN gold_vms d ON LOWER(TRIM(g."ResourceId")) = LOWER(TRIM(d.resource_id))
         WHERE g._billing_period = '{period}'
         GROUP BY 1
@@ -1820,7 +1820,7 @@ SELECT
     SUM(COALESCE(TRY_CAST(b."ConsumedQuantity" AS DOUBLE), 0)) AS hours_billed,
     SUM(COALESCE(TRY_CAST(b."EffectiveCost" AS DOUBLE), 0)) AS total_effective_cost,
     COUNT(DISTINCT b."ResourceId") AS vm_count
-FROM iceberg.{layers.detail_layer()}.dest_modelo_focus b
+FROM iceberg.{layers.detail_layer()}.dest_billing_cloud b
 WHERE LOWER(CAST(b."ServiceSubcategory" AS VARCHAR)) LIKE '%virtual machines%'
   AND (b."ChargeCategory" = 'Usage' OR b."ChargeCategory" IS NULL)
   AND LOWER(COALESCE(CAST(b."ResourceName" AS VARCHAR), '')) NOT LIKE '%savings plan%'
@@ -1879,7 +1879,7 @@ WITH vm_tags AS (
                 ELSE FALSE
             END
         ) AS has_shutdown_auto
-    FROM iceberg.{layers.detail_layer()}.dest_modelo_focus
+    FROM iceberg.{layers.detail_layer()}.dest_billing_cloud
     WHERE LOWER(CAST("ServiceSubcategory" AS VARCHAR)) LIKE '%virtual machines%'
       AND LOWER(COALESCE(CAST("ResourceName" AS VARCHAR), '')) NOT LIKE '%savings plan%'
       AND LOWER(COALESCE(CAST("ResourceName" AS VARCHAR), '')) NOT LIKE '%reserved vm instance%'

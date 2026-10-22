@@ -258,7 +258,7 @@ def _process_blob_sync(
         # destination. When connection_id is set, preserve the source binding
         # so a rule imported from one Azure environment cannot leak into the
         # other Azure environment.
-        is_focus_destination = physical_name.strip().lower() == "dest_modelo_focus"
+        is_focus_destination = physical_name.strip().lower() == "dest_billing_cloud"
         class_rules = [rule for rule in class_rules if
                        rule_matches_cloud(rule.cloud_scope, conn.cloud_scope, conn.cloud_name) and
                        rule_matches_connection(rule.connection_id, conn.id) and
@@ -727,7 +727,7 @@ def _apply_classifications_sync(df: pd.DataFrame, class_rules: list[Classificati
 
     # ── Ensure ALL hierarchy columns exist BEFORE rule application ──
     for col in ['organograma', 'centro_custo', 'id_orcamento', 'ambiente',
-                'custom_fields', 'subscription_rg',
+                'custom_fields',
                 *hierarchy_columns(depth_from_departments(dept_map.values())),
                 'business_rule']:
         if col not in df.columns:

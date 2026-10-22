@@ -1,5 +1,5 @@
 """
-Seed MODELO_FOCUS destination table and its 107+ FOCUS v1.4 columns.
+Seed BILLING_CLOUD destination table and its 107+ FOCUS v1.4 columns.
 Run after the focus_v1_4_recreate.sql migration.
 """
 import os
@@ -164,22 +164,22 @@ FOCUS_COLUMNS = [
 def seed():
     db = SyncSession()
     try:
-        # 1. Upsert the MODELO_FOCUS destination table
-        dt = db.query(DestinationTable).filter(DestinationTable.name == "MODELO FOCUS").first()
+        # 1. Upsert the BILLING_CLOUD destination table
+        dt = db.query(DestinationTable).filter(DestinationTable.name == "BILLING_CLOUD").first()
         if not dt:
             dt = DestinationTable(
-                name="MODELO FOCUS",
+                name="BILLING_CLOUD",
                 description="FinOps Open Cost and Usage Specification v1.4 — 107 columns",
-                physical_name="dest_modelo_focus",
+                physical_name="dest_billing_cloud",
                 active=True,
             )
             db.add(dt)
             db.flush()
-            print(f"Created destination table: MODELO FOCUS (id={dt.id})")
+            print(f"Created destination table: BILLING_CLOUD (id={dt.id})")
         else:
             dt.description = "FinOps Open Cost and Usage Specification v1.4 — 107 columns"
             db.flush()
-            print(f"Updated destination table: MODELO FOCUS (id={dt.id})")
+            print(f"Updated destination table: BILLING_CLOUD (id={dt.id})")
 
         table_id = dt.id
 
@@ -206,7 +206,7 @@ def seed():
             db.add(dc)
 
         db.commit()
-        print(f"Seeded {len(FOCUS_COLUMNS)} FOCUS v1.4 columns for MODELO_FOCUS (id={table_id})")
+        print(f"Seeded {len(FOCUS_COLUMNS)} FOCUS v1.4 columns for BILLING_CLOUD (id={table_id})")
 
     except Exception as e:
         db.rollback()

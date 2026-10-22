@@ -1,7 +1,7 @@
 """
 Script de expiração de snapshots técnicos antigos e purga de arquivos órfãos na Gold.
 
-Executa manutenção na tabela dest_modelo_focus do Iceberg via Trino:
+Executa manutenção na tabela dest_billing_cloud do Iceberg via Trino:
 1. Valida a contagem de linhas e integridade dos dados ativos.
 2. Executa expire_snapshots com retenção configurada (padrão: 1 dia) via header de sessão.
 3. Executa remove_orphan_files para expurgar parquets não referenciados.
@@ -85,7 +85,7 @@ def execute_trino_statement(sql: str, session_properties: str) -> None:
             next_uri = data.get("nextUri")
 
 
-def run_maintenance(table_name: str = "dest_modelo_focus", retention: str = "1d") -> None:
+def run_maintenance(table_name: str = "dest_billing_cloud", retention: str = "1d") -> None:
     print("=" * 70)
     print("INICIANDO MANUTENÇÃO DE SNAPSHOTS TÉCNICOS NA GOLD")
     print(f"Tabela-alvo: iceberg.gold.{table_name}")

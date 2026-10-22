@@ -26,7 +26,7 @@ AZURE_SOURCE_CATALOG: tuple[dict[str, Any], ...] = (
         "connector_type": "azure_blob",
         "code_pattern": "azure-{env}",
         "bronze_pattern": "raw_azure_{env}",
-        "silver_target": "silver.dest_modelo_focus",
+        "silver_target": "silver.dest_billing_cloud",
         "gold_target": "gold.cost_cube",
         "is_cost_source": True,
         "api_reference": "Cost Management Exports (Blob Storage)",

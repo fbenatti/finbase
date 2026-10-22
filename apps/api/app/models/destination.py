@@ -11,7 +11,7 @@ from app.database import Base
 
 
 class DestinationTable(Base):
-    """Metadata for a target/destination table (e.g. MODELO_FOCUS)."""
+    """Metadata for a target/destination table (e.g. BILLING_CLOUD)."""
     __tablename__ = "destination_table"
 
     id = Column(Integer, primary_key=True, autoincrement=True)

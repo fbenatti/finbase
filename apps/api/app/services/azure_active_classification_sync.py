@@ -106,7 +106,7 @@ def _candidates(project_rows: list[dict[str, str]]) -> list[Candidate]:
 
 async def _active_pairs() -> tuple[list[str], list[dict[str, Any]]]:
     periods = await trino_execute(
-        f"SELECT DISTINCT _billing_period FROM iceberg.{layers.detail_layer()}.dest_modelo_focus "
+        f"SELECT DISTINCT _billing_period FROM iceberg.{layers.detail_layer()}.dest_billing_cloud "
         "WHERE _billing_period IS NOT NULL ORDER BY _billing_period DESC LIMIT 3",
         timeout_s=120,
     )
@@ -122,7 +122,7 @@ async def _active_pairs() -> tuple[list[str], list[dict[str, Any]]]:
                    "SubAccountId" AS subscription_id,
                    source_resource_group_name,
                    SUM(COALESCE("BilledCost", 0)) AS billed_cost
-            FROM iceberg.{layers.detail_layer()}.dest_modelo_focus
+            FROM iceberg.{layers.detail_layer()}.dest_billing_cloud
             WHERE _billing_period IN ({period_list})
               AND lower(cloud_origem) IN ('azure-4p', 'azure-ti')
               AND source_resource_group_name IS NOT NULL
@@ -212,10 +212,10 @@ async def sync_active_azure_classifications(
     if not all(connection_by_cloud.values()):
         raise ValueError("As conexões azure-4p e azure-ti são obrigatórias para a sincronização")
     focus_destination_id = (await db.execute(
-        select(DestinationTable.id).where(DestinationTable.physical_name == "dest_modelo_focus").limit(1)
+        select(DestinationTable.id).where(DestinationTable.physical_name == "dest_billing_cloud").limit(1)
     )).scalar_one_or_none()
     if focus_destination_id is None:
-        raise ValueError("O destino MODELO FOCUS não foi encontrado")
+        raise ValueError("O destino BILLING_CLOUD não foi encontrado")
 
     existing_rules = (await db.execute(select(ClassificationRule).where(ClassificationRule.cloud_scope == "azure", ClassificationRule.active == True))).scalars().all()
     rules_by_resource_group: dict[str, list[ClassificationRule]] = defaultdict(list)

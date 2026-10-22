@@ -32,19 +32,19 @@ def test_cutoff_wrap_is_disabled():
     A asserção aponta para o resolvedor central: se a camada de detalhe mudar,
     o teste acompanha em vez de fixar um namespace que já mudou uma vez.
     """
-    sql = realized_cutoff_source("dest_modelo_focus", _schema(), _policy())
-    assert sql == f"iceberg.{layers.detail_layer()}.dest_modelo_focus"
+    sql = realized_cutoff_source("dest_billing_cloud", _schema(), _policy())
+    assert sql == f"iceberg.{layers.detail_layer()}.dest_billing_cloud"
     assert "LEFT JOIN" not in sql
     assert "date_add" not in sql
 
 
 def test_planning_table_reads_from_the_detail_layer():
     assert realized_cutoff_source(
-        "dest_modelo_focus_planning", _schema(), _policy(),
-    ) == f"iceberg.{layers.detail_layer()}.dest_modelo_focus_planning"
+        "dest_billing_cloud_planning", _schema(), _policy(),
+    ) == f"iceberg.{layers.detail_layer()}.dest_billing_cloud_planning"
 
 
 def test_missing_policy_keeps_plain_scan():
     assert realized_cutoff_source(
-        "dest_modelo_focus", _schema(), None,
-    ) == f"iceberg.{layers.detail_layer()}.dest_modelo_focus"
+        "dest_billing_cloud", _schema(), None,
+    ) == f"iceberg.{layers.detail_layer()}.dest_billing_cloud"

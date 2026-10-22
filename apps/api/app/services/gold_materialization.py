@@ -1,8 +1,8 @@
 """Materializa um cubo Gold pré-agregado (dest_dm_cost_<code>) a partir da Silver.
 
 Uma `gold_rule` seleciona uma ou mais tabelas **Silver** já normalizadas
-(`resource_cost` para os cubos financeiros; `dest_modelo_focus` e o espelho
-`dest_modelo_focus_planning` para os cubos organizacionais legados), aplica os
+(`resource_cost` para os cubos financeiros; `dest_billing_cloud` e o espelho
+`dest_billing_cloud_planning` para os cubos organizacionais legados), aplica os
 filtros declarados e pré-agrega nas dimensões analíticas para que a API e o
 dashboard leiam uma tabela fina.
 
@@ -47,7 +47,7 @@ _AI_AUXILIARY_GOLD_CUBES = {
 
 async def materialize_dollar_evolution_cube(session: Any, *, run_id: int) -> int:
     """Build monthly Azure FX rates from observed FOCUS exchange rates only."""
-    source = "dest_modelo_focus"
+    source = "dest_billing_cloud"
     schema = await load_gold_schema(source)
     period = schema.get("_billing_period") or schema.get("billingperiodstart")
     if not period:
@@ -995,7 +995,7 @@ async def prepare_vm_monthly(
         # Use periods actually present in Silver. A rolling calendar window
         # can silently exclude the only imported month (e.g. 202512 in DEV).
         available = await execute(
-            "SELECT DISTINCT _billing_period AS p FROM iceberg.silver.dest_modelo_focus "
+            "SELECT DISTINCT _billing_period AS p FROM iceberg.silver.dest_billing_cloud "
             "WHERE _billing_period IS NOT NULL ORDER BY 1",
             timeout_s=120,
         )
@@ -1003,13 +1003,13 @@ async def prepare_vm_monthly(
 
     source_filters: list[str] = []
     if sources:
-        schema = await load_gold_schema("dest_modelo_focus")
+        schema = await load_gold_schema("dest_billing_cloud")
         for source in sources:
             golds = list(getattr(source, "gold_tables", None) or [])
             if not golds and getattr(source, "gold_table", None):
                 golds = [source.gold_table]
-            if "dest_modelo_focus" in golds:
-                source_filters.append(_source_clause(schema, source, gold_table="dest_modelo_focus"))
+            if "dest_billing_cloud" in golds:
+                source_filters.append(_source_clause(schema, source, gold_table="dest_billing_cloud"))
     configured_filter = (
         "AND (" + " OR ".join(f"({clause})" for clause in source_filters) + ")"
         if source_filters else ""
@@ -1035,7 +1035,7 @@ async def prepare_vm_monthly(
             b._billing_period AS billing_period,
             SUM(COALESCE(TRY_CAST(b."ConsumedQuantity" AS DOUBLE), 0)) AS total_hours,
             SUM(COALESCE(TRY_CAST(b."BilledCost" AS DOUBLE), 0)) AS total_cost
-        FROM iceberg.silver.dest_modelo_focus b
+        FROM iceberg.silver.dest_billing_cloud b
         WHERE b._billing_period = '{period}'
           AND b.cloud_origem IN ('azure-ti', 'azure-4p')
           AND LOWER(CAST(b."ServiceSubcategory" AS VARCHAR)) LIKE '%virtual machines%'
@@ -1249,7 +1249,7 @@ def _lifecycle_sql_cte(
                     THEN COALESCE(TRY_CAST(g."ConsumedQuantity" AS DOUBLE), 0)
                     ELSE 0
                 END) AS window_hours
-            FROM iceberg.silver.dest_modelo_focus g
+            FROM iceberg.silver.dest_billing_cloud g
             WHERE g."ChargePeriodStart" IS NOT NULL
               AND LOWER(CAST(g."ServiceSubcategory" AS VARCHAR)) LIKE '%virtual machines%'
               AND (g."ChargeCategory" = 'Usage' OR g."ChargeCategory" IS NULL)
@@ -1330,7 +1330,7 @@ async def materialize_saving_history(
     if periods is None:
         # Períodos disponíveis na Gold até o mês anterior ao atual.
         avail = await execute(
-            "SELECT DISTINCT _billing_period FROM iceberg.silver.dest_modelo_focus ORDER BY 1",
+            "SELECT DISTINCT _billing_period FROM iceberg.silver.dest_billing_cloud ORDER BY 1",
             timeout_s=240,
         )
         periods = [str(r["_billing_period"]) for r in avail if str(r["_billing_period"]) < cur]
@@ -1433,7 +1433,7 @@ async def materialize_saving_history(
                 LOWER(TRIM(g."ResourceId")) AS rid,
                 MAX(g.hierarquia_4) AS n4,
                 MAX(g.hierarquia_5) AS n5
-            FROM iceberg.silver.dest_modelo_focus g
+            FROM iceberg.silver.dest_billing_cloud g
             JOIN stats s ON LOWER(TRIM(g."ResourceId")) = LOWER(TRIM(s.resource_id))
             WHERE g._billing_period = '{target}'
             GROUP BY 1

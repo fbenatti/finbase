@@ -130,7 +130,7 @@ async def ensure_cloud_classification_fallbacks(db: AsyncSession) -> int:
         return 0
 
     destination = (await db.execute(
-        select(DestinationTable).where(DestinationTable.physical_name == "dest_modelo_focus")
+        select(DestinationTable).where(DestinationTable.physical_name == "dest_billing_cloud")
     )).scalars().first()
     if destination is None:
         logger.info("Skipping cloud classification fallbacks: FOCUS destination is not seeded yet")

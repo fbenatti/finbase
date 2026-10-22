@@ -1,4 +1,4 @@
-"""Global mapping from Azure tag keys to MODELO FOCUS fields."""
+"""Global mapping from Azure tag keys to BILLING_CLOUD fields."""
 from sqlalchemy import Boolean, Column, DateTime, Integer, String, UniqueConstraint, func
 
 from app.database import Base

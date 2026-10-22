@@ -154,7 +154,7 @@ WITH latest_orphan_period AS (
         SELECT f.*, MIN(f.resourceid) OVER (
             PARTITION BY lower(f.resourceid), f."_billing_period", f.cloud_origem
         ) AS canonical
-        FROM iceberg.{layers.detail_layer()}.dest_modelo_focus f
+        FROM iceberg.{layers.detail_layer()}.dest_billing_cloud f
         JOIN orphan_ids o
           ON lower(f.resourceid) = o.rid
          AND f."_billing_period" = o."_billing_period"

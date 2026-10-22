@@ -114,7 +114,7 @@ def rule_matches_destination(
     """Whether a rule belongs to the destination currently being rebuilt.
 
     Old FOCUS rules predate destination tables and have a null destination id.
-    They remain valid only while rebuilding MODELO FOCUS.  A null id must not
+    They remain valid only while rebuilding BILLING_CLOUD.  A null id must not
     become a wildcard for newer destination tables.
     """
     return (

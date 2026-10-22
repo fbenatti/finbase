@@ -346,7 +346,7 @@ class OciExtractor:
     def uses_usage_api(self) -> bool:
         return self.config_json.get("extraction_mode") == USAGE_API_MODE
 
-    def _usage_client(self) -> oci.usage_api.UsageapiClient:
+    def _usage_client(self) -> "oci.usage_api.UsageapiClient":
         return oci.usage_api.UsageapiClient(self._get_oci_config())
 
     def _test_usage_api(self) -> dict:

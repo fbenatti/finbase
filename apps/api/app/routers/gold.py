@@ -348,7 +348,7 @@ async def list_gold_tables():
         items = [{"id": row.id, "name": row.name, "physical_name": row.physical_name} for row in rows]
     finally:
         session.close()
-    # Planning pseudo-tables are derived from each Gold (dest_modelo_focus_planning).
+    # Planning pseudo-tables are derived from each Gold (dest_billing_cloud_planning).
     planning = [{"id": -row["id"], "name": f"{row['name']} (planejamento/forecast/rateio)", "physical_name": f"{row['physical_name']}_planning"} for row in items]
     return {"tables": items + planning}
 
@@ -690,7 +690,7 @@ async def query_gold_daily_consumption(body: GoldQueryRequest):
     """Return realized consumption by its source date, reading the Silver detail.
 
     Executive Gold cubes are monthly aggregates and cannot supply this series.
-    The current executive cube is materialized from ``silver.dest_modelo_focus``;
+    The current executive cube is materialized from ``silver.dest_billing_cloud``;
     query that detail table with the same dimensional scope and billing-period
     filters, then group by the original FOCUS charge date.
     """
@@ -698,7 +698,7 @@ async def query_gold_daily_consumption(body: GoldQueryRequest):
 
     # Keep the source selection server-owned: the request only names a validated
     # Gold cube, never an arbitrary Silver table.
-    silver_sources = {"dest_dm_cost_visao_completa": "dest_modelo_focus"}
+    silver_sources = {"dest_dm_cost_visao_completa": "dest_billing_cloud"}
     silver_table = silver_sources.get(body.table)
     if not silver_table:
         raise HTTPException(status_code=422, detail=f"Série diária indisponível para o cubo: {body.table}")

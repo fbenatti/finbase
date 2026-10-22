@@ -1,5 +1,5 @@
 """
-Seed GCP BigQuery → MODELO FOCUS mappings using the official Google/FOCUS mapping.
+Seed GCP BigQuery → BILLING_CLOUD mappings using the official Google/FOCUS mapping.
 
 Usage: cd apps/api && python seed_gcp_focus_mappings.py
 """

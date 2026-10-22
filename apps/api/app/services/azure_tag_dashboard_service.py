@@ -269,7 +269,7 @@ class AzureTagDashboardService:
             evidence = await trino_execute(f"""
                 WITH latest AS (
                     SELECT max(_billing_period) AS period
-                    FROM iceberg.silver.dest_modelo_focus
+                    FROM iceberg.silver.dest_billing_cloud
                     WHERE cloud_origem = '{safe_code}'
                       AND CAST(source_connection_id AS bigint) = {int(connection.id)}
                       AND lower(trim(CAST(subaccountid AS varchar))) = '{subscription_id.casefold()}'
@@ -278,7 +278,7 @@ class AzureTagDashboardService:
                     lower(trim(CAST(resourceid AS varchar))) AS resource_id,
                     lower(trim(CAST(source_resource_group_name AS varchar))) AS resource_group,
                     {dynamic_fields}, count(*) AS evidence_count
-                FROM iceberg.silver.dest_modelo_focus
+                FROM iceberg.silver.dest_billing_cloud
                 WHERE cloud_origem = '{safe_code}'
                   AND CAST(source_connection_id AS bigint) = {int(connection.id)}
                   AND lower(trim(CAST(subaccountid AS varchar))) = '{subscription_id.casefold()}'

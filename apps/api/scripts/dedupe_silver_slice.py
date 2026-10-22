@@ -2,7 +2,7 @@
 """DEV helper: idempotent DELETE of a Silver dest_* slice (optional ROW_NUMBER dedupe).
 
 Usage:
-  python scripts/dedupe_silver_slice.py --table dest_modelo_focus \\
+  python scripts/dedupe_silver_slice.py --table dest_billing_cloud \\
       --connection-id 4 --billing-period 202501
   python scripts/dedupe_silver_slice.py --table dest_cloud_resource_inventory \\
       --connection-id 2 --snapshot-date 2025-09-01

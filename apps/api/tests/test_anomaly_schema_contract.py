@@ -87,8 +87,8 @@ def test_ddl_e_idempotente_e_cobre_as_tres_tabelas():
     assert len(statements) == 3
     for statement in statements:
         assert statement.startswith("CREATE TABLE IF NOT EXISTS iceberg.")
-    assert "dest_modelo_focus_anomaly_reference" in statements[0]
-    assert "dest_modelo_focus_anomalies" in statements[1]
+    assert "dest_billing_cloud_anomaly_reference" in statements[0]
+    assert "dest_billing_cloud_anomalies" in statements[1]
     assert "dest_dm_cost_anomalies" in statements[2]
 
 

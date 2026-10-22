@@ -57,10 +57,10 @@ def run_row(
         cutoff_date=cutoff,
         finished_at=finished,
         started_at=finished,
-        destination_physical_name="dest_modelo_focus",
+        destination_physical_name="dest_billing_cloud",
         source_snapshot_id=None,
         config_snapshot=snapshot if snapshot is not None else {
-            "destination_physical_name": "dest_modelo_focus",
+            "destination_physical_name": "dest_billing_cloud",
             "measure_column": "realizado",
             "dimensions": DIMS,
         },

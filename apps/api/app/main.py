@@ -1049,8 +1049,6 @@ async def lifespan(app: FastAPI):
         await ensure_planning_paths_synced(db)
         from app.routers.clone_rules import ensure_focus_templates
         await ensure_focus_templates(db)
-        from seed_marketplace_focus import ensure_marketplace_focus
-        ensure_marketplace_focus()
 
     # Only the dedicated scheduler service owns APScheduler in production.
     if settings.scheduler_enabled:

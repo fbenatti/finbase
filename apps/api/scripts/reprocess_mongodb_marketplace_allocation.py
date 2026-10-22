@@ -40,7 +40,7 @@ RULE_META = {
 
 def _read(connection_id: int) -> pd.DataFrame:
     frames = list(iceberg.read_destination_slice_batches(
-        "dest_modelo_focus",
+        "dest_billing_cloud",
         billing_period=PERIOD,
         connection_id=connection_id,
         batch_size=100_000,
@@ -63,7 +63,7 @@ def _append_rule(value: object) -> str:
 def _cloud_pool_brl() -> Decimal:
     rows = trino_run(
         """SELECT sum(realizado) pool_brl
-           FROM iceberg.silver.dest_modelo_focus
+           FROM iceberg.silver.dest_billing_cloud
           WHERE _billing_period = '202608'
             AND source_connection_id = 2
             AND organograma = 'MongoDB'
@@ -111,13 +111,13 @@ def main() -> None:
         return
 
     staged = iceberg.write_destination_staged(
-        "dest_modelo_focus",
+        "dest_billing_cloud",
         mongo,
         namespace="silver",
         partition_spec_json=None,
     )
     iceberg.publish_staged_partition(
-        "dest_modelo_focus",
+        "dest_billing_cloud",
         staged,
         billing_period=PERIOD,
         connection_id=MONGO_CONNECTION_ID,

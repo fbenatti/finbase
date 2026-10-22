@@ -703,7 +703,7 @@ def _iceberg_orphan_cleanup_job() -> None:
             result.get("deleted_dirs", 0),
             result.get("deleted_bytes", 0) / (1024 * 1024),
         )
-        expire_gold_snapshots("dest_modelo_focus", retention_days=7)
+        expire_gold_snapshots("dest_billing_cloud", retention_days=7)
     except Exception as exc:
         logger.error("Falha na limpeza periódica de staging órfão do Iceberg: %s", exc)
 

@@ -130,7 +130,7 @@ def test_linha_de_anomalia_aditiva_e_rejeitada():
 def test_leitura_observada_usa_data_completa_e_nao_seleciona_por_billing_period():
     sql = observed_daily_sql(
         source_namespace="silver",
-        table="dest_modelo_focus",
+        table="dest_billing_cloud",
         date_column="chargeperiodstart",
         period_column="_billing_period",
         type_column="tipo",
@@ -355,7 +355,7 @@ async def test_build_outcome_avalia_series_e_reconcilia():
         "cutoff_date": "2026-10-12",
         "finished_at": "2026-10-14T01:00:00-03:00",
         "started_at": "2026-10-14T01:00:00-03:00",
-        "destination_physical_name": "dest_modelo_focus",
+        "destination_physical_name": "dest_billing_cloud",
         "source_snapshot_id": None,
         "config_snapshot": {"measure_column": "realizado", "dimensions": ["cloud_origem", "servicename"]},
         "error_metrics": {},

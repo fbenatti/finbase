@@ -84,12 +84,12 @@ const PREBUILT: Record<string, { label: string; sql: string }[]> = {
   bronze: [],
   silver: [],
   gold: [
-    { label: "Top 10 serviços por custo faturado", sql: 'SELECT "ServiceName", SUM("BilledCost") AS total_billed, COUNT(*) AS rows FROM iceberg.gold.dest_modelo_focus GROUP BY "ServiceName" ORDER BY total_billed DESC LIMIT 10' },
-    { label: "Custo por unidade", sql: 'SELECT "organograma", SUM("BilledCost") AS total_billed, SUM("EffectiveCost") AS total_effective, COUNT(*) AS rows FROM iceberg.gold.dest_modelo_focus GROUP BY "organograma" ORDER BY total_billed DESC LIMIT 20' },
-    { label: "Custo por competência", sql: 'SELECT "_billing_period", SUM("BilledCost") AS total_billed, SUM("EffectiveCost") AS total_effective, COUNT(*) AS rows FROM iceberg.gold.dest_modelo_focus GROUP BY "_billing_period" ORDER BY "_billing_period" DESC' },
-    { label: "Custo por localização", sql: 'SELECT "RegionName", SUM("BilledCost") AS total_billed, COUNT(*) AS rows FROM iceberg.gold.dest_modelo_focus GROUP BY "RegionName" ORDER BY total_billed DESC LIMIT 20' },
-    { label: "Custo por fonte e mês", sql: 'SELECT "cloud_origem", "_billing_period", SUM("BilledCost") AS total_billed, COUNT(*) AS rows FROM iceberg.gold.dest_modelo_focus GROUP BY "cloud_origem", "_billing_period" ORDER BY "_billing_period" DESC, total_billed DESC' },
-    { label: "Unidade / fonte por mês", sql: 'SELECT "organograma", "cloud_origem", "_billing_period", SUM("BilledCost") AS total_billed, SUM("EffectiveCost") AS total_effective, COUNT(*) AS rows FROM iceberg.gold.dest_modelo_focus GROUP BY "organograma", "cloud_origem", "_billing_period" ORDER BY "_billing_period" DESC, total_billed DESC LIMIT 500' },
+    { label: "Top 10 serviços por custo faturado", sql: 'SELECT "ServiceName", SUM("BilledCost") AS total_billed, COUNT(*) AS rows FROM iceberg.gold.dest_billing_cloud GROUP BY "ServiceName" ORDER BY total_billed DESC LIMIT 10' },
+    { label: "Custo por unidade", sql: 'SELECT "organograma", SUM("BilledCost") AS total_billed, SUM("EffectiveCost") AS total_effective, COUNT(*) AS rows FROM iceberg.gold.dest_billing_cloud GROUP BY "organograma" ORDER BY total_billed DESC LIMIT 20' },
+    { label: "Custo por competência", sql: 'SELECT "_billing_period", SUM("BilledCost") AS total_billed, SUM("EffectiveCost") AS total_effective, COUNT(*) AS rows FROM iceberg.gold.dest_billing_cloud GROUP BY "_billing_period" ORDER BY "_billing_period" DESC' },
+    { label: "Custo por localização", sql: 'SELECT "RegionName", SUM("BilledCost") AS total_billed, COUNT(*) AS rows FROM iceberg.gold.dest_billing_cloud GROUP BY "RegionName" ORDER BY total_billed DESC LIMIT 20' },
+    { label: "Custo por fonte e mês", sql: 'SELECT "cloud_origem", "_billing_period", SUM("BilledCost") AS total_billed, COUNT(*) AS rows FROM iceberg.gold.dest_billing_cloud GROUP BY "cloud_origem", "_billing_period" ORDER BY "_billing_period" DESC, total_billed DESC' },
+    { label: "Unidade / fonte por mês", sql: 'SELECT "organograma", "cloud_origem", "_billing_period", SUM("BilledCost") AS total_billed, SUM("EffectiveCost") AS total_effective, COUNT(*) AS rows FROM iceberg.gold.dest_billing_cloud GROUP BY "organograma", "cloud_origem", "_billing_period" ORDER BY "_billing_period" DESC, total_billed DESC LIMIT 500' },
   ],
 };
 
@@ -852,7 +852,7 @@ export default function Analysis() {
                 : layer === "gold"
                   ? (selectedDataTable ? (PREBUILT.gold || []).map(q => ({
                       ...q,
-                      sql: q.sql.split("iceberg.gold.dest_modelo_focus").join(`iceberg.gold.${selectedDataTable}`),
+                      sql: q.sql.split("iceberg.gold.dest_billing_cloud").join(`iceberg.gold.${selectedDataTable}`),
                     })) : [])
                   : (PREBUILT[layer] || [])).map((q) => (
                 <Button key={q.label} size="small" variant="outlined" onClick={() => setPrebuilt(q.sql)}>{q.label}</Button>

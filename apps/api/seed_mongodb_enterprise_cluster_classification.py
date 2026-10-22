@@ -24,7 +24,7 @@ def ensure_rules() -> list[int]:
             select(SourceConnection.id).where(SourceConnection.code == "mongodb-atlas-enterprise")
         ).scalar_one()
         destination_id = session.execute(
-            select(DestinationTable.id).where(DestinationTable.physical_name == "dest_modelo_focus")
+            select(DestinationTable.id).where(DestinationTable.physical_name == "dest_billing_cloud")
         ).scalar_one()
         for cluster, project in RULES:
             name = f"Enterprise Cluster {cluster} → {project}"

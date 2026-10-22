@@ -174,7 +174,7 @@ def test_reconstrucao_nunca_publica_planning():
     assert planning_publication_allowed(simulated_as_of=None) is True
 
     with pytest.raises(RuntimeError, match="publicou Planning"):
-        assert_no_planning_published({"planning_table": "dest_modelo_focus_planning"})
+        assert_no_planning_published({"planning_table": "dest_billing_cloud_planning"})
     assert_no_planning_published({"planning_table": None})
 
 
@@ -252,7 +252,7 @@ async def test_um_mes_com_falha_nao_derruba_o_lote():
 @pytest.mark.asyncio
 async def test_reconstrucao_que_publicasse_planning_falha_alto():
     plan = plan_reconstruction(["202606"], contracts=[])
-    reconstructor = make_reconstructor(planning_table="dest_modelo_focus_planning")
+    reconstructor = make_reconstructor(planning_table="dest_billing_cloud_planning")
     result = await run_reconstruction_batches(
         plan, config=FakeConfig(), reconstructor=reconstructor
     )

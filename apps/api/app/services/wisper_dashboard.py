@@ -18,7 +18,7 @@ from app.services import lakehouse_layers as layers
 
 
 # Source of truth for Wisper financials: FOCUS gold filtered by SubAccountName
-FOCUS_TABLE = f"iceberg.{layers.detail_layer()}.dest_modelo_focus"
+FOCUS_TABLE = f"iceberg.{layers.detail_layer()}.dest_billing_cloud"
 # Operational/inventory source
 OP_METRICS_TABLE = f"iceberg.{layers.detail_layer()}.dest_oci_operational_metrics"
 # Legacy gold table (kept only for current-month forecast comparison)

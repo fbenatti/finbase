@@ -406,7 +406,7 @@ async def seed(db: AsyncSession):
 
 async def _seed_pivot_views(db: AsyncSession):
     """Shared FinOps templates. They are config only, never financial rows."""
-    focus = (await db.execute(text("SELECT id FROM destination_table WHERE upper(name) = 'MODELO FOCUS' LIMIT 1"))).scalar()
+    focus = (await db.execute(text("SELECT id FROM destination_table WHERE upper(name) = 'BILLING_CLOUD' LIMIT 1"))).scalar()
     if not focus:
         return
     templates = [

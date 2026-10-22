@@ -211,8 +211,8 @@ class AzureTagPolicyService:
         if not ids:
             return []
         tables = (await self.db.execute(select(DestinationTable).where(DestinationTable.id.in_(ids)))).scalars().all()
-        return [(table.id, (table.name or "").strip().upper() == "MODELO FOCUS" or
-                (table.physical_name or "").strip().lower() == "dest_modelo_focus") for table in tables]
+        return [(table.id, (table.name or "").strip().upper() == "BILLING_CLOUD" or
+                (table.physical_name or "").strip().lower() == "dest_billing_cloud") for table in tables]
 
     async def _load_classification_rules(self, conn: SourceConnection) -> list[ClassificationRule]:
         destinations = await self._connection_destinations(conn.id)
@@ -308,7 +308,7 @@ class AzureTagPolicyService:
             rows = await trino_execute(f"""
                 WITH latest AS (
                     SELECT max(_billing_period) AS period
-                    FROM iceberg.{layers.detail_layer()}.dest_modelo_focus
+                    FROM iceberg.{layers.detail_layer()}.dest_billing_cloud
                     WHERE cloud_origem = '{safe_code}'
                       AND CAST(source_connection_id AS bigint) = {int(conn.id)}
                 )
@@ -320,7 +320,7 @@ class AzureTagPolicyService:
                     trim(resourceid) AS resource_id,
                     {dynamic_fields + ',' if dynamic_fields else ''}
                     count(*) AS evidence_count
-                FROM iceberg.{layers.detail_layer()}.dest_modelo_focus
+                FROM iceberg.{layers.detail_layer()}.dest_billing_cloud
                 WHERE cloud_origem = '{safe_code}'
                   AND CAST(source_connection_id AS bigint) = {int(conn.id)}
                   AND _billing_period = (SELECT period FROM latest)
@@ -348,7 +348,7 @@ class AzureTagPolicyService:
             rows = await trino_execute(f"""
                 SELECT DISTINCT
                     CAST(json_extract_scalar(business_rule, '$.classification.id') AS integer) AS rule_id
-                FROM iceberg.{layers.detail_layer()}.dest_modelo_focus
+                FROM iceberg.{layers.detail_layer()}.dest_billing_cloud
                 WHERE cloud_origem = '{safe_code}'
                   AND CAST(source_connection_id AS bigint) = {int(conn.id)}
                   AND lower(trim(CAST(subaccountid AS varchar))) = '{subscription_id.casefold()}'
@@ -387,7 +387,7 @@ class AzureTagPolicyService:
                     trim(CAST(source_resource_group_name AS varchar)) AS resource_group_name,
                     {dynamic_select}
                     count(*) AS evidence_count
-                FROM iceberg.{layers.detail_layer()}.dest_modelo_focus
+                FROM iceberg.{layers.detail_layer()}.dest_billing_cloud
                 WHERE lower(trim(CAST(cloud_origem AS varchar))) = lower('{safe_code}')
                   AND CAST(source_connection_id AS bigint) = {int(conn.id)}
                   AND lower(trim(CAST(subaccountid AS varchar))) = '{subscription_id.casefold()}'

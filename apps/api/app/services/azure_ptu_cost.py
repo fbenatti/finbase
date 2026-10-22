@@ -1,7 +1,7 @@
 """Enriquecimento financeiro do Azure PTU Ops a partir da Gold (FOCUS).
 
-Lê ``iceberg.{layers.detail_layer()}.dest_modelo_focus`` (realizado) e
-``iceberg.{layers.detail_layer()}.dest_modelo_focus_planning`` (forecast) e devolve o bloco
+Lê ``iceberg.{layers.detail_layer()}.dest_billing_cloud`` (realizado) e
+``iceberg.{layers.detail_layer()}.dest_billing_cloud_planning`` (forecast) e devolve o bloco
 financeiro do dashboard com a separação correta de capacidade PTU:
 
 * **Reserva** — ``Microsoft.Capacity`` (chargecategory Purchase/Refund/Return),
@@ -34,8 +34,8 @@ from app.services import lakehouse_layers as layers
 
 logger = logging.getLogger(__name__)
 
-FOCUS_TABLE = "dest_modelo_focus"
-PLANNING_TABLE = "dest_modelo_focus_planning"
+FOCUS_TABLE = "dest_billing_cloud"
+PLANNING_TABLE = "dest_billing_cloud_planning"
 DETAIL_NAMESPACE = f"iceberg.{layers.detail_layer()}"
 PROJECTS = ("Vivo Mais", "Aura Brain")
 

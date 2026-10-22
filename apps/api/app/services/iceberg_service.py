@@ -148,7 +148,7 @@ def ensure_namespace(namespace: str) -> None:
 
 
 def _table_id(namespace: str, table: str) -> tuple:
-    """Build a table identifier tuple e.g. ('gold', 'dest_modelo_focus')."""
+    """Build a table identifier tuple e.g. ('gold', 'dest_billing_cloud')."""
     return (namespace, table.replace("-", "_").replace(".", "_"))
 
 
@@ -2374,7 +2374,7 @@ def cleanup_orphan_staging(max_age_hours: int = 2) -> dict[str, int]:
     }
 
 
-def expire_gold_snapshots(table_name: str = "dest_modelo_focus", retention_days: int = 7) -> bool:
+def expire_gold_snapshots(table_name: str = "dest_billing_cloud", retention_days: int = 7) -> bool:
     """Maintain historical snapshots only after proving the active table is safe."""
     from urllib.parse import urljoin
     import httpx
