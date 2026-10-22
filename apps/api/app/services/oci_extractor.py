@@ -2,6 +2,7 @@ import logging
 import io
 import re
 import os
+from pathlib import Path
 import gzip
 import tempfile
 from collections import defaultdict
@@ -61,6 +62,29 @@ def _sanitize_df(df: pd.DataFrame) -> pd.DataFrame:
     return df
 
 
+# Pasta montada (somente leitura) com os arquivos de config e chaves da OCI.
+# A conexão guarda só o caminho do arquivo; as chaves não vão para o banco.
+OCI_CONFIG_DIR = Path(os.getenv("OCI_CONFIG_DIR", "/run/finbase-env"))
+
+
+def _oci_config_from_file(config_file: str, profile: str) -> dict:
+    """Lê um config OCI (formato ~/.oci/config) que esteja dentro de ``OCI_CONFIG_DIR``."""
+    root = OCI_CONFIG_DIR.resolve()
+    path = (root / config_file).resolve() if not Path(config_file).is_absolute() else Path(config_file).resolve()
+    if root not in path.parents:
+        raise ValueError(f"O arquivo de config OCI precisa estar em {root}")
+    config = oci.config.from_file(str(path), profile_name=profile)
+    # O key_file do arquivo costuma apontar para o caminho da máquina de quem o
+    # gerou; procura a chave pelo nome na mesma pasta do config.
+    key_file = Path(str(config.get("key_file") or "")).expanduser()
+    if not key_file.is_file():
+        candidate = (path.parent / key_file.name).resolve()
+        if root not in candidate.parents or not candidate.is_file():
+            raise ValueError(f"Chave privada '{key_file.name}' não encontrada em {path.parent}")
+        config["key_file"] = str(candidate)
+    return config
+
+
 class OciExtractor:
     """Extrator de relatórios de Cost e Usage Reports da Oracle Cloud Infrastructure (OCI) com agregação mensal."""
 
@@ -73,6 +97,13 @@ class OciExtractor:
 
     def _get_oci_config(self) -> dict:
         cfg = self.config_json
+        if cfg.get("config_file"):
+            return _oci_config_from_file(cfg["config_file"], cfg.get("config_profile") or "DEFAULT")
+        if not (cfg.get("user_ocid") or cfg.get("user")) or not (cfg.get("tenancy_ocid") or cfg.get("tenancy")):
+            raise ValueError(
+                "Credenciais OCI não informadas: escolha o arquivo de config OCI "
+                "ou preencha tenancy, usuário, fingerprint e chave privada."
+            )
         user_ocid = cfg.get("user_ocid") or cfg.get("user")
         tenancy_ocid = cfg.get("tenancy_ocid") or cfg.get("tenancy")
         fingerprint = cfg.get("fingerprint")
@@ -98,6 +129,12 @@ class OciExtractor:
         }
         return oci_config
 
+    def _tenancy_ocid(self) -> str | None:
+        """Tenancy da conexão; com arquivo de config, vem do próprio arquivo."""
+        if self.config_json.get("config_file"):
+            return self._get_oci_config().get("tenancy")
+        return self.config_json.get("tenancy_ocid") or self.config_json.get("tenancy")
+
     def _get_object_storage_client(self) -> oci.object_storage.ObjectStorageClient:
         oci_config = self._get_oci_config()
         oci.config.validate_config(oci_config)
@@ -107,7 +144,7 @@ class OciExtractor:
         """Testa conexão com a OCI e valida o acesso ao bucket de relatórios."""
         try:
             client = self._get_object_storage_client()
-            tenancy_ocid = self.config_json.get("tenancy_ocid") or self.config_json.get("tenancy")
+            tenancy_ocid = self._tenancy_ocid()
             namespace = self.config_json.get("namespace", "bling")
 
             response = client.list_objects(
@@ -139,7 +176,7 @@ class OciExtractor:
             return self._cached_objects[prefix]
 
         client = self._get_object_storage_client()
-        tenancy_ocid = self.config_json.get("tenancy_ocid") or self.config_json.get("tenancy")
+        tenancy_ocid = self._tenancy_ocid()
         namespace = self.config_json.get("namespace", "bling")
 
         objects = []

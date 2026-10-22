@@ -679,6 +679,9 @@ export default function Connections() {
     }
   };
 
+  // A API não devolve segredos já salvos; só avisa que existem.
+  const savedSecrets = Boolean((editing?.config_json as Record<string, unknown> | undefined)?.credentials_configured);
+
   const testFormConnection = async () => {
     setTestingForm(true);
     setFormTestMessage(null);
@@ -885,27 +888,18 @@ export default function Connections() {
           {error && <Alert severity="error" sx={{ mb: 2 }} onClose={() => setError("")}>{dataDisplayText(error)}</Alert>}
           {formTestMessage && <Alert severity={formTestMessage.severity} sx={{ mb: 2 }}>{dataDisplayText(formTestMessage.msg)}</Alert>}
           <Box sx={{ display: "grid", gridTemplateColumns: { xs: "1fr", sm: "repeat(2, minmax(0, 1fr))" }, gap: 2, mt: 1,
-            "& > .MuiAlert-root, & > .MuiTypography-root, & > .MuiDivider-root, & > .MuiBox-root, & > .MuiTextField-root:has(textarea)": { gridColumn: "1 / -1" } }}>
+            "& > .MuiAlert-root, & > .MuiTypography-root, & > .MuiDivider-root, & > .MuiBox-root, & > .MuiTextField-root:has(textarea)": { gridColumn: "1 / -1" },
+            // Acesso e parâmetros: uma coluna só, igual para qualquer tipo de fonte.
+            "& > .access-section ~ *": { gridColumn: "1 / -1" } }}>
             <Typography variant="subtitle2">Dados de identificação</Typography>
             <TextField label="Nome da fonte" value={form.name} onChange={e => setForm({ ...form, name: e.target.value })} />
             <TextField label="Identificador da conexão" value={form.code} disabled={form.connector_type === "azure_pricesheet"} onChange={e => setForm({ ...form, code: e.target.value })} helperText="Chave usada nos fluxos de coleta." />
-            <TextField label="Provedor" value={providerOf(form.connector_type)?.label ?? "Outro"} disabled />
-            <FormControl fullWidth>
-              <InputLabel id="connection-kind-label">O que coletar</InputLabel>
-              <Select labelId="connection-kind-label" value={form.connector_type} label="O que coletar" onChange={e => { const type = e.target.value; setForm({ ...form, connector_type: type, cloud_scope: providerOf(type)?.key ?? form.cloud_scope }); }}>
-                {(() => {
-                  const provider = providerOf(form.connector_type);
-                  const kinds = provider ? visibleKinds(provider, hiddenConnectorTypes) : [];
-                  // Mantém o tipo atual na lista mesmo se foi desabilitado depois.
-                  const current = kindOf(form.connector_type);
-                  const options = current && !kinds.includes(current) ? [current, ...kinds] : kinds;
-                  return options.map((kind) => <MenuItem key={kind.connectorType} value={kind.connectorType}>{kind.label}</MenuItem>);
-                })()}
-              </Select>
-            </FormControl>
-            <TextField label="Conta ou ambiente de faturamento" value={form.cloud_name} onChange={e => setForm({ ...form, cloud_name: e.target.value })} />
+            {/* O tipo é escolhido em "Conectar fonte"; aqui só é exibido. */}
+            <TextField label="Tipo de fonte" sx={{ gridColumn: "1 / -1" }} disabled
+              value={[providerOf(form.connector_type)?.label, kindOf(form.connector_type)?.label].filter(Boolean).join(" · ") || form.connector_type} />
+            <TextField label="Conta ou ambiente de faturamento" sx={{ gridColumn: "1 / -1" }} value={form.cloud_name} onChange={e => setForm({ ...form, cloud_name: e.target.value })} />
             <Divider />
-            <Typography variant="subtitle2">Acesso e parâmetros da origem</Typography>
+            <Typography variant="subtitle2" className="access-section">Acesso e parâmetros — {providerOf(form.connector_type)?.label ?? "origem"}</Typography>
             {form.connector_type === "azure_mca_invoice" && (
               <>
                 <Alert severity="info">Consulta valores mensais consolidados ligados a invoices. Cada Billing Account fica identificada e particionada sem sobrescrever as demais. A credencial é somente gravação.</Alert>
@@ -1054,7 +1048,6 @@ export default function Connections() {
                     o snapshot vai para a base de origem <code>raw_azure_pricesheet</code> pelo prefixo próprio.
                   </Alert>
                 )}
-                <Typography variant="subtitle2" sx={{ mt: 1, color: "text.primary" }}>Credenciais do Azure</Typography>
                 <TextField label="Diretório (tenant)" value={form.tenant_id}
                   onChange={(e) => setForm({ ...form, tenant_id: e.target.value })}
                   helperText="Identificador do diretório no Microsoft Entra ID." />
@@ -1085,7 +1078,6 @@ export default function Connections() {
 
             {form.connector_type === "gcp_bigquery" && (
               <>
-                <Typography variant="subtitle2" sx={{ mt: 1, color: "text.primary" }}>Configuração do Google Cloud</Typography>
                 <TextField label="Identificador do projeto" value={form.tenant_id}
                   onChange={(e) => setForm({ ...form, tenant_id: e.target.value })}
                   helperText="Identificador do projeto GCP (ex: billing-344820)" />
@@ -1104,7 +1096,6 @@ export default function Connections() {
 
             {form.connector_type === "oci" && (
               <>
-                <Typography variant="subtitle2" sx={{ mt: 1, color: "text.primary" }}>Configuração da Oracle Cloud</Typography>
                 <TextField label="Tenancy (OCID)" value={form.tenant_id}
                   onChange={(e) => setForm({ ...form, tenant_id: e.target.value })}
                   helperText="OCID da Tenancy (ex: ocid1.tenancy.oc1..aaaa...)" />
@@ -1120,24 +1111,13 @@ export default function Connections() {
                 <TextField label="Arquivo PEM da chave privada" multiline rows={5}
                   value={form.oci_private_key}
                   onChange={(e) => setForm({ ...form, oci_private_key: e.target.value })}
-                  helperText="Cole o conteúdo completo do arquivo de chave privada (.pem)." />
-                <TextField label="Caminhos do Blob (tipo: pasta, uma por linha)" multiline rows={2}
-                  value={form.blob_prefixes}
-                  onChange={(e) => setForm({ ...form, blob_prefixes: e.target.value })}
-                  helperText="Padrão: reports/cost-csv (relatórios de custo)" />
-                <TextField label="Compartments OCI de IA generativa e GPU (um OCID por linha)" multiline rows={3}
-                  value={form.oci_genai_compartments}
-                  onChange={(e) => setForm({ ...form, oci_genai_compartments: e.target.value })}
-                  helperText="Abrangência da fonte OCI Generative AI e GPU Monitoring; necessária para coletar inventário, tokens e tendências." />
-                <Alert severity="info" sx={{ mt: 1, fontSize: "0.8rem" }}>
-                  <strong>Consolidação diária OCI:</strong> Os dados são automaticamente agrupados por dia, recurso e tags durante a ingestão para otimização de performance, preservando 100% dos valores financeiros em R$ e dimensões.
-                </Alert>
+                  placeholder={savedSecrets ? "•••••• chave já cadastrada" : undefined}
+                  helperText={savedSecrets ? "Chave privada já cadastrada no servidor. Deixe em branco para manter ou cole uma nova para trocar." : "Cole o conteúdo completo do arquivo de chave privada (.pem)."} />
               </>
             )}
 
             {form.connector_type === "mongodb_atlas" && (
               <>
-                <Typography variant="subtitle2" sx={{ mt: 1, color: "text.primary" }}>Configuração do Atlas (MongoDB)</Typography>
                 <TextField label="URL da API" value={form.tenant_id}
                   onChange={(e) => setForm({ ...form, tenant_id: e.target.value })}
                   helperText="Ex: https://cloud.mongodb.com/api/atlas/v1.0" />
@@ -1164,7 +1144,6 @@ export default function Connections() {
 
             {(form.connector_type === "github_billing" || form.connector_type === "github_license" || form.connector_type === "github_token") && (
               <>
-                <Typography variant="subtitle2" sx={{ mt: 1, color: "text.primary" }}>Configuração do GitHub Enterprise</Typography>
                 <FormControl fullWidth>
                   <InputLabel>Conteúdo</InputLabel>
                   <Select
@@ -1193,7 +1172,6 @@ export default function Connections() {
 
             {(form.connector_type === "notebooklm_license" || form.connector_type === "notebooklm_token") && (
               <>
-                <Typography variant="subtitle2" sx={{ mt: 1, color: "text.primary" }}>Configuração do Google Gemini (NotebookLM)</Typography>
                 <FormControl fullWidth>
                   <InputLabel>Conteúdo</InputLabel>
                   <Select
@@ -1230,7 +1208,6 @@ export default function Connections() {
 
             {(form.connector_type === "gemini_license" || form.connector_type === "gemini_token") && (
               <>
-                <Typography variant="subtitle2" sx={{ mt: 1, color: "text.primary" }}>Configuração do Google Gemini</Typography>
                 <FormControl fullWidth>
                   <InputLabel>Conteúdo</InputLabel>
                   <Select
@@ -1267,7 +1244,6 @@ export default function Connections() {
 
             {(form.connector_type === "claude_license" || form.connector_type === "claude_token") && (
               <>
-                <Typography variant="subtitle2" sx={{ mt: 1, color: "text.primary" }}>Configuração do Claude Enterprise (Anthropic)</Typography>
                 <FormControl fullWidth>
                   <InputLabel>Conteúdo</InputLabel>
                   <Select
@@ -1295,7 +1271,6 @@ export default function Connections() {
 
             {form.connector_type === "databricks" && (
               <>
-                <Typography variant="subtitle2" sx={{ mt: 1, color: "text.primary" }}>Configuração do Databricks</Typography>
                 <TextField label="Host do servidor" value={form.databricks_server_hostname}
                   onChange={(e) => setForm({ ...form, databricks_server_hostname: e.target.value })}
                   helperText="Host do workspace (NÃO é o token). Ex.: adb-7405612109211710.10.azuredatabricks.net" />

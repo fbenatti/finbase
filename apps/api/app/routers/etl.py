@@ -984,9 +984,14 @@ async def _execute_connection_test(conn: SourceConnection) -> dict[str, str]:
 
 
 @router.post("/extracoes/fontes/testar-configuracao")
-async def test_connection_config(data: SourceConnectionCreate):
+async def test_connection_config(data: SourceConnectionCreate, db: AsyncSession = Depends(get_db)):
     """Test a connection from form data without persisting it."""
     conn = SourceConnection(**data.model_dump())
+    # A tela não recebe segredos já salvos (chaves, tokens); ao testar uma
+    # conexão existente, completa com o que está guardado, como o salvar faz.
+    saved = await db.scalar(select(SourceConnection).where(SourceConnection.code == data.code)) if data.code else None
+    if saved is not None:
+        conn.config_json = {**(saved.config_json or {}), **(conn.config_json or {})}
     return await _execute_connection_test(conn)
 
 

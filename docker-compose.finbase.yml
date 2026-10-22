@@ -25,6 +25,8 @@ services:
     restart: unless-stopped
     volumes: &finbase-app-volumes
       - ./apps/data/iceberg:/data/finbase-iceberg
+      # Configs e chaves de nuvem (OCI), só leitura; nunca copiadas para o banco.
+      - ./env:/run/finbase-env:ro
       - ./backups/scheduled:/backups/scheduled
       - worker_runtime:/run/openfinops-worker
     depends_on:

@@ -48,3 +48,8 @@ backups/scheduled/
 .DS_Store
 .idea/
 .vscode/
+
+# Chaves e configs locais de nuvem (nunca versionar)
+env/*
+!env/*.env.example
+*.pem

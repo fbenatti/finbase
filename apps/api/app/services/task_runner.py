@@ -1149,7 +1149,7 @@ def _process_oci_blob_sync(
     """Download, parse e carga consolidada do mês OCI em Bronze Iceberg."""
     errors: list[str] = []
     conn = extractor.connection
-    tenancy_ocid = conn.config_json.get("tenancy_ocid") or conn.config_json.get("tenancy")
+    tenancy_ocid = extractor._tenancy_ocid()
     namespace = conn.config_json.get("namespace", "bling")
     client = extractor._get_object_storage_client()
 
