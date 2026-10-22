@@ -5,7 +5,7 @@
 #
 # Uso:
 #   ./start-local.sh            # rebuild + reinicia tudo (build de produção)
-#   ./start-local.sh dev        # modo DEV: Vite e API com recarga automática, sem rebuild
+#   ./start-local.sh dev        # modo DEV local: API, worker e Vite na máquina, com recarga automática
 #   ./start-local.sh web        # rebuild + reinicia só o frontend
 #   ./start-local.sh api        # rebuild + reinicia só o backend (api, scheduler, worker, supervisor)
 #   ./start-local.sh stop       # para o stack Finbase
@@ -14,7 +14,7 @@ set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 COMPOSE_FILE="$ROOT_DIR/docker-compose.finbase.yml"
-COMPOSE_DEV_FILE="$ROOT_DIR/docker-compose.finbase.dev.yml"
+LOG_DIR="$ROOT_DIR/.runtime-logs"
 WEB_URL="http://localhost:5174"
 API_URL="http://localhost:8011"
 
@@ -22,8 +22,74 @@ compose() {
   docker compose -f "$COMPOSE_FILE" --project-directory "$ROOT_DIR" "$@"
 }
 
-compose_dev() {
-  docker compose -f "$COMPOSE_FILE" -f "$COMPOSE_DEV_FILE" --project-directory "$ROOT_DIR" "$@"
+# ── Modo DEV local ──────────────────────────────────────────────────────────
+# API (uvicorn --reload), worker, supervisor e Vite rodam direto na máquina,
+# nas mesmas portas do Docker (8011 e 5174). Do Docker ficam só o PostgreSQL
+# (porta 5433 do host) e o Trino compartilhados. Ctrl+C encerra tudo.
+run_local_dev() {
+  local venv_python="$ROOT_DIR/.venv/bin/python"
+  if [[ ! -x "$venv_python" ]]; then
+    echo "ERRO: falta o .venv. Crie com:" >&2
+    echo "  python3.12 -m venv .venv && .venv/bin/pip install -r apps/api/requirements.txt" >&2
+    exit 1
+  fi
+  local postgres_password
+  postgres_password="$(grep -E '^POSTGRES_PASSWORD=' "$ROOT_DIR/.env" | head -1 | cut -d= -f2-)"
+  [[ -n "$postgres_password" ]] || { echo "ERRO: POSTGRES_PASSWORD não está no .env" >&2; exit 1; }
+
+  # Mesmas configurações do docker-compose.finbase.yml, com endereços do host.
+  export ENV=development AUTH_ENABLED=false BOOTSTRAP_ENABLED=true SCHEDULER_ENABLED=true
+  export DATABASE_URL="postgresql+asyncpg://finops:${postgres_password}@localhost:5433/finbase"
+  export DATABASE_URL_SYNC="postgresql://finops:${postgres_password}@localhost:5433/finbase"
+  export TRINO_URL="http://localhost:8080" TRINO_CATALOG="iceberg_finbase"
+  export ICEBERG_LOCAL_WAREHOUSE="$ROOT_DIR/apps/data/iceberg"
+  export ICEBERG_CANONICAL_WAREHOUSE_PATH="/data/finbase-iceberg"
+  export OCI_CONFIG_DIR="$ROOT_DIR/env"
+  export OPENFINOPS_WORKER_RUNTIME_DIR="${TMPDIR:-/tmp}/finbase-worker"
+  export CORS_ORIGINS="$WEB_URL"
+  mkdir -p "$LOG_DIR" "$OPENFINOPS_WORKER_RUNTIME_DIR"
+
+  echo "Parando os containers da aplicação Finbase (as portas 5174/8011 passam para a máquina)..."
+  compose stop api web gateway worker scheduler supervisor >/dev/null 2>&1 || true
+
+  if [[ ! -x "$ROOT_DIR/apps/web/node_modules/.bin/vite" ]]; then
+    echo "Instalando dependências do front (só na primeira vez)..."
+    (cd "$ROOT_DIR/apps/web" && yarn install --frozen-lockfile) || exit 1
+  fi
+
+  local pids=()
+  stop_local() {
+    trap - INT TERM EXIT
+    echo
+    echo "Encerrando API, worker, supervisor e Vite..."
+    kill "${pids[@]}" 2>/dev/null || true
+    wait 2>/dev/null || true
+  }
+  trap stop_local INT TERM EXIT
+
+  (cd "$ROOT_DIR/apps/api" && exec "$venv_python" -m uvicorn app.main:app --host 0.0.0.0 --port 8011 --reload --reload-dir app) \
+    >"$LOG_DIR/api.log" 2>&1 &
+  pids+=($!)
+  echo "Aguardando a API (migrações na primeira subida)..."
+  wait_http "$API_URL/saude" "API" 120 || { tail -20 "$LOG_DIR/api.log" >&2; exit 1; }
+
+  # O worker só começa depois das migrações da API.
+  (cd "$ROOT_DIR/apps/api" && exec "$venv_python" -u worker.py) >"$LOG_DIR/worker.log" 2>&1 &
+  pids+=($!)
+  (cd "$ROOT_DIR/apps/api" && exec "$venv_python" -u supervisor.py) >"$LOG_DIR/supervisor.log" 2>&1 &
+  pids+=($!)
+  (cd "$ROOT_DIR/apps/web" && VITE_API_PROXY_TARGET="$API_URL" exec yarn dev --port 5174 --strictPort) \
+    >"$LOG_DIR/web.log" 2>&1 &
+  pids+=($!)
+  wait_http "$WEB_URL/" "Web" 60 || { tail -20 "$LOG_DIR/web.log" >&2; exit 1; }
+
+  echo
+  echo "Finbase local (DEV): Web $WEB_URL | API $API_URL"
+  echo "Front e API recarregam sozinhos ao salvar. Logs: $LOG_DIR (api, worker, supervisor, web)"
+  echo "Ctrl+C encerra tudo."
+  # Encerra tudo se qualquer processo cair.
+  wait -n "${pids[@]}"
+  echo "Um dos processos encerrou; veja os logs em $LOG_DIR" >&2
 }
 
 require_shared_container() {
@@ -91,20 +157,18 @@ require_shared_container openfinops-postgres-1
 require_shared_container openfinops-trino-1
 
 if [[ "$target" == "dev" ]]; then
-  # Código montado da máquina: mudanças no front e na API valem sem rebuild.
-  echo "Subindo o Finbase em modo DEV (Vite + API com recarga automática)..."
-  compose_dev up -d --remove-orphans
-else
-  echo "Build + subida do Finbase (${services[*]:-todos os serviços})..."
-  compose up -d --build --remove-orphans "${services[@]}"
+  run_local_dev
+  exit 0
 fi
+
+echo "Build + subida do Finbase (${services[*]:-todos os serviços})..."
+compose up -d --build --remove-orphans "${services[@]}"
 # O gateway resolve api/web por DNS; reinicia para não reaproveitar IPs antigos.
 compose restart gateway >/dev/null
 
 echo "Aguardando serviços..."
 wait_http "$API_URL/saude" "API"
-# No modo DEV o primeiro start instala as dependências do front (pode levar alguns minutos).
-wait_http "$WEB_URL/" "Web" "$([[ "$target" == "dev" ]] && echo 300 || echo 60)"
+wait_http "$WEB_URL/" "Web"
 
 echo
 echo "Finbase no ar: Web $WEB_URL | API $API_URL"
