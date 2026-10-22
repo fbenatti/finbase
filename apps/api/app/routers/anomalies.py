@@ -36,7 +36,7 @@ from app.services.anomaly_v2.settings import detector_settings, validate_detecto
 
 logger = logging.getLogger(__name__)
 
-router = APIRouter(prefix="/anomalies", tags=["anomalies"])
+router = APIRouter(prefix="/alertas", tags=["anomalies"])
 
 MAX_PAGE_SIZE = 200
 DEFAULT_PAGE_SIZE = 50
@@ -216,7 +216,7 @@ def _iso(value: datetime | None) -> str | None:
 # --------------------------------------------------------------------------
 # Configuração
 # --------------------------------------------------------------------------
-@router.get("/configs")
+@router.get("/configuracoes")
 async def list_configs(
     db: AsyncSession = Depends(get_db),
     user: User = Depends(require("anomalies", "read")),
@@ -262,7 +262,7 @@ async def list_configs(
     return configs
 
 
-@router.put("/configs/{config_id}")
+@router.put("/configuracoes/{config_id}")
 async def update_config(
     config_id: int,
     body: ConfigUpdate,
@@ -313,7 +313,7 @@ async def update_config(
     return {"id": config.id, "version": config.version, "enabled": config.enabled}
 
 
-@router.get("/coverage")
+@router.get("/cobertura")
 async def coverage(
     db: AsyncSession = Depends(get_db),
     user: User = Depends(require("anomalies", "read")),
@@ -350,7 +350,7 @@ async def coverage(
 # --------------------------------------------------------------------------
 # Execuções
 # --------------------------------------------------------------------------
-@router.post("/configs/{config_id}/run")
+@router.post("/configuracoes/{config_id}/executar")
 async def enqueue_run(
     config_id: int,
     body: RunRequest,
@@ -433,7 +433,7 @@ async def enqueue_run(
     return {"run_id": run.id, "task_id": task.id, "status": run.status}
 
 
-@router.get("/runs")
+@router.get("/execucoes")
 async def list_runs(
     limit: int = DEFAULT_PAGE_SIZE,
     offset: int = 0,
@@ -477,7 +477,7 @@ async def list_runs(
     }
 
 
-@router.post("/runs/{run_id}/cancel")
+@router.post("/execucoes/{run_id}/cancelar")
 async def cancel_run(
     run_id: int,
     request: Request,
@@ -511,7 +511,7 @@ async def cancel_run(
 # --------------------------------------------------------------------------
 # Casos
 # --------------------------------------------------------------------------
-@router.get("/cases")
+@router.get("/casos")
 async def list_cases(
     state: list[str] | None = Query(default=None),
     severity: list[str] | None = Query(default=None),
@@ -589,7 +589,7 @@ async def list_cases(
     }
 
 
-@router.get("/cases/summary")
+@router.get("/casos/resumo")
 async def summary(
     config_id: int | None = None,
     db: AsyncSession = Depends(get_db),
@@ -598,7 +598,7 @@ async def summary(
     return await workflow.case_summary(db, config_id=config_id)
 
 
-@router.get("/metrics")
+@router.get("/metricas")
 async def metrics(
     db: AsyncSession = Depends(get_db),
     user: User = Depends(require("anomalies", "read")),
@@ -629,7 +629,7 @@ async def metrics(
     return summary_payload
 
 
-@router.get("/cases/{case_id}")
+@router.get("/casos/{case_id}")
 async def get_case(
     case_id: int,
     db: AsyncSession = Depends(get_db),
@@ -651,7 +651,7 @@ async def get_case(
     return payload
 
 
-@router.get("/cases/{case_id}/events")
+@router.get("/casos/{case_id}/eventos")
 async def get_case_events(
     case_id: int,
     db: AsyncSession = Depends(get_db),
@@ -700,7 +700,7 @@ async def _resolve_config(db: AsyncSession, config_id: int | None) -> AnomalyCon
     return config
 
 
-@router.get("/expected-events")
+@router.get("/eventos-esperados")
 async def expected_events(
     config_id: int | None = None,
     period: str | None = None,
@@ -738,7 +738,7 @@ async def expected_events(
         raise HTTPException(503, f"Falha ao consultar o Iceberg: {exc}") from exc
 
 
-@router.get("/quality")
+@router.get("/qualidade")
 async def quality(
     config_id: int | None = None,
     period: str | None = None,
@@ -773,7 +773,7 @@ async def quality(
         raise HTTPException(503, f"Falha ao consultar o Iceberg: {exc}") from exc
 
 
-@router.get("/cases/{case_id}/series")
+@router.get("/casos/{case_id}/series")
 async def get_case_series(
     case_id: int,
     horizon_days: int = Query(default=15, ge=1, le=92),
@@ -854,7 +854,7 @@ async def get_case_series(
         raise HTTPException(503, f"Falha ao consultar a série: {exc}") from exc
 
 
-@router.get("/cases/{case_id}/contributors")
+@router.get("/casos/{case_id}/contribuintes")
 async def get_contributors(
     case_id: int,
     db: AsyncSession = Depends(get_db),
@@ -882,7 +882,7 @@ async def get_contributors(
     return {"items": rows, "assessment_table": publication.assessment_table}
 
 
-@router.post("/cases/{case_id}/transition")
+@router.post("/casos/{case_id}/transicao")
 async def transition(
     case_id: int,
     body: TransitionRequest,
@@ -942,7 +942,7 @@ def _action_out(action: AnomalyAction) -> dict[str, Any]:
     }
 
 
-@router.post("/cases/{case_id}/actions")
+@router.post("/casos/{case_id}/acoes")
 async def create_action(
     case_id: int,
     body: ActionCreate,
@@ -973,7 +973,7 @@ async def create_action(
     return _action_out(action)
 
 
-@router.put("/actions/{action_id}")
+@router.put("/acoes/{action_id}")
 async def update_action(
     action_id: int,
     body: ActionUpdate,
@@ -1002,7 +1002,7 @@ async def update_action(
 # --------------------------------------------------------------------------
 # Notificações
 # --------------------------------------------------------------------------
-@router.get("/notifications")
+@router.get("/notificacoes")
 async def list_notifications(
     unread_only: bool = False,
     include_queue: bool = True,
@@ -1044,7 +1044,7 @@ async def list_notifications(
     }
 
 
-@router.post("/notifications/{notification_id}/read")
+@router.post("/notificacoes/{notification_id}/lidas")
 async def read_notification(
     notification_id: int,
     acknowledge: bool = False,
@@ -1065,7 +1065,7 @@ async def read_notification(
     }
 
 
-@router.get("/cases/{case_id}/explanation")
+@router.get("/casos/{case_id}/explicacao")
 async def case_explanation(
     case_id: int,
     db: AsyncSession = Depends(get_db),
@@ -1093,7 +1093,7 @@ async def case_explanation(
     return {"case_id": case_id, "checks": explain_signal(signal, materiality=materiality, min_pct=min_pct)}
 
 
-@router.get("/impact/summary")
+@router.get("/impacto/resumo")
 async def impact_summary(
     config_id: int | None = None,
     db: AsyncSession = Depends(get_db),
@@ -1137,7 +1137,7 @@ async def impact_summary(
     }
 
 
-@router.get("/health")
+@router.get("/saude")
 async def anomaly_health(
     db: AsyncSession = Depends(get_db),
     user: User = Depends(require("anomalies", "read")),
@@ -1158,7 +1158,7 @@ async def anomaly_health(
     }
 
 
-@router.post("/configs/{config_id}/simulate")
+@router.post("/configuracoes/{config_id}/simular")
 async def simulate_detection(
     config_id: int,
     days: int = Query(default=30, ge=7, le=90),

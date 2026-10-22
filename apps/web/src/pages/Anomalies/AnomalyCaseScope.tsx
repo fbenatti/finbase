@@ -1,6 +1,6 @@
 import { useMemo, useState } from "react";
 import { Alert, Box, Button, ButtonBase, Chip, Paper, Stack, Typography } from "@mui/material";
-import ArrowForwardIcon from "@mui/icons-material/ArrowForward";
+import ArrowForwardIcon from "@mui/icons-material/ArrowForwardOutlined";
 import AnomalyEvolutionChart from "./AnomalyEvolutionChart";
 import type { AnomalyCase, AnomalySeries } from "../../services/anomaliesApi";
 import { caseLineageNodes, detailScopeChain, dimensionValue, filterMembers, observedScopeBranches, scopeBranches, scopeTimeline, type ScopeFilter } from "./anomalyInvestigationModel";
@@ -9,7 +9,7 @@ const money = (value: number | null | undefined, currency: string) => value == n
 const pct = (value: number) => `${value.toLocaleString("pt-BR", { maximumFractionDigits: 1 })}%`;
 const day = (value: string) => new Date(`${value.slice(0, 10)}T00:00:00Z`).toLocaleDateString("pt-BR", { day: "2-digit", month: "short", timeZone: "UTC" }).replace(/\.$/, "");
 const orgPath = (dimensions: Record<string, string | null>) => Array.from({ length: 7 }, (_, i) => dimensions[`organograma_nivel_${i + 1}`]).filter((value): value is string => Boolean(value));
-const branchColors = ["#db525e", "#e59051", "#9b719e", "#6299b1"];
+const branchColors = ["#db525e", "#e59051", "#9b719e", "#0F62FE"];
 
 export default function AnomalyCaseScope({ kase, series, currency }: {
   kase: AnomalyCase; series: AnomalySeries; currency: string;
@@ -27,12 +27,12 @@ export default function AnomalyCaseScope({ kase, series, currency }: {
   const delta = monthlyCase ? kase.delta_cloud : actual != null && expected != null ? actual - expected : null;
   const withinBand = !monthlyCase && focus?.above_band === false && delta != null;
   const headline = delta == null
-    ? "Custo sem comparação"
+    ? "Custo sem referência"
     : withinBand
       ? `${money(Math.abs(delta), currency)} em relação à mediana, dentro da faixa`
       : delta > 0
-        ? `${money(delta, currency)} ${monthlyCase ? "acima da média dos meses anteriores" : "acima da faixa"}`
-        : `${money(Math.abs(delta), currency)} ${delta < 0 ? "abaixo da referência" : "de desvio"}`;
+        ? `${money(delta, currency)} ${monthlyCase ? "acima da média dos meses anteriores" : "acima da faixa esperada"}`
+        : `${money(Math.abs(delta), currency)} ${delta < 0 ? "abaixo da referência" : "de variação"}`;
   const relative = delta != null && expected != null && expected > 0 ? delta / expected * 100 : null;
   const hierarchy = detailScopeChain(series.detail_dimensions);
   const detailItems = series.detail_items ?? [];
@@ -46,7 +46,7 @@ export default function AnomalyCaseScope({ kase, series, currency }: {
   const paths = (all.length ? all : [{ dimensions: kase.series_dimensions }]).map(member => orgPath(member.dimensions));
   const common = paths[0]?.filter((_, index) => paths.every(parts => parts.slice(0, index + 1).join("\0") === paths[0].slice(0, index + 1).join("\0"))) ?? [];
   const lineageNodes = caseLineageNodes(members, series.detail_dimensions, series.detail_items, hierarchy);
-  const label = filters.length ? filters[filters.length - 1].value : common[common.length - 1] ?? "Escopo do caso";
+  const label = filters.length ? filters[filters.length - 1].value : common[common.length - 1] ?? "Recorte do caso";
   const excessDays = timeline.filter(point => point.event_date <= kase.event_date && point.above_band);
   const latest = [...timeline].reverse().find(point => point.observed_cloud != null && point.event_date <= (series.analysis_data_end ?? kase.event_date));
   const rootPoint = series.items.find(point => point.event_date === kase.event_date);
@@ -63,57 +63,57 @@ export default function AnomalyCaseScope({ kase, series, currency }: {
   const safeToDrill = members.length > 0 && members.every(member => Boolean(member.items?.length));
 
   return <Box>
-    <Paper variant="outlined" sx={{ mt: 2, p: { xs: 2, sm: 2.5 }, borderRadius: 3, borderColor: "#E2E5EE", background: "linear-gradient(120deg,#fff,#f7faff)" }}>
-      <Typography variant="overline" color="text.secondary">{monthlyCase ? "Acumulado do mês até" : "O que aconteceu"} · {day(kase.event_date)}</Typography>
-      <Typography sx={{ mt: .5, fontSize: { xs: 25, sm: 30 }, lineHeight: 1.2, fontWeight: 800, letterSpacing: "-.03em", color: delta != null && delta > 0 && !withinBand ? "#c53d4b" : "#203047" }}>
+    <Paper variant="outlined" sx={{ mt: 2, p: { xs: 2, sm: 2.5 }, borderRadius: 3, borderColor: "#E1E8F0", background: "linear-gradient(120deg,#fff,#F3F7FC)" }}>
+      <Typography variant="overline" color="text.secondary">{monthlyCase ? "Soma do mês até" : "O que ocorreu"} · {day(kase.event_date)}</Typography>
+      <Typography sx={{ mt: .5, fontSize: { xs: 25, sm: 30 }, lineHeight: 1.2, fontWeight: 800, letterSpacing: "-.03em", color: delta != null && delta > 0 && !withinBand ? "#c53d4b" : "#162B3A" }}>
         {headline}
       </Typography>
-      <Typography sx={{ mt: 1, fontWeight: 600, color: "#34445a" }}>{label}</Typography>
+      <Typography sx={{ mt: 1, fontWeight: 600, color: "#162B3A" }}>{label}</Typography>
       <Typography variant="body2" color="text.secondary" sx={{ mt: .5 }}>
-        {monthlyCase ? "Média dos meses anteriores" : "Mediana recente"} <strong>{money(expected, currency)}</strong> → realizado <strong>{money(actual, currency)}</strong>{relative != null && ` · ${relative > 0 ? "+" : ""}${pct(relative)}`}
+        {monthlyCase ? "Média dos meses passados" : "Mediana dos últimos dias"} <strong>{money(expected, currency)}</strong> → efetivado <strong>{money(actual, currency)}</strong>{relative != null && ` · ${relative > 0 ? "+" : ""}${pct(relative)}`}
       </Typography>
       {expected != null && actual != null && expected >= 0 && actual > 0 && delta != null && delta > 1 && !withinBand && <Box sx={{ mt: 1.5 }}>
-        <Box sx={{ height: 10, borderRadius: 2, overflow: "hidden", display: "flex", bgcolor: "#e6edf6" }} aria-label="Composição do realizado entre forecast e desvio">
-          <Box sx={{ width: `${Math.min(100, expected / actual * 100)}%`, bgcolor: "#4e81c5" }} />
+        <Box sx={{ height: 10, borderRadius: 2, overflow: "hidden", display: "flex", bgcolor: "#E1E8F0" }} aria-label="Composição do efetivado entre previsão e desvio">
+          <Box sx={{ width: `${Math.min(100, expected / actual * 100)}%`, bgcolor: "#0F62FE" }} />
           {delta != null && delta > 0 && <Box sx={{ flex: 1, bgcolor: "#db525e" }} />}
         </Box>
-        <Stack direction="row" justifyContent="space-between" sx={{ mt: .5 }}><Typography variant="caption" color="#4e81c5">Previsto</Typography><Typography variant="caption" color="#c53d4b">Desvio positivo</Typography></Stack>
+        <Stack direction="row" justifyContent="space-between" sx={{ mt: .5 }}><Typography variant="caption" color="#0F62FE">Previsto</Typography><Typography variant="caption" color="#c53d4b">Desvio para cima</Typography></Stack>
       </Box>}
       {!monthlyCase && focus?.above_band && excessDays.length > 0 && <Typography variant="body2" color="text.secondary" sx={{ mt: 1 }}>Primeiro excesso: {day(excessDays[0].event_date)} · {excessDays.length} {excessDays.length === 1 ? "dia" : "dias"} acima da faixa até {day(kase.event_date)}</Typography>}
       {latest && latest.event_date > kase.event_date && <Typography variant="caption" color="text.secondary" sx={{ display: "block", mt: .75 }}>Último dado ({day(latest.event_date)}): {money(latest.observed_cloud, currency)}{latest.above_band === true ? " · acima da faixa" : latest.above_band === false ? " · não supera o limite de alerta" : " · sem comparação disponível"}</Typography>}
-      <Stack direction={{ xs: "column", sm: "row" }} justifyContent="space-between" alignItems={{ sm: "center" }} spacing={1.5} sx={{ mt: 2, pt: 1.5, borderTop: "1px solid #E2E5EE" }}>
+      <Stack direction={{ xs: "column", sm: "row" }} justifyContent="space-between" alignItems={{ sm: "center" }} spacing={1.5} sx={{ mt: 2, pt: 1.5, borderTop: "1px solid #E1E8F0" }}>
         <Box>
           <Typography variant="body2" fontWeight={700}>Investigue primeiro {leading ? leading.value : label}</Typography>
           <Typography variant="caption" color="text.secondary">{leading ? `${pct(share(leading.delta ?? 0))} dos aumentos · ` : ""}{kase.cause_hypothesis || "Confirme com a área se a mudança foi planejada."}</Typography>
         </Box>
-        <Button variant="contained" size="small" sx={{ flexShrink: 0 }} onClick={() => document.getElementById("anomaly-investigation")?.scrollIntoView({ behavior: "smooth", block: "start" })}>Registrar investigação</Button>
+        <Button variant="contained" size="small" sx={{ flexShrink: 0 }} onClick={() => document.getElementById("anomaly-investigation")?.scrollIntoView({ behavior: "smooth", block: "start" })}>Anotar investigação</Button>
       </Stack>
     </Paper>
 
-    <Typography variant="subtitle2" sx={{ mt: 2.5 }}>Realizado × forecast</Typography>
+    <Typography variant="subtitle2" sx={{ mt: 2.5 }}>Efetivado × previsão</Typography>
     <AnomalyEvolutionChart key={`${kase.id}-${JSON.stringify(filters)}`} series={selectedSeries} kase={kase} currency={currency} />
 
     <Paper variant="outlined" sx={{ mt: 2, p: { xs: 2, sm: 2.5 }, borderRadius: 3 }}>
-      <Typography sx={{ fontWeight: 750, fontSize: 17 }}>De onde veio o desvio?</Typography>
-      <Typography variant="body2" color="text.secondary" sx={{ mt: .25 }}>Localize o salto pelo organograma, subconta, grupo de recursos e produto.</Typography>
+      <Typography sx={{ fontWeight: 750, fontSize: 17 }}>Qual a origem do desvio?</Typography>
+      <Typography variant="body2" color="text.secondary" sx={{ mt: .25 }}>Localize o salto pela hierarquia, subconta, grupo de recursos e produto.</Typography>
       <Stack direction="row" gap={.75} flexWrap="wrap" alignItems="center" sx={{ my: 1.5 }}>
-        <Chip size="small" label="Total do caso" color={filters.length ? "default" : "primary"} onClick={() => setFilters([])} />
+        <Chip size="small" label="Total acumulado do caso" color={filters.length ? "default" : "primary"} onClick={() => setFilters([])} />
         {filters.map((filter, index) => <Box key={filter.field} sx={{ display: "flex", alignItems: "center", gap: .75 }}><Typography color="text.secondary">›</Typography><Chip size="small" label={`${hierarchy.find(item => item.field === filter.field)?.label ?? filter.field}: ${filter.value}`} color={index === filters.length - 1 ? "primary" : "default"} onClick={() => setFilters(filters.slice(0, index + 1))} /></Box>)}
       </Stack>
       {lineageNodes.length > 0 && <Box sx={{ mb: 1.5 }}>
         {/** IDs técnicos e dimensões de baixo valor foram retirados do caminho em detailScopeChain. */}
         <Stack direction="row" justifyContent="space-between" alignItems="center" gap={1}>
-          <Typography variant="caption" fontWeight={700} color="text.secondary">CAMINHO DO GASTO</Typography>
-          <Chip size="small" variant="outlined" label={filters.length ? `Forecast no nível: ${forecastScopeLabel}` : "Forecast e desvio neste ramo"} sx={{ maxWidth: "70%", "& .MuiChip-label": { overflow: "hidden", textOverflow: "ellipsis" } }} />
+          <Typography variant="caption" fontWeight={700} color="text.secondary">TRAJETO DO GASTO</Typography>
+          <Chip size="small" variant="outlined" label={filters.length ? `Forecast no nível: ${forecastScopeLabel}` : "Previsão e desvio neste ramo"} sx={{ maxWidth: "70%", "& .MuiChip-label": { overflow: "hidden", textOverflow: "ellipsis" } }} />
         </Stack>
-        <Box sx={{ mt: 1, pl: 1.5, position: "relative", "&:before": { content: '""', position: "absolute", left: 5, top: 10, bottom: 10, width: 2, bgcolor: "#E2E5EE" } }}>
+        <Box sx={{ mt: 1, pl: 1.5, position: "relative", "&:before": { content: '""', position: "absolute", left: 5, top: 10, bottom: 10, width: 2, bgcolor: "#E1E8F0" } }}>
           {lineageNodes.map((node, index) => {
             const terminal = index === lineageNodes.length - 1;
             return <Stack key={node.field} direction="row" alignItems="stretch" gap={1.25} sx={{ position: "relative", mb: index === lineageNodes.length - 1 ? 0 : .75 }}>
-              <Box sx={{ zIndex: 1, flex: "0 0 10px", width: 10, height: 10, mt: 1.5, ml: -.25, borderRadius: "50%", border: "2px solid", borderColor: terminal ? "#536fb2" : "#aab8ca", bgcolor: terminal ? "#536fb2" : "#fff" }} />
-              <Box sx={{ minWidth: 0, flex: 1, display: "flex", flexWrap: "wrap", alignItems: "baseline", columnGap: 1, rowGap: .25, px: 1.25, py: .8, border: "1px solid", borderColor: terminal ? "#cbd5f0" : "#e4eaf1", borderRadius: 1.5, bgcolor: terminal ? "#f2f4fc" : "#fff" }}>
+              <Box sx={{ zIndex: 1, flex: "0 0 10px", width: 10, height: 10, mt: 1.5, ml: -.25, borderRadius: "50%", border: "2px solid", borderColor: terminal ? "#0F62FE" : "#C5D2DE", bgcolor: terminal ? "#0F62FE" : "#fff" }} />
+              <Box sx={{ minWidth: 0, flex: 1, display: "flex", flexWrap: "wrap", alignItems: "baseline", columnGap: 1, rowGap: .25, px: 1.25, py: .8, border: "1px solid", borderColor: terminal ? "#CFDFFF" : "#E1E8F0", borderRadius: 1.5, bgcolor: terminal ? "#F3F7FC" : "#fff" }}>
                 <Typography variant="caption" color="text.secondary" sx={{ minWidth: { xs: 96, sm: 128 } }}>{node.label}</Typography>
-                <Typography variant="body2" fontWeight={terminal ? 750 : 600} sx={{ minWidth: 0, flex: 1, overflowWrap: "anywhere", color: terminal ? "#344878" : "#26364a" }}>{node.value}</Typography>
+                <Typography variant="body2" fontWeight={terminal ? 750 : 600} sx={{ minWidth: 0, flex: 1, overflowWrap: "anywhere", color: terminal ? "#0B3FA8" : "#162B3A" }}>{node.value}</Typography>
                 {terminal && <Chip size="small" color="primary" variant="outlined" label="grão avaliado" sx={{ height: 21 }} />}
               </Box>
             </Stack>;
@@ -129,23 +129,23 @@ export default function AnomalyCaseScope({ kase, series, currency }: {
         </Alert>;
       })()}
       <Box sx={{ display: "grid", gridTemplateColumns: { xs: "1fr", md: "minmax(160px,.7fr) 2fr" }, gap: { xs: 1.5, md: 3 }, alignItems: "center" }}>
-        <Box sx={{ p: 2, bgcolor: "#f1f5fb", border: "1px solid #d6e2f1", borderRadius: 2 }}>
-          <Typography variant="caption" color="text.secondary">{filters.length ? "Ramo selecionado" : "Desvio total"}</Typography>
+        <Box sx={{ p: 2, bgcolor: "#F3F7FC", border: "1px solid #E1E8F0", borderRadius: 2 }}>
+          <Typography variant="caption" color="text.secondary">{filters.length ? "Ramo escolhido" : "Soma dos desvios"}</Typography>
           <Typography fontWeight={750} sx={{ mt: .5, overflowWrap: "anywhere" }}>{label}</Typography>
           <Typography sx={{ mt: 1, fontSize: 24, fontWeight: 800, color: "#c53d4b" }}>{delta != null && delta > 0 ? "+" : ""}{money(delta, currency)}</Typography>
           {rawDetailSelected && <Typography variant="caption" color="text.secondary" sx={{ display: "block", mt: .5 }}>Desvio calculado em {forecastScopeLabel}; detalhe abaixo é custo observado no dia do evento.</Typography>}
           {filters.length > 0 && rootDelta != null && rootDelta > 0 && delta != null && <Typography variant="caption" color="text.secondary">{pct(delta / rootDelta * 100)} do desvio líquido do caso</Typography>}
         </Box>
-        <Box sx={{ pl: { xs: 1.5, md: 2.5 }, borderLeft: "2px solid #E2E5EE", minWidth: 0 }}>
+        <Box sx={{ pl: { xs: 1.5, md: 2.5 }, borderLeft: "2px solid #E1E8F0", minWidth: 0 }}>
           {dimension && <Typography variant="overline" color="text.secondary">{dimension.label}</Typography>}
-          {groups.map((group, index) => <ButtonBase key={group.value} disabled={sourceOnly ? !(series.detail_items?.length) : !safeToDrill} onClick={() => setFilters([...filters, { field: dimension!.field, value: group.value }])} sx={{ display: "block", width: "100%", textAlign: "left", p: 1.5, my: 1, border: "1px solid #E2E5EE", borderRadius: 2, position: "relative", "&:before": { content: '""', position: "absolute", width: { xs: 12, md: 22 }, height: 2, bgcolor: "#E2E5EE", left: { xs: -13, md: -23 }, top: "50%" }, "&:hover": { bgcolor: "#f5f8fd", borderColor: "#8caee1" } }}>
+          {groups.map((group, index) => <ButtonBase key={group.value} disabled={sourceOnly ? !(series.detail_items?.length) : !safeToDrill} onClick={() => setFilters([...filters, { field: dimension!.field, value: group.value }])} sx={{ display: "block", width: "100%", textAlign: "left", p: 1.5, my: 1, border: "1px solid #E1E8F0", borderRadius: 2, position: "relative", "&:before": { content: '""', position: "absolute", width: { xs: 12, md: 22 }, height: 2, bgcolor: "#E1E8F0", left: { xs: -13, md: -23 }, top: "50%" }, "&:hover": { bgcolor: "#F3F7FC", borderColor: "#A9C8FF" } }}>
             <Stack direction="row" justifyContent="space-between" alignItems="start" spacing={1}>
               <Typography variant="body2" fontWeight={750}>{group.value}</Typography>
-              <Typography fontWeight={800} sx={{ color: group.sourceOnly ? "#315e91" : group.delta != null && group.delta > 0 ? branchColors[index % branchColors.length] : "#087e6e", whiteSpace: "nowrap" }}>{group.sourceOnly ? money(group.actual, currency) : <>{group.delta != null && group.delta > 0 ? "+" : ""}{money(group.delta, currency)}</>}</Typography>
+              <Typography fontWeight={800} sx={{ color: group.sourceOnly ? "#0F62FE" : group.delta != null && group.delta > 0 ? branchColors[index % branchColors.length] : "#087e6e", whiteSpace: "nowrap" }}>{group.sourceOnly ? money(group.actual, currency) : <>{group.delta != null && group.delta > 0 ? "+" : ""}{money(group.delta, currency)}</>}</Typography>
             </Stack>
-            <Typography variant="caption" color="text.secondary">{group.sourceOnly ? "Custo observado na data do evento" : <>Previsto {money(group.expected, currency)} → realizado {money(group.actual, currency)}</>}</Typography>
-            <Box sx={{ height: 5, bgcolor: "#edf1f6", borderRadius: 1, mt: 1 }}><Box sx={{ width: `${group.sourceOnly ? Math.min(100, Math.abs(group.actual ?? 0) / Math.max(1, Math.abs(actual ?? 0)) * 100) : share(group.delta ?? 0)}%`, height: "100%", borderRadius: 1, bgcolor: branchColors[index % branchColors.length] }} /></Box>
-            <Stack direction="row" justifyContent="space-between" sx={{ mt: .5 }}><Typography variant="caption" color="text.secondary">{group.sourceOnly ? "Forecast não desce a este nível" : group.delta == null ? "Comparação indisponível" : group.delta < 0 ? "Reduz o desvio líquido" : `${pct(share(group.delta))} dos aumentos`}</Typography><ArrowForwardIcon sx={{ fontSize: 16, color: "#6685ac" }} /></Stack>
+            <Typography variant="caption" color="text.secondary">{group.sourceOnly ? "Gasto observado na data do evento" : <>Previsto {money(group.expected, currency)} → efetivado {money(group.actual, currency)}</>}</Typography>
+            <Box sx={{ height: 5, bgcolor: "#F3F7FC", borderRadius: 1, mt: 1 }}><Box sx={{ width: `${group.sourceOnly ? Math.min(100, Math.abs(group.actual ?? 0) / Math.max(1, Math.abs(actual ?? 0)) * 100) : share(group.delta ?? 0)}%`, height: "100%", borderRadius: 1, bgcolor: branchColors[index % branchColors.length] }} /></Box>
+            <Stack direction="row" justifyContent="space-between" sx={{ mt: .5 }}><Typography variant="caption" color="text.secondary">{group.sourceOnly ? "Forecast não desce a este nível" : group.delta == null ? "Comparação indisponível" : group.delta < 0 ? "Reduz o desvio líquido" : `${pct(share(group.delta))} dos aumentos`}</Typography><ArrowForwardIcon sx={{ fontSize: 16, color: "#0F62FE" }} /></Stack>
           </ButtonBase>)}
           {!groups.length && rawDetailSelected && selectedDetailItems.length > 0 && <Stack spacing={.75} sx={{ mt: 1 }}>
             {selectedDetailItems.slice(0, 20).map((item, index) => {
@@ -153,22 +153,22 @@ export default function AnomalyCaseScope({ kase, series, currency }: {
               const title = namedDetails.find(detail => /^recurso$/i.test(detail.label))?.value
                 ?? namedDetails.find(detail => /sku|medidor|serviço/i.test(detail.label))?.value
                 ?? namedDetails.find(detail => /resource group/i.test(detail.label))?.value
-                ?? namedDetails[0]?.value ?? "Consumo sem dimensão descritiva";
+                ?? namedDetails[0]?.value ?? "Consumo sem atributo descritivo";
               const supportingDetails = namedDetails.map(detail => {
-                if (detail.label === "ID do recurso") {
+                if (detail.label === "Identificador do recurso") {
                   const parts = String(detail.value).split("/").filter(Boolean);
                   return `ID: ${parts[parts.length - 1] ?? detail.value}`;
                 }
                 return `${detail.label}: ${detail.value}`;
               }).join(" · ");
-              return <Box key={`${index}-${String(title)}`} sx={{ display: "flex", justifyContent: "space-between", gap: 2, py: 1, borderBottom: "1px solid #edf1f6" }}>
+              return <Box key={`${index}-${String(title)}`} sx={{ display: "flex", justifyContent: "space-between", gap: 2, py: 1, borderBottom: "1px solid #F3F7FC" }}>
               <Box sx={{ minWidth: 0 }}><Typography variant="body2" fontWeight={700} sx={{ overflowWrap: "anywhere" }}>{title}</Typography><Typography variant="caption" color="text.secondary">{supportingDetails}</Typography></Box>
               <Typography variant="body2" fontWeight={750} sx={{ whiteSpace: "nowrap" }}>{money(item.observed_cloud, currency)}</Typography>
             </Box>;
             })}
             {selectedDetailItems.length > 20 && <Typography variant="caption" color="text.secondary">Exibindo os 20 maiores detalhes de {selectedDetailItems.length} itens.</Typography>}
           </Stack>}
-          {!groups.length && !rawDetailSelected && series.detail_dimensions?.length === 0 && <Typography variant="caption" color="text.secondary" sx={{ display: "block", mt: 1, p: 1, bgcolor: "#f7f9fc", borderRadius: 1 }}>{monthlyCase ? "A comparação é o total do mês deste escopo. Não há abertura por resource group ou SKU nesta avaliação." : "A origem desta avaliação não disponibilizou dimensões abaixo do escopo do caso."}</Typography>}
+          {!groups.length && !rawDetailSelected && series.detail_dimensions?.length === 0 && <Typography variant="caption" color="text.secondary" sx={{ display: "block", mt: 1, p: 1, bgcolor: "#f7f9fc", borderRadius: 1 }}>{monthlyCase ? "A comparação é o total do mês deste escopo. Não há abertura por resource group ou SKU nesta avaliação." : "A origem desta avaliação não trouxe dimensões abaixo do recorte do caso."}</Typography>}
           {!all.length && !monthlyCase && <Typography variant="body2" color="text.secondary">A decomposição exige as séries contribuintes desta avaliação. O total continua disponível abaixo.</Typography>}
         </Box>
       </Box>

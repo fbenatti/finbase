@@ -1,5 +1,5 @@
 import { Box, Typography } from "@mui/material";
-import { Inbox as InboxIcon } from "@mui/icons-material";
+import { InboxOutlined as InboxIcon } from "@mui/icons-material";
 import { dataDisplayText } from "../utils/dataPresentation";
 
 interface EmptyStateProps {

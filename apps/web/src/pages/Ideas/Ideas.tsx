@@ -73,7 +73,7 @@ export default function Ideas() {
   const backlogCols: GridColDef<Idea>[] = [
     ...portalCols.filter((c) => c.field !== "vote"),
     { field: "due_date", headerName: "Prazo", width: 110 },
-    { field: "difficulty", headerName: "Dific.", width: 80 },
+    { field: "difficulty", headerName: "Compl.", width: 80 },
   ];
 
   return (
@@ -81,13 +81,13 @@ export default function Ideas() {
       <Box sx={{ px: 3, pt: 3, bgcolor: "background.paper", borderBottom: "1px solid", borderColor: "divider" }}>
         <Stack direction="row" justifyContent="space-between" alignItems="start" sx={{ mb: 2 }}>
           <Box>
-            <Typography variant="h4">Ideias</Typography>
+            <Typography variant="h4">Backlog de ideias</Typography>
             <Typography color="text.secondary" sx={{ mt: 0.5 }}>
               Portal de discovery, backlog priorizado, canvas de entrega e dashboard de ciclo até produção.
             </Typography>
           </Box>
           {canCreate && (
-            <Button variant="contained" startIcon={<Add />} onClick={() => setDialog(true)}>Nova ideia</Button>
+            <Button variant="contained" startIcon={<Add />} onClick={() => setDialog(true)}>Registrar ideia</Button>
           )}
         </Stack>
       </Box>

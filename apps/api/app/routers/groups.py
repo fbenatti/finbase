@@ -10,7 +10,7 @@ from app.core.rbac import invalidate_permissions_cache
 from app.database import get_db
 from app.models.identity import Group, Role, User, user_group, group_role
 
-router = APIRouter(prefix="/groups", tags=["groups"])
+router = APIRouter(prefix="/administracao/grupos", tags=["groups"])
 
 
 class GroupCreate(BaseModel):
@@ -106,7 +106,7 @@ async def delete_group(group_id: int, db: AsyncSession = Depends(get_db), user: 
     return {"ok": True}
 
 
-@router.post("/{group_id}/members")
+@router.post("/{group_id}/membros")
 async def add_member(group_id: int, body: MemberBody, db: AsyncSession = Depends(get_db), user: User = Depends(require("groups", "update"))):
     group = (await db.execute(select(Group).options(selectinload(Group.users), selectinload(Group.roles)).where(Group.id == group_id))).scalar_one_or_none()
     member = (await db.execute(select(User).options(selectinload(User.roles), selectinload(User.groups)).where(User.id == body.user_id))).scalar_one_or_none()
@@ -119,7 +119,7 @@ async def add_member(group_id: int, body: MemberBody, db: AsyncSession = Depends
     return {"ok": True}
 
 
-@router.delete("/{group_id}/members/{user_id}")
+@router.delete("/{group_id}/membros/{user_id}")
 async def remove_member(group_id: int, user_id: int, db: AsyncSession = Depends(get_db), user: User = Depends(require("groups", "update"))):
     group = (await db.execute(select(Group).options(selectinload(Group.users)).where(Group.id == group_id))).scalar_one_or_none()
     if group is None:
@@ -132,7 +132,7 @@ async def remove_member(group_id: int, user_id: int, db: AsyncSession = Depends(
     return {"ok": True}
 
 
-@router.post("/{group_id}/roles")
+@router.post("/{group_id}/perfis")
 async def add_group_role(group_id: int, body: RoleBody, db: AsyncSession = Depends(get_db), user: User = Depends(require("groups", "update"))):
     group = (await db.execute(select(Group).options(selectinload(Group.roles)).where(Group.id == group_id))).scalar_one_or_none()
     role = (await db.execute(select(Role).where(Role.id == body.role_id))).scalar_one_or_none()
@@ -145,7 +145,7 @@ async def add_group_role(group_id: int, body: RoleBody, db: AsyncSession = Depen
     return {"ok": True}
 
 
-@router.delete("/{group_id}/roles/{role_id}")
+@router.delete("/{group_id}/perfis/{role_id}")
 async def remove_group_role(group_id: int, role_id: int, db: AsyncSession = Depends(get_db), user: User = Depends(require("groups", "update"))):
     group = (await db.execute(select(Group).options(selectinload(Group.roles)).where(Group.id == group_id))).scalar_one_or_none()
     if group is None:

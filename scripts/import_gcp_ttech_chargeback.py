@@ -46,8 +46,8 @@ def main():
             logger.info(f"Diretoria existente: 'DIR ARQUITETURA E ESTRATEGIA TECH' (ID: {dir_arq_id})")
         else:
             cur.execute("""
-                INSERT INTO department (parent_id, name, centro_custo, ambiente, cloud_filter, custom_fields, active, created_at, updated_at)
-                VALUES (%s, 'DIR ARQUITETURA E ESTRATEGIA TECH', '29TN161700', 'TI', 'GCP-TI', 
+                INSERT INTO department (parent_id, name, centro_custo, ambiente, custom_fields, active, created_at, updated_at)
+                VALUES (%s, 'DIR ARQUITETURA E ESTRATEGIA TECH', '29TN161700', 'TI', 
                 %s, true, NOW(), NOW()) RETURNING id
             """, (gcp_chargeback_id, json.dumps({
                 "tipo": "Diretoria",
@@ -68,8 +68,8 @@ def main():
             logger.info(f"Diretoria existente: 'DIR INFRAESTRUTURA E CLOUD' (ID: {dir_infra_id})")
         else:
             cur.execute("""
-                INSERT INTO department (parent_id, name, centro_custo, ambiente, cloud_filter, custom_fields, active, created_at, updated_at)
-                VALUES (%s, 'DIR INFRAESTRUTURA E CLOUD', '29TN161700', 'TI', 'GCP-TTech', 
+                INSERT INTO department (parent_id, name, centro_custo, ambiente, custom_fields, active, created_at, updated_at)
+                VALUES (%s, 'DIR INFRAESTRUTURA E CLOUD', '29TN161700', 'TI', 
                 %s, true, NOW(), NOW()) RETURNING id
             """, (gcp_chargeback_id, json.dumps({
                 "tipo": "Diretoria",
@@ -91,8 +91,8 @@ def main():
             logger.info(f"Departamento-Projeto existente: 'Vicky' (ID: {dept_vicky_id})")
         else:
             cur.execute("""
-                INSERT INTO department (parent_id, name, centro_custo, ambiente, cloud_filter, custom_fields, active, created_at, updated_at)
-                VALUES (%s, 'Vicky', '29TN161700', 'TI', 'GCP-TTech', 
+                INSERT INTO department (parent_id, name, centro_custo, ambiente, custom_fields, active, created_at, updated_at)
+                VALUES (%s, 'Vicky', '29TN161700', 'TI', 
                 %s, true, NOW(), NOW()) RETURNING id
             """, (dir_arq_id, json.dumps({
                 "tipo": "Projeto",
@@ -113,8 +113,8 @@ def main():
             logger.info(f"Departamento-Projeto existente: 'DEPARTAMENTAIS' (ID: {dept_dpt_id})")
         else:
             cur.execute("""
-                INSERT INTO department (parent_id, name, centro_custo, ambiente, cloud_filter, custom_fields, active, created_at, updated_at)
-                VALUES (%s, 'DEPARTAMENTAIS', '29TN161700', 'TI', 'GCP-TTech', 
+                INSERT INTO department (parent_id, name, centro_custo, ambiente, custom_fields, active, created_at, updated_at)
+                VALUES (%s, 'DEPARTAMENTAIS', '29TN161700', 'TI', 
                 %s, true, NOW(), NOW()) RETURNING id
             """, (dir_infra_id, json.dumps({
                 "tipo": "Projeto",
@@ -135,8 +135,8 @@ def main():
             logger.info(f"Departamento-Projeto existente: 'SEM PROJETO DEFINIDO' (ID: {dept_ti_id})")
         else:
             cur.execute("""
-                INSERT INTO department (parent_id, name, centro_custo, ambiente, cloud_filter, custom_fields, active, created_at, updated_at)
-                VALUES (%s, 'SEM PROJETO DEFINIDO', '29TN161700', 'TI', 'GCP-TTech', 
+                INSERT INTO department (parent_id, name, centro_custo, ambiente, custom_fields, active, created_at, updated_at)
+                VALUES (%s, 'SEM PROJETO DEFINIDO', '29TN161700', 'TI', 
                 %s, true, NOW(), NOW()) RETURNING id
             """, (dir_infra_id, json.dumps({
                 "tipo": "Projeto",

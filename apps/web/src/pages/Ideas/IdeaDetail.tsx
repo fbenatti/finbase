@@ -2,7 +2,7 @@ import { Dialog, DialogActions, DialogContent, DialogTitle } from "../../compone
 import { dataDisplayText } from "../../utils/dataPresentation";
 import { useEffect, useState } from "react";
 import { Alert, Autocomplete, Box, Button, Chip, Divider, FormControl, InputLabel, MenuItem, Select, Stack, TextField, Typography } from "@mui/material";
-import { ThumbDown, ThumbUp } from "@mui/icons-material";
+import { ThumbDownOutlined, ThumbUpOutlined } from "@mui/icons-material";
 import RecordHistory from "../../components/RecordHistory";
 import { useAuth } from "../../auth/AuthContext";
 import { listUsers, type AdminUser } from "../../services/adminApi";
@@ -12,6 +12,8 @@ import {
   type Idea, type IdeaComment, type IdeaStatus, type IdeaTimeline,
 } from "../../services/ideasApi";
 import { IMPACT_LABELS, STATUS_COLOR, STATUS_LABELS, TRANSITIONS, TYPE_LABELS, VOTABLE_TYPES } from "./constants";
+import { colors } from "../../theme/tokens";
+import VersionHistorySection from "../../components/VersionHistorySection";
 
 interface Props {
   ideaId: number | null;
@@ -100,7 +102,7 @@ export default function IdeaDetail({ ideaId, open, onClose, onUpdated }: Props) 
   if (!idea) {
     return (
       <Dialog open={open} onClose={onClose} maxWidth="md" fullWidth>
-        <DialogContent><Typography color="text.secondary">Carregando...</Typography></DialogContent>
+        <DialogContent><Typography color="text.secondary">Buscando...</Typography></DialogContent>
       </Dialog>
     );
   }
@@ -125,11 +127,11 @@ export default function IdeaDetail({ ideaId, open, onClose, onUpdated }: Props) 
             Autor: {idea.author.full_name || idea.author.username}
             {idea.due_date ? ` · Prazo: ${idea.due_date}` : ""}
           </Typography>
-          <Typography variant="body1">{idea.description || "Sem descrição."}</Typography>
+          <Typography variant="body1">{idea.description || "Sem detalhamento."}</Typography>
 
           {canVote && (
-            <Button startIcon={voted ? <ThumbDown /> : <ThumbUp />} onClick={() => void toggleVote()}>
-              {voted ? "Remover voto" : "Votar"}
+            <Button startIcon={voted ? <ThumbDownOutlined /> : <ThumbUpOutlined />} onClick={() => void toggleVote()}>
+              {voted ? "Retirar voto" : "Votar"}
             </Button>
           )}
 
@@ -150,19 +152,19 @@ export default function IdeaDetail({ ideaId, open, onClose, onUpdated }: Props) 
               getOptionLabel={(u) => u.full_name || u.username}
               value={users.filter((u) => idea.assignees.some((a) => a.id === u.id))}
               onChange={(_, v) => void saveAssignees(v)}
-              renderInput={(params) => <TextField {...params} label="Pessoas na ideia" />}
+              renderInput={(params) => <TextField {...params} label="Pessoas envolvidas" />}
             />
           )}
 
           {timeline && (
             <Box>
-              <Typography variant="subtitle1" gutterBottom>Linha do tempo (dwell)</Typography>
+              <Typography variant="subtitle1" gutterBottom>Linha do tempo (permanência)</Typography>
               <Stack spacing={1}>
                 {timeline.intervals.map((iv) => (
                   <Box key={iv.id} sx={{ display: "flex", alignItems: "center", gap: 1 }}>
                     <Box sx={{ minWidth: 140 }}><Chip size="small" label={STATUS_LABELS[iv.status as IdeaStatus] || iv.status} /></Box>
-                    <Box sx={{ flex: 1, height: 8, bgcolor: "#E2E5EE", borderRadius: 1, overflow: "hidden" }}>
-                      <Box sx={{ width: `${Math.min(100, iv.duration_days * 8)}%`, height: "100%", bgcolor: "#4338CA" }} />
+                    <Box sx={{ flex: 1, height: 8, bgcolor: colors.border, borderRadius: 1, overflow: "hidden" }}>
+                      <Box sx={{ width: `${Math.min(100, iv.duration_days * 8)}%`, height: "100%", bgcolor: colors.brand }} />
                     </Box>
                     <Typography variant="caption" sx={{ minWidth: 48 }}>{iv.duration_days}d</Typography>
                   </Box>
@@ -180,7 +182,7 @@ export default function IdeaDetail({ ideaId, open, onClose, onUpdated }: Props) 
           <Divider />
           <Typography variant="subtitle1">Comentários</Typography>
           {comments.map((c) => (
-            <Box key={c.id} sx={{ p: 1, bgcolor: "#FAFBFD", borderRadius: 1 }}>
+            <Box key={c.id} sx={{ p: 1, bgcolor: colors.raised, borderRadius: 1 }}>
               <Typography variant="caption" color="text.secondary">
                 {c.author.full_name || c.author.username} · {c.created_at ? new Date(c.created_at).toLocaleString("pt-BR") : ""}
               </Typography>
@@ -189,12 +191,12 @@ export default function IdeaDetail({ ideaId, open, onClose, onUpdated }: Props) 
           ))}
           {canCreate && (
             <Stack direction="row" spacing={1}>
-              <TextField fullWidth multiline minRows={2} value={comment} onChange={(e) => setComment(e.target.value)} placeholder="Adicionar comentário..." />
-              <Button variant="contained" onClick={() => void submitComment()} disabled={!comment.trim()}>Enviar</Button>
+              <TextField fullWidth multiline minRows={2} value={comment} onChange={(e) => setComment(e.target.value)} placeholder="Escreva um comentário..." />
+              <Button variant="contained" onClick={() => void submitComment()} disabled={!comment.trim()}>Publicar</Button>
             </Stack>
           )}
 
-          <RecordHistory module="ideas" entityType="idea" entityId={idea.id} />
+          <VersionHistorySection><RecordHistory module="ideas" entityType="idea" entityId={idea.id} /></VersionHistorySection>
         </Stack>
       </DialogContent>
       <DialogActions>

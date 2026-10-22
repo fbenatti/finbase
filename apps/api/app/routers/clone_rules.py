@@ -9,7 +9,7 @@ from app.models.destination import DestinationColumn
 from app.models.destination import DestinationTable, SourceDestinationMapping
 from app.models.source_connection import SourceConnection
 
-router = APIRouter(prefix="/clone-rules", tags=["clone-rules"])
+router = APIRouter(prefix="/dados/regras-clonagem", tags=["clone-rules"])
 
 class CloneRuleIn(BaseModel):
     destination_table_id: int; connection_id: int | None = None; name: str; description: str | None = None
@@ -105,20 +105,20 @@ async def update_rule(rule_id: int, body: CloneRuleIn, db: AsyncSession = Depend
     for k,v in body.model_dump().items(): setattr(row,k,v)
     row.version += 1; await db.commit(); await db.refresh(row); return _out(row)
 
-@router.post("/{rule_id}/duplicate", status_code=201)
+@router.post("/{rule_id}/duplicar", status_code=201)
 async def duplicate_rule(rule_id: int, db: AsyncSession = Depends(get_db)):
     src=await db.get(CloneRule, rule_id)
     if not src: raise HTTPException(404, "Regra de clonagem não encontrada")
     data={c.name:getattr(src,c.name) for c in src.__table__.columns if c.name not in {"id","created_at","updated_at","version"}}
     data["name"] += " (cópia)"; row=CloneRule(**data); db.add(row); await db.commit(); await db.refresh(row); return _out(row)
 
-@router.post("/{rule_id}/validate")
+@router.post("/{rule_id}/validar")
 async def validate_rule(rule_id: int, db: AsyncSession = Depends(get_db)):
     row=await db.get(CloneRule,rule_id)
     if not row: raise HTTPException(404, "Regra de clonagem não encontrada")
     await _validate(db, CloneRuleIn(**{c.name:getattr(row,c.name) for c in row.__table__.columns if c.name not in {"id","version","created_at","updated_at"}})); return {"valid":True}
 
-@router.post("/{rule_id}/preview")
+@router.post("/{rule_id}/previa")
 async def preview_rule(rule_id: int, db: AsyncSession = Depends(get_db)):
     row=await db.get(CloneRule,rule_id)
     if not row: raise HTTPException(404, "Regra de clonagem não encontrada")
@@ -130,7 +130,7 @@ async def delete_rule(rule_id: int, db: AsyncSession = Depends(get_db)):
     if not row: raise HTTPException(404, "Regra de clonagem não encontrada")
     await db.delete(row); await db.commit()
 
-@router.get("/price-pendencies")
+@router.get("/pendencias-preco")
 async def pendencies(destination_table_id: int | None = Query(None), db: AsyncSession = Depends(get_db)):
     stmt=select(ClonePricePendencies).order_by(ClonePricePendencies.created_at.desc()).limit(1000)
     if destination_table_id: stmt=stmt.where(ClonePricePendencies.destination_table_id==destination_table_id)

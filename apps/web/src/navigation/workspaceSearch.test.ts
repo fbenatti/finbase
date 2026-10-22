@@ -6,11 +6,16 @@ const item = (code: string, label: string, parent_code: string | null = null, ex
   permission_module: null, permission_scope: "", position: 1, icon: "", required: false,
   configured_enabled: true, enabled: true, allowed: true, visible: true, ...extra,
 });
-const catalog = [item("planning", "Planejamento"), item("budget", "Orçamentos", "planning"), item("story", "História dos contratos", "planning"), item("data", "Dados e operação"), item("sources", "Fontes de dados", "data")];
+const catalog = [item("planning", "Planejamento"), item("budget", "Orçamentos", "planning"), item("story", "Histórico de contratos", "planning"), item("data", "Dados e operação"), item("sources", "Fontes de dados", "data")];
 describe("workspace menu search", () => {
   it("ignores accents, case and extra whitespace", () => expect(searchWorkspaceMenus(catalog, "  ORCAMENTO  ").map(x => x.code)).toEqual(["budget"]));
-  it("matches the group and submenu together", () => expect(searchWorkspaceMenus(catalog, "planejamento contrato").map(x => x.code)).toEqual(["story"]));
-  it("includes children when their group matches", () => expect(searchWorkspaceMenus(catalog, "planejamento").map(x => x.code)).toEqual(["planning", "budget", "story"]));
+  it("matches words in the entry's own label", () => expect(searchWorkspaceMenus(catalog, "historico contratos").map(x => x.code)).toEqual(["story"]));
+  it("does not pull in children when their group matches", () => expect(searchWorkspaceMenus(catalog, "planejamento").map(x => x.code)).toEqual(["planning"]));
+  it("finds entries at any submenu level without the group name", () => expect(searchWorkspaceMenus(catalog, "fontes").map(x => x.code)).toEqual(["sources"]));
+  it("finds a deeply nested entry by its own label", () => {
+    const deep = [item("a", "Grupo"), item("b", "Nível dois", "a"), item("c", "Nível três", "b")];
+    expect(searchWorkspaceMenus(deep, "nivel tres").map(x => x.code)).toEqual(["c"]);
+  });
   it("returns no results for unmatched words", () => expect(searchWorkspaceMenus(catalog, "inexistente")).toEqual([]));
   it("excludes forbidden, disabled and hidden entries", () => expect(searchWorkspaceMenus([item("a", "A", null, { allowed: false }), item("b", "B", null, { enabled: false }), item("c", "C", null, { visible: false })], "")).toEqual([]));
   it("excludes children of inaccessible ancestors", () => expect(searchWorkspaceMenus([item("a", "A", null, { allowed: false }), item("b", "B", "a")], "b")).toEqual([]));

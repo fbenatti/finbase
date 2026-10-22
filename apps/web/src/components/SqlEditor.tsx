@@ -28,14 +28,14 @@ const FUNCTIONS = new Set([
 ]);
 
 const COLORS = {
-  keyword: "#7c3aed",
-  function: "#4338CA",
+  keyword: "#64748B",
+  function: "#0F62FE",
   string: "#059669",
   number: "#d97706",
-  comment: "#8A93A8",
-  identifier: "#0e7490",
-  operator: "#475569",
-  default: "#161B2E",
+  comment: "#8497A8",
+  identifier: "#0EA5C6",
+  operator: "#526777",
+  default: "#162B3A",
 };
 
 function escapeHtml(s: string): string {
@@ -118,9 +118,9 @@ export default function SqlEditor({
         position: "relative",
         width: "100%",
         borderRadius: 2,
-        border: "1px solid #CDD2DF",
-        bgcolor: "#161B2E",
-        "&:focus-within": { borderColor: "#7c3aed", boxShadow: "0 0 0 3px rgba(124,58,237,0.15)" },
+        border: "1px solid #C5D2DE",
+        bgcolor: "#162B3A",
+        "&:focus-within": { borderColor: "#64748B", boxShadow: "0 0 0 3px rgba(124,58,237,0.15)" },
         overflow: "hidden",
       }}
     >
@@ -137,7 +137,7 @@ export default function SqlEditor({
           lineHeight: 1.65,
           whiteSpace: "pre-wrap",
           wordBreak: "break-word",
-          color: "#E2E5EE",
+          color: "#E1E8F0",
           minHeight: rows * 21.45,
           overflow: "hidden",
           pointerEvents: "none",

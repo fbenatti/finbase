@@ -32,7 +32,8 @@ encerramento*.
 
 | Aba | Conteúdo |
 |---|---|
-| **Visão geral** | KPIs do plano §5.2: novos, abertos, vencidos, encerrados, sem responsável, custo anômalo observado, tempo até ciência e resolução, classificados, famílias reincidentes; distribuição por estado e decisões; notas declarando que falsos negativos não são estimados e que aceitação não é falso positivo |
+| **Painel** (`/alertas/painel`, antiga `/alertas/visao-geral`) | Quatro KPIs: abertas e críticas (`GET /anomalies/metrics`), impacto em R$ (`GET /anomalies/impact/summary`, excesso já incorrido) e tempo para resolver (mediana). Tendência diária de casos e de impacto, impacto por serviço e por nó da hierarquia (cloud › subconta), lista de casos priorizada por impacto com ação **Abrir investigação**, e situação dos casos. Os gráficos e a lista usam `GET /anomalies/cases` (até 200 casos por prioridade). Notas do backend declaram que falsos negativos não são estimados e que aceitação não é falso positivo. Saída retirada: blocos de saving e exposição (já na aba Impacto), contadores de sem dono, encerrados, classificados e famílias recorrentes, e chips de decisão |
+| **Impacto** | `GET /anomalies/impact/summary`: custo já incorrido, saving projetado e exposição em aberto (mês e ano) |
 | **Meus casos / fila FinOps** | lista com filtros por estado, severidade e "somente fila FinOps" |
 | **Casos** | mesma lista, ciclo completo de estados |
 | **Eventos esperados** | `GET /anomalies/expected-events`: recorrências agrupadas por família, com ocorrências, séries, valores esperado/observado/desvio, meses e confiança (F4) |

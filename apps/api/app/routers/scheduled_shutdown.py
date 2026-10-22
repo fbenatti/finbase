@@ -36,7 +36,7 @@ from app.services.gold_materialization import (
 )
 
 logger = logging.getLogger(__name__)
-router = APIRouter(prefix="/scheduled-shutdown", tags=["scheduled-shutdown"])
+router = APIRouter(prefix="/otimizacao/desligamento-agendado", tags=["scheduled-shutdown"])
 
 CONNECTION_CODE = "azure-automation"
 CONNECTION_NAME = "Azure Automation — Jobs de Start/Stop"
@@ -283,7 +283,7 @@ async def _setup_for_connection(db: AsyncSession, conn: SourceConnection) -> Set
     )
 
 
-@router.post("/setup", response_model=SetupResponse)
+@router.post("/configurar", response_model=SetupResponse)
 async def setup_scheduled_shutdown(
     body: SetupRequest | None = None,
     db: AsyncSession = Depends(get_db),
@@ -361,7 +361,7 @@ class SavingsResponse(BaseModel):
     vm_with_shutdown: int
 
 
-@router.post("/savings", response_model=SavingsResponse)
+@router.post("/economias", response_model=SavingsResponse)
 async def calculate_savings(body: SavingsFilter, db: AsyncSession = Depends(get_db)):
     """Calcula saving por VM/mês cruzando billing FOCUS com jobs do Azure Automation.
 
@@ -712,7 +712,7 @@ class ScheduleDeltaResponse(BaseModel):
     total_cost_since_removal: float
 
 
-@router.get("/schedule-delta", response_model=ScheduleDeltaResponse)
+@router.get("/agendar-delta", response_model=ScheduleDeltaResponse)
 async def schedule_delta(db: AsyncSession = Depends(get_db)):
     """Compara o snapshot mais recente do inventário de schedules com o anterior (D vs D-1).
 
@@ -1001,7 +1001,7 @@ class ExceptionRuleOut(ExceptionRuleCreate):
     model_config = {"from_attributes": True}
 
 
-@router.post("/exceptions", response_model=ExceptionRuleOut, status_code=201)
+@router.post("/excecoes", response_model=ExceptionRuleOut, status_code=201)
 async def create_exception(data: ExceptionRuleCreate, db: AsyncSession = Depends(get_db)):
     rule = ShutdownExceptionRule(**data.model_dump())
     db.add(rule)
@@ -1010,7 +1010,7 @@ async def create_exception(data: ExceptionRuleCreate, db: AsyncSession = Depends
     return ExceptionRuleOut.model_validate(rule)
 
 
-@router.get("/exceptions", response_model=list[ExceptionRuleOut])
+@router.get("/excecoes", response_model=list[ExceptionRuleOut])
 async def list_exceptions(active_only: bool = False, db: AsyncSession = Depends(get_db)):
     stmt = select(ShutdownExceptionRule)
     if active_only:
@@ -1019,7 +1019,7 @@ async def list_exceptions(active_only: bool = False, db: AsyncSession = Depends(
     return [ExceptionRuleOut.model_validate(r) for r in (await db.execute(stmt)).scalars().all()]
 
 
-@router.put("/exceptions/{rule_id}", response_model=ExceptionRuleOut)
+@router.put("/excecoes/{rule_id}", response_model=ExceptionRuleOut)
 async def update_exception(rule_id: int, data: ExceptionRuleCreate, db: AsyncSession = Depends(get_db)):
     rule = await db.get(ShutdownExceptionRule, rule_id)
     if not rule:
@@ -1031,7 +1031,7 @@ async def update_exception(rule_id: int, data: ExceptionRuleCreate, db: AsyncSes
     return ExceptionRuleOut.model_validate(rule)
 
 
-@router.delete("/exceptions/{rule_id}", status_code=204)
+@router.delete("/excecoes/{rule_id}", status_code=204)
 async def delete_exception(rule_id: int, db: AsyncSession = Depends(get_db)):
     rule = await db.get(ShutdownExceptionRule, rule_id)
     if not rule:
@@ -1048,7 +1048,7 @@ class ExceptionFromDeltaCreate(BaseModel):
     reason: str = "Saiu do schedule de desligue programado"
 
 
-@router.post("/exceptions/from-delta", response_model=ExceptionRuleOut)
+@router.post("/excecoes/a-partir-do-delta", response_model=ExceptionRuleOut)
 async def create_exception_from_delta(data: ExceptionFromDeltaCreate, db: AsyncSession = Depends(get_db)):
     """Registra uma regra de exceção para um recurso que SAIU do schedule de
     desligue (REMOVIDO/DESABILITADO no delta de snapshots).
@@ -1103,7 +1103,7 @@ class SavingsMonthlyResponse(BaseModel):
     rows: list[SavingsMonthlyRow]
 
 
-@router.get("/savings-monthly")
+@router.get("/economias-mensais")
 async def savings_monthly():
     """Resumo mensal de saving (agregado na Gold) — para o gráfico de barras.
 
@@ -1351,7 +1351,7 @@ class VmDailyUsageResponse(BaseModel):
     rows: list[VmDailyUsageItem]
 
 
-@router.get("/vm-usage-daily", response_model=VmDailyUsageResponse)
+@router.get("/uso-diario-vm", response_model=VmDailyUsageResponse)
 async def vm_usage_daily(resource_name: str, days: int = 30):
     """Consumo diário de uma VM nos últimos N dias (Gold FOCUS).
 
@@ -1494,8 +1494,8 @@ class SavingOrganogramaResponse(BaseModel):
 SavingDepartamentoResponse = SavingOrganogramaResponse
 
 
-@router.get("/saving-organograma", response_model=SavingOrganogramaResponse)
-@router.get("/saving-departamento", response_model=SavingOrganogramaResponse, include_in_schema=False)
+@router.get("/economia-organograma", response_model=SavingOrganogramaResponse)
+@router.get("/economia-departamento", response_model=SavingOrganogramaResponse, include_in_schema=False)
 async def saving_organograma(period: str | None = None):
     """Saving por desligue agrupado por organograma_nivel_4 e organograma_nivel_5 (FOCUS).
 
@@ -1564,7 +1564,7 @@ async def saving_organograma(period: str | None = None):
     )
 
 
-@router.post("/reprocess-history")
+@router.post("/historico-reprocessamento")
 async def reprocess_saving_history(db: AsyncSession = Depends(get_db)):
     """Materializa a Gold de saving por desligue MÊS A MÊS (jan → mês atual).
 
@@ -1677,7 +1677,7 @@ class OpportunityResponse(BaseModel):
     vmss_count: int
 
 
-@router.get("/opportunity-subscriptions")
+@router.get("/assinaturas-oportunidade")
 async def opportunity_subscriptions():
     """Lista as subscriptions disponíveis na Gold de saving (mês corrente) com
     contagem de recursos, para o seletor do dashboard."""
@@ -1705,7 +1705,7 @@ async def opportunity_subscriptions():
     }
 
 
-@router.post("/opportunity", response_model=OpportunityResponse)
+@router.post("/oportunidade", response_model=OpportunityResponse)
 async def opportunity_savings(body: SavingsFilter, db: AsyncSession = Depends(get_db)):
     """Oportunidade de saving: recursos que são VMs/VMSS e poderiam ser desligados.
 
@@ -1835,7 +1835,7 @@ GROUP BY
 """
 
 
-@router.post("/seed-gold")
+@router.post("/carga-ouro")
 async def seed_saving_gold(db: AsyncSession = Depends(get_db)):
     """Cria (se não existir) a regra Gold de saving por desligue de VM."""
     from app.models.gold_mart_rule import GoldMartRule
@@ -1896,7 +1896,7 @@ FROM vm_tags
 """
 
 
-@router.post("/seed-tag-gold")
+@router.post("/carga-tags-ouro")
 async def seed_tag_snapshot_gold(db: AsyncSession = Depends(get_db)):
     """Cria a Gold de snapshot de tags shutdown=auto por recurso (modo snapshot)."""
     from app.models.gold_mart_rule import GoldMartRule
@@ -1950,7 +1950,7 @@ class TagDeltaResponse(BaseModel):
     total_with_tag: int = 0
 
 
-@router.get("/tag-delta", response_model=TagDeltaResponse)
+@router.get("/delta-tags", response_model=TagDeltaResponse)
 async def tag_delta(db: AsyncSession = Depends(get_db)):
     """Compara os snapshots de tags (Gold snapshot_tags_automacao) mais recentes.
 
@@ -2063,7 +2063,7 @@ async def tag_delta(db: AsyncSession = Depends(get_db)):
 # Coleta de INVENTÁRIO Azure Automation (jobSchedules + schedules + runbooks)
 # ---------------------------------------------------------------------------
 
-@router.post("/collect-inventory")
+@router.post("/coletar-inventario")
 async def collect_automation_inventory_endpoint(
     connection_id: int,
     db: AsyncSession = Depends(get_db),

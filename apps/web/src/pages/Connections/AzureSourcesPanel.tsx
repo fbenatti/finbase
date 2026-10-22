@@ -30,10 +30,10 @@ import {
  */
 
 const STATE_LABEL: Record<string, { label: string; color: "success" | "warning" | "error" | "default" }> = {
-  AVAILABLE: { label: "Disponível", color: "success" },
+  AVAILABLE: { label: "Acessível", color: "success" },
   PARTIAL: { label: "Parcial", color: "warning" },
-  NOT_CONFIGURED: { label: "Não configurada", color: "default" },
-  UNAVAILABLE: { label: "Indisponível", color: "warning" },
+  NOT_CONFIGURED: { label: "Sem credenciais", color: "default" },
+  UNAVAILABLE: { label: "Inacessível", color: "warning" },
   ERROR: { label: "Erro", color: "error" },
 };
 
@@ -69,7 +69,7 @@ function SourceRow({
   return (
     <Box sx={{ borderBottom: 1, borderColor: "divider", py: 1 }}>
       <Stack direction="row" alignItems="center" spacing={1} flexWrap="wrap">
-        <Tooltip title={planned ? "Fonte planejada: ainda não tem coletor" : source.independent_connection ? "Conexão independente: não é ligada dentro de outro ambiente" : "Ligar/desligar a coleta"}>
+        <Tooltip title={planned ? "Fonte prevista: o coletor ainda não existe" : source.independent_connection ? "Conexão independente: não depende de outro ambiente" : "Ativar ou pausar a coleta"}>
           <span>
             <Checkbox
               size="small"
@@ -84,33 +84,33 @@ function SourceRow({
           <Stack direction="row" alignItems="center" spacing={1} flexWrap="wrap">
             <Typography variant="body2" fontWeight={600}>{source.display_name}</Typography>
             <Chip size="small" label={state.label} color={state.color} variant="outlined" />
-            {source.is_cost_source && <Chip size="small" label="Custos" color="info" variant="outlined" />}
-            {source.independent_connection && <Chip size="small" label="Independente" color="info" variant="outlined" />}
-            {planned && <Chip size="small" label="Em preparação" variant="outlined" />}
-            {source.running_tasks > 0 && <Chip size="small" label="Coletando" color="primary" />}
+            {source.is_cost_source && <Chip size="small" label="Dados de custo" color="info" variant="outlined" />}
+            {source.independent_connection && <Chip size="small" label="Conexão própria" color="info" variant="outlined" />}
+            {planned && <Chip size="small" label="Em construção" variant="outlined" />}
+            {source.running_tasks > 0 && <Chip size="small" label="Coleta em andamento" color="primary" />}
           </Stack>
           <Typography variant="caption" color="text.secondary" display="block">
             {source.rows != null ? `${source.rows.toLocaleString("pt-BR")} registros` : "Sem registros coletados"}
             {source.last_billing_period ? ` · ${source.last_billing_period}` : ""}
           </Typography>
         </Box>
-        <Tooltip title="Validar disponibilidade da fonte">
+        <Tooltip title="Testar acesso à fonte">
           <span>
-            <IconButton aria-label={`Validar ${source.display_name}`} size="small" onClick={onTest} disabled={busy || planned}>
+            <IconButton aria-label={`Testar acesso de ${source.display_name}`} size="small" onClick={onTest} disabled={busy || planned}>
               <ScienceIcon fontSize="small" />
             </IconButton>
           </span>
         </Tooltip>
         {source.collection_mode === "dedicated" && (
-          <Tooltip title="Atualizar os dados desta fonte">
+          <Tooltip title="Recarregar os dados desta fonte">
             <span>
-              <IconButton aria-label={`Atualizar ${source.display_name}`} size="small" onClick={onRefreshDedicated} disabled={busy}>
+              <IconButton aria-label={`Recarregar ${source.display_name}`} size="small" onClick={onRefreshDedicated} disabled={busy}>
                 <RefreshIcon fontSize="small" />
               </IconButton>
             </span>
           </Tooltip>
         )}
-        <IconButton aria-label={`Detalhes de ${source.display_name}`} aria-expanded={open} size="small" onClick={() => setOpen((v) => !v)}>
+        <IconButton aria-label={`Ver detalhes de ${source.display_name}`} aria-expanded={open} size="small" onClick={() => setOpen((v) => !v)}>
           <ExpandMoreIcon fontSize="small" sx={{ transform: open ? "rotate(180deg)" : "none" }} />
         </IconButton>
       </Stack>
@@ -122,7 +122,7 @@ function SourceRow({
             <Typography variant="caption" color="text.secondary">{source.description}</Typography>
           )}
           <Typography variant="caption" color="text.secondary">
-            Última validação: {source.last_test_status || "—"} em {formatWhen(source.last_tested_at)}
+            Último teste: {source.last_test_status || "—"} em {formatWhen(source.last_tested_at)}
             {source.last_ingested_at ? ` · última coleta: ${formatWhen(source.last_ingested_at)}` : ""}
           </Typography>
           {source.required_permission && (
@@ -139,7 +139,7 @@ function SourceRow({
           {source.window_days != null && (
             <Stack direction="row" spacing={1} alignItems="center" sx={{ pt: 0.5 }}>
               <TextField
-                size="small" label="Janela (dias)" type="number" value={windowDays}
+                size="small" label="Período (dias)" type="number" value={windowDays}
                 onChange={(e) => setWindowDays(e.target.value)}
                 onBlur={() => {
                   const days = Number(windowDays);
@@ -148,7 +148,7 @@ function SourceRow({
                 inputProps={{ min: 1, max: 90 }}
                 sx={{ width: 140 }}
               />
-              <Typography variant="caption" color="text.secondary">1 a 90 dias (piloto: 15)</Typography>
+              <Typography variant="caption" color="text.secondary">De 1 a 90 dias (piloto: 15)</Typography>
             </Stack>
           )}
         </Stack>
@@ -235,7 +235,7 @@ function EnvironmentCard({
     setMessage({ severity: "info", text: `Preparando atualização independente de ${source.display_name}…` });
     try {
       const task = await refreshAzurePriceSheet();
-      setMessage({ severity: "success", text: task.message || `Atualização agendada na conexão ${task.source || "azure-pricesheet"} (tarefa ${task.task_id}).` });
+      setMessage({ severity: "success", text: task.message || `Recarga agendada na conexão ${task.source || "azure-pricesheet"} (tarefa ${task.task_id}).` });
       onChanged();
     } catch (error) {
       setMessage({ severity: "error", text: error instanceof Error ? error.message : String(error) });
@@ -252,16 +252,16 @@ function EnvironmentCard({
         </Typography>
         {environment.cloud_names.map((name) => <Chip key={name} size="small" label={name} />)}
         {environment.sources.some((source) => source.independent_connection) && (
-          <Chip size="small" label="credenciais e coleta próprias" color="info" variant="outlined" />
+          <Chip size="small" label="credenciais e coleta exclusivas" color="info" variant="outlined" />
         )}
         {environment.credential_profiles.map((profile) => (
-          <Chip key={profile} size="small" variant="outlined" label={`credencial: ${profile}`} />
+          <Chip key={profile} size="small" variant="outlined" label={`perfil: ${profile}`} />
         ))}
         <Box sx={{ flex: 1 }} />
         {enabledSources.length > 0 && (
           <>
-            <Chip size="small" label={`${environment.enabled_count}/${environment.source_count} habilitadas`} />
-            <Tooltip title="Enfileira a coleta de todas as fontes ligadas deste ambiente">
+            <Chip size="small" label={`${environment.enabled_count}/${environment.source_count} ativas`} />
+            <Tooltip title="Agenda a coleta de todas as fontes ativas deste ambiente">
               <span>
                 <Button
                   size="small" variant="contained" startIcon={collecting ? <CircularProgress size={14} /> : <PlayArrowIcon />}
@@ -273,7 +273,7 @@ function EnvironmentCard({
             </Tooltip>
           </>
         )}
-        <IconButton aria-label={`Fontes do ambiente ${environment.environment_slug}`} aria-expanded={expanded} size="small" onClick={() => setExpanded((v) => !v)}>
+        <IconButton aria-label={`Mostrar fontes do ambiente ${environment.environment_slug}`} aria-expanded={expanded} size="small" onClick={() => setExpanded((v) => !v)}>
           <ExpandMoreIcon fontSize="small" sx={{ transform: expanded ? "rotate(180deg)" : "none" }} />
         </IconButton>
       </Stack>
@@ -338,14 +338,14 @@ export default function AzureSourcesPanel({ environment, connectionId }: { envir
     return (
       <Box sx={{ display: "flex", alignItems: "center", gap: 1, py: 2 }}>
         <CircularProgress size={18} />
-        <Typography variant="body2" color="text.secondary">Carregando fontes Azure…</Typography>
+        <Typography variant="body2" color="text.secondary">Buscando fontes Azure…</Typography>
       </Box>
     );
   }
 
   if (error) {
     return (
-      <Alert severity="error" action={<IconButton aria-label="Atualizar fontes Azure" size="small" onClick={() => void load()}><RefreshIcon fontSize="small" /></IconButton>}>
+      <Alert severity="error" action={<IconButton aria-label="Recarregar fontes Azure" size="small" onClick={() => void load()}><RefreshIcon fontSize="small" /></IconButton>}>
         Não foi possível carregar as fontes Azure: {dataDisplayText(error)}
       </Alert>
     );
@@ -366,11 +366,11 @@ export default function AzureSourcesPanel({ environment, connectionId }: { envir
         <Typography variant="subtitle2">
           Fontes de coleta Azure
         </Typography>
-        <Chip size="small" label={`${totals.environments} ambiente(s)`} />
-        <Chip size="small" label={`${totals.collectable} habilitadas para coleta`} color="success" variant="outlined" />
+        <Chip size="small" label={`${totals.environments} ambiente(s) mapeado(s)`} />
+        <Chip size="small" label={`${totals.collectable} prontas para coleta`} color="success" variant="outlined" />
         <Box sx={{ flex: 1 }} />
-        <Tooltip title="Recarregar estado das fontes">
-          <IconButton aria-label="Atualizar fontes Azure" size="small" onClick={() => void load()}><RefreshIcon fontSize="small" /></IconButton>
+        <Tooltip title="Revalidar o estado das fontes">
+          <IconButton aria-label="Recarregar fontes Azure" size="small" onClick={() => void load()}><RefreshIcon fontSize="small" /></IconButton>
         </Tooltip>
       </Stack>
       <Typography variant="caption" color="text.secondary" display="block" sx={{ mb: 1.5 }}>
@@ -385,9 +385,9 @@ export default function AzureSourcesPanel({ environment, connectionId }: { envir
 
       <Divider sx={{ my: 1 }} />
       <Typography variant="caption" color="text.secondary">
-        Fontes marcadas como <b>planejada</b> aparecem na lista para dar visibilidade do planejamento, mas
+        Fontes marcadas como <b>prevista</b> aparecem na lista para dar visibilidade ao roadmap, mas
         ainda não estão disponíveis para coleta. Veja{" "}
-        <Link href="/dados/explorador/destinos" underline="hover">Explorador de dados</Link> para inspecionar as tabelas de origem, preparação e consolidação.
+        <Link href="/dados/explorador/destinos" underline="hover">Explorador de tabelas</Link> para inspecionar as tabelas de origem, de staging e consolidadas.
       </Typography>
     </Box>
   );

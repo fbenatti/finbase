@@ -4,18 +4,18 @@ export type Member = NonNullable<AnomalySeries["contributor_breakdown"]>[number]
 export type ScopeFilter = { field: string; value: string };
 export const dimensionValue = (member: Member, field: string) => member.dimensions[field] || "Não informado";
 export const scopeChain = [
-  ...Array.from({ length: 7 }, (_, index) => ({ field: `organograma_nivel_${index + 1}`, label: index === 4 ? "Projeto / nível 5" : `Organograma · nível ${index + 1}` })),
-  { field: "subaccountname", label: "Assinatura / subconta" },
-  { field: "resourcegroupname", label: "Resource group" }, { field: "resource_group", label: "Resource group" },
-  { field: "servicesubcategory", label: "Produto / família" }, { field: "skumeter", label: "SKU / medidor" },
+  ...Array.from({ length: 7 }, (_, index) => ({ field: `organograma_nivel_${index + 1}`, label: index === 4 ? "Projeto / nível 5" : `Hierarquia · nível ${index + 1}` })),
+  { field: "subaccountname", label: "Assinatura ou subconta" },
+  { field: "resourcegroupname", label: "Grupo de recursos" }, { field: "resource_group", label: "Grupo de recursos" },
+  { field: "servicesubcategory", label: "Produto ou família" }, { field: "skumeter", label: "SKU ou medidor" },
 ];
 export const detailScopeChain = (details: Array<{ key: string; label: string }> = []) => {
   const base = [
-    ...Array.from({ length: 7 }, (_, index) => ({ field: `organograma_nivel_${index + 1}`, label: `Organograma · nível ${index + 1}` })),
-    { field: "subaccountname", label: "Assinatura / subconta" },
-    { field: "resourcegroupname", label: "Resource group" }, { field: "resource_group", label: "Resource group" },
-    { field: "gcp_project", label: "Projeto GCP" },
-    { field: "servicesubcategory", label: "Produto / família" }, { field: "skumeter", label: "SKU / medidor" },
+    ...Array.from({ length: 7 }, (_, index) => ({ field: `organograma_nivel_${index + 1}`, label: `Hierarquia · nível ${index + 1}` })),
+    { field: "subaccountname", label: "Assinatura ou subconta" },
+    { field: "resourcegroupname", label: "Grupo de recursos" }, { field: "resource_group", label: "Grupo de recursos" },
+    { field: "gcp_project", label: "Projeto no GCP" },
+    { field: "servicesubcategory", label: "Produto ou família" }, { field: "skumeter", label: "SKU ou medidor" },
   ];
   const hiddenFields = new Set(["subscription", "subscription_id", "resource", "resource_name", "resource_id", "region"]);
   const hiddenLabels = /^(id\s+da\s+assinatura|assinatura\s+id|subscription(?:\s+id)?|recurso(?:\s+id)?|id\s+do\s+recurso|nome\s+do\s+recurso|resource(?:\s+id|\s+name)?|regi[aã]o|region)$/i;

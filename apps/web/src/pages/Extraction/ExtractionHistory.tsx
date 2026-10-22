@@ -37,7 +37,7 @@ export default function ExtractionHistory() {
   const [filterModel, setFilterModel] = useState<GridFilterModel>({ items: [] });
   const [sortModel, setSortModel] = useState<GridSortModel>([]);
   const [page, setPage] = useState(0);
-  const [pageSize, setPageSize] = useState(100);
+  const [pageSize, setPageSize] = useState(50);
   const [contextMenu, setContextMenu] = useState<{
     mouseX: number;
     mouseY: number;
@@ -200,12 +200,12 @@ export default function ExtractionHistory() {
           <Typography variant="body2" color="text.secondary" mt={0.5}>
             {metadata ? (
               <>
-                <strong>Fonte:</strong> {metadata.connection_name} ({metadata.connection_code}) ·{" "}
-                <strong>Tabela base de origem:</strong> <code>{metadata.table_name}</code> ·{" "}
-                <strong>Total de Registros:</strong> {totalRows.toLocaleString()}
+                <strong>Fonte de dados:</strong> {metadata.connection_name} ({metadata.connection_code}) ·{" "}
+                <strong>Tabela da base de origem:</strong> <code>{metadata.table_name}</code> ·{" "}
+                <strong>Total de linhas:</strong> {totalRows.toLocaleString()}
               </>
             ) : (
-              `Execução ${taskId} · consulta aos registros armazenados`
+              `Execução ${taskId} · consulta às linhas armazenadas`
             )}
           </Typography>
         </Box>
@@ -225,8 +225,8 @@ export default function ExtractionHistory() {
         <TextField
           size="small"
           fullWidth
-          label="Buscar nos dados da extração"
-          placeholder="Busca textual em qualquer coluna (ex: Compute, Network, 202608, BRL...)"
+          label="Buscar nos dados da coleta"
+          placeholder="Busca textual em qualquer campo (ex.: Compute, Network, 202608, BRL...)"
           value={search}
           onChange={(e) => setSearch(e.target.value)}
           onKeyDown={(e) => e.key === "Enter" && void fetchData(search, 0)}
@@ -263,7 +263,7 @@ export default function ExtractionHistory() {
           filterMode="server"
           sortingMode="server"
           rowCount={totalRows}
-          pageSizeOptions={[50, 100, 200]}
+          pageSizeOptions={[50, 100, 500, 1000]}
           paginationModel={{ page, pageSize }}
           filterModel={filterModel}
           sortModel={sortModel}

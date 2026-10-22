@@ -25,8 +25,8 @@ export default function Login() {
 
   useEffect(() => {
     if (user) navigate("/", { replace: true });
-    api.get("/auth/sso/providers").then((r) => setProviders(r.data)).catch(() => {});
-    api.get("/auth/login-config").then((r) => setConfig(r.data)).catch(() => {});
+    api.get("/autenticacao/sso/provedores").then((r) => setProviders(r.data)).catch(() => {});
+    api.get("/autenticacao/configuracao-entrada").then((r) => setConfig(r.data)).catch(() => {});
   }, [user, navigate]);
 
   // Usuários locais nunca têm "@" no username; contas corporativas (OIDC) são
@@ -41,7 +41,7 @@ export default function Login() {
 
     if (isCorporate) {
       if (!oidcProvider) {
-        setError("Login com conta corporativa não está disponível no momento.");
+        setError("O login corporativo não está disponível agora.");
         return;
       }
       const query = `?login_hint=${encodeURIComponent(identifier.trim())}`;
@@ -50,7 +50,7 @@ export default function Login() {
     }
 
     if (!showLocal) {
-      setError("Login local desabilitado. Use seu e-mail corporativo.");
+      setError("O login local está desativado. Use seu e-mail corporativo.");
       return;
     }
 
@@ -62,13 +62,13 @@ export default function Login() {
       const status = err?.response?.status;
       const detail = err?.response?.data?.detail;
       if (status === 423) {
-        setError("Conta temporariamente bloqueada por tentativas inválidas. Tente novamente em alguns minutos.");
-      } else if (detail === "Conta temporariamente bloqueada por tentativas inválidas") {
-        setError("Conta temporariamente bloqueada por tentativas inválidas. Tente novamente em alguns minutos.");
+        setError("Conta bloqueada temporariamente por tentativas inválidas. Tente de novo em alguns minutos.");
+      } else if (detail === "Conta bloqueada por tentativas inválidas") {
+        setError("Conta bloqueada temporariamente por tentativas inválidas. Tente de novo em alguns minutos.");
       } else if (status === 429) {
-        setError("Muitas tentativas. Aguarde um minuto antes de tentar de novo.");
+        setError("Muitas tentativas seguidas. Aguarde um minuto e tente de novo.");
       } else {
-        setError("Usuário ou senha inválidos");
+        setError("Usuário ou senha incorretos");
       }
     } finally {
       setBusy(false);
@@ -98,14 +98,14 @@ export default function Login() {
           {error && <Alert severity="error" sx={{ mb: 2 }}>{dataDisplayText(error)}</Alert>}
           <form onSubmit={submit}>
             <TextField
-              label="Usuário ou e-mail corporativo" fullWidth margin="normal" autoFocus
+              label="E-mail corporativo ou usuário" fullWidth margin="normal" autoFocus
               value={identifier} onChange={(e) => setIdentifier(e.target.value)}
               autoComplete="username"
-              helperText={isCorporate ? "Você será redirecionado para o login corporativo." : undefined}
+              helperText={isCorporate ? "Você será levado ao login corporativo." : undefined}
             />
             {!isCorporate && (
               <TextField
-                label="Senha" type="password" fullWidth margin="normal"
+                label="Senha de acesso" type="password" fullWidth margin="normal"
                 value={password} onChange={(e) => setPassword(e.target.value)}
                 autoComplete="current-password"
               />
@@ -114,12 +114,12 @@ export default function Login() {
               type="submit" variant="contained" fullWidth sx={{ mt: 3 }}
               disabled={busy || !canSubmit || (!isCorporate && !showLocal)}
             >
-              {busy ? <CircularProgress size={22} /> : isCorporate ? "Continuar com conta corporativa" : "Entrar"}
+              {busy ? <CircularProgress size={22} /> : isCorporate ? "Entrar com conta corporativa" : "Acessar o FinBase"}
             </Button>
           </form>
           {!isCorporate && !showLocal && (
             <Typography variant="caption" color="text.secondary" sx={{ display: "block", textAlign: "center", mt: 1.5 }}>
-              Login local desabilitado. {breakGlass ? "(modo break-glass)" : "Acesse com seu e-mail corporativo."}
+              O login local está desativado. {breakGlass ? "(acesso de emergência)" : "Entre com seu e-mail corporativo."}
             </Typography>
           )}
           {samlProviders.length > 0 && (

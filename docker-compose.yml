@@ -5,9 +5,11 @@ services:
     environment:
       POSTGRES_DB: finops
       POSTGRES_USER: finops
-      POSTGRES_PASSWORD: finops
+      # Defina POSTGRES_PASSWORD no .env (ver .env.example). Sem default de propósito.
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?defina POSTGRES_PASSWORD no .env}
     ports:
-      - "5434:5432"
+      # Loopback only: the database must not be reachable from the network.
+      - "127.0.0.1:5434:5432"
     volumes:
       - pgdata:/var/lib/postgresql/data
     healthcheck:
@@ -23,13 +25,15 @@ services:
     env_file:
       - .env-databriks
     environment:
-      DATABASE_URL: postgresql+asyncpg://finops:finops@postgres:5432/finops
-      DATABASE_URL_SYNC: postgresql://finops:finops@postgres:5432/finops
+      DATABASE_URL: postgresql+asyncpg://finops:${POSTGRES_PASSWORD:?defina POSTGRES_PASSWORD no .env}@postgres:5432/finops
+      DATABASE_URL_SYNC: postgresql://finops:${POSTGRES_PASSWORD:?defina POSTGRES_PASSWORD no .env}@postgres:5432/finops
       TRINO_URL: http://trino:8080
       ICEBERG_LOCAL_WAREHOUSE: /data/iceberg
       OPENFINOPS_WORKER_RUNTIME_DIR: /run/openfinops-worker
       BOOTSTRAP_ENABLED: "false"
       SCHEDULER_ENABLED: "false"
+      # Gateway/nginx da rede Docker. Confie só nessa faixa, nunca em "*".
+      FORWARDED_ALLOW_IPS: ${FORWARDED_ALLOW_IPS:-172.16.0.0/12}
     volumes:
       - ./apps/data/iceberg:/data/iceberg
       - ./backups/scheduled:/backups/scheduled
@@ -50,8 +54,8 @@ services:
       - .env-databriks
     restart: unless-stopped
     environment:
-      DATABASE_URL: postgresql+asyncpg://finops:finops@postgres:5432/finops
-      DATABASE_URL_SYNC: postgresql://finops:finops@postgres:5432/finops
+      DATABASE_URL: postgresql+asyncpg://finops:${POSTGRES_PASSWORD:?defina POSTGRES_PASSWORD no .env}@postgres:5432/finops
+      DATABASE_URL_SYNC: postgresql://finops:${POSTGRES_PASSWORD:?defina POSTGRES_PASSWORD no .env}@postgres:5432/finops
       TRINO_URL: http://trino:8080
       ICEBERG_LOCAL_WAREHOUSE: /data/iceberg
       OPENFINOPS_WORKER_RUNTIME_DIR: /run/openfinops-worker
@@ -82,8 +86,8 @@ services:
       - .env-databriks
     restart: unless-stopped
     environment:
-      DATABASE_URL: postgresql+asyncpg://finops:finops@postgres:5432/finops
-      DATABASE_URL_SYNC: postgresql://finops:finops@postgres:5432/finops
+      DATABASE_URL: postgresql+asyncpg://finops:${POSTGRES_PASSWORD:?defina POSTGRES_PASSWORD no .env}@postgres:5432/finops
+      DATABASE_URL_SYNC: postgresql://finops:${POSTGRES_PASSWORD:?defina POSTGRES_PASSWORD no .env}@postgres:5432/finops
       TRINO_URL: http://trino:8080
       ICEBERG_LOCAL_WAREHOUSE: /data/iceberg
       OPENFINOPS_WORKER_RUNTIME_DIR: /run/openfinops-worker
@@ -119,7 +123,7 @@ services:
     pid: "service:worker"
     restart: unless-stopped
     environment:
-      DATABASE_URL_SYNC: postgresql://finops:finops@postgres:5432/finops
+      DATABASE_URL_SYNC: postgresql://finops:${POSTGRES_PASSWORD:?defina POSTGRES_PASSWORD no .env}@postgres:5432/finops
       OPENFINOPS_WORKER_RUNTIME_DIR: /run/openfinops-worker
       SUPERVISOR_INTERVAL_SECONDS: ${SUPERVISOR_INTERVAL_SECONDS:-15}
     volumes:
@@ -142,8 +146,9 @@ services:
     image: nginx:1.27-alpine
     restart: unless-stopped
     ports:
-      - "5173:80"
-      - "8000:8000"
+      # Loopback only: public access goes through the VM's outer Nginx (443).
+      - "127.0.0.1:5173:80"
+      - "127.0.0.1:8000:8000"
     volumes:
       - ./infra/nginx/gateway.conf:/etc/nginx/conf.d/default.conf:ro
     depends_on:
@@ -159,12 +164,16 @@ services:
     restart: unless-stopped
     # Coordinator only schedules; retain sufficient native JVM headroom.
     mem_limit: 2560m
+    # Catálogo Iceberg lê a senha do PostgreSQL desta variável (${ENV:...}).
+    environment:
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?defina POSTGRES_PASSWORD no .env}
     # Linux hosts do not resolve host.docker.internal unless this mapping is set.
     # Trino's Iceberg JDBC catalog reaches the canonical PostgreSQL on the host (:5433).
     extra_hosts:
       - "host.docker.internal:host-gateway"
     ports:
-      - "8080:8080"
+      # Loopback only: Trino has no authentication configured.
+      - "127.0.0.1:8080:8080"
     healthcheck:
       test: ["CMD", "sh", "-c", "curl -fsS http://localhost:8080/v1/info | grep -q '\"starting\":false'"]
       interval: 10s
@@ -184,6 +193,8 @@ services:
   trino-worker:
     image: trinodb/trino:483
     restart: unless-stopped
+    environment:
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?defina POSTGRES_PASSWORD no .env}
     # Keep the whole local cluster below Docker Desktop's 7.65 GiB VM. Query
     # concurrency is bounded in config-worker.properties; a bigger limit here
     # only lets two workers evict the coordinator and one another.
@@ -212,6 +223,8 @@ services:
   trino-worker-2:
     image: trinodb/trino:483
     restart: unless-stopped
+    environment:
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?defina POSTGRES_PASSWORD no .env}
     mem_limit: 2500m
     extra_hosts:
       - "host.docker.internal:host-gateway"

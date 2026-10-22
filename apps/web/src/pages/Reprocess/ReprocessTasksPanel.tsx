@@ -3,7 +3,7 @@ import { useCallback, useEffect, useState } from "react";
 import {
   Alert, Box, Button, Chip, CircularProgress, LinearProgress, Paper, Typography,
 } from "@mui/material";
-import { Stop } from "@mui/icons-material";
+import { StopOutlined } from "@mui/icons-material";
 import {
   TaskStatus, cancelEtl, cancelForecastRun, cancelReprocess, getForecastRuns, getRunningTasks,
 } from "../../services/api";
@@ -23,9 +23,9 @@ function label(task: TaskStatus): string {
   if (k === "reprocess") {
     const sources = task.connections?.map((source) => source.cloud_name || source.name || source.code) || [];
     const periods = task.billing_periods?.map(formatBillingPeriod) || [];
-    return `Reprocessar dados · ${sources.length ? [...new Set(sources)].join(", ") : "origem não informada"} · ${periods.length ? [...new Set(periods)].join(", ") : "período não informado"}`;
+    return `Reprocessar dados · ${sources.length ? [...new Set(sources)].join(", ") : "fonte não informada"} · ${periods.length ? [...new Set(periods)].join(", ") : "período não informado"}`;
   }
-  return `Extração${task.table ? `: ${task.table}` : ""}`;
+  return `Coleta${task.table ? `: ${task.table}` : ""}`;
 }
 
 function formatBillingPeriod(period: string): string {
@@ -40,7 +40,7 @@ function scope(task: TaskStatus): string {
   if (kind(task) !== "reprocess") return "";
   const sources = task.connections?.map((source) => `${source.cloud_name || source.name} (${source.code})`) || [];
   const periods = task.billing_periods?.map(formatBillingPeriod) || [];
-  return `Origem: ${sources.length ? [...new Set(sources)].join(", ") : "não informada"} · Mês: ${periods.length ? [...new Set(periods)].join(", ") : "não informado"} · Destino: ${task.destination_table_name || task.table || "não informado"} (base preparada)`;
+  return `Fonte: ${sources.length ? [...new Set(sources)].join(", ") : "sem informação"} · Mês: ${periods.length ? [...new Set(periods)].join(", ") : "não informado"} · Destino: ${task.destination_table_name || task.table || "não informado"} (base preparada)`;
 }
 
 export default function ReprocessTasksPanel() {
@@ -107,8 +107,8 @@ export default function ReprocessTasksPanel() {
         const stageLabel = kind(task) === "reprocess" && running && task.total_blobs > 0
           && task.processed_blobs >= task.total_blobs
           ? publishingPreparedData
-            ? "Publicando dados preparados..."
-            : "Origem processada · preparando publicação dos dados"
+            ? "Publicando os dados preparados..."
+            : "Fonte processada · preparando publicação dos dados"
           : task.phase || task.status;
         return (
           <Box key={task.id} sx={{ mb: 1.5, p: 1.25, bgcolor: "#FAFBFD", borderRadius: 1 }}>
@@ -133,7 +133,7 @@ export default function ReprocessTasksPanel() {
                   color="error"
                   variant="outlined"
                   disabled={cancelling === task.id}
-                  startIcon={cancelling === task.id ? <CircularProgress size={14} /> : <Stop />}
+                  startIcon={cancelling === task.id ? <CircularProgress size={14} /> : <StopOutlined />}
                   onClick={() => void cancel(task)}
                 >
                   Cancelar

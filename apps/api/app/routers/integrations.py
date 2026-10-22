@@ -22,13 +22,14 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.database import get_db
 from app.core.audit import audit
 from app.core.deps import get_current_user
+from app.core.outbound import ensure_allowed_url, integration_allowed_hosts
 from app.models.source_connection import SystemIntegration
 from app.models.identity import User
 
 logger = logging.getLogger(__name__)
 _CATALOG_DELETED_KEY = "__catalog_deleted"
 
-router = APIRouter(prefix="/integrations", tags=["integrations"])
+router = APIRouter(prefix="/dados/integracoes", tags=["integrations"])
 
 # Serviços previstos. `servicenow` nasce **desabilitado**: o plano pede que
 # apareça como futuro, sem enviar dado.
@@ -230,7 +231,7 @@ async def delete_integration(
     return Response(status_code=204)
 
 
-@router.post("/{code}/test")
+@router.post("/{code}/testar")
 async def test_integration(code: str, db: AsyncSession = Depends(get_db)) -> dict[str, Any]:
     """Testa a conectividade e registra o resultado.
 
@@ -247,6 +248,13 @@ async def test_integration(code: str, db: AsyncSession = Depends(get_db)) -> dic
     segredo = dict(linha.secret_json or {})
     base_url = str(config.get("base_url") or "").strip()
     token = str(segredo.get("api_key") or "").strip()
+
+    # O token é enviado a base_url: só para hosts configurados em INTEGRATION_ALLOWED_HOSTS.
+    if base_url and token:
+        try:
+            ensure_allowed_url(base_url, integration_allowed_hosts())
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
 
     status, mensagem = "NOT_CONFIGURED", "Informe `base_url` e o token."
     if base_url and token:

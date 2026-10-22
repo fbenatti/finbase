@@ -32,14 +32,14 @@ export default function Reprocess() {
     if (tab === "schedules") {
       getConnections()
         .then(setConnections)
-        .catch((e) => setSchedulesError(formatApiError(e, "Falha ao carregar conexões")));
+        .catch((e) => setSchedulesError(formatApiError(e, "Não foi possível carregar as conexões")));
     }
   }, [tab]);
 
   return (
     <Box sx={{ mx: -3, mt: -3 }}>
       <Box sx={{ bgcolor: "background.paper", px: { xs: 2, md: 4 }, pt: 3, borderBottom: 1, borderColor: "divider" }}>
-        <Typography variant="h4" sx={{ mb: 0.5 }}>Reprocessar</Typography>
+        <Typography variant="h4" sx={{ mb: 0.5 }}>Reprocessamento</Typography>
         <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
 
         Extração, consolidação, projeções e custo compartilhado no mesmo lugar. Acompanhe as execuções no sino de notificações.
@@ -55,7 +55,7 @@ export default function Reprocess() {
           {tab === "extraction" && <Extraction embedded />}
           {tab === "schedules" && (
             <>
-              <Typography variant="subtitle1" fontWeight={700} sx={{ mb: 1 }}>Agendamentos</Typography>
+              <Typography variant="subtitle1" fontWeight={700} sx={{ mb: 1 }}>Programações</Typography>
               <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
                 Coleta automática diária de dados de cloud e ferramentas. Cada agendamento pode cobrir várias
                 conexões e dispara a extração na fila do worker.

@@ -26,7 +26,7 @@ export function NavigationProvider({ children }: { children: React.ReactNode }) 
     if (userId == null) { setSnapshot(null); setLoading(false); return; }
     setError("");
     try {
-      const data = (await api.get<NavigationSnapshot>("/navigation")).data;
+      const data = (await api.get<NavigationSnapshot>("/navegacao")).data;
       if (activeUser.current === userId) setSnapshot({ userId, data });
     }
     catch (e) { if (activeUser.current === userId) { setSnapshot(null); setError(formatApiError(e, "Não foi possível carregar os módulos.")); } }

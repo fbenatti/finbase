@@ -12,8 +12,8 @@ body {
   font-family: "Inter", "Segoe UI", "Helvetica Neue", Arial, sans-serif;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
-  color: #161b2e;
-  background: #f5f6fa;
+  color: #162B3A;
+  background: #F5F8FB;
 }
 
 [data-print-only] {
@@ -51,7 +51,7 @@ body {
   body.finops-print-mode .finops-print-meta {
     margin-bottom: 16px;
     padding-bottom: 12px;
-    border-bottom: 1px solid #e5e7eb;
+    border-bottom: 1px solid #E1E8F0;
     page-break-after: avoid;
   }
 
@@ -64,14 +64,14 @@ body {
   body.finops-print-mode .finops-print-meta p {
     margin: 2px 0;
     font-size: 11px;
-    color: #374151;
+    color: #526777;
   }
 
   body.finops-print-mode .finops-print-card {
     break-inside: avoid;
     page-break-inside: avoid;
     box-shadow: none !important;
-    border: 1px solid #e5e7eb;
+    border: 1px solid #E1E8F0;
     margin-bottom: 12px;
   }
 
@@ -96,7 +96,7 @@ body {
   /* ── Relatório PDF — Azure PTU Operação (todos os painéis) ─────────── */
   body.finops-print-mode .azure-ptu-ops-report {
     font-size: 11px;
-    color: #161B2E;
+    color: #162B3A;
   }
 
   body.finops-print-mode .azure-ptu-ops-report h6,
@@ -115,7 +115,7 @@ body {
     gap: 10px;
     margin: 20px 0 8px;
     padding-bottom: 6px;
-    border-bottom: 2px solid #e5e7eb;
+    border-bottom: 2px solid #E1E8F0;
     page-break-after: avoid;
   }
 
@@ -175,4 +175,37 @@ body {
     margin: 10mm;
     size: A4 landscape;
   }
+}
+
+/* Calendários nativos (campos de data e filtros de datagrid) seguem a paleta da marca. */
+:root {
+  accent-color: #0F62FE;
+}
+
+input[type="date"],
+input[type="datetime-local"],
+input[type="month"] {
+  accent-color: #0F62FE;
+  color-scheme: light;
+}
+
+input[type="date"]::-webkit-calendar-picker-indicator,
+input[type="datetime-local"]::-webkit-calendar-picker-indicator {
+  cursor: pointer;
+  opacity: 0.6;
+  padding: 2px;
+  border-radius: 4px;
+}
+
+input[type="date"]::-webkit-calendar-picker-indicator:hover,
+input[type="datetime-local"]::-webkit-calendar-picker-indicator:hover {
+  opacity: 1;
+  background-color: #EEF4FF;
+}
+
+input[type="date"]:focus-visible,
+input[type="datetime-local"]:focus-visible,
+input[type="month"]:focus-visible {
+  outline: 2px solid #6EA8FE;
+  outline-offset: 1px;
 }

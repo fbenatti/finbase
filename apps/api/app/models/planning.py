@@ -31,6 +31,8 @@ class PlanningVersion(Base):
     effective_date = Column(Date, nullable=True, index=True)
     scope_id_orcamento = Column(String(80), nullable=True, index=True)
     scope_cloud = Column(String(80), nullable=True, index=True)
+    # Nó da hierarquia que delimita a grade (substitui scope_id_orcamento; nulo em snapshots antigos).
+    scope_hierarquia_id = Column(Integer, ForeignKey("department.id", ondelete="SET NULL"), nullable=True, index=True)
     # When a defense snapshot belongs to a request, "current" is tracked per
     # request instead of per (ID Orçamento, cloud): two projects may defend the
     # same requested line at the same time.

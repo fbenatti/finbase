@@ -3,7 +3,7 @@ import { dataDisplayText } from "../../utils/dataPresentation";
 import { useEffect, useState } from "react";
 import Plot from "@/components/Plot";
 import { Alert, Box, Button, Chip, CircularProgress, FormControl, FormControlLabel, InputLabel, MenuItem, Paper, Select, Stack, Switch, Table, TableBody, TableCell, TableContainer, TableHead, TableRow, ToggleButton, ToggleButtonGroup, TextField, Typography } from "@mui/material";
-import { Add } from "@mui/icons-material";
+import { AddOutlined } from "@mui/icons-material";
 import {
   BudgetAccuracyAck,
   BudgetAccuracyDetail,
@@ -41,10 +41,10 @@ const months = [
   "Dezembro",
 ];
 const statusLabels = {
-  dentro_orcamento: "Dentro do orçamento",
-  fora_orcamento: "Fora do orçamento",
-  sem_orcamento: "Sem orçamento",
-  sem_realizado: "Sem realizado",
+  dentro_orcamento: "Dentro da meta",
+  fora_orcamento: "Acima da meta",
+  sem_orcamento: "Sem meta cadastrada",
+  sem_realizado: "Sem gasto registrado",
 } as const;
 const statusColors = {
   dentro_orcamento: "success",
@@ -114,7 +114,7 @@ export default function BudgetAccuracy() {
   const [detailTab, setDetailTab] = useState(0);
 
   const updateUrl = (next: URLSearchParams) => {
-    next.set("tab", "acuracia-orcamento");
+    next.set("tab", "aderencia-orcamento");
     window.history.replaceState(
       null,
       "",
@@ -265,11 +265,11 @@ export default function BudgetAccuracy() {
     0;
   return (
     <Box sx={{ minWidth: 0 }}>
-      <Typography variant="h4">Acurácia de Orçamento</Typography>
+      <Typography variant="h4">Execução do orçamento</Typography>
       <Typography color="text.secondary" sx={{ mb: 2 }}>
         {period === "annual"
-          ? "Visão anual: soma de Forecast + Realizado comparada ao orçamento anual por departamento."
-          : "Visão mensal do orçamento vigente contra o realizado por departamento."}
+          ? "Visão do ano: soma de previsão + efetivado comparada à meta anual por unidade."
+          : "Visão mensal da meta vigente contra o efetivado por unidade."}
       </Typography>
       <Paper
         variant="outlined"
@@ -286,7 +286,7 @@ export default function BudgetAccuracy() {
             alignItems={{ sm: "center" }}
           >
             <FormControl size="small" sx={{ minWidth: 130 }}>
-              <InputLabel>Ano</InputLabel>
+              <InputLabel>Exercício</InputLabel>
               <Select
                 label="Ano"
                 value={String(year)}
@@ -300,23 +300,23 @@ export default function BudgetAccuracy() {
               </Select>
             </FormControl>
             <FormControl size="small" sx={{ minWidth: 150 }}>
-              <InputLabel>Visão</InputLabel>
+              <InputLabel>Visualização</InputLabel>
               <Select
-                label="Visão"
+                label="Visualização"
                 value={period}
                 onChange={(event) =>
                   changePeriod(event.target.value as "monthly" | "annual")
                 }
               >
-                <MenuItem value="monthly">Mês</MenuItem>
-                <MenuItem value="annual">Ano</MenuItem>
+                <MenuItem value="monthly">Mensal</MenuItem>
+                <MenuItem value="annual">Anual</MenuItem>
               </Select>
             </FormControl>
             {period === "monthly" && (
               <FormControl size="small" sx={{ minWidth: 150 }}>
-                <InputLabel>Mês</InputLabel>
+                <InputLabel>Mês de referência</InputLabel>
                 <Select
-                  label="Mês"
+                  label="Mês de referência"
                   value={String(month)}
                   onChange={(event) => changeMonth(Number(event.target.value))}
                 >
@@ -335,8 +335,8 @@ export default function BudgetAccuracy() {
               value={departmentId}
               onChange={changeDepartment}
               allowClear
-              clearLabel="Toda a organização"
-              label="Organograma"
+              clearLabel="Toda a empresa"
+              label="Hierarquia"
             />
           </Box>
         </Stack>
@@ -354,32 +354,32 @@ export default function BudgetAccuracy() {
         <>
           <Stack direction={{ xs: "column", md: "row" }} gap={2} sx={{ mb: 2 }}>
             <Metric
-              label="Orçamento vigente"
+              label="Meta vigente"
               value={money(totals?.budget_value || 0)}
-              color="#4338CA"
+              color="#0F62FE"
             />
             {period === "annual" ? (
               <Metric
-                label="Forecast + Realizado"
+                label="Previsão mais realizado"
                 value={money(totals?.comparison_value || 0)}
-                color="#0f766e"
+                color="#0F62FE"
               />
             ) : (
               <Metric
-                label="Realizado"
+                label="Efetivado"
                 value={money(totals?.actual_value || 0)}
-                color="#0f766e"
+                color="#0F62FE"
               />
             )}
             {period === "annual" && (
               <Metric
-                label="Forecast"
+                label="Previsão"
                 value={money(totals?.forecast_value || 0)}
-                color="#7c3aed"
+                color="#64748B"
               />
             )}
             <Metric
-              label={period === "annual" ? "Variação anual" : "Desvio mensal"}
+              label={period === "annual" ? "Desvio anual" : "Desvio mensal"}
               value={money(totals?.variance || 0)}
               color={
                 totals &&
@@ -391,12 +391,12 @@ export default function BudgetAccuracy() {
               }
             />
             <Metric
-              label="Fora do orçamento"
+              label="Acima da meta"
               value={String(outsideCount)}
               color="#dc2626"
             />
             <Metric
-              label="Dentro do orçamento"
+              label="Dentro da meta"
               value={String(insideCount)}
               color="#059669"
             />
@@ -415,17 +415,17 @@ export default function BudgetAccuracy() {
                 </Typography>
                 <Typography variant="body2" color="text.secondary">
                   {period === "annual"
-                    ? "Soma dos 12 meses: Forecast + Realizado comparados ao orçamento anual."
-                    : "Realizado mensal comparado ao orçamento do mês."}{" "}
-                  Desvio: {percent(totals?.variance_pct ?? null)} · consumo:{" "}
+                    ? "Soma dos 12 meses: previsão + efetivado comparados à meta anual."
+                    : "Efetivado mensal comparado à meta do mês."}{" "}
+                  Variação: {percent(totals?.variance_pct ?? null)} · consumido:{" "}
                   {percent(totals?.consumed_pct ?? null)}
                 </Typography>
               </Box>
               <Typography variant="body2" color="text.secondary">
-                Versão:{" "}
+                Versão da meta:{" "}
                 {data?.version
-                  ? `v${data.version.version} · ${data.version.title || "sem título"}`
-                  : "Nenhuma versão vigente"}
+                  ? `v${data.version.version} · ${data.version.title || "sem descrição"}`
+                  : "Nenhuma versão de meta vigente"}
               </Typography>
             </Stack>
           </Paper>
@@ -434,23 +434,23 @@ export default function BudgetAccuracy() {
               <TableHead>
                 <TableRow>
                   <TableCell />
-                  <TableCell>Departamento</TableCell>
+                  <TableCell>Unidade organizacional</TableCell>
                   <TableCell align="right">
                     {period === "annual"
-                      ? "Orçamento anual"
-                      : "Orçamento do mês"}
+                      ? "Meta anual"
+                      : "Meta do mês"}
                   </TableCell>
                   <TableCell align="right">
-                    {period === "annual" ? "Forecast + Realizado" : "Realizado"}
+                    {period === "annual" ? "Previsão + realizado" : "Efetivado"}
                   </TableCell>
                   {period === "annual" && (
-                    <TableCell align="right">Forecast</TableCell>
+                    <TableCell align="right">Previsão</TableCell>
                   )}
-                  <TableCell align="right">Desvio</TableCell>
-                  <TableCell align="right">Desvio %</TableCell>
+                  <TableCell align="right">Variação</TableCell>
+                  <TableCell align="right">Variação %</TableCell>
                   <TableCell align="right">Consumido</TableCell>
                   <TableCell>Status</TableCell>
-                  <TableCell>Reconhecer desvio</TableCell>
+                  <TableCell>Justificar variação</TableCell>
                 </TableRow>
               </TableHead>
               <TableBody>
@@ -461,7 +461,7 @@ export default function BudgetAccuracy() {
                         color="text.secondary"
                         sx={{ py: 3, textAlign: "center" }}
                       >
-                        Nenhuma linha de orçamento encontrada para este período.
+                        Nenhuma linha de meta encontrada para este período.
                       </Typography>
                     </TableCell>
                   </TableRow>
@@ -478,7 +478,7 @@ export default function BudgetAccuracy() {
                             onClick={() => void openDetail(line)}
                             aria-label={`Abrir detalhe de ${line.department_levels[line.department_levels.length - 1]}`}
                           >
-                            <Add />
+                            <AddOutlined />
                           </Button>
                         </TableCell>
                         <TableCell>
@@ -557,7 +557,7 @@ export default function BudgetAccuracy() {
                               size="small"
                               onClick={() => setAckTarget(line)}
                             >
-                              Reconhecer desvio
+                              Aceitar desvio
                             </Button>
                           )}
                         </TableCell>
@@ -580,7 +580,7 @@ export default function BudgetAccuracy() {
           >
             <DialogTitle>
               {detail?.department_levels[detail.department_levels.length - 1] ||
-                "Detalhe do projeto"}{" "}
+                "Detalhe por projeto"}{" "}
               · visão anual {year}
             </DialogTitle>
             <DialogContent sx={{ overflowX: "hidden" }}>
@@ -597,24 +597,24 @@ export default function BudgetAccuracy() {
                       flexWrap="wrap"
                     >
                       <Metric
-                        label="Orçamento anual"
+                        label="Meta anual"
                         value={money(detailBudget)}
-                        color="#4338CA"
+                        color="#0F62FE"
                       />
                       <Metric
-                        label="Realizado + Forecast"
+                        label="Efetivado mais previsão"
                         value={money(detailProjected)}
-                        color="#0f766e"
+                        color="#0F62FE"
                       />
                       <Metric
-                        label="Realizado"
+                        label="Efetivado"
                         value={money(detailActual)}
                         color="#f2a900"
                       />
                       <Metric
-                        label="Forecast"
+                        label="Previsão"
                         value={money(detailForecast)}
-                        color="#7c3aed"
+                        color="#64748B"
                       />
                       <Metric
                         label="Variação"
@@ -622,25 +622,25 @@ export default function BudgetAccuracy() {
                         color={detailWithinBudget ? "#059669" : "#dc2626"}
                       />
                       <Metric
-                        label="Status"
+                        label="Situação"
                         value={
                           detailWithinBudget
-                            ? "Dentro do orçamento"
-                            : "Fora do orçamento"
+                            ? "Dentro da meta"
+                            : "Acima da meta"
                         }
                         color={detailWithinBudget ? "#059669" : "#dc2626"}
                       />
                     </Stack>
                     <ToggleButtonGroup exclusive size="small" value={detailTab} onChange={(_, value: number | null) => { if (value !== null) setDetailTab(value); }}>
-                      <ToggleButton value={0}>Visão anual</ToggleButton>
-                      <ToggleButton value={1}>Registrar desvio</ToggleButton>
+                      <ToggleButton value={0}>Anual</ToggleButton>
+                      <ToggleButton value={1}>Registrar justificativa</ToggleButton>
                     </ToggleButtonGroup>
                     {detailTab === 0 ? (
                       <>
                         <Typography variant="body2" color="text.secondary">
-                          Evolução mensal: orçamento como linha; realizado e
+                          Evolução mensal: meta como linha; efetivado e
                           forecast como barras empilhadas. No mês corrente, a
-                          altura representa a projeção total.
+                          altura representa a previsão total.
                         </Typography>
                         <Box
                           sx={{
@@ -660,8 +660,8 @@ export default function BudgetAccuracy() {
                                 y: detail.monthly.map(
                                   (item) => item.actual_value,
                                 ),
-                                type: "bar",
-                                name: "Realizado",
+                                type: "bar" as const,
+                                name: "Efetivado",
                                 marker: { color: "#F2A900" },
                               },
                               {
@@ -671,8 +671,8 @@ export default function BudgetAccuracy() {
                                 y: detail.monthly.map(
                                   (item) => item.forecast_value,
                                 ),
-                                type: "bar",
-                                name: "Forecast",
+                                type: "bar" as const,
+                                name: "Previsão",
                                 marker: { color: "#22C55E" },
                               },
                               {
@@ -684,8 +684,8 @@ export default function BudgetAccuracy() {
                                 ),
                                 type: "scatter",
                                 mode: "lines+markers",
-                                name: "Orçamento",
-                                line: { color: "#5A6378", width: 3 },
+                                name: "Meta",
+                                line: { color: "#526777", width: 3 },
                               },
                             ]}
                             layout={{
@@ -734,7 +734,7 @@ export default function BudgetAccuracy() {
                                   }
                                 />
                               }
-                              label="Incluir Outros"
+                              label="Agrupar demais"
                             />
                           </Stack>
                           <Box
@@ -753,14 +753,14 @@ export default function BudgetAccuracy() {
                                     point.period.slice(4),
                                   ),
                                   y: item.monthly_values,
-                                  type: "bar",
+                                  type: "bar" as const,
                                   name: item.name,
                                   marker: {
                                     color: [
-                                      "#4338CA",
-                                      "#0F766E",
+                                      "#0F62FE",
+                                      "#0F62FE",
                                       "#F2A900",
-                                      "#7C3AED",
+                                      "#64748B",
                                       "#DC2626",
                                     ][index],
                                   },
@@ -773,11 +773,11 @@ export default function BudgetAccuracy() {
                                           item.period.slice(4),
                                         ),
                                         y: detail.others_monthly,
-                                        type: "bar",
+                                        type: "bar" as const,
                                         name: "Outros",
-                                        marker: { color: "#8A93A8" },
+                                        marker: { color: "#8497A8" },
                                         hovertemplate:
-                                          "Outros<br>%{x}: R$ %{y:,.0f}<extra></extra>",
+                                          "Demais<br>%{x}: R$ %{y:,.0f}<extra></extra>",
                                       },
                                     ]
                                   : []),
@@ -792,7 +792,7 @@ export default function BudgetAccuracy() {
                                 yaxis: {
                                   tickprefix: "R$ ",
                                   tickformat: ".2s",
-                                  title: "Consumo mensal",
+                                  title: { text: "Consumo por mês" },
                                 },
                                 legend: {
                                   orientation: "h",
@@ -814,11 +814,11 @@ export default function BudgetAccuracy() {
                     ) : (
                       <Stack spacing={2} sx={{ py: 2, maxWidth: 720 }}>
                         <Typography variant="body2" color="text.secondary">
-                          Registre a categoria e o motivo do desvio para este
+                          Registre a categoria e o motivo da variação para este
                           projeto.
                         </Typography>
                         <FormControl fullWidth>
-                          <InputLabel>Categoria</InputLabel>
+                          <InputLabel>Tipo de variação</InputLabel>
                           <Select
                             label="Categoria"
                             value={ackCategory}
@@ -834,13 +834,13 @@ export default function BudgetAccuracy() {
                             </MenuItem>
                             <MenuItem value="Migração">Migração</MenuItem>
                             <MenuItem value="Erro de planejamento">
-                              Erro de planejamento
+                              Erro de previsão
                             </MenuItem>
                             <MenuItem value="Outro">Outro</MenuItem>
                           </Select>
                         </FormControl>
                         <TextField
-                          label="Motivo do desvio"
+                          label="Motivo da variação"
                           value={ackReason}
                           onChange={(event) => setAckReason(event.target.value)}
                           multiline
@@ -854,7 +854,7 @@ export default function BudgetAccuracy() {
                           disabled={savingAck || !ackReason.trim()}
                           sx={{ alignSelf: "flex-start" }}
                         >
-                          Registrar reconhecimento
+                          Registrar aceite
                         </Button>
                       </Stack>
                     )}
@@ -872,14 +872,14 @@ export default function BudgetAccuracy() {
             maxWidth="sm"
             fullWidth
           >
-            <DialogTitle>Justificar desvio de orçamento</DialogTitle>
+            <DialogTitle>Justificar variação da meta</DialogTitle>
             <DialogContent>
               <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
                 {ackTarget?.department_levels.join(" › ")}
               </Typography>
               <Stack gap={2}>
                 <FormControl fullWidth>
-                  <InputLabel>Categoria</InputLabel>
+                  <InputLabel>Tipo de variação</InputLabel>
                   <Select
                     label="Categoria"
                     value={ackCategory}
@@ -891,13 +891,13 @@ export default function BudgetAccuracy() {
                     <MenuItem value="Projeto novo">Projeto novo</MenuItem>
                     <MenuItem value="Migração">Migração</MenuItem>
                     <MenuItem value="Erro de planejamento">
-                      Erro de planejamento
+                      Erro de previsão
                     </MenuItem>
                     <MenuItem value="Outro">Outro</MenuItem>
                   </Select>
                 </FormControl>
                 <TextField
-                  label="Motivo do desvio"
+                  label="Motivo da variação"
                   value={ackReason}
                   onChange={(event) => setAckReason(event.target.value)}
                   multiline

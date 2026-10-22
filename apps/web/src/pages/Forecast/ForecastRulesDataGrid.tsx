@@ -15,6 +15,7 @@ import { Delete, Edit, FilterAlt } from "../../components/FinbaseIcons";
 import { GridColDef, GridFilterModel, GridPaginationModel, GridSortModel, useGridApiRef } from "@mui/x-data-grid";
 import { ForecastBusinessRule } from "../../services/api";
 import { BEHAVIOR_LABELS } from "./forecastConstants";
+import { RowAction } from "../../components/RowAction";
 
 export type ForecastGridFilter = {
   field: string;
@@ -69,7 +70,7 @@ export default function ForecastRulesDataGrid({
   onDelete,
 }: Props) {
   const apiRef = useGridApiRef();
-  const [paginationModel, setPaginationModel] = useState<GridPaginationModel>({ page: 0, pageSize: 10 });
+  const [paginationModel, setPaginationModel] = useState<GridPaginationModel>({ page: 0, pageSize: 50 });
   const [sortModel, setSortModel] = useState<GridSortModel>([]);
   const [filterModel, setFilterModel] = useState<GridFilterModel>({ items: [] });
   const [activeFilters, setActiveFilters] = useState<Record<string, ForecastGridFilter>>({});
@@ -80,7 +81,7 @@ export default function ForecastRulesDataGrid({
     <Stack direction="row" alignItems="center" gap={0.5} sx={{ overflow: "hidden" }}>
       <Typography component="span" variant="inherit" noWrap>{label}</Typography>
       {activeFilters[field] && (
-        <Tooltip title="Esta coluna possui um filtro ativo">
+        <Tooltip title="Filtro ativo nesta coluna">
           <FilterAlt fontSize="small" color="primary" />
         </Tooltip>
       )}
@@ -173,11 +174,11 @@ export default function ForecastRulesDataGrid({
       headerAlign: "center",
       renderCell: ({ row }: { row: ForecastBusinessRule }) => (
         <Stack direction="row" alignItems="center" justifyContent="center" sx={{ height: "100%" }}>
-          <Tooltip title="Editar regra">
-            <IconButton size="small" aria-label={"Editar " + row.name} onClick={(event) => { event.stopPropagation(); onEdit(row); }}><Edit fontSize="small" /></IconButton>
+          <Tooltip title="Alterar regra">
+            <RowAction kind="edit" label={"Editar " + row.name} onClick={(event) => { event.stopPropagation(); onEdit(row); }} />
           </Tooltip>
-          <Tooltip title="Excluir regra">
-            <IconButton size="small" color="error" aria-label={"Excluir " + row.name} onClick={(event) => { event.stopPropagation(); onDelete(row); }}><Delete fontSize="small" /></IconButton>
+          <Tooltip title="Remover regra">
+            <RowAction kind="delete" label={"Excluir " + row.name} onClick={(event) => { event.stopPropagation(); onDelete(row); }} />
           </Tooltip>
         </Stack>
       ),
@@ -337,7 +338,7 @@ export default function ForecastRulesDataGrid({
           paginationMode="server"
           sortingMode="server"
           filterMode="server"
-          pageSizeOptions={[10, 25, 50]}
+          pageSizeOptions={[50, 100, 500, 1000]}
           paginationModel={paginationModel}
           sortModel={sortModel}
           filterModel={filterModel}
@@ -364,10 +365,10 @@ export default function ForecastRulesDataGrid({
         anchorReference="anchorPosition"
         anchorPosition={context ? { top: context.mouseY, left: context.mouseX } : undefined}
       >
-        <MenuItem onClick={() => applyContextFilter("equals")}>Mostrar iguais</MenuItem>
-        <MenuItem onClick={() => applyContextFilter("notEquals")}>Mostrar diferentes</MenuItem>
-        <MenuItem disabled={!context || !activeFilters[context.field]} onClick={() => clearFilter(context?.field)}>Limpar filtro da coluna</MenuItem>
-        <MenuItem disabled={Object.keys(activeFilters).length === 0} onClick={() => clearFilter()}>Limpar todos os filtros</MenuItem>
+        <MenuItem onClick={() => applyContextFilter("equals")}>Filtrar iguais</MenuItem>
+        <MenuItem onClick={() => applyContextFilter("notEquals")}>Filtrar diferentes</MenuItem>
+        <MenuItem disabled={!context || !activeFilters[context.field]} onClick={() => clearFilter(context?.field)}>Remover filtro da coluna</MenuItem>
+        <MenuItem disabled={Object.keys(activeFilters).length === 0} onClick={() => clearFilter()}>Remover todos os filtros</MenuItem>
       </Menu>
 
       <Menu
@@ -380,11 +381,11 @@ export default function ForecastRulesDataGrid({
           const field = headerContext?.field;
           setHeaderContext(null);
           if (field) apiRef.current.showColumnMenu(field);
-        }}>Opções da coluna</MenuItem>
-        <MenuItem onClick={() => { exportDisplayed(); setHeaderContext(null); }}>Exportar resultados exibidos</MenuItem>
+        }}>Configurar coluna</MenuItem>
+        <MenuItem onClick={() => { exportDisplayed(); setHeaderContext(null); }}>Baixar resultados exibidos</MenuItem>
         <Divider />
-        <MenuItem disabled={!headerContext || !activeFilters[headerContext.field]} onClick={() => clearFilter(headerContext?.field)}>Limpar filtro da coluna</MenuItem>
-        <MenuItem disabled={Object.keys(activeFilters).length === 0} onClick={() => clearFilter()}>Limpar todos os filtros</MenuItem>
+        <MenuItem disabled={!headerContext || !activeFilters[headerContext.field]} onClick={() => clearFilter(headerContext?.field)}>Remover filtro da coluna</MenuItem>
+        <MenuItem disabled={Object.keys(activeFilters).length === 0} onClick={() => clearFilter()}>Remover todos os filtros</MenuItem>
       </Menu>
     </>
   );

@@ -32,52 +32,52 @@ export interface EffectivePermissions {
 }
 
 // Roles
-export const listRoles = () => api.get<AdminRole[]>("/roles").then((r) => r.data);
+export const listRoles = () => api.get<AdminRole[]>("/administracao/perfis").then((r) => r.data);
 export const createRole = (body: { name: string; description?: string }) =>
-  api.post<AdminRole>("/roles", body).then((r) => r.data);
+  api.post<AdminRole>("/administracao/perfis", body).then((r) => r.data);
 export const updateRole = (id: number, body: { name?: string; description?: string }) =>
-  api.put(`/roles/${id}`, body).then((r) => r.data);
-export const deleteRole = (id: number) => api.delete(`/roles/${id}`).then((r) => r.data);
-export const getRole = (id: number) => api.get<AdminRole>(`/roles/${id}`).then((r) => r.data);
+  api.put(`/administracao/perfis/${id}`, body).then((r) => r.data);
+export const deleteRole = (id: number) => api.delete(`/administracao/perfis/${id}`).then((r) => r.data);
+export const getRole = (id: number) => api.get<AdminRole>(`/administracao/perfis/${id}`).then((r) => r.data);
 export const setRolePermissions = (id: number, items: Array<{ module: string; action: string }>) =>
-  api.put(`/roles/${id}/permissions`, items).then((r) => r.data);
+  api.put(`/administracao/perfis/${id}/permissoes`, items).then((r) => r.data);
 export const addInheritance = (roleId: number, parentId: number) =>
-  api.post(`/roles/${roleId}/inherits/${parentId}`).then((r) => r.data);
+  api.post(`/administracao/perfis/${roleId}/heranca/${parentId}`).then((r) => r.data);
 export const removeInheritance = (roleId: number, parentId: number) =>
-  api.delete(`/roles/${roleId}/inherits/${parentId}`).then((r) => r.data);
-export const getRoleTree = (id: number) => api.get(`/roles/${id}/tree`).then((r) => r.data);
+  api.delete(`/administracao/perfis/${roleId}/heranca/${parentId}`).then((r) => r.data);
+export const getRoleTree = (id: number) => api.get(`/administracao/perfis/${id}/arvore`).then((r) => r.data);
 
 // Groups
-export const listGroups = () => api.get<AdminGroup[]>("/groups").then((r) => r.data);
+export const listGroups = () => api.get<AdminGroup[]>("/administracao/grupos").then((r) => r.data);
 export const createGroup = (body: { name: string; description?: string }) =>
-  api.post<AdminGroup>("/groups", body).then((r) => r.data);
+  api.post<AdminGroup>("/administracao/grupos", body).then((r) => r.data);
 export const updateGroup = (id: number, body: { name?: string; description?: string }) =>
-  api.put(`/groups/${id}`, body).then((r) => r.data);
-export const deleteGroup = (id: number) => api.delete(`/groups/${id}`).then((r) => r.data);
+  api.put(`/administracao/grupos/${id}`, body).then((r) => r.data);
+export const deleteGroup = (id: number) => api.delete(`/administracao/grupos/${id}`).then((r) => r.data);
 export const addGroupMember = (groupId: number, userId: number) =>
-  api.post(`/groups/${groupId}/members`, { user_id: userId }).then((r) => r.data);
+  api.post(`/administracao/grupos/${groupId}/membros`, { user_id: userId }).then((r) => r.data);
 export const removeGroupMember = (groupId: number, userId: number) =>
-  api.delete(`/groups/${groupId}/members/${userId}`).then((r) => r.data);
+  api.delete(`/administracao/grupos/${groupId}/membros/${userId}`).then((r) => r.data);
 export const addGroupRole = (groupId: number, roleId: number) =>
-  api.post(`/groups/${groupId}/roles`, { role_id: roleId }).then((r) => r.data);
+  api.post(`/administracao/grupos/${groupId}/perfis`, { role_id: roleId }).then((r) => r.data);
 export const removeGroupRole = (groupId: number, roleId: number) =>
-  api.delete(`/groups/${groupId}/roles/${roleId}`).then((r) => r.data);
+  api.delete(`/administracao/grupos/${groupId}/perfis/${roleId}`).then((r) => r.data);
 
 // Users
-export const listUsers = () => api.get<AdminUser[]>("/users").then((r) => r.data);
+export const listUsers = () => api.get<AdminUser[]>("/administracao/usuarios").then((r) => r.data);
 export const createUser = (body: { username: string; full_name?: string; email?: string; password?: string; role_ids?: number[] }) =>
-  api.post<AdminUser>("/users", body).then((r) => r.data);
+  api.post<AdminUser>("/administracao/usuarios", body).then((r) => r.data);
 export const updateUser = (id: number, body: Partial<Pick<AdminUser, "full_name" | "email" | "is_active">>) =>
-  api.put(`/users/${id}`, body).then((r) => r.data);
+  api.put(`/administracao/usuarios/${id}`, body).then((r) => r.data);
 export const resetUserPassword = (id: number, newPassword?: string) =>
-  api.post<{ ok: boolean; temporary_password?: string }>(`/users/${id}/reset-password`, { new_password: newPassword }).then((r) => r.data);
+  api.post<{ ok: boolean; temporary_password?: string }>(`/administracao/usuarios/${id}/redefinir-senha`, { new_password: newPassword }).then((r) => r.data);
 export const setUserRoles = (id: number, roleIds: number[]) =>
-  api.put(`/users/${id}/roles`, { role_ids: roleIds }).then((r) => r.data);
+  api.put(`/administracao/usuarios/${id}/perfis`, { role_ids: roleIds }).then((r) => r.data);
 export const getEffectivePermissions = (id: number) =>
-  api.get<EffectivePermissions>(`/users/${id}/effective-permissions`).then((r) => r.data);
+  api.get<EffectivePermissions>(`/administracao/usuarios/${id}/permissoes-efetivas`).then((r) => r.data);
 export const listGrants = (userId: number) =>
-  api.get<AdminGrant[]>(`/users/${userId}/grants`).then((r) => r.data);
+  api.get<AdminGrant[]>(`/administracao/usuarios/${userId}/concessoes`).then((r) => r.data);
 export const createGrant = (userId: number, body: { module: string; action: string; reason: string; expires_at?: string | null }) =>
-  api.post<AdminGrant>(`/users/${userId}/grants`, body).then((r) => r.data);
+  api.post<AdminGrant>(`/administracao/usuarios/${userId}/concessoes`, body).then((r) => r.data);
 export const deleteGrant = (grantId: number) =>
-  api.delete(`/users/grants/${grantId}`).then((r) => r.data);
+  api.delete(`/administracao/usuarios/concessoes/${grantId}`).then((r) => r.data);

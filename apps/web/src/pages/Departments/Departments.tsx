@@ -2,19 +2,8 @@ import { Dialog, DialogActions, DialogContent, DialogTitle } from "../../compone
 import { dataDisplayText } from "../../utils/dataPresentation";
 import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { Alert, Box, Button, Chip, CircularProgress, Divider, FormControl, FormControlLabel, FormLabel, IconButton, InputAdornment, Menu, MenuItem, Paper, Radio, RadioGroup, Stack, Switch, TextField, Tooltip, Typography } from "@mui/material";
-import {
-  Add,
-  AccountBalance,
-  AccountTree,
-  Business,
-  Delete,
-  Edit,
-  ExpandLess,
-  ExpandMore,
-  Search,
-  UploadFile,
-} from "@mui/icons-material";
+import { Alert, Box, Breadcrumbs, Button, ButtonBase, Chip, CircularProgress, Divider, FormControl, FormControlLabel, FormLabel, IconButton, InputAdornment, Link, Menu, MenuItem, Paper, Radio, RadioGroup, Stack, Switch, TextField, Tooltip, Typography } from "@mui/material";
+import { AddOutlined, AccountBalanceOutlined, AccountTreeOutlined, BusinessOutlined, ChevronRightOutlined, DeleteOutlined, EditOutlined, ExpandMoreOutlined, SearchOutlined, UnfoldLessOutlined, UnfoldMoreOutlined, UploadFileOutlined } from "@mui/icons-material";
 import {
   getDepartments,
   createDepartment,
@@ -45,9 +34,7 @@ const emptyDeptForm = {
   parent_id: null as number | null,
   name: "",
   centro_custo: "",
-  id_orcamento: "",
   ambiente: "",
-  cloud_filter: "",
   custom_fields: {} as Record<string, unknown>,
   active: true,
 };
@@ -65,7 +52,7 @@ export default function Departments({ embedded = false }: { embedded?: boolean }
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
 
-  // Busca do organograma (filtra a arvore mantendo os ancestrais)
+  // Busca na árvore (filtra mantendo os ancestrais)
   const [deptSearch, setDeptSearch] = useState("");
 
   // Department dialog
@@ -76,8 +63,9 @@ export default function Departments({ embedded = false }: { embedded?: boolean }
   const [savingDept, setSavingDept] = useState(false);
   const [deptDialogError, setDeptDialogError] = useState("");
 
-  // Expand state do organograma
+  // Expansão da árvore e nó selecionado no painel de detalhe
   const [expanded, setExpanded] = useState<Set<number>>(new Set());
+  const [selectedId, setSelectedId] = useState<number | null>(null);
 
   // Import / organizacao
   const [importing, setImporting] = useState(false);
@@ -139,7 +127,7 @@ export default function Departments({ embedded = false }: { embedded?: boolean }
       setError(
         e instanceof Error
           ? e.message
-          : "Não foi possível preparar o organograma",
+          : "Não foi possível preparar a hierarquia",
       );
     } finally {
       setPreparingOrganization(false);
@@ -155,7 +143,7 @@ export default function Departments({ embedded = false }: { embedded?: boolean }
       setSuccess(
         "Importado: " +
           result.departments_created +
-          " nós do organograma e " +
+          " nós da hierarquia e " +
           result.classification_rules_created +
           " regras de classificação",
       );
@@ -192,9 +180,7 @@ export default function Departments({ embedded = false }: { embedded?: boolean }
       parent_id: d.parent_id,
       name: d.name,
       centro_custo: d.centro_custo || "",
-      id_orcamento: d.id_orcamento || "",
       ambiente: d.ambiente || "",
-      cloud_filter: d.cloud_filter || "",
       custom_fields: d.custom_fields || {},
       active: d.active,
     });
@@ -276,7 +262,7 @@ export default function Departments({ embedded = false }: { embedded?: boolean }
       await load();
     } catch (e: unknown) {
       setDeptDialogError(
-        formatApiError(e, "Não foi possível salvar o organograma"),
+        formatApiError(e, "Não foi possível salvar a hierarquia"),
       );
     } finally {
       setSavingDept(false);
@@ -314,7 +300,7 @@ export default function Departments({ embedded = false }: { embedded?: boolean }
       setSuccess(ORG.deleted);
       await load();
     } catch (e: unknown) {
-      setError(formatApiError(e, "Não foi possível excluir o organograma"));
+      setError(formatApiError(e, "Não foi possível excluir a hierarquia"));
     }
   };
 
@@ -348,7 +334,7 @@ export default function Departments({ embedded = false }: { embedded?: boolean }
   const filteredTree = useMemo(() => {
     if (!searchTerm) return departments;
     const matches = (d: Department): boolean =>
-      [d.name, d.centro_custo, d.id_orcamento, d.ambiente, d.cloud_filter]
+      [d.name, d.centro_custo, d.ambiente]
         .filter(Boolean)
         .some((v) => String(v).toLowerCase().includes(searchTerm));
     const includeSubtree = (node: Department): Department => ({
@@ -367,176 +353,385 @@ export default function Departments({ embedded = false }: { embedded?: boolean }
     return filter(departments);
   }, [departments, searchTerm]);
 
-  const renderDeptNode = (
+  // Índice por id com os ancestrais de cada nó, para o breadcrumb e o detalhe.
+  const nodeIndex = useMemo(() => {
+    const index = new Map<number, { node: Department; ancestors: Department[] }>();
+    const walk = (nodes: Department[], ancestors: Department[]) => {
+      for (const node of nodes) {
+        index.set(node.id, { node, ancestors });
+        walk(node.children || [], [...ancestors, node]);
+      }
+    };
+    walk(departments, []);
+    return index;
+  }, [departments]);
+
+  const selectedEntry = selectedId != null ? nodeIndex.get(selectedId) ?? null : null;
+  const selectedNode = selectedEntry?.node ?? null;
+  const selectedAncestors = selectedEntry?.ancestors ?? [];
+
+  // Mantém um nó válido selecionado (a primeira raiz quando nada está selecionado).
+  useEffect(() => {
+    if (selectedId != null && nodeIndex.has(selectedId)) return;
+    setSelectedId(departments[0]?.id ?? null);
+  }, [departments, nodeIndex, selectedId]);
+
+  // Seleciona um nó e abre o caminho até ele na árvore.
+  const selectNode = (id: number) => {
+    setSelectedId(id);
+    const entry = nodeIndex.get(id);
+    if (!entry) return;
+    setExpanded((prev) => {
+      const next = new Set(prev);
+      for (const ancestor of entry.ancestors) next.add(ancestor.id);
+      return next;
+    });
+  };
+
+  const allParentIds = useMemo(() => {
+    const ids: number[] = [];
+    const collect = (nodes: Department[]) => {
+      for (const node of nodes) {
+        if (node.children?.length) {
+          ids.push(node.id);
+          collect(node.children);
+        }
+      }
+    };
+    collect(departments);
+    return ids;
+  }, [departments]);
+
+  const sharedConfigFor = (id: number) =>
+    sharedCosts.find((config) => config.department_id === id && config.enabled);
+
+  const formatDate = (iso: string) => new Date(iso).toLocaleDateString("pt-BR");
+
+  const renderTreeNode = (
     dept: Department,
     depth: number,
     forceExpanded: boolean,
   ) => {
     const isExpanded = forceExpanded || expanded.has(dept.id);
-    const allocationConfig = sharedCosts.find(
-      (config) => config.department_id === dept.id && config.enabled,
-    );
-    const isShared = Boolean(allocationConfig);
-    const isRateio = allocationConfig?.allocation_type === "rateio";
+    const hasChildren = dept.children.length > 0;
+    const isSelected = dept.id === selectedId;
+    const shared = sharedConfigFor(dept.id);
+    const isRateio = shared?.allocation_type === "rateio";
 
     return (
-      <Box key={dept.id}>
-        <Paper
+      <Box key={dept.id} role="group">
+        <ButtonBase
+          component="div"
+          role="treeitem"
+          aria-selected={isSelected}
+          aria-expanded={hasChildren ? isExpanded : undefined}
+          onClick={() => selectNode(dept.id)}
           sx={{
-            p: 1.5,
-            mb: 0.5,
-            ml: depth * 3,
+            width: "100%",
             display: "flex",
+            justifyContent: "flex-start",
             alignItems: "center",
             gap: 1,
-            borderLeft: 4,
-            borderColor: isShared
-              ? isRateio ? "#1976D2" : "#ED6C02"
-              : depth === 0
-                ? "primary.main"
-                : depth === 1
-                  ? "secondary.main"
-                  : "grey.400",
-            bgcolor: isShared ? isRateio ? "#EAF3FF" : "#FFF4E5" : "background.paper",
+            py: 0.75,
+            pr: 1,
+            pl: 0.5 + Math.min(depth, 8) * 2,
+            borderRadius: 1.5,
+            textAlign: "left",
+            borderLeft: 3,
+            borderColor: isSelected ? "#0F62FE" : "transparent",
+            bgcolor: isSelected ? "#EEF4FF" : "transparent",
+            "&:hover": { bgcolor: isSelected ? "#EEF4FF" : "#F4F6FA" },
           }}
         >
-          {dept.children.length > 0 ? (
-            <IconButton size="small" onClick={() => toggleExpand(dept.id)}>
-              {isExpanded ? <ExpandLess /> : <ExpandMore />}
-            </IconButton>
-          ) : (
-            <Box sx={{ width: 32 }} />
-          )}
-          {depth === 0 ? (
-            <Business color="primary" />
-          ) : (
-            <AccountTree color={isShared ? isRateio ? "primary" : "warning" : "secondary"} />
-          )}
-          <Box sx={{ flexGrow: 1 }}>
-            <Typography
-              variant="body2"
-              fontWeight={600}
-              component="div"
-              color={isShared ? isRateio ? "primary.main" : "warning.dark" : "inherit"}
-            >
-              {dept.name}
-              {dept.parent_id && (
-                <Chip
-                  label="filho"
-                  size="small"
-                  sx={{ ml: 1, height: 18, fontSize: "0.6rem" }}
-                />
-              )}
-              {isShared && (
-                <Chip
-                  label={isRateio ? "Rateio" : "Custo compartilhado"}
-                  size="small"
-                  color={isRateio ? "primary" : "warning"}
-                  sx={{ ml: 1, height: 18, fontSize: "0.6rem" }}
-                />
-              )}
-            </Typography>
-            <Box sx={{ display: "flex", gap: 1, mt: 0.25 }}>
-              {dept.centro_custo && (
-                <Chip
-                  label={"CC: " + dept.centro_custo}
-                  size="small"
-                  variant="outlined"
-                  sx={{ height: 18, fontSize: "0.6rem" }}
-                />
-              )}
-              {dept.id_orcamento && (
-                <Chip
-                  label={"ID Orçamento: " + dept.id_orcamento}
-                  size="small"
-                  variant="outlined"
-                  sx={{ height: 18, fontSize: "0.6rem" }}
-                />
-              )}
-              {dept.ambiente && (
-                <Chip
-                  label={dept.ambiente}
-                  size="small"
-                  variant="outlined"
-                  sx={{ height: 18, fontSize: "0.6rem" }}
-                />
-              )}
-              {dept.cloud_filter && (
-                <Chip
-                  label={dept.cloud_filter}
-                  size="small"
-                  variant="outlined"
-                  color="info"
-                  sx={{ height: 18, fontSize: "0.6rem" }}
-                />
-              )}
-            </Box>
-            {dept.custom_fields &&
-              Object.keys(dept.custom_fields).length > 0 && (
-                <Box
-                  sx={{ display: "flex", gap: 0.5, mt: 0.25, flexWrap: "wrap" }}
-                >
-                  {Object.entries(dept.custom_fields)
-                    .slice(0, 3)
-                    .map(([k, v]) => (
-                      <Chip
-                        key={k}
-                        label={k + ": " + String(v).slice(0, 30)}
-                        size="small"
-                        variant="outlined"
-                        sx={{ height: 18, fontSize: "0.55rem" }}
-                      />
-                    ))}
-                  {Object.keys(dept.custom_fields).length > 3 && (
-                    <Chip
-                      label={"+" + (Object.keys(dept.custom_fields).length - 3)}
-                      size="small"
-                      sx={{ height: 18, fontSize: "0.55rem" }}
-                    />
-                  )}
-                </Box>
-              )}
-          </Box>
-          <Tooltip title="Adicionar filho">
-            <IconButton size="small" onClick={() => openNewDept(dept.id)}>
-              <Add fontSize="small" />
-            </IconButton>
-          </Tooltip>
-          <Tooltip title={ORG.financialTooltip}>
-            <IconButton
-              size="small"
-              onClick={() =>
-                navigate("/departments/financial?department_id=" + dept.id)
-              }
-            >
-              <AccountBalance fontSize="small" />
-            </IconButton>
-          </Tooltip>
-          <IconButton size="small" onClick={() => void openEditDept(dept)}>
-            <Edit fontSize="small" />
+          <IconButton
+            size="small"
+            disabled={!hasChildren}
+            aria-label={isExpanded ? "Recolher" : "Expandir"}
+            onClick={(event) => {
+              event.stopPropagation();
+              toggleExpand(dept.id);
+            }}
+            sx={{ visibility: hasChildren ? "visible" : "hidden" }}
+          >
+            {isExpanded ? (
+              <ExpandMoreOutlined fontSize="small" />
+            ) : (
+              <ChevronRightOutlined fontSize="small" />
+            )}
           </IconButton>
-          <Tooltip title="Excluir organograma">
-            <IconButton
-              size="small"
-              color="error"
-              onClick={(event) => {
-                event.stopPropagation();
-                setDeleteDeptPending(dept);
+          {depth === 0 ? (
+            <BusinessOutlined
+              fontSize="small"
+              sx={{ color: isSelected ? "#0F62FE" : "text.secondary" }}
+            />
+          ) : (
+            <AccountTreeOutlined
+              fontSize="small"
+              sx={{
+                color: shared
+                  ? isRateio ? "#0F62FE" : "#EA580C"
+                  : "text.secondary",
               }}
-            >
-              <Delete fontSize="small" />
-            </IconButton>
-          </Tooltip>
-        </Paper>
+            />
+          )}
+          <Typography
+            variant="body2"
+            fontWeight={depth === 0 || isSelected ? 600 : 500}
+            noWrap
+            sx={{
+              flexGrow: 1,
+              minWidth: 0,
+              color: isSelected ? "#0F62FE" : "text.primary",
+            }}
+          >
+            {dept.name}
+          </Typography>
+          {shared && (
+            <Box
+              title={isRateio ? "Rateio" : "Custo compartilhado"}
+              sx={{
+                width: 8,
+                height: 8,
+                borderRadius: "50%",
+                flexShrink: 0,
+                bgcolor: isRateio ? "#0F62FE" : "#EA580C",
+              }}
+            />
+          )}
+          {hasChildren && (
+            <Chip
+              label={dept.children.length}
+              size="small"
+              variant="outlined"
+              sx={{ height: 20, minWidth: 28, fontSize: "0.7rem" }}
+            />
+          )}
+        </ButtonBase>
 
-        {/* Children departments (recursive) */}
         {isExpanded &&
           dept.children.map((child) =>
-            renderDeptNode(child, depth + 1, forceExpanded),
+            renderTreeNode(child, depth + 1, forceExpanded),
           )}
       </Box>
     );
   };
+
+  const selectedShared = selectedNode ? sharedConfigFor(selectedNode.id) : undefined;
+  const selectedIsRateio = selectedShared?.allocation_type === "rateio";
+  const selectedParent = selectedAncestors[selectedAncestors.length - 1];
+
+  const detailPanel = selectedNode ? (
+    <Box>
+      <Breadcrumbs aria-label="Caminho na hierarquia" sx={{ mb: 2 }}>
+        {selectedAncestors.map((ancestor) => (
+          <Link
+            key={ancestor.id}
+            component="button"
+            type="button"
+            variant="body2"
+            underline="hover"
+            color="text.secondary"
+            onClick={() => selectNode(ancestor.id)}
+          >
+            {ancestor.name}
+          </Link>
+        ))}
+        <Typography variant="body2" fontWeight={600} color="text.primary">
+          {selectedNode.name}
+        </Typography>
+      </Breadcrumbs>
+
+      <Stack direction="row" spacing={1.5} alignItems="center" sx={{ mb: 2 }}>
+        <Box
+          sx={{
+            width: 44,
+            height: 44,
+            borderRadius: 2,
+            display: "grid",
+            placeItems: "center",
+            flexShrink: 0,
+            bgcolor: "#EEF4FF",
+            color: "#0F62FE",
+          }}
+        >
+          {selectedAncestors.length === 0 ? <BusinessOutlined /> : <AccountTreeOutlined />}
+        </Box>
+        <Box sx={{ minWidth: 0, flexGrow: 1 }}>
+          <Typography variant="h5" sx={{ wordBreak: "break-word" }}>
+            {selectedNode.name}
+          </Typography>
+          <Stack direction="row" spacing={0.75} flexWrap="wrap" sx={{ mt: 0.75 }}>
+            <Chip
+              size="small"
+              variant="outlined"
+              label={selectedNode.active ? "Ativo" : "Inativo"}
+              color={selectedNode.active ? "success" : "default"}
+            />
+            {selectedShared && (
+              <Chip
+                size="small"
+                color={selectedIsRateio ? "primary" : "warning"}
+                label={selectedIsRateio ? "Rateio" : "Custo compartilhado"}
+              />
+            )}
+          </Stack>
+        </Box>
+      </Stack>
+
+      <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap sx={{ mb: 2.5 }}>
+        <Button
+          size="small"
+          variant="contained"
+          startIcon={<AddOutlined />}
+          onClick={() => openNewDept(selectedNode.id)}
+        >
+          Adicionar subnível
+        </Button>
+        <Button
+          size="small"
+          variant="outlined"
+          startIcon={<EditOutlined />}
+          onClick={() => void openEditDept(selectedNode)}
+        >
+          Editar
+        </Button>
+        <Button
+          size="small"
+          variant="outlined"
+          startIcon={<AccountBalanceOutlined />}
+          onClick={() => navigate("/departments/financial?department_id=" + selectedNode.id)}
+        >
+          Cadastro financeiro
+        </Button>
+        <Button
+          size="small"
+          variant="outlined"
+          color="error"
+          startIcon={<DeleteOutlined />}
+          onClick={() => setDeleteDeptPending(selectedNode)}
+        >
+          Excluir
+        </Button>
+      </Stack>
+
+      {selectedShared && (
+        <Alert severity="info" sx={{ mb: 2.5 }}>
+          {selectedIsRateio
+            ? "Rateio ativo: o consumo deste nó é distribuído entre os destinos da mesma cloud."
+            : "Custo compartilhado ativo: abra Editar para ver ou ajustar os destinos."}
+        </Alert>
+      )}
+
+      <Box
+        sx={{
+          display: "grid",
+          gridTemplateColumns: { xs: "1fr", sm: "repeat(3, minmax(0, 1fr))" },
+          gap: 1.5,
+          mb: 2.5,
+        }}
+      >
+        {[
+          ["Centro de custo", selectedNode.centro_custo],
+          ["Ambiente", selectedNode.ambiente],
+          ["Nó pai", selectedParent ? selectedParent.name : "Raiz"],
+          ["Subníveis", String(selectedNode.children.length)],
+          ["Atualizado em", formatDate(selectedNode.updated_at)],
+        ].map(([label, value]) => (
+          <Box
+            key={label}
+            sx={{
+              p: 1.5,
+              borderRadius: 1.5,
+              bgcolor: "#F7F9FC",
+              border: "1px solid",
+              borderColor: "divider",
+            }}
+          >
+            <Typography variant="caption" color="text.secondary" component="div">
+              {label}
+            </Typography>
+            <Typography variant="body2" fontWeight={600} sx={{ wordBreak: "break-word" }}>
+              {value || "—"}
+            </Typography>
+          </Box>
+        ))}
+      </Box>
+
+      {selectedNode.custom_fields && Object.keys(selectedNode.custom_fields).length > 0 && (
+        <Box sx={{ mb: 2.5 }}>
+          <Typography variant="subtitle2" sx={{ mb: 1 }}>
+            Campos customizados
+          </Typography>
+          <Stack spacing={0.5}>
+            {Object.entries(selectedNode.custom_fields).map(([key, value]) => (
+              <Stack
+                key={key}
+                direction="row"
+                spacing={1}
+                sx={{ py: 0.75, borderBottom: "1px dashed", borderColor: "divider" }}
+              >
+                <Typography variant="body2" color="text.secondary" sx={{ minWidth: 140 }}>
+                  {key}
+                </Typography>
+                <Typography variant="body2" sx={{ wordBreak: "break-word" }}>
+                  {String(value)}
+                </Typography>
+              </Stack>
+            ))}
+          </Stack>
+        </Box>
+      )}
+
+      <Typography variant="subtitle2" sx={{ mb: 1 }}>
+        Subníveis
+      </Typography>
+      {selectedNode.children.length === 0 ? (
+        <Typography variant="body2" color="text.secondary">
+          Nenhum subnível. Use &quot;Adicionar subnível&quot; para criar o primeiro.
+        </Typography>
+      ) : (
+        <Stack spacing={0.75}>
+          {selectedNode.children.map((child) => (
+            <ButtonBase
+              key={child.id}
+              onClick={() => selectNode(child.id)}
+              sx={{
+                display: "flex",
+                justifyContent: "flex-start",
+                alignItems: "center",
+                gap: 1,
+                p: 1,
+                borderRadius: 1.5,
+                textAlign: "left",
+                border: "1px solid",
+                borderColor: "divider",
+                "&:hover": { borderColor: "#0F62FE", bgcolor: "#F7FAFF" },
+              }}
+            >
+              <AccountTreeOutlined fontSize="small" sx={{ color: "text.secondary" }} />
+              <Typography variant="body2" fontWeight={600} noWrap sx={{ flexGrow: 1, minWidth: 0 }}>
+                {child.name}
+              </Typography>
+              {child.centro_custo && (
+                <Chip
+                  size="small"
+                  variant="outlined"
+                  label={"CC: " + child.centro_custo}
+                  sx={{ height: 20, fontSize: "0.7rem" }}
+                />
+              )}
+              {child.children.length > 0 && (
+                <Typography variant="caption" color="text.secondary">
+                  {child.children.length} sub.
+                </Typography>
+              )}
+              <ChevronRightOutlined fontSize="small" sx={{ color: "text.secondary" }} />
+            </ButtonBase>
+          ))}
+        </Stack>
+      )}
+    </Box>
+  ) : null;
 
   if (loading)
     return <CircularProgress sx={{ display: "block", mx: "auto", mt: 10 }} />;
@@ -600,6 +795,7 @@ export default function Departments({ embedded = false }: { embedded?: boolean }
           elevation={0}
           sx={{
             p: { xs: 1.5, md: 2 },
+            mb: 2,
             borderRadius: 2,
             bgcolor: "background.paper",
             border: "1px solid",
@@ -610,7 +806,7 @@ export default function Departments({ embedded = false }: { embedded?: boolean }
             direction="row"
             justifyContent="space-between"
             alignItems="center"
-            sx={{ mb: 2, minHeight: 52, gap: 2, flexWrap: "wrap" }}
+            sx={{ minHeight: 52, gap: 2, flexWrap: "wrap" }}
           >
             <Box>
               <Typography variant="h6">{ORG.hierarchySection}</Typography>
@@ -621,7 +817,7 @@ export default function Departments({ embedded = false }: { embedded?: boolean }
             <Stack direction="row" spacing={1} flexWrap="wrap" flexShrink={0}>
               <Button
                 size="small"
-                startIcon={<AccountBalance />}
+                startIcon={<AccountBalanceOutlined />}
                 onClick={(e) => setFinancialMenu(e.currentTarget)}
               >
                 Cadastro financeiro
@@ -670,18 +866,18 @@ export default function Departments({ embedded = false }: { embedded?: boolean }
                   preparingOrganization ? (
                     <CircularProgress size={16} />
                   ) : (
-                    <AccountTree />
+                    <AccountTreeOutlined />
                   )
                 }
                 onClick={() => setPrepareOrgPending(true)}
                 disabled={preparingOrganization}
               >
-                Preparar organograma cloud
+                Preparar hierarquia cloud
               </Button>
               <Button
                 size="small"
                 startIcon={
-                  importing ? <CircularProgress size={16} /> : <UploadFile />
+                  importing ? <CircularProgress size={16} /> : <UploadFileOutlined />
                 }
                 onClick={handleImport}
                 disabled={importing}
@@ -691,47 +887,105 @@ export default function Departments({ embedded = false }: { embedded?: boolean }
               <Button
                 size="small"
                 variant="contained"
-                startIcon={<Add />}
+                startIcon={<AddOutlined />}
                 onClick={() => openNewDept(null)}
               >
                 {ORG.newNode}
               </Button>
             </Stack>
           </Stack>
-          <TextField
-            fullWidth
-            size="small"
-            placeholder={ORG.searchPlaceholder}
-            value={deptSearch}
-            onChange={(event) => setDeptSearch(event.target.value)}
-            slotProps={{
-              input: {
-                startAdornment: (
-                  <InputAdornment position="start">
-                    <Search fontSize="small" />
-                  </InputAdornment>
-                ),
-                sx: { height: 40 },
-              },
-            }}
-            sx={{ mb: 2, maxWidth: 520 }}
-          />
-          {departments.length === 0 ? (
+        </Paper>
+
+        {departments.length === 0 ? (
+          <Paper
+            elevation={0}
+            sx={{ borderRadius: 2, bgcolor: "background.paper", border: "1px solid", borderColor: "divider" }}
+          >
             <Box sx={{ py: 7 }}>
               <EmptyState message={ORG.emptyNone} />
             </Box>
-          ) : filteredTree.length === 0 ? (
-            <Box sx={{ py: 7 }}>
-              <EmptyState message={ORG.emptySearch} />
-            </Box>
-          ) : (
-            <Box>
-              {filteredTree.map((d) =>
-                renderDeptNode(d, 0, Boolean(searchTerm)),
-              )}
-            </Box>
-          )}
-        </Paper>
+          </Paper>
+        ) : (
+          <Box
+            sx={{
+              display: "grid",
+              gridTemplateColumns: { xs: "1fr", md: "minmax(280px, 360px) minmax(0, 1fr)" },
+              gap: 2,
+              alignItems: "start",
+            }}
+          >
+            <Paper
+              elevation={0}
+              sx={{
+                p: 1.5,
+                borderRadius: 2,
+                bgcolor: "background.paper",
+                border: "1px solid",
+                borderColor: "divider",
+              }}
+            >
+              <Stack direction="row" alignItems="center" spacing={0.5} sx={{ mb: 1.5 }}>
+                <TextField
+                  fullWidth
+                  size="small"
+                  placeholder={ORG.searchPlaceholder}
+                  value={deptSearch}
+                  onChange={(event) => setDeptSearch(event.target.value)}
+                  slotProps={{
+                    input: {
+                      startAdornment: (
+                        <InputAdornment position="start">
+                          <SearchOutlined fontSize="small" />
+                        </InputAdornment>
+                      ),
+                      sx: { height: 40 },
+                    },
+                  }}
+                />
+                <Tooltip title="Expandir tudo">
+                  <IconButton
+                    size="small"
+                    onClick={() => setExpanded(new Set(allParentIds))}
+                  >
+                    <UnfoldMoreOutlined fontSize="small" />
+                  </IconButton>
+                </Tooltip>
+                <Tooltip title="Recolher tudo">
+                  <IconButton size="small" onClick={() => setExpanded(new Set())}>
+                    <UnfoldLessOutlined fontSize="small" />
+                  </IconButton>
+                </Tooltip>
+              </Stack>
+              <Box
+                role="tree"
+                aria-label={ORG.hierarchySection}
+                sx={{ maxHeight: { md: "calc(100vh - 300px)" }, overflowY: "auto", pr: 0.5 }}
+              >
+                {filteredTree.length === 0 ? (
+                  <Box sx={{ py: 5 }}>
+                    <EmptyState message={ORG.emptySearch} />
+                  </Box>
+                ) : (
+                  filteredTree.map((d) => renderTreeNode(d, 0, Boolean(searchTerm)))
+                )}
+              </Box>
+            </Paper>
+
+            <Paper
+              elevation={0}
+              sx={{
+                p: { xs: 2, md: 3 },
+                minHeight: 320,
+                borderRadius: 2,
+                bgcolor: "background.paper",
+                border: "1px solid",
+                borderColor: "divider",
+              }}
+            >
+              {detailPanel ?? <EmptyState message={ORG.selectNode} />}
+            </Paper>
+          </Box>
+        )}
       </Box>
 
       {/* Department Dialog */}
@@ -793,14 +1047,6 @@ export default function Departments({ embedded = false }: { embedded?: boolean }
                 fullWidth
               />
               <TextField
-                label="ID Orçamento"
-                value={deptForm.id_orcamento}
-                onChange={(e) =>
-                  setDeptForm({ ...deptForm, id_orcamento: e.target.value })
-                }
-                fullWidth
-              />
-              <TextField
                 label="Ambiente"
                 value={deptForm.ambiente}
                 onChange={(e) =>
@@ -809,14 +1055,6 @@ export default function Departments({ embedded = false }: { embedded?: boolean }
                 fullWidth
               />
             </Box>
-            <TextField
-              label="Cloud Filter"
-              value={deptForm.cloud_filter}
-              onChange={(e) =>
-                setDeptForm({ ...deptForm, cloud_filter: e.target.value })
-              }
-              helperText="Filtrar por cloud (Azure-4P, Azure-TI, GCP-4P, etc.)"
-            />
 
             <Divider />
             <Box
@@ -827,7 +1065,7 @@ export default function Departments({ embedded = false }: { embedded?: boolean }
               }}
             >
               <Typography variant="subtitle2">Campos Customizados</Typography>
-              <Button size="small" startIcon={<Add />} onClick={addCustomField}>
+              <Button size="small" startIcon={<AddOutlined />} onClick={addCustomField}>
                 Adicionar
               </Button>
             </Box>
@@ -852,7 +1090,7 @@ export default function Departments({ embedded = false }: { embedded?: boolean }
                   onClick={() => removeCustomField(i)}
                   color="error"
                 >
-                  <Delete fontSize="small" />
+                  <DeleteOutlined fontSize="small" />
                 </IconButton>
               </Box>
             ))}
@@ -927,7 +1165,7 @@ export default function Departments({ embedded = false }: { embedded?: boolean }
                     </FormControl>
                     {sharedMode === "consumption" ? (
                       <Typography variant="body2" color="text.secondary">
-                        O valor rateado é o gasto deste nó do organograma e de
+                        O valor rateado é o gasto deste nó da hierarquia e de
                         todos os filhos. Ligue a flag no nó Condomínio (folha),
                         não na diretoria de Infra — senão a DIR Dados/IA paga
                         uma fatia de Compra de RIs, redes e o resto da Infra,
@@ -947,7 +1185,7 @@ export default function Departments({ embedded = false }: { embedded?: boolean }
                             setSharedPercentInputs((current) => Object.fromEntries(Object.entries(current).filter(([id]) => selectedIds.has(Number(id)))));
                             addCustomDestinations(ids);
                           }}
-                          label="Organograma · selecione níveis"
+                          label="Hierarquia · selecione níveis"
                           placeholder="Navegue e marque destinos"
                         />
                         <Typography variant="caption" color="text.secondary">Selecione destinos em qualquer nível. Selecione apenas um nó em cada ramo; o percentual será lançado nesse próprio nó.</Typography>
@@ -1014,14 +1252,14 @@ export default function Departments({ embedded = false }: { embedded?: boolean }
                             setSharedTargets((current) => [...current, { department_id: found.id, percent: null, name: found.name, path: found.path }]);
                             setSharedPicker(null);
                           }}
-                          label="Adicionar nó destino no organograma"
+                          label="Adicionar nó destino na hierarquia"
                           placeholder="Selecione para incluir no rateio"
                           blockedIds={blockedParentIds}
                         />
                         {sharedTargets.map((target) => (
                           <Box key={target.department_id} sx={{ display: "flex", gap: 1, alignItems: "center" }}>
                             <Typography variant="body2" sx={{ flex: 1 }}>{target.path || target.name}</Typography>
-                            <IconButton size="small" color="error" onClick={() => setSharedTargets((current) => current.filter((item) => item.department_id !== target.department_id))}><Delete fontSize="small" /></IconButton>
+                            <IconButton size="small" color="error" onClick={() => setSharedTargets((current) => current.filter((item) => item.department_id !== target.department_id))}><DeleteOutlined fontSize="small" /></IconButton>
                           </Box>
                         ))}
                           <Typography variant="caption" color="text.secondary">
@@ -1083,7 +1321,7 @@ export default function Departments({ embedded = false }: { embedded?: boolean }
         maxWidth="xs"
         fullWidth
       >
-        <DialogTitle>Preparar organograma cloud?</DialogTitle>
+        <DialogTitle>Preparar hierarquia cloud?</DialogTitle>
         <DialogContent>
           <Typography>
             Preparar Consumo Cloud &gt; Showback/Chargeback &gt; Provedores e
@@ -1098,7 +1336,7 @@ export default function Departments({ embedded = false }: { embedded?: boolean }
             color="warning"
             onClick={() => void prepareCloudOrganization()}
           >
-            Preparar organograma
+            Preparar hierarquia
           </Button>
         </DialogActions>
       </Dialog>

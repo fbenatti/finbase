@@ -1,31 +1,31 @@
 import type { IdeaImpact, IdeaStatus, IdeaType } from "../../services/ideasApi";
 
 export const STATUS_LABELS: Record<IdeaStatus, string> = {
-  NOVA: "Nova",
-  EM_VOTACAO: "Em votação",
-  EM_ANALISE: "Em análise",
-  BACKLOG: "Backlog",
-  EM_IMPLEMENTACAO: "Em implementação",
-  CONCLUIDA_ANALISE: "Concluída p/ análise",
-  EM_PRODUCAO: "Em produção",
-  CONCLUIDA: "Concluída",
-  CANCELADA: "Cancelada",
-  FECHADA: "Fechada",
+  NOVA: "Nova ideia",
+  EM_VOTACAO: "Em priorização",
+  EM_ANALISE: "Em triagem",
+  BACKLOG: "Fila de espera",
+  EM_IMPLEMENTACAO: "Em desenvolvimento",
+  CONCLUIDA_ANALISE: "Pronta para revisão",
+  EM_PRODUCAO: "Publicada em produção",
+  CONCLUIDA: "Entregue",
+  CANCELADA: "Descartada",
+  FECHADA: "Encerrada",
 };
 
 export const TYPE_LABELS: Record<IdeaType, string> = {
-  FEATURE: "Nova feature",
-  PAINEL: "Novo painel",
-  BUG: "Bug",
-  BUG_CRITICO: "Bug crítico",
-  MELHORIA: "Melhoria",
+  FEATURE: "Nova funcionalidade",
+  PAINEL: "Novo dashboard",
+  BUG: "Defeito",
+  BUG_CRITICO: "Defeito crítico",
+  MELHORIA: "Aprimoramento",
 };
 
 export const IMPACT_LABELS: Record<IdeaImpact, string> = {
-  BAIXO: "Baixo",
-  MEDIO: "Médio",
-  ALTO: "Alto",
-  CRITICO: "Crítico",
+  BAIXO: "Baixo impacto",
+  MEDIO: "Impacto médio",
+  ALTO: "Alto impacto",
+  CRITICO: "Impacto crítico",
 };
 
 export const STATUS_COLOR: Record<IdeaStatus, "default" | "primary" | "success" | "error" | "warning" | "info" | "secondary"> = {

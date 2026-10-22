@@ -8,6 +8,7 @@ import { Box, Card, CardContent, Chip, Stack, Typography, Alert } from "@mui/mat
 import { useAuth } from "../../auth/AuthContext";
 import { getIdeasBoard, transitionIdea, type Idea, type IdeaBoard, type IdeaStatus } from "../../services/ideasApi";
 import { STATUS_LABELS, BOARD_STATUSES } from "./constants";
+import { colors } from "../../theme/tokens";
 
 interface Props {
   onOpen: (id: number) => void;
@@ -37,9 +38,9 @@ function DroppableColumn({ status, ideas, onOpen, canDrag }: { status: IdeaStatu
   return (
     <Box ref={setNodeRef} sx={{
       minWidth: 240, maxWidth: 280, flex: "0 0 240px",
-      bgcolor: isOver ? "#e0f2fe" : "#EEF0F7",
+      bgcolor: isOver ? colors.brandTint : colors.tableHead,
       borderRadius: 2, p: 1, maxHeight: "calc(100vh - 280px)", overflowY: "auto",
-      border: isOver ? "2px dashed #4338CA" : "2px solid transparent",
+      border: isOver ? "2px dashed #0F62FE" : "2px solid transparent",
     }}>
       <Stack direction="row" justifyContent="space-between" alignItems="center" sx={{ mb: 1, px: 0.5 }}>
         <Typography variant="subtitle2">{STATUS_LABELS[status]}</Typography>
@@ -99,7 +100,7 @@ export default function CanvasTab({ onOpen, refreshKey }: Props) {
     }
   };
 
-  if (!board) return <Typography>Carregando canvas...</Typography>;
+  if (!board) return <Typography>Carregando quadro...</Typography>;
 
   const columns = BOARD_STATUSES.map((status) => ({
     status,
@@ -109,7 +110,7 @@ export default function CanvasTab({ onOpen, refreshKey }: Props) {
   return (
     <Box>
       {error && <Alert severity="error" sx={{ mb: 2 }} onClose={() => setError("")}>{dataDisplayText(error)}</Alert>}
-      {!canUpdate && <Alert severity="info" sx={{ mb: 2 }}>Visualização do quadro. Arrastar cards exige permissão de atualização.</Alert>}
+      {!canUpdate && <Alert severity="info" sx={{ mb: 2 }}>Modo de visualização do quadro. Mover cards exige permissão de edição.</Alert>}
       <DndContext sensors={sensors} collisionDetection={closestCorners} onDragStart={onDragStart} onDragEnd={(e) => void onDragEnd(e)}>
         <Stack direction="row" spacing={1.5} sx={{ overflowX: "auto", pb: 2 }}>
           {columns.map((col) => (

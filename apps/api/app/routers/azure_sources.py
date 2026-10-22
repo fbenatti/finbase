@@ -47,7 +47,7 @@ from app.services.cost_sources import is_cost_source
 
 logger = logging.getLogger(__name__)
 
-router = APIRouter(prefix="/azure-sources", tags=["azure-sources"])
+router = APIRouter(prefix="/dados/fontes-azure", tags=["azure-sources"])
 
 #: Estados possíveis por fonte (o plano exige estes cinco).
 STATE_NOT_CONFIGURED = "NOT_CONFIGURED"
@@ -209,7 +209,7 @@ def _source_payload(
     }
 
 
-@router.get("/catalog")
+@router.get("/catalogo")
 async def get_catalog():
     """Catálogo declarativo: todas as fontes que podem ser ligadas por ambiente."""
     return {
@@ -386,7 +386,7 @@ async def list_azure_sources(
     return {"environments": result, "total_environments": len(result)}
 
 
-@router.post("/{connection_id}/test")
+@router.post("/{connection_id}/testar")
 async def test_azure_source(connection_id: int, db: AsyncSession = Depends(get_db)):
     """Teste de capacidade da fonte — nunca executa a coleta completa."""
     connection = await db.get(SourceConnection, connection_id)
@@ -462,7 +462,7 @@ async def test_azure_source(connection_id: int, db: AsyncSession = Depends(get_d
     }
 
 
-@router.put("/{connection_id}/sources/{source_key}/selection")
+@router.put("/{connection_id}/fontes/{source_key}/selecao")
 async def update_source_selection(
     connection_id: int,
     source_key: str,
@@ -530,7 +530,7 @@ async def update_source_selection(
     return _source_payload(connection, selection, entry, last_blob=None, running=0)
 
 
-@router.post("/environments/{environment_slug_value}/collect")
+@router.post("/ambientes/{environment_slug_value}/coletar")
 async def collect_environment(
     environment_slug_value: str,
     body: EnvironmentCollectRequest,

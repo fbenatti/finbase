@@ -15,7 +15,7 @@ from app.core.security import hash_password, validate_password_policy
 from app.database import get_db
 from app.models.identity import User, Role, UserGrant
 
-router = APIRouter(prefix="/users", tags=["users"])
+router = APIRouter(prefix="/administracao/usuarios", tags=["users"])
 
 
 class UserCreate(BaseModel):
@@ -142,7 +142,7 @@ async def update_user(user_id: int, body: UserUpdate, db: AsyncSession = Depends
     return _user_out(await _reload(db, target.id))
 
 
-@router.post("/{user_id}/reset-password")
+@router.post("/{user_id}/redefinir-senha")
 async def reset_password(user_id: int, body: ResetPasswordBody, db: AsyncSession = Depends(get_db), user: User = Depends(require("users", "update"))):
     target = (await db.execute(select(User).where(User.id == user_id))).scalar_one_or_none()
     if target is None:
@@ -165,7 +165,7 @@ async def reset_password(user_id: int, body: ResetPasswordBody, db: AsyncSession
     return {"ok": True, "temporary_password": body.new_password is None and new_password or None}
 
 
-@router.put("/{user_id}/roles")
+@router.put("/{user_id}/perfis")
 async def set_user_roles(user_id: int, body: RolesBody, db: AsyncSession = Depends(get_db), user: User = Depends(require("users", "update"))):
     target = (await db.execute(select(User).where(User.id == user_id))).scalar_one_or_none()
     if target is None:
@@ -178,7 +178,7 @@ async def set_user_roles(user_id: int, body: RolesBody, db: AsyncSession = Depen
     return {"ok": True}
 
 
-@router.get("/{user_id}/effective-permissions")
+@router.get("/{user_id}/permissoes-efetivas")
 async def effective_permissions(user_id: int, db: AsyncSession = Depends(get_db), user: User = Depends(require("users", "read"))):
     target = (await db.execute(select(User).where(User.id == user_id))).scalar_one_or_none()
     if target is None:
@@ -200,7 +200,7 @@ async def effective_permissions(user_id: int, db: AsyncSession = Depends(get_db)
 
 # ── Grants diretos ──────────────────────────────────────────────────────────
 
-@router.get("/{user_id}/grants")
+@router.get("/{user_id}/concessoes")
 async def list_grants(user_id: int, db: AsyncSession = Depends(get_db), user: User = Depends(require("users", "read"))):
     result = await db.execute(select(UserGrant).where(UserGrant.user_id == user_id))
     return [
@@ -213,7 +213,7 @@ async def list_grants(user_id: int, db: AsyncSession = Depends(get_db), user: Us
     ]
 
 
-@router.post("/{user_id}/grants", status_code=201)
+@router.post("/{user_id}/concessoes", status_code=201)
 async def create_grant(user_id: int, body: GrantCreate, db: AsyncSession = Depends(get_db), user: User = Depends(require("users", "update"))):
     _validate_perm(body.module, body.action)
     from app.routers.roles import _validate_scope as _vs
@@ -243,7 +243,7 @@ async def create_grant(user_id: int, body: GrantCreate, db: AsyncSession = Depen
     return {"id": grant.id, "module": grant.module, "action": grant.action, "reason": grant.reason}
 
 
-@router.delete("/grants/{grant_id}")
+@router.delete("/concessoes/{grant_id}")
 async def delete_grant(grant_id: int, db: AsyncSession = Depends(get_db), user: User = Depends(require("users", "update"))):
     grant = (await db.execute(select(UserGrant).where(UserGrant.id == grant_id))).scalar_one_or_none()
     if grant is None:

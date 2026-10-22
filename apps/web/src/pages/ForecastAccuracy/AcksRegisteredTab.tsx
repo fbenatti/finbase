@@ -9,6 +9,7 @@ import {
   ForecastAck, activateForecastAck, deactivateForecastAck, deleteForecastAck, getForecastAcks, updateForecastAck,
 } from "../../services/api";
 import AckRegisterDialog from "./AckRegisterDialog";
+import { RowAction } from "../../components/RowAction";
 
 const money = new Intl.NumberFormat("pt-BR", { maximumFractionDigits: 0 });
 const pct = (value: number | null | undefined) => value == null ? "—" : (value * 100).toFixed(1) + "%";
@@ -145,11 +146,11 @@ export default function AcksRegisteredTab({ defaultMonth, department }: { defaul
         category: editCategory, reason: editReason.trim(),
         severity: editSeverity, ordem: editOrdem, registered_at: editDate || undefined,
       });
-      setMessage(`Ack de ${editTarget.department_name} editado — versão anterior preservada no histórico.`);
+      setMessage(`Justificativa de ${editTarget.department_name} alterada — versão anterior preservada no histórico.`);
       setEditTarget(null);
       await load(monthKey, department);
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Falha ao salvar Ack");
+      setError(e instanceof Error ? e.message : "Não foi possível gravar a justificativa");
     } finally {
       setSavingEdit(false);
     }
@@ -163,15 +164,15 @@ export default function AcksRegisteredTab({ defaultMonth, department }: { defaul
       const target = deactivateTarget;
       if (target.active === false) {
         await activateForecastAck(target.id);
-        setMessage(`Ack de ${target.department_name} reativado.`);
+        setMessage(`Justificativa de ${target.department_name} reativada.`);
       } else {
         await deactivateForecastAck(target.id);
-        setMessage(`Ack de ${target.department_name} desativado — não aparece mais nos dashboards.`);
+        setMessage(`Justificativa de ${target.department_name} desativada — não aparece mais nos dashboards.`);
       }
       setDeactivateTarget(null);
       await load(monthKey, department);
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Falha ao alterar o Ack");
+      setError(e instanceof Error ? e.message : "Não foi possível alterar a justificativa");
     } finally {
       setTogglingActive(false);
     }
@@ -187,7 +188,7 @@ export default function AcksRegisteredTab({ defaultMonth, department }: { defaul
       setDeleteTarget(null);
       await load(monthKey, department);
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Falha ao excluir o Ack");
+      setError(e instanceof Error ? e.message : "Não foi possível excluir a justificativa");
     } finally {
       setDeleting(false);
     }
@@ -230,14 +231,14 @@ export default function AcksRegisteredTab({ defaultMonth, department }: { defaul
       if (changed.severity) body.severity = changed.severity;
       if (changed.ordem !== undefined) body.ordem = changed.ordem;
       const updated = await updateForecastAck(next.id, body);
-      setMessage(`Ack de ${next.department_name} atualizado.`);
+      setMessage(`Justificativa de ${next.department_name} atualizada.`);
       return updated;
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Falha ao atualizar o Ack");
+      setError(e instanceof Error ? e.message : "Não foi possível atualizar a justificativa");
       return prev;
     }
   };
-  const onProcessRowUpdateError = (e: unknown) => setError(e instanceof Error ? e.message : "Falha ao atualizar o Ack");
+  const onProcessRowUpdateError = (e: unknown) => setError(e instanceof Error ? e.message : "Não foi possível atualizar a justificativa");
 
   const columns = useMemo<GridColDef[]>(() => [
     {
@@ -245,7 +246,7 @@ export default function AcksRegisteredTab({ defaultMonth, department }: { defaul
       align: "center", headerAlign: "center",
     },
     {
-      field: "department_name", headerName: "Departamento", minWidth: 210, flex: 1.1,
+      field: "department_name", headerName: "Unidade", minWidth: 210, flex: 1.1,
       renderCell: ({ row }) => (
         <Stack justifyContent="center" sx={{ minWidth: 0, height: "100%" }}>
           <Typography variant="body2" fontWeight={600} noWrap>{row.department_name}</Typography>
@@ -253,23 +254,23 @@ export default function AcksRegisteredTab({ defaultMonth, department }: { defaul
         </Stack>
       ),
     },
-    { field: "reason", headerName: "Motivo", minWidth: 230, flex: 1.4, editable: true },
+    { field: "reason", headerName: "Justificativa", minWidth: 230, flex: 1.4, editable: true },
     {
-      field: "severity", headerName: "Severidade", width: 140, editable: true,
+      field: "severity", headerName: "Gravidade", width: 140, editable: true,
       renderCell: ({ row }) => <Chip size="small" color={severityColor(row.severity)} label={severityLabel(row.severity)} />,
       renderEditCell: (params) => <SeverityEditCell {...params} />,
     },
     {
-      field: "category", headerName: "Categoria", width: 165, editable: true,
+      field: "category", headerName: "Tipo de variação", width: 165, editable: true,
       renderEditCell: (params) => <CategoryEditCell {...params} />,
     },
     {
-      field: "target_month", headerName: "Mês de referência", width: 150, align: "right", headerAlign: "right",
+      field: "target_month", headerName: "Mês da variação", width: 150, align: "right", headerAlign: "right",
       valueGetter: (_v, row) => row.target_month,
       valueFormatter: (value) => prettyMonthLabel(String(value ?? "")),
     },
     {
-      field: "active", headerName: "Status", width: 115,
+      field: "active", headerName: "Situação", width: 115,
       renderCell: ({ row }) => row.active === false
         ? <Chip size="small" label="Desativado" color="error" variant="outlined" />
         : <Chip size="small" label="Ativo" color="success" variant="outlined" />,
@@ -279,25 +280,21 @@ export default function AcksRegisteredTab({ defaultMonth, department }: { defaul
       align: "center", headerAlign: "center",
       renderCell: ({ row }) => (
         <Stack direction="row" alignItems="center" justifyContent="center" sx={{ height: "100%" }}>
-          <Tooltip title="Editar Ack">
-            <IconButton size="small" aria-label={`Editar Ack de ${row.department_name}`} onClick={() => openEdit(row)}>
-              <Edit fontSize="small" />
-            </IconButton>
+          <Tooltip title="Alterar justificativa">
+            <RowAction kind="edit" label={`Alterar justificativa de ${row.department_name}`} onClick={() => openEdit(row)} />
           </Tooltip>
-          <Tooltip title={row.active === false ? "Reativar Ack" : "Desativar Ack"}>
+          <Tooltip title={row.active === false ? "Reativar justificativa" : "Desativar justificativa"}>
             <IconButton
               size="small"
               color={row.active === false ? "success" : "error"}
-              aria-label={row.active === false ? `Reativar Ack de ${row.department_name}` : `Desativar Ack de ${row.department_name}`}
+              aria-label={row.active === false ? `Reativar justificativa de ${row.department_name}` : `Desativar justificativa de ${row.department_name}`}
               onClick={() => setDeactivateTarget(row)}
             >
               {row.active === false ? <Check fontSize="small" /> : <Block fontSize="small" />}
             </IconButton>
           </Tooltip>
-          <Tooltip title="Excluir registro (departamento)">
-            <IconButton size="small" color="error" aria-label={`Excluir registro de ${row.department_name}`} onClick={() => setDeleteTarget(row)}>
-              <Delete fontSize="small" />
-            </IconButton>
+          <Tooltip title="Excluir registro (unidade)">
+            <RowAction kind="delete" label={`Excluir registro de ${row.department_name}`} onClick={() => setDeleteTarget(row)} />
           </Tooltip>
         </Stack>
       ),
@@ -309,13 +306,13 @@ export default function AcksRegisteredTab({ defaultMonth, department }: { defaul
       {message && <Alert severity="success" sx={{ mb: 2 }} onClose={() => setMessage("")}>{dataDisplayText(message)}</Alert>}
       <Stack direction="row" spacing={2} alignItems="center" sx={{ mb: 2 }} flexWrap="wrap">
         <TextField
-          label="Data (mês)"
+          label="Mês da variação"
           type="date"
           value={month}
           onChange={e => setMonth(e.target.value)}
           InputLabelProps={{ shrink: true }}
           sx={{ width: 200 }}
-          helperText="Pode ser futura — o mês segue a regra do mês realizado (YYYYMM)."
+          helperText="Pode ser futura — o mês segue a regra do mês efetivado (AAAAMM)."
         />
         <Button size="small" variant="outlined" onClick={() => void load(monthKey, department)}>Atualizar</Button>
         <Chip size="small" variant="outlined" label={`Mês: ${monthKey || "—"}`} />
@@ -326,26 +323,26 @@ export default function AcksRegisteredTab({ defaultMonth, department }: { defaul
       </Stack>
       {department && (
         <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
-          Filtrado pelo departamento selecionado: <b>{department}</b>
+          Filtrado pela unidade selecionada: <b>{department}</b>
         </Typography>
       )}
       {error && <Alert severity="error" sx={{ mb: 2 }} onClose={() => setError("")}>{dataDisplayText(error)}</Alert>}
       <Alert severity="info" sx={{ mb: 2 }}>
-        Esta lista mostra somente <strong>itens manuais</strong> (cadastrados via "Cadastrar item"), para explicar
-        algo que não foi identificado como desvio. Acks vinculados a desvios identificados são justificados
-        diretamente nas abas <strong>Desvios</strong> e no <strong>Top 5</strong> — não se repetem aqui.
+        Esta lista mostra somente <strong>itens manuais</strong> (registrados via "Registrar item"), para explicar
+        algo que não foi identificado como variação. Acks vinculados a variações identificados são justificados
+        diretamente nas abas <strong>Variações</strong> e no <strong>5 maiores</strong> — não se repetem aqui.
       </Alert>
       {!loading && acks.length > manualAcks.length && (
         <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>
-          {acks.length - manualAcks.length} ack(s) vinculado(s) a desvios identificados ocultos desta lista (aparecem nas abas Desvios / Top 5).
+          {acks.length - manualAcks.length} justificativa(s) vinculada(s) a variações identificadas ocultas desta lista (aparecem nas abas Variações / Top 5).
         </Typography>
       )}
       {loading ? (
-        <Typography variant="body2" color="text.secondary">Carregando acks registrados…</Typography>
+        <Typography variant="body2" color="text.secondary">Carregando aceites registrados…</Typography>
       ) : manualAcks.length === 0 ? (
         <Typography variant="body2" color="text.secondary">
           Nenhum item manual registrado para o mês {monthKey || "selecionado"}
-          {department ? ` e departamento ${department}` : ""}. Use "Cadastrar item" para explicar um desvio
+          {department ? ` e unidade ${department}` : ""}. Use "Registrar item" para explicar uma variação
           que não foi identificado automaticamente.
         </Typography>
       ) : (
@@ -384,13 +381,13 @@ export default function AcksRegisteredTab({ defaultMonth, department }: { defaul
 
       {/* Edição de Ack */}
       <Dialog open={editTarget !== null} onClose={() => setEditTarget(null)} maxWidth="sm" fullWidth>
-        <DialogTitle>Editar Ack — {editTarget?.department_name}</DialogTitle>
+        <DialogTitle>Alterar justificativa — {editTarget?.department_name}</DialogTitle>
         <DialogContent>
           <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
             {editTarget?.department_path.join(" > ")}
           </Typography>
           <TextField
-            fullWidth label="Data do registro" type="date" sx={{ mb: 2 }}
+            fullWidth label="Data de registro" type="date" sx={{ mb: 2 }}
             value={editDate}
             onChange={e => setEditDate(e.target.value)}
             InputLabelProps={{ shrink: true }}
@@ -412,16 +409,16 @@ export default function AcksRegisteredTab({ defaultMonth, department }: { defaul
             fullWidth label="Ordem (menor = aparece primeiro)" type="number" size="small" sx={{ mb: 2 }}
             value={editOrdem}
             onChange={e => setEditOrdem(Number(e.target.value) || 0)}
-            helperText="Usada para ordenar os highlights."
+            helperText="Usada para ordenar os destaques."
           />
           <TextField
-            fullWidth multiline minRows={3} label="Motivo do desvio"
+            fullWidth multiline minRows={3} label="Justificativa da variação"
             value={editReason} onChange={e => setEditReason(e.target.value)}
-            placeholder="Ex.: migração de workloads anunciada após o fechamento do forecast..."
+            placeholder="Ex.: migração de cargas anunciada após o fechamento da previsão..."
           />
           {editTarget?.history && editTarget.history.length > 0 && (
             <Box sx={{ mt: 2 }}>
-              <Typography variant="caption" color="text.secondary" fontWeight={700}>Histórico de edições:</Typography>
+              <Typography variant="caption" color="text.secondary" fontWeight={700}>Histórico de alterações:</Typography>
               {editTarget.history.map((h, index) => (
                 <Typography key={index} variant="caption" color="text.secondary" sx={{ display: "block", mt: 0.5 }}>
                   • {h.category}: {h.reason} <Box component="span" sx={{ opacity: 0.7 }}>(em {new Date(h.changed_at).toLocaleString("pt-BR")})</Box>
@@ -433,22 +430,22 @@ export default function AcksRegisteredTab({ defaultMonth, department }: { defaul
         <DialogActions sx={{ px: 3, pb: 2 }}>
           <Button onClick={() => setEditTarget(null)}>Cancelar</Button>
           <Button variant="contained" disabled={savingEdit || !editReason.trim()} onClick={() => void saveEdit()}>
-            {savingEdit ? "Salvando..." : "Salvar edição"}
+            {savingEdit ? "Gravando..." : "Gravar edição"}
           </Button>
         </DialogActions>
       </Dialog>
 
       {/* Confirmação desativar/reativar */}
       <Dialog open={deactivateTarget !== null} onClose={() => { if (!togglingActive) setDeactivateTarget(null); }} maxWidth="xs" fullWidth>
-        <DialogTitle>{deactivateTarget?.active === false ? "Reativar Ack?" : "Desativar Ack?"}</DialogTitle>
+        <DialogTitle>{deactivateTarget?.active === false ? "Reativar justificativa?" : "Desativar justificativa?"}</DialogTitle>
         <DialogContent>
           {deactivateTarget?.active === false ? (
             <Typography>
-              Reativar o Ack de <strong>{deactivateTarget.department_name}</strong>? Ele voltará a aparecer nos dashboards.
+              Reativar a justificativa de <strong>{deactivateTarget.department_name}</strong>? Ele voltará a aparecer nos dashboards.
             </Typography>
           ) : (
             <Typography>
-              Desativar o Ack de <strong>{deactivateTarget?.department_name}</strong>? Ele deixará de aparecer nos
+              Desativar a justificativa de <strong>{deactivateTarget?.department_name}</strong>? Ele deixará de aparecer nos
               dashboards (Ex.: Visão Esperada) sem perder o registro nem o histórico.
             </Typography>
           )}
@@ -461,14 +458,14 @@ export default function AcksRegisteredTab({ defaultMonth, department }: { defaul
             disabled={togglingActive}
             onClick={() => void toggleActive()}
           >
-            {togglingActive ? "Alterando..." : deactivateTarget?.active === false ? "Reativar" : "Desativar"}
+            {togglingActive ? "Modificando..." : deactivateTarget?.active === false ? "Reativar" : "Desativar"}
           </Button>
         </DialogActions>
       </Dialog>
 
       {/* Confirmação de exclusão do registro (departamento) */}
       <Dialog open={deleteTarget !== null} onClose={() => { if (!deleting) setDeleteTarget(null); }} maxWidth="xs" fullWidth>
-        <DialogTitle>Excluir registro?</DialogTitle>
+        <DialogTitle>Remover registro?</DialogTitle>
         <DialogContent>
           <Typography>
             Excluir o registro de <strong>{deleteTarget?.department_name}</strong>
@@ -479,7 +476,7 @@ export default function AcksRegisteredTab({ defaultMonth, department }: { defaul
         <DialogActions sx={{ px: 3, pb: 2 }}>
           <Button disabled={deleting} onClick={() => setDeleteTarget(null)}>Cancelar</Button>
           <Button variant="contained" color="error" disabled={deleting} onClick={() => void confirmDelete()}>
-            {deleting ? "Excluindo..." : "Excluir"}
+            {deleting ? "Removendo..." : "Remover"}
           </Button>
         </DialogActions>
       </Dialog>

@@ -37,7 +37,7 @@ describe("shared chart theme", () => {
   });
   it("keeps sequential heatmap scales ordered and custom diverging stops intact", () => {
     const data: any = standardChartData([{ type: "heatmap", colorscale: "Purples" }, { type: "heatmap", colorscale: [[0, "#ffeeee"], [0.5, "#ffffff"], [1, "#004400"]] }], tokens);
-    expect(data[0].colorscale).toEqual([[0, tokenColors.brandTint], [0.3, "#A5B4FC"], [0.65, tokenColors.brandLight], [1, tokenColors.brandDark]]);
+    expect(data[0].colorscale).toEqual([[0, tokenColors.brandTint], [0.3, "#A9C8FF"], [0.65, tokenColors.brandLight], [1, tokenColors.brandDark]]);
     expect(data[1].colorscale).toEqual([[0, "#ffeeee"], [0.5, "#ffffff"], [1, "#004400"]]);
   });
   it("does not mutate the original layout or trace styles", () => {

@@ -157,17 +157,17 @@ export type CaseSummary = {
 };
 
 export async function listAnomalyConfigs(): Promise<AnomalyConfig[]> {
-  const { data } = await api.get("/anomalies/configs");
+  const { data } = await api.get("/alertas/configuracoes");
   return data;
 }
 
 export async function updateAnomalyConfig(id: number, payload: Record<string, unknown>) {
-  const { data } = await api.put(`/anomalies/configs/${id}`, payload);
+  const { data } = await api.put(`/alertas/configuracoes/${id}`, payload);
   return data;
 }
 
 export async function enqueueAnomalyRun(id: number) {
-  const { data } = await api.post(`/anomalies/configs/${id}/run`, { trigger_type: "MANUAL" });
+  const { data } = await api.post(`/alertas/configuracoes/${id}/executar`, { trigger_type: "MANUAL" });
   return data;
 }
 
@@ -183,32 +183,32 @@ export type AnomalyRunSummary = {
 };
 
 export async function listAnomalyRuns(limit = 20): Promise<{ items: AnomalyRunSummary[] }> {
-  const { data } = await api.get("/anomalies/runs", { params: { limit } });
+  const { data } = await api.get("/alertas/execucoes", { params: { limit } });
   return data;
 }
 
 export async function getAnomalyCoverage() {
-  const { data } = await api.get("/anomalies/coverage");
+  const { data } = await api.get("/alertas/cobertura");
   return data;
 }
 
 export async function getAnomalyMetrics(): Promise<CaseSummary> {
-  const { data } = await api.get("/anomalies/metrics");
+  const { data } = await api.get("/alertas/metricas");
   return data;
 }
 
 export async function listAnomalyCases(params: Record<string, unknown>) {
-  const { data } = await api.get("/anomalies/cases", { params });
+  const { data } = await api.get("/alertas/casos", { params });
   return data as { items: AnomalyCase[]; total: number; limit: number; offset: number };
 }
 
 export async function getAnomalyCase(id: number): Promise<AnomalyCase> {
-  const { data } = await api.get(`/anomalies/cases/${id}`);
+  const { data } = await api.get(`/alertas/casos/${id}`);
   return data;
 }
 
 export async function getAnomalyCaseEvents(id: number) {
-  const { data } = await api.get(`/anomalies/cases/${id}/events`);
+  const { data } = await api.get(`/alertas/casos/${id}/eventos`);
   return data as { items: Array<Record<string, unknown>> };
 }
 
@@ -285,7 +285,7 @@ export type AnomalySeries = {
 };
 
 export async function getAnomalyCaseSeries(id: number, horizonDays = 15): Promise<AnomalySeries> {
-  const { data } = await api.get(`/anomalies/cases/${id}/series`, {
+  const { data } = await api.get(`/alertas/casos/${id}/series`, {
     params: { horizon_days: horizonDays },
   });
   return data;
@@ -313,7 +313,7 @@ export type QualityBucket = {
 };
 
 export async function getExpectedEvents(params: Record<string, unknown> = {}) {
-  const { data } = await api.get("/anomalies/expected-events", { params });
+  const { data } = await api.get("/alertas/eventos-esperados", { params });
   return data as {
     items: ExpectedEventFamily[];
     total: number;
@@ -323,7 +323,7 @@ export async function getExpectedEvents(params: Record<string, unknown> = {}) {
 }
 
 export async function getQuality(params: Record<string, unknown> = {}) {
-  const { data } = await api.get("/anomalies/quality", { params });
+  const { data } = await api.get("/alertas/qualidade", { params });
   return data as {
     items: QualityBucket[];
     sampled?: number;
@@ -333,42 +333,42 @@ export async function getQuality(params: Record<string, unknown> = {}) {
 }
 
 export async function getAnomalyContributors(id: number) {
-  const { data } = await api.get(`/anomalies/cases/${id}/contributors`);
+  const { data } = await api.get(`/alertas/casos/${id}/contribuintes`);
   return data as { items: Array<Record<string, unknown>>; note?: string };
 }
 
 export async function transitionAnomalyCase(id: number, payload: Record<string, unknown>) {
-  const { data } = await api.post(`/anomalies/cases/${id}/transition`, payload);
+  const { data } = await api.post(`/alertas/casos/${id}/transicao`, payload);
   return data as AnomalyCase;
 }
 
 export async function createAnomalyAction(caseId: number, payload: Record<string, unknown>) {
-  const { data } = await api.post(`/anomalies/cases/${caseId}/actions`, payload);
+  const { data } = await api.post(`/alertas/casos/${caseId}/acoes`, payload);
   return data as AnomalyAction;
 }
 
 export async function updateAnomalyAction(actionId: number, payload: Record<string, unknown>) {
-  const { data } = await api.put(`/anomalies/actions/${actionId}`, payload);
+  const { data } = await api.put(`/alertas/acoes/${actionId}`, payload);
   return data as AnomalyAction;
 }
 
 export async function getAnomalyImpactSummary(configId?: number) {
-  const { data } = await api.get("/anomalies/impact/summary", { params: configId ? { config_id: configId } : {} });
+  const { data } = await api.get("/alertas/impacto/resumo", { params: configId ? { config_id: configId } : {} });
   return data as ImpactSummary;
 }
 
 export async function getAnomalyHealth() {
-  const { data } = await api.get("/anomalies/health");
+  const { data } = await api.get("/alertas/saude");
   return data as Record<string, unknown>;
 }
 
 export async function listAnomalyNotifications(params: Record<string, unknown>) {
-  const { data } = await api.get("/anomalies/notifications", { params });
+  const { data } = await api.get("/alertas/notificacoes", { params });
   return data as { items: AnomalyNotification[]; total: number; unread: number };
 }
 
 export async function readAnomalyNotification(id: number, acknowledge = false) {
-  const { data } = await api.post(`/anomalies/notifications/${id}/read`, null, {
+  const { data } = await api.post(`/alertas/notificacoes/${id}/lidas`, null, {
     params: { acknowledge },
   });
   return data;

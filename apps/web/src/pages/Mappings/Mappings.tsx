@@ -1,14 +1,11 @@
 import { dataDisplayText } from "../../utils/dataPresentation";
-import { useState, useEffect, useCallback, useRef } from "react";
+import { useState, useEffect, useCallback } from "react";
 import {
   Box, Typography, Button, Paper, IconButton, Chip,
   Select, MenuItem, FormControl, InputLabel, TextField,
-  Alert, CircularProgress, Tooltip, Divider, Autocomplete,
+  Alert, CircularProgress, Tooltip, Divider, Stack,
 } from "@mui/material";
-import {
-  Add, Delete, AutoFixHigh, SwapHoriz, Visibility,
-  Save, Refresh, Download,
-} from "@mui/icons-material";
+import { AddOutlined, AutoFixHighOutlined, SwapHorizOutlined, SaveOutlined, RefreshOutlined } from "@mui/icons-material";
 import {
   getConnections, SourceConnection, discoverSchema, ColumnInfo,
   getMappings, createMapping, updateMapping, deleteMapping, EtlMapping,
@@ -118,7 +115,7 @@ export default function Mappings() {
       }
       setDrafts([...existingDrafts, ...suggestedDrafts]);
     } catch (e: unknown) {
-      setError(e instanceof Error ? e.message : "Failed to load");
+      setError(e instanceof Error ? e.message : "Não foi possível carregar");
     } finally { setLoading(false); }
   }, [selectedConnId]);
 
@@ -153,7 +150,7 @@ export default function Mappings() {
       }
     }
     setDrafts(newDrafts);
-    setSuccess("Auto-suggest aplicado. Revise os mapeamentos e clique em Salvar Tudo.");
+    setSuccess("Sugestão automática aplicada. Revise os mapeamentos e clique em Salvar tudo.");
   };
 
   // Drag & drop
@@ -220,7 +217,7 @@ export default function Mappings() {
     let config: Record<string, unknown> | null = null;
     try {
       if (d.transform_config.trim()) config = JSON.parse(d.transform_config);
-    } catch { setError("JSON inválido na config"); setSavingIdx(null); return; }
+    } catch { setError("Configuração em JSON inválida"); setSavingIdx(null); return; }
 
     try {
       if (d.id > 0) {
@@ -238,7 +235,7 @@ export default function Mappings() {
       }
       setSuccess(`${d.name} salvo`);
     } catch (e: unknown) {
-      setError(e instanceof Error ? e.message : "Save failed");
+      setError(e instanceof Error ? e.message : "Não foi possível salvar");
     } finally { setSavingIdx(null); }
   };
 
@@ -280,82 +277,77 @@ export default function Mappings() {
   if (loading && drafts.length === 0) return <CircularProgress sx={{ display: "block", mx: "auto", mt: 10 }} />;
 
   return (
-    <Box>
-      {/* Header */}
-      <Box sx={{ display: "flex", justifyContent: "space-between", mb: 2 }}>
+    <Stack spacing={2}>
+      <Stack direction={{ xs: "column", md: "row" }} spacing={2} justifyContent="space-between" alignItems={{ md: "flex-start" }}>
         <Box>
-          <Typography variant="h4">Mapeamento de Colunas</Typography>
-          <Typography variant="body2" color="text.secondary" sx={{ mt: 0.5 }}>
-            Arraste colunas de origem para colunas de destino ou use Auto-Suggest
+          <Typography variant="h6">Mapeamento de colunas</Typography>
+          <Typography variant="body2" color="text.secondary">
+            Arraste os campos de origem para os campos de destino, ou use Auto-suggest para sugerir o vínculo.
           </Typography>
         </Box>
-        <Box sx={{ display: "flex", gap: 1 }}>
-          <Button variant="outlined" startIcon={<AutoFixHigh />} onClick={handleAutoSuggest}
+        <Stack direction="row" spacing={1}>
+          <Button variant="outlined" startIcon={<AutoFixHighOutlined />} onClick={handleAutoSuggest}
             disabled={!selectedConnId || columns.length === 0}>
-            Auto-Suggest
+            Auto-suggest
           </Button>
-          <Button variant="contained" startIcon={<Save />} onClick={saveAll}
+          <Button variant="contained" startIcon={<SaveOutlined />} onClick={saveAll}
             disabled={!selectedConnId || loading}>
-            {loading ? "Salvando..." : "Salvar Tudo"}
+            {loading ? "Salvando..." : "Salvar tudo"}
           </Button>
-        </Box>
-      </Box>
+        </Stack>
+      </Stack>
 
-      {/* Datasource selector */}
-      <Paper sx={{ p: 2, mb: 2, display: "flex", gap: 2, alignItems: "center" }}>
-        <FormControl sx={{ minWidth: 280 }} size="small">
-          <InputLabel>Datasource</InputLabel>
-          <Select value={selectedConnId} label="Datasource"
-            onChange={(e) => setSelectedConnId(e.target.value as number)}>
-            <MenuItem value=""><em>Selecione...</em></MenuItem>
-            {connections.map((c) => (
-              <MenuItem key={c.id} value={c.id}>{c.name} ({c.code})</MenuItem>
-            ))}
-          </Select>
-        </FormControl>
-        {selectedConn && (
-          <Chip label={`${columns.length} colunas descobertas`} size="small" color="primary" variant="outlined" />
-        )}
-        {unmappedCols.length > 0 && (
-          <Chip label={`${unmappedCols.length} não mapeadas`} size="small" color="warning" variant="outlined" />
-        )}
-        <Box sx={{ flexGrow: 1 }} />
-        <Button size="small" startIcon={<Refresh />} onClick={loadAll} disabled={!selectedConnId}>
-          Recarregar
-        </Button>
+      {/* Barra: datasource e contagens */}
+      <Paper variant="outlined" sx={{ p: 2 }}>
+        <Stack direction={{ xs: "column", md: "row" }} spacing={2} alignItems={{ md: "center" }}>
+          <FormControl sx={{ minWidth: 280 }} size="small">
+            <InputLabel>Origem dos dados</InputLabel>
+            <Select value={selectedConnId} label="Origem dos dados"
+              onChange={(e) => setSelectedConnId(e.target.value as number)}>
+              <MenuItem value=""><em>Escolha...</em></MenuItem>
+              {connections.map((c) => (
+                <MenuItem key={c.id} value={c.id}>{c.name} ({c.code})</MenuItem>
+              ))}
+            </Select>
+          </FormControl>
+          <Stack direction="row" spacing={3} flexWrap="wrap" useFlexGap>
+            <Box><Typography variant="caption" color="text.secondary">Campos de origem</Typography><Typography variant="h6">{columns.length}</Typography></Box>
+            <Box><Typography variant="caption" color="text.secondary">Vinculadas</Typography><Typography variant="h6">{mappedSourceCols.size}</Typography></Box>
+            <Box><Typography variant="caption" color="text.secondary">Sem vínculo</Typography><Typography variant="h6" color={unmappedCols.length > 0 ? "warning.main" : "text.primary"}>{unmappedCols.length}</Typography></Box>
+          </Stack>
+          <Box sx={{ flexGrow: 1 }} />
+          <Button size="small" startIcon={<RefreshOutlined />} onClick={loadAll} disabled={!selectedConnId}>
+            Recarregar
+          </Button>
+        </Stack>
       </Paper>
 
-      {error && <Alert severity="error" sx={{ mb: 2 }} onClose={() => setError("")}>{dataDisplayText(error)}</Alert>}
-      {success && <Alert severity="success" sx={{ mb: 2 }} onClose={() => setSuccess("")}>{dataDisplayText(success)}</Alert>}
+      {error && <Alert severity="error" onClose={() => setError("")}>{dataDisplayText(error)}</Alert>}
+      {success && <Alert severity="success" onClose={() => setSuccess("")}>{dataDisplayText(success)}</Alert>}
 
       {!selectedConnId ? (
-        <EmptyState message="Selecione um datasource para descobrir as colunas e criar mapeamentos." />
+        <EmptyState message="Escolha uma origem de dados para descobrir os campos e criar mapeamentos." />
       ) : columns.length === 0 ? (
-        <EmptyState message="Nenhuma coluna descoberta. Execute a coleta primeiro para preencher os dados e descobrir colunas." />
+        <EmptyState message="Nenhum campo descoberto. Execute a coleta primeiro para preencher os dados e descobrir os campos." />
       ) : (
         <>
-          {/* Legend */}
-          <Box sx={{ display: "flex", gap: 2, mb: 1, alignItems: "center" }}>
-            <Chip
-              label="Arraste colunas da esquerda para as colunas destino na direita"
-              icon={<SwapHoriz />}
-              size="small"
-              color="info"
-              variant="outlined"
-            />
-          </Box>
+          <Chip
+            label="Arraste campos da esquerda para os campos de destino na direita"
+            icon={<SwapHorizOutlined />}
+            size="small"
+            variant="outlined"
+            sx={{ alignSelf: "flex-start" }}
+          />
 
-          <Box sx={{ display: "grid", gridTemplateColumns: "320px 1fr", gap: 2 }}>
-            {/* LEFT PANEL - Source Columns */}
-            <Paper sx={{ p: 2, height: "fit-content", maxHeight: "calc(100vh - 230px)", overflow: "auto" }}>
-              <Box sx={{ display: "flex", alignItems: "center", gap: 1, mb: 2 }}>
-                <Typography variant="subtitle2" sx={{ fontWeight: 700, color: "#1565c0" }}>
-                  Colunas de Origem
-                </Typography>
-                <Chip label={sourceCols.length} size="small" sx={{ ml: "auto" }} />
-              </Box>
+          <Box sx={{ display: "grid", gridTemplateColumns: { xs: "1fr", md: "320px 1fr" }, gap: 2, alignItems: "start" }}>
+            {/* Painel esquerdo: colunas de origem */}
+            <Paper variant="outlined" sx={{ p: 2, maxHeight: { md: "calc(100vh - 300px)" }, overflow: "auto" }}>
+              <Stack direction="row" alignItems="center" spacing={1} sx={{ mb: 0.5 }}>
+                <Typography variant="subtitle2" sx={{ flexGrow: 1 }}>Campos de origem</Typography>
+                <Chip label={sourceCols.length} size="small" variant="outlined" />
+              </Stack>
               <Typography variant="caption" color="text.secondary" sx={{ display: "block", mb: 1 }}>
-                {selectedConn?.name} — arraste para mapear
+                {selectedConn?.name}: arraste para mapear
               </Typography>
               <Divider sx={{ mb: 1 }} />
               {sourceCols.map(col => {
@@ -369,10 +361,9 @@ export default function Mappings() {
                     sx={{
                       display: "flex", alignItems: "center", gap: 1,
                       p: 0.75, mb: 0.5, borderRadius: 1, cursor: "grab",
-                      bgcolor: isMapped ? "grey.100" : "#e3f2fd",
-                      border: isMapped ? "1px solid transparent" : "1px solid #90caf9",
+                      border: "1px solid", borderColor: isMapped ? "divider" : "primary.light",
+                      bgcolor: isMapped ? "transparent" : "action.hover",
                       opacity: isMapped ? 0.5 : 1,
-                      "&:hover": { bgcolor: isMapped ? "grey.200" : "#bbdefb" },
                       transition: "all 0.15s",
                     }}
                   >
@@ -380,11 +371,11 @@ export default function Mappings() {
                       fontWeight: isMapped ? 400 : 600,
                       fontFamily: "monospace", fontSize: "0.75rem",
                       textDecoration: isMapped ? "line-through" : "none",
-                      flexGrow: 1,
+                      flexGrow: 1, minWidth: 0, overflowWrap: "anywhere",
                     }}>
                       {col}
                     </Typography>
-                    {isMapped && <Chip label="mapeada" size="small" sx={{ height: 18, fontSize: "0.6rem" }} />}
+                    {isMapped && <Chip label="vinculada" size="small" variant="outlined" sx={{ height: 18, fontSize: "0.6rem" }} />}
                     {colInfo?.sample_values?.[0] && !isMapped && (
                       <Tooltip title={`Ex: ${colInfo.sample_values[0]}`} arrow>
                         <Chip label={colInfo.sample_values[0].slice(0, 20)} size="small"
@@ -395,36 +386,34 @@ export default function Mappings() {
                 );
               })}
               {sourceCols.length === 0 && (
-                <Typography variant="body2" color="text.secondary">Nenhuma coluna descoberta.</Typography>
+                <Typography variant="body2" color="text.secondary">Nenhum campo descoberto.</Typography>
               )}
             </Paper>
 
-            {/* RIGHT PANEL - Target Columns & Mappings */}
-            <Paper sx={{ p: 2, maxHeight: "calc(100vh - 230px)", overflow: "auto" }}>
-              <Box sx={{ display: "flex", justifyContent: "space-between", alignItems: "center", mb: 2 }}>
-                <Box sx={{ display: "flex", alignItems: "center", gap: 1 }}>
-                  <Typography variant="subtitle2" sx={{ fontWeight: 700, color: "#1a237e" }}>
-                    Tabela de Destino
-                  </Typography>
-                  <Chip label={`${allTargets.length} colunas`} size="small" />
-                </Box>
-                <Box sx={{ display: "flex", gap: 1 }}>
+            {/* Painel direito: colunas de destino e mapeamentos */}
+            <Paper variant="outlined" sx={{ p: 2, maxHeight: { md: "calc(100vh - 300px)" }, overflow: "auto" }}>
+              <Stack direction={{ xs: "column", sm: "row" }} justifyContent="space-between" alignItems={{ sm: "center" }} spacing={1} sx={{ mb: 1 }}>
+                <Stack direction="row" alignItems="center" spacing={1}>
+                  <Typography variant="subtitle2">Tabela alvo</Typography>
+                  <Chip label={`${allTargets.length} campos`} size="small" variant="outlined" />
+                </Stack>
+                <Stack direction="row" spacing={1}>
                   <TextField
                     size="small"
-                    placeholder="Nova coluna destino"
+                    placeholder="Novo campo de destino"
                     value={newTargetCol}
                     onChange={(e) => setNewTargetCol(e.target.value)}
                     onKeyDown={(e) => e.key === "Enter" && addTargetColumn()}
-                    sx={{ width: 180 }}
+                    sx={{ width: 200 }}
                   />
-                  <Button size="small" variant="outlined" startIcon={<Add />} onClick={addTargetColumn}>
-                    Adicionar
+                  <Button size="small" variant="outlined" startIcon={<AddOutlined />} onClick={addTargetColumn}>
+                    Incluir
                   </Button>
-                </Box>
-              </Box>
+                </Stack>
+              </Stack>
               <Divider sx={{ mb: 2 }} />
 
-              {/* Group by target column */}
+              {/* Agrupado por coluna de destino */}
               {allTargets.map(tgt => {
                 const tgtDrafts = drafts.filter(d => d.target_column === tgt);
                 return (
@@ -433,53 +422,49 @@ export default function Mappings() {
                     onDragOver={handleDragOver}
                     onDrop={() => handleDropOnTarget(tgt)}
                     sx={{
-                      mb: 1.5, p: 1.5, borderRadius: 2,
-                      border: dragSrc ? "2px dashed #1976d2" : "1px solid #E2E5EE",
-                      bgcolor: dragSrc ? "#e3f2fd" : "#fafafa",
+                      mb: 1.5, p: 1.5, borderRadius: 1,
+                      border: "1px solid", borderStyle: dragSrc ? "dashed" : "solid",
+                      borderColor: dragSrc ? "primary.main" : "divider",
+                      bgcolor: dragSrc ? "action.selected" : "transparent",
                       transition: "all 0.2s",
                     }}
                   >
-                    <Box sx={{ display: "flex", alignItems: "center", gap: 1, mb: tgtDrafts.length > 0 ? 1 : 0 }}>
-                      <Typography variant="body2" sx={{
-                        fontWeight: 700, fontFamily: "monospace", fontSize: "0.8rem",
-                        color: "#1a237e",
-                      }}>
+                    <Stack direction="row" alignItems="center" spacing={1} sx={{ mb: tgtDrafts.length > 0 ? 1 : 0 }}>
+                      <Typography variant="body2" sx={{ fontWeight: 700, fontFamily: "monospace", fontSize: "0.8rem" }}>
                         {tgt}
                       </Typography>
-                      <Chip label="destino" size="small" sx={{ height: 18, fontSize: "0.6rem", bgcolor: "#1a237e", color: "#fff" }} />
                       {dragSrc && (
-                        <Chip label={`Solte "${dragSrc}" aqui`} size="small" color="info" sx={{ ml: "auto" }} />
+                        <Chip label={`Solte "${dragSrc}" aqui`} size="small" color="primary" variant="outlined" sx={{ ml: "auto" }} />
                       )}
-                    </Box>
+                    </Stack>
 
-                    {/* Mapping rows for this target */}
+                    {/* Linhas de mapeamento para este destino */}
                     {tgtDrafts.map(d => {
                       const idx = drafts.indexOf(d);
                       return (
-                        <Box key={`${d.source_column}-${tgt}-${idx}`} sx={{
-                          display: "flex", alignItems: "center", gap: 0.5,
-                          py: 0.5, px: 1, mb: 0.5, borderRadius: 1,
-                          bgcolor: d.active ? "#fff" : "grey.100",
-                          border: "1px solid #E2E5EE",
-                        }}>
-                          {/* Source */}
+                        <Stack key={`${d.source_column}-${tgt}-${idx}`} direction="row" alignItems="center" spacing={0.5}
+                          sx={{
+                            py: 0.5, px: 1, mb: 0.5, borderRadius: 1,
+                            bgcolor: d.active ? "background.paper" : "action.hover",
+                            border: "1px solid", borderColor: "divider",
+                            flexWrap: "wrap", rowGap: 0.5,
+                          }}>
                           {d.source_column ? (
                             <Chip
                               label={d.source_column}
                               size="small"
-                              sx={{ minWidth: 100, fontFamily: "monospace", fontSize: "0.7rem", bgcolor: "#e3f2fd" }}
+                              variant="outlined"
+                              sx={{ minWidth: 100, fontFamily: "monospace", fontSize: "0.7rem" }}
                               onDelete={() => removeDraft(idx)}
                             />
                           ) : (
-                            <Chip label="CONSTANT" size="small" color="secondary"
+                            <Chip label="CONSTANT" size="small" variant="outlined"
                               sx={{ minWidth: 80, fontSize: "0.7rem" }}
                               onDelete={() => removeDraft(idx)} />
                           )}
 
-                          {/* Arrow */}
-                          <SwapHoriz sx={{ fontSize: 16, color: "#888" }} />
+                          <SwapHorizOutlined sx={{ fontSize: 16, color: "text.secondary" }} />
 
-                          {/* Transform type */}
                           <Select
                             size="small"
                             value={d.transform_type}
@@ -517,42 +502,39 @@ export default function Mappings() {
                             />
                           )}
 
-                          {/* Priority */}
                           <TextField
                             size="small"
                             type="number"
                             value={d.priority}
                             onChange={(e) => updateDraft(idx, "priority", parseInt(e.target.value) || 0)}
-                            sx={{ width: 50, "& input": { fontSize: "0.7rem", py: 0.5, textAlign: "center" } }}
+                            sx={{ width: 60, "& input": { fontSize: "0.7rem", py: 0.5, textAlign: "center" } }}
                           />
 
-                          {/* Active toggle */}
                           <Chip
                             label={d.active ? "ativo" : "inativo"}
                             size="small"
                             color={d.active ? "success" : "default"}
+                            variant={d.active ? "filled" : "outlined"}
                             onClick={() => toggleActive(idx)}
                             sx={{ height: 22, fontSize: "0.6rem", cursor: "pointer" }}
                           />
 
-                          {/* Save button */}
-                          <Tooltip title="Salvar este mapeamento">
+                          <Tooltip title="Gravar este mapeamento">
                             <IconButton size="small" onClick={() => saveDraft(idx)}
                               disabled={savingIdx === idx}
                               color={d.id > 0 ? "default" : "primary"}>
-                              {savingIdx === idx ? <CircularProgress size={14} /> : <Save sx={{ fontSize: 16 }} />}
+                              {savingIdx === idx ? <CircularProgress size={14} /> : <SaveOutlined sx={{ fontSize: 16 }} />}
                             </IconButton>
                           </Tooltip>
 
-                          {/* Status */}
-                          {d.id > 0 && <Chip label="salvo" size="small" color="primary" variant="outlined" sx={{ height: 20, fontSize: "0.6rem" }} />}
-                        </Box>
+                          {d.id > 0 && <Chip label="gravado" size="small" color="primary" variant="outlined" sx={{ height: 20, fontSize: "0.6rem" }} />}
+                        </Stack>
                       );
                     })}
 
                     {tgtDrafts.filter(d => d.active).length === 0 && (
                       <Typography variant="caption" color="text.secondary">
-                        Arraste uma coluna de origem aqui ou clique em Auto-Suggest
+                        Arraste um campo de origem aqui ou use Auto-suggest
                       </Typography>
                     )}
                   </Box>
@@ -560,12 +542,12 @@ export default function Mappings() {
               })}
 
               {drafts.length === 0 && (
-                <EmptyState message="Nenhum mapeamento. Arraste colunas da esquerda para criar mapeamentos ou use Auto-Suggest." />
+                <EmptyState message="Nenhum mapeamento. Arraste campos da esquerda para criar vínculos ou use Auto-suggest." />
               )}
             </Paper>
           </Box>
         </>
       )}
-    </Box>
+    </Stack>
   );
 }

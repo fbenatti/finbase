@@ -4,7 +4,7 @@ import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "rea
 import Plot from "@/components/Plot";
 import { useMenuSearchParams as useSearchParams } from "../../navigation/useMenuSearchParams";
 import { Alert, Box, Breadcrumbs, Button, Chip, CircularProgress, FormControl, Grid, IconButton, InputLabel, LinearProgress, Link, MenuItem, Paper, Select, Stack, Table, TableBody, TableCell, TableContainer, TableHead, TableRow, TextField, Typography } from "@mui/material";
-import { Add, ArrowBack, Remove } from "@mui/icons-material";
+import { AddOutlined, ArrowBackOutlined, RemoveOutlined } from "@mui/icons-material";
 import DepartmentTreePicker, { flattenDepartments } from "../../components/DepartmentTreePicker";
 import DesviosTab from "./DesviosTab";
 import AcksRegisteredTab from "./AcksRegisteredTab";
@@ -28,7 +28,7 @@ const prettyMonth = (month: string) => month.length === 6
   : month;
 const DIM_LABELS: Record<string, string> = {
   serviceprovidername: "Cloud",
-  cloud_origem: "Cloud Origem",
+  cloud_origem: "Origem na nuvem",
   subaccountname: "SubAccountName",
 };
 
@@ -187,8 +187,8 @@ export default function ForecastAccuracy({ embedded = false }: { embedded?: bool
     return () => { cancelled = true; };
   }, [selectedMonth, department]);
 
-  // Motivos de desvio que se aplicam a uma linha do Top 5: Ack exato no caminho
-  // da linha ou Ack de um descendente (ex.: linha "DIR DADOS..." mostra o Ack do
+  // Motivos de variação que se aplicam a uma linha do Top 5: Ack exato no caminho
+  // da linha ou Justificativa de um descendente (ex.: linha "DIR DADOS..." mostra o Ack do
   // projeto "Invoice" abaixo dela). Merge direto com os desvios identificados.
   const acksForRow = (item: ForecastAccuracyDeltaRow): ForecastAck[] => {
     if (acks.length === 0 || !deltaData) return [];
@@ -227,7 +227,7 @@ export default function ForecastAccuracy({ embedded = false }: { embedded?: bool
       setAckTarget(null);
       setAckReason("");
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Falha ao salvar Ack");
+      setError(e instanceof Error ? e.message : "Não foi possível gravar a justificativa");
     } finally {
       setSavingAck(false);
     }
@@ -314,11 +314,11 @@ export default function ForecastAccuracy({ embedded = false }: { embedded?: bool
         name: "Projetado",
         x: records.map(item => item.dimension_value),
         y: records.map(item => Number(item.forecast_value || 0)),
-        marker: { color: "#4338CA" },
+        marker: { color: "#0F62FE" },
       },
       {
         type: "bar" as const,
-        name: "Realizado",
+        name: "Efetivado",
         x: records.map(item => item.dimension_value),
         y: records.map(item => Number(item.actual_value || 0)),
         marker: { color: "#16A34A" },
@@ -352,9 +352,9 @@ export default function ForecastAccuracy({ embedded = false }: { embedded?: bool
       <Box sx={{ px: 3, pt: 3, bgcolor: "background.paper", borderBottom: "1px solid", borderColor: "divider", borderRadius: embedded ? "12px 12px 0 0" : 0 }}>
         <Box sx={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 2, mb: 2, flexWrap: "wrap" }}>
           <Box>
-            <Typography variant={embedded ? "h6" : "h4"}>{embedded ? "Acurácia" : tab === "desvios" ? "Desvios das projeções" : tab === "acks" ? "Justificativas das projeções" : "Acurácia das projeções"}</Typography>
+            <Typography variant={embedded ? "h6" : "h4"}>{embedded ? "Precisão" : tab === "desvios" ? "Variações da previsão" : tab === "acks" ? "Justificativas de variação" : "Precisão das previsões"}</Typography>
             <Typography color="text.secondary" sx={{ mt: 0.5 }}>
-              O que foi projetado no início do mês × o que realmente foi realizado.
+              O que foi projetado no início do mês × o que realmente foi efetivado.
             </Typography>
           </Box>
           <Stack direction={{ xs: "column", md: "row" }} spacing={1.5} sx={{ alignItems: { md: "flex-end" }, flexWrap: "wrap", width: "100%" }}>
@@ -365,35 +365,35 @@ export default function ForecastAccuracy({ embedded = false }: { embedded?: bool
                 onChange={id => chooseDepartment(id == null ? "" : flattenDepartments(organization).find(node => node.id === id)?.path || "")}
                 allowClear
                 clearLabel="Todos"
-                label="Organograma"
-                menuHint="Selecione um nível para consolidar todos os seus filhos."
+                label="Hierarquia"
+                menuHint="Escolha um nível para consolidar todos os itens abaixo dele."
               />
             </Box>
             <FormControl size="small" sx={{ minWidth: 160 }}>
-              <InputLabel id="accuracy-month-label">Mês realizado</InputLabel>
+              <InputLabel id="accuracy-month-label">Mês de apuração</InputLabel>
               <Select
                 labelId="accuracy-month-label"
-                label="Mês realizado"
+                label="Mês de apuração"
                 value={selectedMonth}
                 onChange={event => handleMonthChange(event.target.value)}
               >
                 {months.map(item => (
                   <MenuItem key={item.run_id} value={item.target_month}>
-                    {prettyMonth(item.target_month)} {item.closed ? "" : "(em curso)"}
+                    {prettyMonth(item.target_month)} {item.closed ? "" : "(em andamento)"}
                   </MenuItem>
                 ))}
               </Select>
             </FormControl>
             <FormControl size="small" sx={{ minWidth: 180 }}>
-              <InputLabel id="accuracy-dim-label">Dimensão</InputLabel>
+              <InputLabel id="accuracy-dim-label">Eixo de análise</InputLabel>
               <Select
                 labelId="accuracy-dim-label"
-                label="Dimensão"
+                label="Eixo de análise"
                 value={selectedDim}
                 onChange={event => setDim(event.target.value)}
               >
-                <MenuItem value="serviceprovidername">Cloud</MenuItem>
-                <MenuItem value="cloud_origem">Cloud Origem</MenuItem>
+                <MenuItem value="serviceprovidername">Nuvem</MenuItem>
+                <MenuItem value="cloud_origem">Origem na nuvem</MenuItem>
                 <MenuItem value="subaccountname">SubAccountName</MenuItem>
               </Select>
             </FormControl>
@@ -402,7 +402,7 @@ export default function ForecastAccuracy({ embedded = false }: { embedded?: bool
 
         {pathParts.length > 0 && (
           <Breadcrumbs separator=">" sx={{ pb: 2, "& .MuiBreadcrumbs-separator": { mx: 0.5 } }}>
-            <Typography color="text.secondary">Acurácia</Typography>
+            <Typography color="text.secondary">Precisão</Typography>
             {pathParts.map((name, index) => {
               const path = pathParts.slice(0, index + 1).join(" > ");
               const last = index === pathParts.length - 1;
@@ -434,27 +434,27 @@ export default function ForecastAccuracy({ embedded = false }: { embedded?: bool
         {summary && (
           <>
             <Stack direction="row" spacing={1} sx={{ mb: 2, alignItems: "center", flexWrap: "wrap" }}>
-              <Typography variant="h6">Snapshot do simulado</Typography>
-              <Chip size="small" color={summary.closed ? "success" : "warning"} label={summary.closed ? "Mês fechado" : "Em acompanhamento"} />
+              <Typography variant="h6">Retrato da simulação</Typography>
+              <Chip size="small" color={summary.closed ? "success" : "warning"} label={summary.closed ? "Mês encerrado" : "Sob acompanhamento"} />
               <Chip size="small" variant="outlined" label={`simulado em ${monthLabel(summary.simulated_as_of)}`} />
               <Chip size="small" variant="outlined" label={`cutoff ${monthLabel(summary.cutoff_date)}`} />
               <Chip size="small" variant="outlined" label={`run #${summary.run_id} · ${summary.result_table}`} />
-              {department && <Chip size="small" variant="outlined" label={`departamento: ${department}`} />}
+              {department && <Chip size="small" variant="outlined" label={`unidade: ${department}`} />}
             </Stack>
 
             <Grid container spacing={2} sx={{ mb: 2 }}>
-              <Grid item xs={6} sm={4} md={2}><KpiCard label="Projetado (mês)" value={money.format(Number(summary.forecast_value || 0))} hint="estimativa do snapshot" /></Grid>
-              <Grid item xs={6} sm={4} md={2}><KpiCard label="Realizado" value={money.format(Number(summary.actual_value || 0))} hint={summary.closed ? "mês fechado" : "parcial até hoje"} /></Grid>
+              <Grid item xs={6} sm={4} md={2}><KpiCard label="Previsto (mês)" value={money.format(Number(summary.forecast_value || 0))} hint="estimativa do snapshot" /></Grid>
+              <Grid item xs={6} sm={4} md={2}><KpiCard label="Efetivado" value={money.format(Number(summary.actual_value || 0))} hint={summary.closed ? "mês fechado" : "parcial até hoje"} /></Grid>
               <Grid item xs={6} sm={4} md={2}><KpiCard label="Variação (R$)" value={money.format(Number(summary.variance || 0))} color={Number(summary.variance || 0) >= 0 ? "#DC2626" : "#16A34A"} /></Grid>
               <Grid item xs={6} sm={4} md={2}><KpiCard label="Variação (%)" value={pct(summary.variance_pct)} color={Number(summary.variance_pct || 0) >= 0 ? "#DC2626" : "#16A34A"} /></Grid>
-              <Grid item xs={6} sm={4} md={2}><KpiCard label="Acurácia" value={pct(summary.accuracy)} color={accuracyColor(summary.accuracy)} hint="1 − WAPE" /></Grid>
+              <Grid item xs={6} sm={4} md={2}><KpiCard label="Precisão" value={pct(summary.accuracy)} color={accuracyColor(summary.accuracy)} hint="1 − erro percentual ponderado (WAPE)" /></Grid>
               <Grid item xs={6} sm={4} md={2}><KpiCard label="WAPE" value={summary.wape == null ? "—" : money2.format(Number(summary.wape))} hint={`bias: ${pct(summary.bias)}`} /></Grid>
             </Grid>
 
             <Grid container spacing={2}>
               <Grid item xs={12} lg={7}>
                 <Paper elevation={0} sx={{ p: 2, borderRadius: 2, border: "1px solid", borderColor: "divider" }}>
-                  <Typography variant="h6" sx={{ mb: 1 }}>Projetado × Realizado</Typography>
+                  <Typography variant="h6" sx={{ mb: 1 }}>Estimado × efetivado</Typography>
                   <Box sx={{ height: 340 }}>
                     <Plot
                       data={chartData}
@@ -468,16 +468,16 @@ export default function ForecastAccuracy({ embedded = false }: { embedded?: bool
               </Grid>
               <Grid item xs={12} lg={5}>
                 <Paper elevation={0} sx={{ p: 2, borderRadius: 2, border: "1px solid", borderColor: "divider" }}>
-                  <Typography variant="h6" sx={{ mb: 1 }}>Evolução da acurácia</Typography>
+                  <Typography variant="h6" sx={{ mb: 1 }}>Evolução da precisão</Typography>
                   {months.length > 0 ? (
                     <TableContainer>
                       <Table size="small">
                         <TableHead>
                           <TableRow>
                             <TableCell>Mês</TableCell>
-                            <TableCell align="right">Projetado</TableCell>
-                            <TableCell align="right">Realizado</TableCell>
-                            <TableCell align="right">Acurácia</TableCell>
+                            <TableCell align="right">Previsto</TableCell>
+                            <TableCell align="right">Efetivado</TableCell>
+                            <TableCell align="right">Precisão</TableCell>
                           </TableRow>
                         </TableHead>
                         <TableBody>
@@ -493,7 +493,7 @@ export default function ForecastAccuracy({ embedded = false }: { embedded?: bool
                       </Table>
                     </TableContainer>
                   ) : (
-                    <Typography variant="body2" color="text.secondary">Sem simulados para este departamento/visão.</Typography>
+                    <Typography variant="body2" color="text.secondary">Sem simulações para esta unidade/visão.</Typography>
                   )}
                 </Paper>
               </Grid>
@@ -503,17 +503,17 @@ export default function ForecastAccuracy({ embedded = false }: { embedded?: bool
               <Stack direction="row" justifyContent="space-between" alignItems="center" sx={{ mb: 1 }}>
                 <Stack direction="row" alignItems="flex-start" gap={1}>
                   {(department || offenderSubcatOpen) && (
-                    <IconButton size="small" onClick={goBackOffender} aria-label="Voltar um nível" title="Voltar um nível">
-                      <ArrowBack fontSize="small" />
+                    <IconButton size="small" onClick={goBackOffender} aria-label="Subir um nível" title="Subir um nível">
+                      <ArrowBackOutlined fontSize="small" />
                     </IconButton>
                   )}
                   <Box>
-                  <Typography variant="h6">Principais desvios</Typography>
+                  <Typography variant="h6">Maiores variações</Typography>
                   <Typography variant="body2" color="text.secondary">
-                    Nível abaixo do departamento selecionado — {deltaData?.level_label || "—"} · top 10 por |delta|.
-                    {department ? ` Filtrado por: ${department}.` : " Sem filtro de departamento."}
-                    {deltaData && !deltaData.leaf && deltaData.records.some(r => !isOffenderLeaf(r)) && " Clique em uma linha para navegar um nível abaixo."}
-                    {deltaData && !deltaData.leaf && deltaData.records.some(isOffenderLeaf) && " Clique em uma linha para ver o detalhe por ServiceSubcategory."}
+                    Nível abaixo da unidade selecionada — {deltaData?.level_label || "—"} · top 10 por |variação|.
+                    {department ? ` Filtrado por: ${department}.` : " Sem filtro de unidade."}
+                    {deltaData && !deltaData.leaf && deltaData.records.some(r => !isOffenderLeaf(r)) && " Clique em uma linha para descer um nível."}
+                    {deltaData && !deltaData.leaf && deltaData.records.some(isOffenderLeaf) && " Clique em uma linha para ver o detalhe por subcategoria de serviço."}
                   </Typography>
                   </Box>
                 </Stack>
@@ -527,12 +527,12 @@ export default function ForecastAccuracy({ embedded = false }: { embedded?: bool
                       <TableHead>
                         <TableRow>
                           <TableCell>{deltaData.level_label}</TableCell>
-                          <TableCell align="right">Projetado</TableCell>
-                          <TableCell align="right">Realizado</TableCell>
-                          <TableCell align="right">Delta (R$)</TableCell>
-                          <TableCell align="right">Delta (%)</TableCell>
-                          <TableCell align="right">Acurácia</TableCell>
-                          <TableCell>Ack</TableCell>
+                          <TableCell align="right">Previsto</TableCell>
+                          <TableCell align="right">Efetivado</TableCell>
+                          <TableCell align="right">Variação (R$)</TableCell>
+                          <TableCell align="right">Variação (%)</TableCell>
+                          <TableCell align="right">Precisão</TableCell>
+                          <TableCell>Justificativa</TableCell>
                         </TableRow>
                       </TableHead>
                       <TableBody>
@@ -555,9 +555,9 @@ export default function ForecastAccuracy({ embedded = false }: { embedded?: bool
                                         size="small"
                                         onClick={event => { event.stopPropagation(); openSeriesDialog(item); }}
                                         aria-label={`Gráfico do período de ${item.name}`}
-                                        title="Gráfico do período (Projetado × Realizado dia a dia)"
+                                        title="Gráfico do período (Previsto × Efetivado dia a dia)"
                                       >
-                                        <Add fontSize="small" />
+                                        <AddOutlined fontSize="small" />
                                       </IconButton>
                                     )}
                                     <Typography variant="body2" fontWeight={600}>{item.name}</Typography>
@@ -583,10 +583,10 @@ export default function ForecastAccuracy({ embedded = false }: { embedded?: bool
                                       >
                                         Ack
                                       </Button>
-                                    ) : <Typography variant="caption" color="text.disabled">Disponível no nível Projeto</Typography>
+                                    ) : <Typography variant="caption" color="text.disabled">Disponível apenas no nível de projeto</Typography>
                                   ) : (
                                     <Stack spacing={0.5} sx={{ maxWidth: 360 }}>
-                                      <Chip size="small" color="info" label={`✓ Ack${rowAcks.length > 1 ? ` (${rowAcks.length})` : ""}: ${rowAcks[0].category}`} />
+                                      <Chip size="small" color="info" label={`✓ Justificativa${rowAcks.length > 1 ? ` (${rowAcks.length})` : ""}: ${rowAcks[0].category}`} />
                                       {rowAcks.slice(0, 3).map(ack => (
                                         <Typography key={ack.id} variant="caption" color="text.secondary" sx={{ display: "block" }}>
                                           {ack.reason}
@@ -609,10 +609,10 @@ export default function ForecastAccuracy({ embedded = false }: { embedded?: bool
                                         <TableHead>
                                           <TableRow>
                                             <TableCell>ServiceSubcategory</TableCell>
-                                            <TableCell align="right">Projetado</TableCell>
-                                            <TableCell align="right">Realizado</TableCell>
-                                            <TableCell align="right">Delta (R$)</TableCell>
-                                            <TableCell align="right">Acurácia</TableCell>
+                                            <TableCell align="right">Previsto</TableCell>
+                                            <TableCell align="right">Efetivado</TableCell>
+                                            <TableCell align="right">Variação (R$)</TableCell>
+                                            <TableCell align="right">Precisão</TableCell>
                                           </TableRow>
                                         </TableHead>
                                         <TableBody>
@@ -630,7 +630,7 @@ export default function ForecastAccuracy({ embedded = false }: { embedded?: bool
                                         </TableBody>
                                       </Table>
                                     ) : (
-                                      <Typography variant="body2" color="text.secondary">Sem subcategorias para este nível.</Typography>
+                                      <Typography variant="body2" color="text.secondary">Nenhuma subcategoria neste nível.</Typography>
                                     )}
                                   </TableCell>
                                 </TableRow>
@@ -643,22 +643,22 @@ export default function ForecastAccuracy({ embedded = false }: { embedded?: bool
                   </TableContainer>
                   <Stack direction="row" spacing={2} alignItems="center" sx={{ mt: 1 }}>
                     <Typography variant="caption" color="text.secondary">
-                      <Box component="span" sx={{ color: "#DC2626" }}>vermelho = subestimou</Box> (realizado acima do projetado) ·{" "}
-                      <Box component="span" sx={{ color: "#16A34A" }}>verde = superestimou</Box> (projetado acima do realizado).
+                      <Box component="span" sx={{ color: "#DC2626" }}>vermelho = subestimou</Box> (efetivado acima do projetado) ·{" "}
+                      <Box component="span" sx={{ color: "#16A34A" }}>verde = superestimou</Box> (projetado acima do efetivado).
                     </Typography>
                   </Stack>
                 </>
               ) : (
-                <Typography variant="body2" color="text.secondary">Sem dados neste nível para os filtros atuais.</Typography>
+                <Typography variant="body2" color="text.secondary">Sem dados neste nível com os filtros atuais.</Typography>
               )}
             </Paper>
 
             <Dialog open={Boolean(ackTarget)} onClose={() => !savingAck && setAckTarget(null)} maxWidth="sm" fullWidth>
-              <DialogTitle>Registrar Ack — Projeto {ackTarget ? projectPathForRow(ackTarget).split(" > ").slice(-1)[0] : ""}</DialogTitle>
+              <DialogTitle>Registrar justificativa — Projeto {ackTarget ? projectPathForRow(ackTarget).split(" > ").slice(-1)[0] : ""}</DialogTitle>
               <DialogContent>
                 <Stack gap={2} sx={{ mt: 1 }}>
                   <FormControl fullWidth>
-                    <InputLabel>Categoria</InputLabel>
+                    <InputLabel>Tipo de variação</InputLabel>
                     <Select value={ackCategory} label="Categoria" onChange={event => setAckCategory(event.target.value)}>
                       {["Pico sazonal", "Migração", "Projeto novo", "Erro de precificação", "Outro"].map(category => (
                         <MenuItem key={category} value={category}>{category}</MenuItem>
@@ -666,7 +666,7 @@ export default function ForecastAccuracy({ embedded = false }: { embedded?: bool
                     </Select>
                   </FormControl>
                   <TextField
-                    label="Motivo do desvio"
+                    label="Justificativa da variação"
                     value={ackReason}
                     onChange={event => setAckReason(event.target.value)}
                     multiline
@@ -678,7 +678,7 @@ export default function ForecastAccuracy({ embedded = false }: { embedded?: bool
               <DialogActions>
                 <Button onClick={() => setAckTarget(null)} disabled={savingAck}>Cancelar</Button>
                 <Button variant="contained" onClick={saveAck} disabled={savingAck || !ackReason.trim()}>
-                  {savingAck ? "Salvando…" : "Salvar Ack"}
+                  {savingAck ? "Gravando…" : "Gravar justificativa"}
                 </Button>
               </DialogActions>
             </Dialog>
@@ -695,11 +695,11 @@ export default function ForecastAccuracy({ embedded = false }: { embedded?: bool
                     <TableHead>
                       <TableRow>
                         <TableCell>{DIM_LABELS[dimensions.dimension] || dimensions.dimension}</TableCell>
-                        <TableCell align="right">Projetado</TableCell>
-                        <TableCell align="right">Realizado</TableCell>
+                        <TableCell align="right">Previsto</TableCell>
+                        <TableCell align="right">Efetivado</TableCell>
                         <TableCell align="right">Variação (R$)</TableCell>
                         <TableCell align="right">Variação (%)</TableCell>
-                        <TableCell align="right">Acurácia</TableCell>
+                        <TableCell align="right">Precisão</TableCell>
                         <TableCell align="right">WAPE</TableCell>
                       </TableRow>
                     </TableHead>
@@ -721,22 +721,22 @@ export default function ForecastAccuracy({ embedded = false }: { embedded?: bool
                   </Table>
                 </TableContainer>
               ) : (
-                <Typography variant="body2" color="text.secondary">Sem linhas para esta dimensão.</Typography>
+                <Typography variant="body2" color="text.secondary">Nenhuma linha para esta dimensão.</Typography>
               )}
             </Paper>
           </>
         )}
         {!loading && months.length === 0 && !error && (
           <Alert severity="info">
-            Nenhum simulado de acurácia encontrado. Crie um com
+            Nenhum simulado de precisão encontrado. Crie um com
             <Box component="code" sx={{ mx: 1 }}>POST /forecast/runs?config_id=&lt;id&gt;&amp;simulated_as_of=YYYY-MM-DD</Box>
-            ou na aba <b>Acurácia de Forecast</b> de Reprocessar.
+            ou na aba <b>Precisão da previsão</b> de Operações de dados.
           </Alert>
         )}
         {!loading && months.length > 0 && !error && !months.some(m => Number(m.forecast_value) || Number(m.actual_value)) && (
           <Alert severity="warning">
-            Sem dados de acurácia para o departamento selecionado
-            {department ? ` (${department})` : ""}. Selecione outro departamento ou <b>Todos</b>.
+            Sem dados de precisão para a unidade selecionada
+            {department ? ` (${department})` : ""}. Selecione outra unidade ou <b>Todas</b>.
           </Alert>
         )}
         </>)}
@@ -749,7 +749,7 @@ export default function ForecastAccuracy({ embedded = false }: { embedded?: bool
                 <Box>
                   <Typography variant="h6">Período — {seriesDialog.subcategory}</Typography>
                   <Typography variant="body2" color="text.secondary">
-                    {prettyMonth(seriesDialog.data?.target_month || selectedMonth)} · {seriesDialog.data?.department || department || "Todos os departamentos"}
+                    {prettyMonth(seriesDialog.data?.target_month || selectedMonth)} · {seriesDialog.data?.department || department || "Todas as unidades"}
                   </Typography>
                 </Box>
                 <Button size="small" onClick={() => setSeriesDialog(null)}>Fechar</Button>
@@ -766,7 +766,7 @@ export default function ForecastAccuracy({ embedded = false }: { embedded?: bool
                       <Typography variant="subtitle1" fontWeight={600}>{money.format(seriesDialog.data.forecast_total)}</Typography>
                     </Box>
                     <Box>
-                      <Typography variant="caption" color="text.secondary">Realizado (mês)</Typography>
+                      <Typography variant="caption" color="text.secondary">Efetivado (mês)</Typography>
                       <Typography variant="subtitle1" fontWeight={600}>{money.format(seriesDialog.data.actual_total)}</Typography>
                     </Box>
                     <Box>
@@ -776,11 +776,11 @@ export default function ForecastAccuracy({ embedded = false }: { embedded?: bool
                       </Typography>
                     </Box>
                     <Box>
-                      <Typography variant="caption" color="text.secondary">Acurácia</Typography>
+                      <Typography variant="caption" color="text.secondary">Precisão</Typography>
                       <Typography variant="subtitle1" fontWeight={600}>{pct(seriesDialog.data.accuracy)}</Typography>
                     </Box>
                     <Box>
-                      <Typography variant="caption" color="text.secondary">Desvio começou a crescer</Typography>
+                      <Typography variant="caption" color="text.secondary">Início da variação a crescer</Typography>
                       <Typography variant="subtitle1" fontWeight={600} sx={{ color: seriesDialog.data.daily_deviation_day != null ? "#DC2626" : "#16A34A" }}>
                         {seriesDialog.data.daily_deviation_day != null ? `dia ${seriesDialog.data.daily_deviation_day}` : "não houve (redução)"}
                       </Typography>
@@ -790,14 +790,14 @@ export default function ForecastAccuracy({ embedded = false }: { embedded?: bool
                     data={[
                       {
                         type: "bar",
-                        name: "Realizado (dentro do rate diário)",
+                        name: "Efetivado (dentro do ritmo diário)",
                         x: seriesDialog.data.points.map(p => p.day),
                         y: seriesDialog.data.points.map(p => Math.min(p.actual, p.forecast_rate)),
                         marker: { color: "#16A34A" },
                       },
                       {
                         type: "bar",
-                        name: "Excesso do dia (desvio)",
+                        name: "Excesso do dia (variação)",
                         x: seriesDialog.data.points.map(p => p.day),
                         y: seriesDialog.data.points.map(p => Math.max(0, p.actual - p.forecast_rate)),
                         marker: { color: "#DC2626" },
@@ -805,19 +805,19 @@ export default function ForecastAccuracy({ embedded = false }: { embedded?: bool
                       {
                         type: "scatter",
                         mode: "lines",
-                        name: "Projetado (rate diário)",
+                        name: "Previsto (ritmo diário)",
                         x: seriesDialog.data.points.map(p => p.day),
                         y: seriesDialog.data.points.map(p => p.forecast_rate),
-                        line: { color: "#4338CA", dash: "dash", width: 2 },
+                        line: { color: "#0F62FE", dash: "dash", width: 2 },
                       },
                       ...(seriesDialog.data.daily_deviation_day != null ? [{
                         type: "scatter" as const,
                         mode: "lines" as const,
-                        name: "Desvio começou",
+                        name: "Início da variação",
                         x: [seriesDialog.data.daily_deviation_day, seriesDialog.data.daily_deviation_day],
                         y: [0, Math.max(...seriesDialog.data.points.map(p => p.actual))],
                         line: { color: "#DC2626", dash: "dot" as const, width: 1.5 },
-                        hovertemplate: "Desvio começou a crescer — dia %{x}<extra></extra>",
+                        hovertemplate: "Variação começou a crescer — dia %{x}<extra></extra>",
                       }] : []),
                     ]}
                     layout={{
@@ -827,7 +827,7 @@ export default function ForecastAccuracy({ embedded = false }: { embedded?: bool
                       paper_bgcolor: "transparent",
                       plot_bgcolor: "transparent",
                       barmode: "stack",
-                      xaxis: { title: { text: "Dia do mês" }, dtick: 1 },
+                      xaxis: { title: { text: "Dia do período" }, dtick: 1 },
                       yaxis: { title: { text: "Valor diário (R$)" }, tickformat: ".2s" },
                       showlegend: true,
                       legend: { orientation: "h", y: -0.18 },
@@ -837,9 +837,9 @@ export default function ForecastAccuracy({ embedded = false }: { embedded?: bool
                     useResizeHandler
                   />
                   <Typography variant="caption" color="text.secondary" sx={{ mt: 1, display: "block" }}>
-                    Consumo diário vs rate projetado (total mensal ÷ dias). A partir do dia{" "}
-                    {seriesDialog.data.daily_deviation_day ?? "—"} o realizado do dia passa a ultrapassar o
-                    rate projetado — é quando o desvio começa a crescer (excesso empilhado em vermelho).
+                    Consumo diário vs ritmo previsto (total mensal ÷ dias). A partir do dia{" "}
+                    {seriesDialog.data.daily_deviation_day ?? "—"} o efetivado do dia passa a ultrapassar o
+                    rate projetado — é quando a variação começa a crescer (excesso empilhado em vermelho).
                   </Typography>
                 </>
               )}

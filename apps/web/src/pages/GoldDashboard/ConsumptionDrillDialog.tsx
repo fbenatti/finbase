@@ -13,9 +13,9 @@ const DEFAULT_TABLE = "dest_dm_cost_visao_completa";
 type ConsumptionType = "realizado" | "forecast" | "ambos";
 
 const TYPE_LABELS: Record<ConsumptionType, string> = {
-  realizado: "Realizado",
+  realizado: "Efetivado",
   forecast: "Forecast",
-  ambos: "Realizado + Forecast",
+  ambos: "Efetivado + previsão",
 };
 
 function selectionFromType(tipo: ConsumptionType) {
@@ -28,7 +28,7 @@ function selectionFromType(tipo: ConsumptionType) {
 function periodLabel(period: string): string {
   if (/^\d{4}$/.test(period)) return `ano de ${period}`;
   const match = String(period ?? "").match(/^(\d{4})(\d{2})$/);
-  if (!match) return period || "todos os períodos do escopo";
+  if (!match) return period || "todas as competências do escopo";
   const months = ["Jan", "Fev", "Mar", "Abr", "Mai", "Jun", "Jul", "Ago", "Set", "Out", "Nov", "Dez"];
   return `${months[Number(match[2]) - 1]}/${match[1].slice(2)}`;
 }
@@ -117,12 +117,12 @@ export default function ConsumptionDrillDialog({
 
   return (
     <Dialog open={open} onClose={onClose} maxWidth="xl" fullWidth>
-      <DialogTitle>Decomposição hierárquica de consumo</DialogTitle>
+      <DialogTitle>Decomposição de consumo pela estrutura</DialogTitle>
       <DialogContent dividers>
         <Stack direction={{ xs: "column", md: "row" }} gap={2} alignItems={{ md: "center" }} sx={{ mb: 1.5 }}>
           <Typography variant="body2" color="text.secondary" sx={{ flex: 1 }}>
             Escopo do departamento selecionado{path.length ? ` (${path.join(" > ")})` : ""} · {periodLabel(period || "")} · {TYPE_LABELS[selectedTipo]}.
-            O drill começa no próximo nível do organograma já filtrado (sem cloud). Cadeia: {chain.map(c => c.label).join(" → ")}.
+            O drill começa no próximo nível da hierarquia já filtrado (sem cloud). Cadeia: {chain.map(c => c.label).join(" → ")}.
           </Typography>
           <FormGroup row sx={{ flexWrap: "nowrap" }}>
             <FormControlLabel
@@ -132,7 +132,7 @@ export default function ConsumptionDrillDialog({
                   onChange={(_, checked) => toggleType("realizado", checked)}
                 />
               )}
-              label="Realizado"
+              label="Efetivado"
             />
             <FormControlLabel
               control={(
@@ -141,7 +141,7 @@ export default function ConsumptionDrillDialog({
                   onChange={(_, checked) => toggleType("forecast", checked)}
                 />
               )}
-              label="Forecast"
+              label="Previsão do período"
             />
           </FormGroup>
         </Stack>
@@ -152,7 +152,7 @@ export default function ConsumptionDrillDialog({
             filterGroups={filterGroups}
             chain={chain}
             queryKey={queryKey}
-            shareCaption="participação no contexto do diálogo"
+            shareCaption="participação no contexto da janela"
             filterRowTypes={false}
             measureColumn={measureColumn}
             labelManualForecast={labelManualForecast}

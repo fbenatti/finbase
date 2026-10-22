@@ -37,7 +37,7 @@ describe("data navigation compatibility", () => {
     expect(canonicalExplorerParams(params).toString()).toBe(params.toString());
   });
 
-  it.each(["cubes", "ai-cost"])("preserves the %s operation and its permissions", subtab => {
+  it.each(["cubes", "shared-cost"])("preserves the %s operation and its permissions", subtab => {
     const params = new URLSearchParams(`tab=gold&subtab=${subtab}`);
     const next = canonicalOperationsParams(params);
     expect(next.get("tab")).toBe("cubos");

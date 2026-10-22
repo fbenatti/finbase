@@ -19,7 +19,7 @@ from app.services.idea_service import (
     idea_to_dict, initial_status, load_intervals, open_interval, transition_idea,
 )
 
-router = APIRouter(prefix="/ideas", tags=["ideas"])
+router = APIRouter(prefix="/iniciativas", tags=["ideas"])
 
 
 class IdeaIn(BaseModel):
@@ -148,7 +148,7 @@ async def create_idea(
     return await _idea_with_metrics(db, await _get_idea(db, row.id))
 
 
-@router.get("/board")
+@router.get("/quadro")
 async def board(db: AsyncSession = Depends(get_db)):
     result = await db.execute(
         select(Idea)
@@ -167,7 +167,7 @@ async def board(db: AsyncSession = Depends(get_db)):
     return {"columns": [{"status": s, "ideas": columns[s]} for s in BOARD_COLUMNS]}
 
 
-@router.get("/dashboard")
+@router.get("/painel")
 async def dashboard(
     from_date: str | None = Query(None, alias="from"),
     to_date: str | None = Query(None, alias="to"),
@@ -365,7 +365,7 @@ async def delete_idea(idea_id: int, db: AsyncSession = Depends(get_db)):
     await db.commit()
 
 
-@router.post("/{idea_id}/transition")
+@router.post("/{idea_id}/transicao")
 async def do_transition(
     idea_id: int,
     body: TransitionIn,
@@ -383,7 +383,7 @@ async def do_transition(
     return await _idea_with_metrics(db, await _get_idea(db, idea_id))
 
 
-@router.get("/{idea_id}/timeline")
+@router.get("/{idea_id}/linha-do-tempo")
 async def timeline(idea_id: int, db: AsyncSession = Depends(get_db)):
     idea = await _get_idea(db, idea_id)
     intervals = await load_intervals(db, idea.id)
@@ -408,7 +408,7 @@ async def timeline(idea_id: int, db: AsyncSession = Depends(get_db)):
     }
 
 
-@router.post("/{idea_id}/vote", status_code=201)
+@router.post("/{idea_id}/votar", status_code=201)
 async def vote(
     idea_id: int,
     db: AsyncSession = Depends(get_db),
@@ -429,7 +429,7 @@ async def vote(
     return await _idea_with_metrics(db, await _get_idea(db, idea_id))
 
 
-@router.delete("/{idea_id}/vote")
+@router.delete("/{idea_id}/votar")
 async def unvote(
     idea_id: int,
     db: AsyncSession = Depends(get_db),
@@ -448,7 +448,7 @@ async def unvote(
     return await _idea_with_metrics(db, await _get_idea(db, idea_id))
 
 
-@router.get("/{idea_id}/comments")
+@router.get("/{idea_id}/comentarios")
 async def list_comments(idea_id: int, db: AsyncSession = Depends(get_db)):
     await _get_idea(db, idea_id)
     rows = (await db.execute(
@@ -467,7 +467,7 @@ async def list_comments(idea_id: int, db: AsyncSession = Depends(get_db)):
     return out
 
 
-@router.post("/{idea_id}/comments", status_code=201)
+@router.post("/{idea_id}/comentarios", status_code=201)
 async def add_comment(
     idea_id: int,
     body: CommentIn,
@@ -488,7 +488,7 @@ async def add_comment(
     }
 
 
-@router.put("/{idea_id}/assignees")
+@router.put("/{idea_id}/responsaveis")
 async def set_assignees(
     idea_id: int,
     body: AssigneesIn,

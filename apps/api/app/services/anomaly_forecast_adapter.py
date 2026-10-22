@@ -13,7 +13,7 @@ O contrato de snapshot varia por tipo de disparo no ambiente real:
 
 | `trigger_type` | `config_snapshot` observado |
 |---|---|
-| `MANUAL` (simulado de acurácia) | 19 chaves, inclui `business_rules` e `source_namespace` |
+| `MANUAL` (simulado de precisão) | 19 chaves, inclui `business_rules` e `source_namespace` |
 | `SCHEDULED_REPROCESS` (normal) | 12 chaves, **sem** `business_rules` e **sem** `source_namespace` |
 | `POST_INGESTION` (agendado) | criado sem snapshot (`{}`) |
 

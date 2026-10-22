@@ -22,7 +22,7 @@ from app.services.csv_upload_service import (
 
 logger = logging.getLogger(__name__)
 
-router = APIRouter(prefix="/csv-upload", tags=["csv-upload"])
+router = APIRouter(prefix="/dados/upload-csv", tags=["csv-upload"])
 
 
 class ColumnTypeOverride(BaseModel):
@@ -60,7 +60,7 @@ class CsvIngestResponse(BaseModel):
     skip_gold_realizado: bool = False
 
 
-@router.post("/preview", response_model=CsvPreviewResponse)
+@router.post("/previa", response_model=CsvPreviewResponse)
 async def preview_csv(
     file: UploadFile = File(...),
 ):
@@ -155,7 +155,7 @@ async def _validate_connection(connection_id: int, db: AsyncSession) -> SourceCo
     return conn
 
 
-@router.post("/ingest", response_model=CsvIngestResponse)
+@router.post("/ingerir", response_model=CsvIngestResponse)
 async def ingest_csv(
     file: UploadFile = File(...),
     connection_id: int = Form(...),
@@ -185,7 +185,7 @@ async def ingest_csv(
         raise HTTPException(status_code=500, detail=f"Falha ao ingerir CSV: {exc}") from exc
 
 
-@router.post("/ingest-batch", response_model=list[CsvIngestResponse])
+@router.post("/ingerir-lote", response_model=list[CsvIngestResponse])
 async def ingest_csv_batch(
     files: list[UploadFile] = File(...),
     connection_id: int = Form(...),
@@ -233,7 +233,7 @@ async def ingest_csv_batch(
     return results
 
 
-@router.get("/connections", response_model=list[dict[str, Any]])
+@router.get("/fontes", response_model=list[dict[str, Any]])
 async def list_csv_connections(db: AsyncSession = Depends(get_db)):
     """List connections eligible for manual CSV upload."""
     result = await db.execute(
@@ -253,7 +253,7 @@ async def list_csv_connections(db: AsyncSession = Depends(get_db)):
     ]
 
 
-@router.get("/history/{connection_id}", response_model=list[IngestedBlobOut])
+@router.get("/historico/{connection_id}", response_model=list[IngestedBlobOut])
 async def list_csv_history(
     connection_id: int,
     db: AsyncSession = Depends(get_db),

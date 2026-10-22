@@ -4,7 +4,7 @@ import {
   Box, Typography, Button, Paper, Select, MenuItem, FormControl,
   InputLabel, Chip, Alert, CircularProgress, Stack,
 } from "@mui/material";
-import { Refresh, AccountTree } from "@mui/icons-material";
+import { RefreshOutlined, AccountTreeOutlined } from "@mui/icons-material";
 import {
   ReactFlow, Controls, Background, MiniMap, useNodesState, useEdgesState,
   addEdge, Connection, Node, Edge, MarkerType, Position, Handle,
@@ -27,7 +27,7 @@ import EmptyState from "../../components/EmptyState";
 function SourceColNode({ data }: NodeProps) {
   const d = data as any;
   return (
-    <Box sx={{ bgcolor: "#e3f2fd", border: "2px solid #1976d2", borderRadius: 2, p: 1, minWidth: 140 }}>
+    <Box sx={{ bgcolor: "#EEF4FF", border: "2px solid #0EA5C6", borderRadius: 2, p: 1, minWidth: 140 }}>
       <Handle type="source" position={Position.Right} />
       <Typography variant="caption" sx={{ color: "#888", display: "block", fontSize: "0.55rem" }}>{d.cloud}</Typography>
       <Typography variant="body2" sx={{ fontWeight: 600, fontSize: "0.68rem", fontFamily: "monospace" }}>{d.label}</Typography>
@@ -38,7 +38,7 @@ function SourceColNode({ data }: NodeProps) {
 function FocusColNode({ data }: NodeProps) {
   const d = data as any;
   return (
-    <Box sx={{ bgcolor: "#1a237e", border: "2px solid #0d47a1", borderRadius: 2, p: 1, minWidth: 140 }}>
+    <Box sx={{ bgcolor: "#0B3FA8", border: "2px solid #0B3FA8", borderRadius: 2, p: 1, minWidth: 140 }}>
       <Handle type="target" position={Position.Left} />
       <Typography variant="body2" sx={{ color: "#fff", fontWeight: 600, fontSize: "0.65rem", fontFamily: "monospace" }}>{d.label}</Typography>
       <Handle type="source" position={Position.Right} />
@@ -222,7 +222,7 @@ export default function PipelineBuilder() {
           const srcId = "src-" + cid + "-" + m.source_column;
           const focId = "foc-" + m.destination_column;
           if (srcNodePos.has(m.source_column) && focusY.has(m.destination_column)) {
-            newEdges.push(newEdge("e-map-" + m.id, srcId, focId, "#42a5f5"));
+            newEdges.push(newEdge("e-map-" + m.id, srcId, focId, "#6EA8FE"));
           }
         });
 
@@ -339,7 +339,7 @@ export default function PipelineBuilder() {
       setEdges(newEdges);
 
     } catch (e: unknown) {
-      setError(e instanceof Error ? e.message : "Failed to load");
+      setError(e instanceof Error ? e.message : "Não foi possível carregar o pipeline");
     } finally { setLoading(false); }
   };
 
@@ -382,56 +382,48 @@ export default function PipelineBuilder() {
   }, [selectedId, edges, nodes]);
 
   return (
-    <Box sx={{ mx: -3, mt: -3, pb: 3, minHeight: "calc(100vh - 64px)", bgcolor: "#FAFBFD" }}>
-      {/* Faixa de contexto branca */}
-      <Box sx={{ px: 3, pt: 3, bgcolor: "background.paper", borderBottom: "1px solid", borderColor: "divider" }}>
-        <Box sx={{ mb: 2 }}>
-          <Typography variant="h4">Pipeline do dado</Typography>
-          <Typography color="text.secondary" sx={{ mt: 0.5 }}>
-            Fluxo de transformação: origens → colunas FOCUS → regras de negócio e classificações. Clique em um objeto para ver com quem ele se relaciona.
-          </Typography>
-        </Box>
+    <Stack spacing={2} sx={{ height: "calc(100vh - 170px)", minHeight: 520 }}>
+      <Box>
+        <Typography variant="h6">Esteira de dados</Typography>
+        <Typography variant="body2" color="text.secondary">
+          Fluxo de transformação: origens, colunas FOCUS, regras de negócio e classificações. Clique em um objeto para ver com quem ele se relaciona.
+        </Typography>
       </Box>
 
-      {/* Área de trabalho */}
-      <Box sx={{ p: 3, display: "flex", flexDirection: "column", gap: 2, height: "calc(100vh - 190px)" }}>
-        {error && <Alert severity="error" onClose={() => setError("")}>{dataDisplayText(error)}</Alert>}
+      {error && <Alert severity="error" onClose={() => setError("")}>{dataDisplayText(error)}</Alert>}
 
-        <Paper elevation={0} sx={{ p: { xs: 1.5, md: 2 }, borderRadius: 2, bgcolor: "background.paper", border: "1px solid", borderColor: "divider" }}>
-          <Stack direction="row" alignItems="center" gap={1.5} flexWrap="wrap">
-            <Typography variant="h6" sx={{ mr: 1, display: "flex", alignItems: "center" }}>
-              <AccountTree sx={{ mr: 1 }} />Pipeline Builder
-            </Typography>
-            <FormControl sx={{ minWidth: 260 }}>
-              <InputLabel>Tabela Destino *</InputLabel>
-              <Select value={destId} label="Tabela Destino *"
-                onChange={(e) => { setDestId(e.target.value as number); setNodes([]); setEdges([]); setSelectedId(null); }}>
-                {destTables.map((t) => (<MenuItem key={t.id} value={t.id}>{t.name}</MenuItem>))}
-              </Select>
-            </FormControl>
-            <Button variant="contained" startIcon={<Refresh />} onClick={loadPipeline} disabled={!destId}>
-              Carregar Pipeline
-            </Button>
-            {destName && <Chip label={"Destino: " + destName} color="primary" />}
-          </Stack>
-
+      <Paper variant="outlined" sx={{ p: 2 }}>
+        <Stack direction={{ xs: "column", md: "row" }} alignItems={{ md: "center" }} gap={1.5} flexWrap="wrap" useFlexGap>
+          <FormControl sx={{ minWidth: 260 }} size="small">
+            <InputLabel>Tabela de destino</InputLabel>
+            <Select value={destId} label="Tabela de destino"
+              onChange={(e) => { setDestId(e.target.value as number); setNodes([]); setEdges([]); setSelectedId(null); }}>
+              {destTables.map((t) => (<MenuItem key={t.id} value={t.id}>{t.name}</MenuItem>))}
+            </Select>
+          </FormControl>
+          <Button variant="contained" startIcon={<RefreshOutlined />} onClick={loadPipeline} disabled={!destId}>
+            Carregar pipeline
+          </Button>
+          {destName && <Chip label={"Saída: " + destName} variant="outlined" />}
           {nodes.length > 0 && (
-            <Stack direction="row" gap={1} sx={{ mt: 1.5, flexWrap: "wrap" }}>
-              <Chip label="Origens" size="small" sx={{ bgcolor: "#e3f2fd", border: "1px solid #1976d2" }} />
-              <Chip label="FOCUS" size="small" sx={{ bgcolor: "#1a237e", color: "#fff" }} />
-              <Chip label="Regras de Negócio" size="small" sx={{ bgcolor: "#fff3e0", border: "1px solid #ff9800" }} />
-              <Chip label="Classificações" size="small" sx={{ bgcolor: "#e8f5e9", border: "1px solid #4caf50" }} />
+            <Stack direction="row" gap={1} flexWrap="wrap" useFlexGap sx={{ ml: { md: "auto" } }}>
+              <Chip label="Fontes" size="small" variant="outlined" sx={{ borderColor: "#0EA5C6" }} />
+              <Chip label="FOCUS" size="small" variant="outlined" sx={{ borderColor: "#0B3FA8" }} />
+              <Chip label="Ajustes de custo" size="small" variant="outlined" sx={{ borderColor: "#ff9800" }} />
+              <Chip label="Classificação por projeto" size="small" variant="outlined" sx={{ borderColor: "#4caf50" }} />
             </Stack>
           )}
-        </Paper>
+        </Stack>
+      </Paper>
 
-        <Paper elevation={0} sx={{ position: "relative", flexGrow: 1, borderRadius: 2, bgcolor: "background.paper", border: "1px solid", borderColor: "divider", overflow: "hidden" }}>
+      <Box sx={{ flexGrow: 1, minHeight: 0, display: "flex" }}>
+        <Paper variant="outlined" sx={{ position: "relative", flexGrow: 1, overflow: "hidden" }}>
           {loading ? (
             <Box sx={{ display: "flex", alignItems: "center", justifyContent: "center", height: "100%" }}><CircularProgress /></Box>
           ) : !destId ? (
-            <EmptyState message="Selecione uma Tabela Destino e clique em 'Carregar Pipeline'." />
+            <EmptyState message="Escolha uma tabela de destino e clique em 'Carregar esteira'." />
           ) : nodes.length === 0 ? (
-            <EmptyState message="Nenhuma relação encontrada para esta tabela." />
+            <EmptyState message="Nenhuma relação de origem encontrada para esta tabela." />
           ) : (
             <ReactFlow
               nodes={displayNodes}
@@ -450,8 +442,8 @@ export default function PipelineBuilder() {
               <Controls />
               <MiniMap nodeColor={(n) => {
                 switch (n.type) {
-                  case "sourceCol": return "#1976d2";
-                  case "focusCol": return "#1a237e";
+                  case "sourceCol": return "#0EA5C6";
+                  case "focusCol": return "#0B3FA8";
                   case "process": return (n.data as any)?.kind === "classification" ? "#4caf50" : "#ff9800";
                   default: return "#888";
                 }
@@ -473,12 +465,12 @@ export default function PipelineBuilder() {
                 {relatedList.length} relacionamento(s)
               </Typography>
               {relatedList.length === 0 ? (
-                <Typography variant="body2" color="text.secondary">Nenhum relacionamento.</Typography>
+                <Typography variant="body2" color="text.secondary">Nenhuma relação.</Typography>
               ) : (
                 <Stack spacing={0.5} sx={{ maxHeight: 220, overflowY: "auto" }}>
                   {relatedList.map(r => (
                     <Box key={r.id} sx={{ display: "flex", alignItems: "center", gap: 0.5 }}>
-                      <Typography component="span" sx={{ fontSize: "0.8rem", color: r.outgoing ? "#2e7d32" : "#1565c0", flexShrink: 0 }}>
+                      <Typography component="span" sx={{ fontSize: "0.8rem", color: r.outgoing ? "#2e7d32" : "#0EA5C6", flexShrink: 0 }}>
                         {r.outgoing ? "→" : "←"}
                       </Typography>
                       <Typography variant="body2" noWrap sx={{ fontSize: "0.78rem" }}>{r.label}</Typography>
@@ -493,6 +485,6 @@ export default function PipelineBuilder() {
           )}
         </Paper>
       </Box>
-    </Box>
+    </Stack>
   );
 }

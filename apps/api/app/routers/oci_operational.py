@@ -11,7 +11,7 @@ from app.services.oci_operational_monitoring import TABLE, collect, discover_com
 from app.services.trino_service import execute as trino_execute
 from app.services import lakehouse_layers as layers
 
-router = APIRouter(prefix="/oci-operational", tags=["oci-operational"])
+router = APIRouter(prefix="/custos/oci-operacional", tags=["oci-operational"])
 COLLECTION_STATUS: dict[int, dict] = {}
 class CollectRequest(BaseModel): connection_id: int; hours: int = Field(72, ge=1, le=2160); persist: bool = True
 
@@ -20,16 +20,16 @@ async def _connection(connection_id: int, db: AsyncSession) -> SourceConnection:
     if not conn or conn.connector_type != "oci": raise HTTPException(404, "Conexão OCI não encontrada")
     return conn
 
-@router.post("/test")
+@router.post("/testar")
 async def test(body: CollectRequest, db: AsyncSession = Depends(get_db)):
     return collect(await _connection(body.connection_id, db), hours=1, persist=False)
 
 
-@router.post("/discover-compartments")
+@router.post("/descobrir-compartimentos")
 async def discover(body: CollectRequest, db: AsyncSession = Depends(get_db)):
     return discover_compartments(await _connection(body.connection_id, db))
 
-@router.post("/collect")
+@router.post("/coletar")
 async def collect_now(body: CollectRequest, db: AsyncSession = Depends(get_db)):
     conn = await _connection(body.connection_id, db)
     if COLLECTION_STATUS.get(body.connection_id, {}).get("status") == "running":
@@ -49,11 +49,11 @@ async def collect_now(body: CollectRequest, db: AsyncSession = Depends(get_db)):
     return COLLECTION_STATUS[body.connection_id]
 
 
-@router.get("/status/{connection_id}")
+@router.get("/situacao/{connection_id}")
 async def collection_status(connection_id: int):
     return COLLECTION_STATUS.get(connection_id, {"connection_id": connection_id, "status": "not_started"})
 
-@router.get("/overview")
+@router.get("/visao-geral")
 async def overview(hours: int = 24 * 90):
     try:
         rows = await trino_execute(f"SELECT timestamp, resource_type, resource_id, metric_name, metric_value, model_id, unit_shape, unit_count, lifecycle_state FROM iceberg.{layers.detail_layer()}.{TABLE} WHERE from_iso8601_timestamp(timestamp) >= current_timestamp - INTERVAL '{max(1, min(hours, 2160))}' HOUR ORDER BY timestamp")

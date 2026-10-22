@@ -21,7 +21,7 @@ from app.services.contract_settlement import normalize_cloud_scope
 from app.models.rules import Department
 from app.models.source_connection import SourceConnection
 
-router = APIRouter(prefix="/financial-contracts", tags=["financial-contracts"])
+router = APIRouter(prefix="/governanca/contratos-financeiros", tags=["financial-contracts"])
 EFFECTIVE_SCOPES = {"POSITIVE_CONSUMPTION_SHARE"}
 
 
@@ -128,7 +128,7 @@ async def list_contracts(db: AsyncSession = Depends(get_db)):
     return [_contract_out(row) for row in rows]
 
 
-@router.get("/overview")
+@router.get("/resumo")
 async def contracts_overview(db: AsyncSession = Depends(get_db)):
     """Return the latest auditable pool metrics for each contract."""
     contracts = (await db.execute(select(FinancialContract).order_by(FinancialContract.name))).scalars().all()
@@ -165,7 +165,7 @@ async def contracts_overview(db: AsyncSession = Depends(get_db)):
     return result
 
 
-@router.get("/options/budget-scopes")
+@router.get("/opcoes/escopos-orcamento")
 async def budget_scope_options(db: AsyncSession = Depends(get_db)):
     departments = list((await db.execute(select(Department).where(Department.active == True))).scalars().all())  # noqa: E712
     counts: dict[tuple[str, str], int] = {}
@@ -219,7 +219,7 @@ async def update_contract(contract_id: int, body: FinancialContractIn, db: Async
     return _contract_out(await _load(contract_id, db))
 
 
-@router.get("/{contract_id}/settlements")
+@router.get("/{contract_id}/liquidacoes")
 async def list_settlements(contract_id: int, db: AsyncSession = Depends(get_db)):
     await _load(contract_id, db)
     latest_run = (await db.execute(
@@ -258,7 +258,7 @@ async def list_settlements(contract_id: int, db: AsyncSession = Depends(get_db))
     return result
 
 
-@router.post("/{contract_id}/settlements/recalculate")
+@router.post("/{contract_id}/liquidacoes/recalcular")
 async def recalculate_settlements(
     contract_id: int,
     body: SettlementRecalculateIn,

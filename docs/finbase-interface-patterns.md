@@ -10,10 +10,10 @@ fixas nos componentes: importe `colors` de `theme/tokens.ts`.
 | --- | --- | --- |
 | Fonte do texto | Inter | `fontFamily.body` |
 | Fonte de títulos | Manrope | `fontFamily.heading` |
-| Ação principal | #4338CA | `colors.brand` |
-| Fundo | #F5F6FA | `colors.canvas` |
-| Texto | #161B2E | `colors.text` |
-| Bordas | #E2E5EE | `colors.border` |
+| Ação principal | #0F62FE | `colors.brand` |
+| Fundo | #F4F8F7 | `colors.canvas` |
+| Texto | #162B3A | `colors.text` |
+| Bordas | #DCE7E5 | `colors.border` |
 | Controles | 40 px | `radius.control` = 8 px |
 | Ícones de ação | 20 px | Material Icons |
 | Linhas e cabeçalho da grade | 48 px | 48 px |
@@ -27,9 +27,9 @@ Tamanhos explícitos de componentes especializados continuam permitidos quando n
   filtros, busca, ações de importação/exportação/publicação, grade com rolagem,
   paginação e virtualização, legenda única e histórico de versões.
 - A estrutura de Planejamento não repete os cabeçalhos dos componentes filhos.
-  Acurácia do orçamento, Histórico do orçamento e História dos contratos usam
+  Aderência ao orçamento, Histórico do orçamento e História dos contratos usam
   o espaçamento do contêiner principal.
-- Configuração, regras, histórico e acurácia de projeções usam o mesmo tema e
+- Configuração, regras, histórico e precisão de projeções usam o mesmo tema e
   títulos correspondentes às suas rotas.
 - Grades de conexões, classificação, reprocessamento, extração, auditoria e
   histórico operacional herdam o padrão central; estilos locais que removiam
@@ -90,3 +90,16 @@ primeiro submenu encontrado. Novos módulos entram automaticamente pelo catálog
 A busca usa somente módulos visíveis, habilitados e permitidos pelo backend,
 incluindo a verificação dos ancestrais. Ela não muda permissões e não exibe
 módulos ocultos ou indisponíveis para o cliente.
+
+## Diálogo "Editar valores mensais" (Orçamentos e Projeções)
+
+Componente: `pages/Planning/MonthlyValuesDialog.tsx`, aberto pelo ícone de editar de uma linha em `Planning.tsx`.
+Edita somente os valores próprios da linha; os totais dos níveis superiores continuam sendo recalculados pela grade.
+
+- Cabeçalho com o nome da linha e o centro de custo. O resumo mostra **Total original**, **Total editado** e **Diferença** (R$ e %).
+- Ações em lote acima da tabela: **Distribuir igualmente** (divide o total anual em 12 meses, com a diferença de centavos nos últimos meses), **Aplicar %** (ajusta cada mês pelo percentual informado, que pode ser negativo) e **Zerar**. **Restaurar atuais** desfaz a edição.
+- Tabela por mês com colunas Mês, Valor atual, Novo valor, Variação (R$) e Variação (%). Meses agrupados por trimestre, com subtotal por trimestre e total do ano.
+- Valores em BRL com 2 casas, alinhados à direita. A entrada aceita `1.234,56` e `1234.56`; o campo é formatado ao sair.
+- Meses alterados ficam com fundo `colors.brandTint`. Aumento aparece em `colors.warning` e redução em `colors.success`.
+- Valores negativos ou inválidos mostram alerta e campo em erro. Nesses casos o botão **Aplicar** fica desabilitado.
+- **Aplicar** também fica desabilitado enquanto nada tiver mudado. O rodapé mostra quantos meses foram alterados.

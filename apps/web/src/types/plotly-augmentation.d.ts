@@ -6,6 +6,7 @@ import "plotly.js";
 declare module "plotly.js" {
   interface PlotData {
     base: Datum | Datum[];
+    offsetgroup?: string;
   }
 }
 

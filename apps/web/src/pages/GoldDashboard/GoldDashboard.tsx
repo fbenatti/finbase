@@ -8,7 +8,7 @@ import {
   Divider, Tooltip, LinearProgress, Menu, List, ListItemButton, ListItemText, Collapse, IconButton,
   FormControlLabel, Switch,
 } from "@mui/material";
-import { Refresh, ContentCopy, FilterAltOff, ExpandMore, ChevronRight, Business, FileDownload, CalendarMonth, Add, Close } from "@mui/icons-material";
+import { RefreshOutlined, ContentCopyOutlined, FilterAltOffOutlined, ExpandMoreOutlined, ChevronRightOutlined, BusinessOutlined, FileDownloadOutlined, CalendarMonthOutlined, AddOutlined, CloseOutlined } from "@mui/icons-material";
 import Plot from "@/components/Plot";
 // Wrapper: react-plotly.js Data/DataTitle typings são excessivamente rígidos
 // para traces com name/text customizados; mantém o restante tipado.
@@ -20,9 +20,10 @@ import {
   GoldQueryFilter, GoldQueryMeasure, GoldQueryResult, GoldInfo,
   formatApiError, Department, getGoldFilterOptions,
   getForecastAccuracyMonths, runForecastHistoryPivot,
-  ForecastAccuracyMonth, HistoryFilter, ForecastAck, getExecutiveManualAcks,
+  ForecastAccuracyMonth, HistoryFilter, 
 } from "../../services/api";
-import ExpectedView from "../Dashboards/ExpectedView";
+import CostSummary from "./CostSummary";
+import OrgScopeDrawer from "./OrgScopeDrawer";
 import HierarchicalDecompTree, { buildDecompChain, type DecompPathStep } from "./HierarchicalDecompTree";
 import ConsumptionDrillDialog from "./ConsumptionDrillDialog";
 import * as XLSX from "xlsx";
@@ -141,8 +142,8 @@ function nivelNum(field: string): number {
   const m = field.match(/^organograma_nivel_(\d+)$/);
   return m ? Number(m[1]) : 0;
 }
-const PURPLE = "#660099", ORANGE = "#ff7a00", BLUE = "#155eef",
-      GREEN = "#10b981", RED = "#ef4444", YELLOW = "#f59e0b", INK = "#161B2E", MUT = "#5A6378";
+const PURPLE = "#0B3FA8", ORANGE = "#ff7a00", BLUE = "#0EA5C6",
+      GREEN = "#10b981", RED = "#ef4444", YELLOW = "#f59e0b", INK = "#162B3A", MUT = "#526777";
 
 const DIM_LABELS: Record<string, string> = {
   _billing_period: "Mês",
@@ -154,7 +155,7 @@ const DIM_LABELS: Record<string, string> = {
   organograma_nivel_5: ORG.level5,
   organograma_nivel_6: "Unidade",
   organograma: "Área",
-  centro_custo: "Centro de Custo",
+  centro_custo: "Centro de custo",
   ambiente: "Ambiente",
   servicecategory: "Categoria",
   servicename: "Serviço",
@@ -162,7 +163,7 @@ const DIM_LABELS: Record<string, string> = {
   skumeter: "SKU",
   subaccountname: "Subconta",
   regionname: "Região",
-  chargecategory: "Tipo de Carga",
+  chargecategory: "Tipo de carga",
 };
 
 const DIRECTOR_VIEW_LABELS: Record<string, string> = {
@@ -200,9 +201,9 @@ function heatmapDimOptions(visaoDiretoria: boolean): string[] {
 }
 
 const MEASURE_LABELS: Record<string, string> = {
-  realizado: "Realizado (BRL)",
-  billedcost: "Billed Cost (USD)",
-  quantity: "Quantidade",
+  efetivado: "Efetivado (BRL)",
+  billedcost: "Custo faturado (USD)",
+  quantity: "Volume consumido",
   count: "Registros",
 };
 
@@ -228,7 +229,7 @@ function pct(v: unknown, digits = 1): string {
   const n = Number(v ?? 0);
   return `${n.toLocaleString("pt-BR", { maximumFractionDigits: digits })}%`;
 }
-function esc(s: unknown): string { return String(s ?? "Não informado"); }
+function esc(s: unknown): string { return String(s ?? "Sem classificação"); }
 /** Compact BRL (mesmo formato de money, para valores monetários do cockpit de decisão). */
 function compact(v: unknown): string { return money(v, "BRL"); }
 
@@ -336,7 +337,7 @@ function useTabQueries(table: string, defs: QueryDef[], key: string) {
         m[d.id] = result;
       });
       setResults(m);
-    }).catch(e => { if (alive) setError(formatApiError(e, "Falha ao consultar a base consolidada")); })
+    }).catch(e => { if (alive) setError(formatApiError(e, "Não foi possível consultar a base consolidada")); })
       .finally(() => { if (alive) setLoading(false); });
     return () => { alive = false; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -370,7 +371,7 @@ function RankBars({ title, rows, measure, currency = "BRL", limit = 8, color = P
   limit?: number; color?: string; unit?: string;
 }) {
   const items = (rows || []).filter(r => r[measure] !== null && r[measure] !== undefined).slice(0, limit);
-  if (!items.length) return <Paper variant="outlined" sx={{ p: 2, height: "100%" }}><Typography variant="subtitle2" fontWeight={900}>{title}</Typography><Typography variant="caption" color="text.secondary">Sem dados para o escopo.</Typography></Paper>;
+  if (!items.length) return <Paper variant="outlined" sx={{ p: 2, height: "100%" }}><Typography variant="subtitle2" fontWeight={900}>{title}</Typography><Typography variant="caption" color="text.secondary">Sem dados para o recorte selecionado.</Typography></Paper>;
   const max = Math.max(...items.map(r => Math.abs(Number(r[measure]) || 0)), 1);
   const total = items.reduce((s, r) => s + Math.abs(Number(r[measure]) || 0), 0);
   return (
@@ -387,7 +388,7 @@ function RankBars({ title, rows, measure, currency = "BRL", limit = 8, color = P
                 <Tooltip title={esc(r[label])}><Typography variant="caption" sx={{ fontWeight: 850, maxWidth: "62%", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{i + 1}. {esc(r[label])}</Typography></Tooltip>
                 <Typography variant="caption" sx={{ fontWeight: 900, whiteSpace: "nowrap" }}>{unit ? `${num(val)} ${unit}` : money(val, currency)} · {pct(Math.abs(val) / (total || 1) * 100, 0)}</Typography>
               </Stack>
-              <Box sx={{ height: 9, borderRadius: 99, background: "#E2E5EE", overflow: "hidden", mt: 0.4 }}>
+              <Box sx={{ height: 9, borderRadius: 99, background: "#E1E8F0", overflow: "hidden", mt: 0.4 }}>
                 <Box sx={{ height: "100%", width: `${w}%`, borderRadius: 99, background: `linear-gradient(90deg, ${color}, ${color}cc)` }} />
               </Box>
             </Box>
@@ -420,7 +421,7 @@ function DataQuality({ table, filters, filterKey }: { table: string; filters: Fi
   const defs = useMemo<QueryDef[]>(() => [{ id: "services", rows: ["servicename"], measures: [{ column: measureFor(filters), aggregation: "SUM" }], filters: base, row_limit: 500 }, { id: "consumers", rows: ["organograma_nivel_4", "organograma_nivel_5"], measures: [{ column: measureFor(filters), aggregation: "SUM" }], filters: service ? [...base, { column: "servicename", operator: "IN", values: [service] }] : base, row_limit: 1000 }], [filterKey, service]);
   const { results, loading, error } = useTabQueries(table, defs, "data-quality-" + filterKey + service);
   const services = rowsOf(results.services); const consumers = rowsOf(results.consumers);
-  return <Box><Typography variant="h5" sx={{ fontWeight: 950, mb: .5 }}>Data Quality</Typography><Typography color="text.secondary" sx={{ mb: 2 }}>Selecione um serviço para identificar todos os projetos e diretorias consumidores, com o valor realizado no escopo filtrado.</Typography><SectionPanel title="Consumidores por serviço" subtitle="Os filtros globais de período, cloud e organização continuam aplicados." right={<FormControl size="small" sx={{ minWidth: 280 }}><InputLabel>Serviço</InputLabel><Select label="Serviço" value={service} onChange={e => setService(e.target.value)}><MenuItem value="">Todos os serviços</MenuItem>{services.map(r => <MenuItem key={String(r.servicename)} value={String(r.servicename)}>{esc(r.servicename)} · {money(r.realizado)}</MenuItem>)}</Select></FormControl>}><LoadingBlock loading={loading} error={error}><TableContainer><Table size="small"><TableHead><TableRow>{["Diretoria", "Projeto", "Realizado", "% do serviço"].map(h => <TableCell key={h} sx={{ fontWeight: 900 }}>{h}</TableCell>)}</TableRow></TableHead><TableBody>{consumers.sort((a, b) => Number(b.realizado || 0) - Number(a.realizado || 0)).map((r, i) => <TableRow key={i}><TableCell>{esc(r.organograma_nivel_4)}</TableCell><TableCell>{esc(r.organograma_nivel_5)}</TableCell><TableCell sx={{ fontWeight: 900 }}>{money(r.realizado)}</TableCell><TableCell>{pct(Number(r.realizado || 0) / Math.max(1, consumers.reduce((s, x) => s + Number(x.realizado || 0), 0)) * 100)}</TableCell></TableRow>)}{!consumers.length && <TableRow><TableCell colSpan={4} align="center">Sem consumidores no escopo selecionado.</TableCell></TableRow>}</TableBody></Table></TableContainer></LoadingBlock></SectionPanel></Box>;
+  return <Box><Typography variant="h5" sx={{ fontWeight: 950, mb: .5 }}>Qualidade dos dados</Typography><Typography color="text.secondary" sx={{ mb: 2 }}>Escolha um serviço para ver os projetos e as diretorias que o consomem, com o valor efetivado neste recorte.</Typography><SectionPanel title="Consumidores por serviço" subtitle="Os filtros globais de período, cloud e organização continuam aplicados." right={<FormControl size="small" sx={{ minWidth: 280 }}><InputLabel>Serviço</InputLabel><Select label="Serviço" value={service} onChange={e => setService(e.target.value)}><MenuItem value="">Todos os serviços</MenuItem>{services.map(r => <MenuItem key={String(r.servicename)} value={String(r.servicename)}>{esc(r.servicename)} · {money(r.realizado)}</MenuItem>)}</Select></FormControl>}><LoadingBlock loading={loading} error={error}><TableContainer><Table size="small"><TableHead><TableRow>{["Diretoria", "Projeto", "Efetivado", "% do total do serviço"].map(h => <TableCell key={h} sx={{ fontWeight: 900 }}>{h}</TableCell>)}</TableRow></TableHead><TableBody>{consumers.sort((a, b) => Number(b.realizado || 0) - Number(a.realizado || 0)).map((r, i) => <TableRow key={i}><TableCell>{esc(r.organograma_nivel_4)}</TableCell><TableCell>{esc(r.organograma_nivel_5)}</TableCell><TableCell sx={{ fontWeight: 900 }}>{money(r.realizado)}</TableCell><TableCell>{pct(Number(r.realizado || 0) / Math.max(1, consumers.reduce((s, x) => s + Number(x.realizado || 0), 0)) * 100)}</TableCell></TableRow>)}{!consumers.length && <TableRow><TableCell colSpan={4} align="center">Nenhum consumidor no recorte selecionado.</TableCell></TableRow>}</TableBody></Table></TableContainer></LoadingBlock></SectionPanel></Box>;
 }
 
 function monthlySeries(r: GoldQueryResult | null | undefined, measure: string) {
@@ -447,7 +448,7 @@ export default function GoldDashboard() {
   const [filters, setFilters] = useState<Filters>(() => ({
     ...EMPTY_FILTERS,
     months: monthsBetween(`${new Date().getFullYear()}-01`, `${new Date().getFullYear()}-12`),
-    visaoDiretoria: window.localStorage.getItem(EXECUTIVE_DIRECTOR_VIEW_STORAGE_KEY) === "1",
+    visaoDiretoria: false,
   }));
   const [monthsAll, setMonthsAll] = useState<string[]>([]);
   const currentYear = new Date().getFullYear();
@@ -458,7 +459,6 @@ export default function GoldDashboard() {
   const [draftTo, setDraftTo] = useState(`${currentYear}-12-31`);
   const [filterMenuAnchor, setFilterMenuAnchor] = useState<HTMLElement | null>(null);
   const [includeSharedCost, setIncludeSharedCost] = useState(false);
-  const [executivePeriodFilter, setExecutivePeriodFilter] = useState("current");
   const [error, setError] = useState("");
   const [refreshTick, setRefreshTick] = useState(0);
   // Árvore do organograma para o filtro global de departamento.
@@ -469,10 +469,6 @@ export default function GoldDashboard() {
   const [expandedNodes, setExpandedNodes] = useState<Set<number>>(new Set());
   const [highlightsDepartment, setHighlightsDepartment] = useState("");
   const [consumptionDrill, setConsumptionDrill] = useState<{ open: boolean; tipo: "realizado" | "forecast" | "ambos"; period?: string }>({ open: false, tipo: "realizado" });
-  const [highlights, setHighlights] = useState<ForecastAck[]>([]);
-  const [highlightsLoading, setHighlightsLoading] = useState(true);
-  const [highlightsError, setHighlightsError] = useState("");
-  const [highlightsRefresh, setHighlightsRefresh] = useState(0);
   const filterDimensionOptions = useMemo(() => [...new Set([...(info?.dimensions || []), ...(info?.columns.filter((column) => column.type !== "measure").map((column) => column.name) || [])])]
     .filter((column) => !["_billing_period", "tipo"].includes(column.toLowerCase()))
     .sort((a, b) => sourceDimensionLabel(a).localeCompare(sourceDimensionLabel(b), "pt-BR", { sensitivity: "base" })), [info]);
@@ -577,7 +573,7 @@ export default function GoldDashboard() {
           <Box sx={{ width: 28, display: "flex", justifyContent: "center" }}>
             {children.length > 0 && (
               <IconButton size="small" onClick={event => { event.stopPropagation(); toggleOrgNode(node.id); }}>
-                {expanded ? <ExpandMore fontSize="small" /> : <ChevronRight fontSize="small" />}
+                {expanded ? <ExpandMoreOutlined fontSize="small" /> : <ChevronRightOutlined fontSize="small" />}
               </IconButton>
             )}
           </Box>
@@ -601,34 +597,6 @@ export default function GoldDashboard() {
   };
   const globalDirector = filters.path.length ? filters.path.join(" > ") : undefined;
 
-  useEffect(() => {
-    let active = true;
-    setHighlightsLoading(true);
-    setHighlightsError("");
-    let monthFrom: string;
-    let monthTo: string;
-    if (filters.months.length) {
-      const selected = [...filters.months].sort();
-      monthFrom = selected[0];
-      monthTo = selected[selected.length - 1];
-    } else {
-      const now = new Date();
-      if (executivePeriodFilter === "all") {
-        monthFrom = "190001";
-        monthTo = "299912";
-      } else {
-        const year = executivePeriodFilter === "current" ? now.getFullYear() : Number(executivePeriodFilter);
-        monthFrom = `${year}01`;
-        monthTo = `${year}12`;
-      }
-    }
-    const departmentPaths = highlightsDepartment ? [highlightsDepartment] : [];
-    getExecutiveManualAcks(monthFrom, monthTo, departmentPaths)
-      .then(result => { if (active) setHighlights(result.items); })
-      .catch(reason => { if (active) setHighlightsError(formatApiError(reason, "Falha ao carregar Executive Highlights")); })
-      .finally(() => { if (active) setHighlightsLoading(false); });
-    return () => { active = false; };
-  }, [filters.months, filters.path, highlightsDepartment, executivePeriodFilter, monthsAll, refreshTick, highlightsRefresh]);
 
   // ── carrega tabelas disponíveis (namespace gold) ──
   useEffect(() => {
@@ -644,7 +612,7 @@ export default function GoldDashboard() {
     let alive = true;
     setInfo(null);
     getDimonInfo(table).then(i => { if (alive) { setInfo(i); setMonthsAll(i.periods || []); } })
-      .catch(e => { if (alive) setError(formatApiError(e, "Falha ao carregar info da base consolidada")); });
+      .catch(e => { if (alive) setError(formatApiError(e, "Não foi possível carregar as informações da base consolidada")); });
     return () => { alive = false; };
   }, [table]);
 
@@ -690,10 +658,10 @@ export default function GoldDashboard() {
       <Box sx={{ px: 3, pt: 3, bgcolor: "background.paper", borderBottom: "1px solid", borderColor: "divider" }}>
       <Stack direction="row" justifyContent="space-between" alignItems="flex-start" flexWrap="wrap" gap={2} mb={2}>
         <Box>
-          <Typography variant="h4">FinOps Intelligence</Typography>
+          <Typography variant="h4">FinBase</Typography>
         </Box>
         <Stack direction="row" gap={1} alignItems="center">
-          <Button size="small" variant="outlined" startIcon={<Refresh />} onClick={() => { setRefreshTick(t => t + 1); setHighlightsRefresh(t => t + 1); }}>Atualizar</Button>
+          <Button size="small" variant="outlined" startIcon={<RefreshOutlined />} onClick={() => { setRefreshTick(t => t + 1); }}>Recarregar dados</Button>
         </Stack>
       </Stack>
       </Box>
@@ -703,94 +671,51 @@ export default function GoldDashboard() {
       {error && <Alert severity="error" sx={{ mb: 2 }}>{dataDisplayText(error)}</Alert>}
 
       {/* ── Filtros globais ── */}
-      <Paper variant="outlined" sx={{ p: 1.5, mb: 2, borderRadius: "18px", borderColor: "#E2E5EE", boxShadow: "0 6px 20px rgba(24, 39, 75, 0.035)" }}>
-        <Stack direction="row" flexWrap="wrap" gap={1.2} alignItems="center">
-          <Box sx={{ width: { xs: "100%", md: 330 }, minWidth: { xs: 0, md: 330 }, flex: { xs: "1 1 100%", md: "0 0 330px" } }}>
-            <Typography variant="caption" color="text.secondary">Período</Typography>
-            <Button fullWidth variant="outlined" startIcon={<CalendarMonth />} onClick={(event) => { setDraftFrom(dateFrom); setDraftTo(dateTo); setDateAnchor(event.currentTarget); }} sx={{ mt: .5, minHeight: 40, px: 1.5, justifyContent: "flex-start", textTransform: "none", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
-              {labelDateRange(dateFrom, dateTo)}
-            </Button>
-          </Box>
-          <Popover open={Boolean(dateAnchor)} anchorEl={dateAnchor} onClose={() => setDateAnchor(null)} anchorOrigin={{ vertical: "bottom", horizontal: "left" }} transformOrigin={{ vertical: "top", horizontal: "left" }} PaperProps={{ sx: { mt: .5, borderRadius: "14px", border: "1px solid #E2E5EE", boxShadow: "0 16px 44px rgba(24,39,75,.16)" } }}>
+      <Paper variant="outlined" sx={{ px: 1.5, py: 1, mb: 2, borderRadius: "14px", borderColor: "#E1E8F0" }}>
+        <Stack direction="row" flexWrap="wrap" gap={1} alignItems="center">
+          <Popover open={Boolean(dateAnchor)} anchorEl={dateAnchor} onClose={() => setDateAnchor(null)} anchorOrigin={{ vertical: "bottom", horizontal: "left" }} transformOrigin={{ vertical: "top", horizontal: "left" }} PaperProps={{ sx: { mt: .5, borderRadius: "14px", border: "1px solid #E1E8F0", boxShadow: "0 16px 44px rgba(24,39,75,.16)" } }}>
             <Stack direction={{ xs: "column", sm: "row" }} sx={{ p: 2 }} gap={2}>
-              <Box sx={{ minWidth: 180 }}><Typography variant="overline" color="text.secondary" fontWeight={800}>Períodos rápidos</Typography><Stack spacing={.25} mt={.5}>
-                <Button size="small" onClick={() => applyPreset("this_month")} sx={{ justifyContent: "flex-start", textTransform: "none" }}>Este mês</Button>
-                <Button size="small" onClick={() => applyPreset("last_month")} sx={{ justifyContent: "flex-start", textTransform: "none" }}>Mês anterior</Button>
-                <Button size="small" onClick={() => applyPreset("last_3")} sx={{ justifyContent: "flex-start", textTransform: "none" }}>Últimos 3 meses</Button>
-                <Button size="small" onClick={() => applyPreset("last_6")} sx={{ justifyContent: "flex-start", textTransform: "none" }}>Últimos 6 meses</Button>
-                <Button size="small" onClick={() => applyPreset("last_12")} sx={{ justifyContent: "flex-start", textTransform: "none" }}>Últimos 12 meses</Button>
-                <Button size="small" onClick={() => applyPreset("this_year")} sx={{ justifyContent: "flex-start", textTransform: "none" }}>Este ano</Button>
-                <Button size="small" onClick={() => applyPreset("last_year")} sx={{ justifyContent: "flex-start", textTransform: "none" }}>Ano anterior</Button>
+              <Box sx={{ minWidth: 180 }}><Typography variant="overline" color="text.secondary" fontWeight={800}>Atalhos de competência</Typography><Stack spacing={.25} mt={.5}>
+                <Button size="small" onClick={() => applyPreset("this_month")} sx={{ justifyContent: "flex-start", textTransform: "none" }}>Mês em curso</Button>
+                <Button size="small" onClick={() => applyPreset("last_month")} sx={{ justifyContent: "flex-start", textTransform: "none" }}>Mês passado</Button>
+                <Button size="small" onClick={() => applyPreset("last_3")} sx={{ justifyContent: "flex-start", textTransform: "none" }}>Últimos três meses</Button>
+                <Button size="small" onClick={() => applyPreset("last_6")} sx={{ justifyContent: "flex-start", textTransform: "none" }}>Últimos seis meses</Button>
+                <Button size="small" onClick={() => applyPreset("last_12")} sx={{ justifyContent: "flex-start", textTransform: "none" }}>Últimos doze meses</Button>
+                <Button size="small" onClick={() => applyPreset("this_year")} sx={{ justifyContent: "flex-start", textTransform: "none" }}>Ano corrente</Button>
+                <Button size="small" onClick={() => applyPreset("last_year")} sx={{ justifyContent: "flex-start", textTransform: "none" }}>Exercício anterior</Button>
               </Stack></Box>
-              <Box sx={{ minWidth: { sm: 330 }, borderLeft: { sm: "1px solid #EEF0F7" }, pl: { sm: 2 } }}><Typography variant="overline" color="text.secondary" fontWeight={800}>Intervalo personalizado · datas</Typography><Stack direction={{ xs: "column", sm: "row" }} gap={1} mt={1}><TextField size="small" type="date" label="Data inicial" value={draftFrom} onChange={(event) => setDraftFrom(event.target.value)} InputLabelProps={{ shrink: true }} /><TextField size="small" type="date" label="Data final" value={draftTo} onChange={(event) => setDraftTo(event.target.value)} InputLabelProps={{ shrink: true }} /></Stack>{draftFrom > draftTo && <Typography variant="caption" color="error" display="block" mt={.5}>A data inicial deve ser anterior ou igual à data final.</Typography>}<Stack direction="row" justifyContent="flex-end" gap={1} mt={2}><Button size="small" onClick={() => setDateAnchor(null)}>Cancelar</Button><Button size="small" variant="contained" disabled={!draftFrom || !draftTo || draftFrom > draftTo} onClick={() => { setDateFrom(draftFrom); setDateTo(draftTo); setFilters((current) => ({ ...current, months: monthsInDateRange(draftFrom, draftTo) })); setDateAnchor(null); }} sx={{ bgcolor: "#6416dc" }}>Aplicar</Button></Stack></Box>
+              <Box sx={{ minWidth: { sm: 330 }, borderLeft: { sm: "1px solid #EEF3F8" }, pl: { sm: 2 } }}><Typography variant="overline" color="text.secondary" fontWeight={800}>Intervalo personalizado</Typography><Stack direction={{ xs: "column", sm: "row" }} gap={1} mt={1}><TextField size="small" type="date" label="Data inicial" value={draftFrom} onChange={(event) => setDraftFrom(event.target.value)} InputLabelProps={{ shrink: true }} /><TextField size="small" type="date" label="Data final" value={draftTo} onChange={(event) => setDraftTo(event.target.value)} InputLabelProps={{ shrink: true }} /></Stack>{draftFrom > draftTo && <Typography variant="caption" color="error" display="block" mt={.5}>A data inicial deve ser anterior ou igual à data final.</Typography>}<Stack direction="row" justifyContent="flex-end" gap={1} mt={2}><Button size="small" onClick={() => setDateAnchor(null)}>Cancelar</Button><Button size="small" variant="contained" disabled={!draftFrom || !draftTo || draftFrom > draftTo} onClick={() => { setDateFrom(draftFrom); setDateTo(draftTo); setFilters((current) => ({ ...current, months: monthsInDateRange(draftFrom, draftTo) })); setDateAnchor(null); }} sx={{ bgcolor: "#0B3FA8" }}>Aplicar</Button></Stack></Box>
             </Stack>
           </Popover>
-          <Box sx={{ minWidth: 280 }}>
-            <Typography variant="caption" color="text.secondary">Organograma · selecione níveis</Typography>
-            <Button fullWidth variant="outlined" size="small" startIcon={<Business fontSize="small" />} onClick={event => { setOrganizationSearch(""); setOrganizationAnchor(event.currentTarget); }} sx={{ mt: .5, minHeight: 40, justifyContent: "flex-start", textTransform: "none" }}>
-              {highlightsDepartment || displayOrgPath(filters)}
-            </Button>
+          <Box sx={{ minWidth: 0, flex: "1 1 320px" }}>
+            <OrgScopeDrawer
+              tree={displayedOrganization}
+              path={filters.path}
+              levelLabels={filters.visaoDiretoria ? [0, 1, 2, 3, 4, 5].map((depth) => directorNivelLabel(depth) || `Nível ${depth + 1}`) : ["Segmento", "Modelo", "Plataforma", "Diretoria", ORG.level5, "Unidade"]}
+              table={table}
+              measure={measureFor(filters)}
+              months={filters.months}
+              onSelect={(node, path, depth) => {
+                const groupedDirector = filters.visaoDiretoria && depth === 2;
+                setHighlightsDepartment(path.join(" > "));
+                setFilters(f => ({ ...f, path, deptId: groupedDirector ? null : node.id }));
+                if (groupedDirector) window.localStorage.removeItem(EXECUTIVE_DEPARTMENT_STORAGE_KEY);
+                else window.localStorage.setItem(EXECUTIVE_DEPARTMENT_STORAGE_KEY, String(node.id));
+              }}
+              onClear={() => {
+                setHighlightsDepartment("");
+                setFilters(f => ({ ...f, path: [], deptId: null }));
+                window.localStorage.removeItem(EXECUTIVE_DEPARTMENT_STORAGE_KEY);
+              }}
+            />
           </Box>
-          <Menu anchorEl={organizationAnchor} open={Boolean(organizationAnchor)} autoFocus={false} disableAutoFocusItem onClose={() => { setOrganizationAnchor(null); setOrganizationSearch(""); }} PaperProps={{ sx: { width: { xs: "calc(100vw - 32px)", sm: 560 }, maxWidth: "calc(100vw - 32px)", maxHeight: 520 } }}>
-            <Typography variant="caption" color="text.secondary" sx={{ display: "block", px: 2, pt: 1 }}>
-              {filters.visaoDiretoria
-                ? `Selecione na árvore — níveis mapeados como ${ORG.directorViewLevels} (profundidade 3↔4 invertida).`
-                : ORG.selectNodeFilterHint}
-            </Typography>
-            <Box sx={{ px: 1.5, pt: 1 }}>
-              <TextField
-                fullWidth
-                size="small"
-                autoFocus
-                inputRef={organizationSearchInput}
-                value={organizationSearch}
-                onChange={event => setOrganizationSearch(event.target.value)}
-                onKeyDown={event => { if (event.key.length === 1) event.stopPropagation(); }}
-                placeholder="Buscar no organograma"
-              />
-            </Box>
-            <List dense disablePadding>
-              {filteredOrganization.map(node => renderOrgNode(node, 0, [], Boolean(organizationSearch.trim())))}
-              {organizationSearch.trim() && filteredOrganization.length === 0 && (
-                <Typography variant="body2" color="text.secondary" sx={{ px: 2, py: 1.5 }}>
-                  Nenhum nível encontrado.
-                </Typography>
-              )}
-            </List>
-          </Menu>
-          <FormControlLabel
-            control={(
-              <Switch
-                size="small"
-                checked={filters.visaoDiretoria}
-                onChange={(_, checked) => {
-                  window.localStorage.setItem(EXECUTIVE_DIRECTOR_VIEW_STORAGE_KEY, checked ? "1" : "0");
-                  setFilters(f => {
-                    const path = f.path.length >= 4
-                      ? formatDirectorPath(f.path).split(" > ")
-                      : f.path.length === 3 ? f.path.slice(0, 2) : f.path;
-                    return { ...f, visaoDiretoria: checked, path, deptId: null };
-                  });
-                  window.localStorage.removeItem(EXECUTIVE_DEPARTMENT_STORAGE_KEY);
-                  setRefreshTick(t => t + 1);
-                }}
-              />
-            )}
-            label={(
-              <Tooltip title={`Agrupa por ${ORG.directorViewChain} em rankings, drilldown e decomposição`}>
-                <Typography variant="body2" sx={{ fontWeight: filters.visaoDiretoria ? 800 : 500 }}>Visão Diretoria</Typography>
-              </Tooltip>
-            )}
-            sx={{ ml: 0.5 }}
-          />
-          <FormControlLabel control={<Switch size="small" checked={includeSharedCost} onChange={(_, checked) => setIncludeSharedCost(checked)} />} label="Custo compartilhado" sx={{ ml: 0.5 }} />
-          <Button size="small" startIcon={<FilterAltOff />} onClick={() => { setHighlightsDepartment(""); setIncludeSharedCost(false); clearFilters(); }}>Limpar</Button>
-        </Stack>
-        {filters.visaoDiretoria && (
-          <Chip size="small" color="secondary" label={`Visão Diretoria: ${ORG.directorViewChain}`} sx={{ mt: 1, fontWeight: 800 }} />
-        )}
-        <Box sx={{ mt: 1 }}>
-          <Button variant="outlined" startIcon={<Add />} onClick={(event) => setFilterMenuAnchor(event.currentTarget)} sx={{ minHeight: 38, borderRadius: "12px", textTransform: "none" }}>Adicionar filtro</Button>
+          <Tooltip title="Filtra por qualquer dimensão FOCUS. Valores da mesma dimensão somam (OU); dimensões diferentes se combinam (E).">
+            <Button size="small" variant="outlined" startIcon={<AddOutlined />} onClick={(event) => setFilterMenuAnchor(event.currentTarget)} sx={{ height: 34, borderRadius: "10px", textTransform: "none" }}>Filtro</Button>
+          </Tooltip>
+          <FormControlLabel control={<Switch size="small" checked={includeSharedCost} onChange={(_, checked) => setIncludeSharedCost(checked)} />} label={<Typography variant="body2">Incluir custo rateado</Typography>} sx={{ ml: 0.5, mr: 0 }} />
+          <Box sx={{ flexGrow: 1 }} />
+          <Button size="small" startIcon={<FilterAltOffOutlined />} onClick={() => { setHighlightsDepartment(""); setIncludeSharedCost(false); clearFilters(); }} sx={{ textTransform: "none" }}>Limpar</Button>
+        <Box>
           <Popover
             anchorEl={filterMenuAnchor}
             open={Boolean(filterMenuAnchor)}
@@ -799,7 +724,7 @@ export default function GoldDashboard() {
             transformOrigin={{ vertical: "top", horizontal: "left" }}
               slotProps={{ paper: { sx: { p: 1.25, width: 380, maxWidth: "calc(100vw - 32px)", borderRadius: "12px", overflow: "visible" } } }}
           >
-            <Typography variant="caption" color="text.secondary" sx={{ px: .5, pb: .5, display: "block" }}>COLUNAS FILTRÁVEIS DO CUBO</Typography>
+            <Typography variant="caption" color="text.secondary" sx={{ px: .5, pb: .5, display: "block" }}>CAMPOS FILTRÁVEIS DO MODELO</Typography>
             <Autocomplete
               autoHighlight
               open
@@ -807,27 +732,37 @@ export default function GoldDashboard() {
               options={filterDimensionOptions.filter((column) => !filters.extra[column])}
               getOptionLabel={sourceDimensionLabel}
               onChange={(_, column) => { if (column) { setFilters((current) => ({ ...current, extra: { ...current.extra, [column]: [] } })); setFilterMenuAnchor(null); } }}
-              noOptionsText={!info ? "Carregando esquema base consolidada…" : "Todas as colunas já foram adicionadas"}
+              noOptionsText={!info ? "Carregando estrutura da base consolidada…" : "Todos os campos já foram incluídos"}
               slotProps={{
                 popper: { sx: { zIndex: (theme) => theme.zIndex.modal + 1 } },
                 listbox: { sx: { maxHeight: 280, overflowY: "auto" } },
               }}
-              renderInput={(params) => <TextField {...params} autoFocus size="small" placeholder="Buscar coluna" />}
+              renderInput={(params) => <TextField {...params} autoFocus size="small" placeholder="Procurar coluna" />}
             />
           </Popover>
         </Box>
+        </Stack>
         {Object.entries(filters.extra).length > 0 && <Box sx={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(min(100%, 340px), 380px))", gap: 1, width: "100%", mt: 1, alignItems: "start" }}>
-          {Object.entries(filters.extra).map(([column, values]) => <Stack key={column} direction="row" alignItems="flex-start" gap={.5} sx={{ minWidth: 0 }}><Box sx={{ minWidth: 0, flex: 1 }}><CascadeDimensionFilter column={column} label={sourceDimensionLabel(column)} table={table} value={values} filters={filtersOf(filters).filter((filter) => filter.column !== column)} onChange={(nextValues) => setFilters((current) => ({ ...current, extra: { ...current.extra, [column]: nextValues } }))} /></Box><Chip size="small" color={values.length ? "success" : "default"} variant={values.length ? "filled" : "outlined"} label={values.length ? `${values.length} aplicado${values.length === 1 ? "" : "s"}` : "Sem filtro"} sx={{ mt: 1, flexShrink: 0 }} /><IconButton size="small" aria-label={`Remover filtro ${sourceDimensionLabel(column)}`} onClick={() => setFilters((current) => { const extra = { ...current.extra }; delete extra[column]; return { ...current, extra }; })}><Close fontSize="small" /></IconButton></Stack>)}
+          {Object.entries(filters.extra).map(([column, values]) => <Stack key={column} direction="row" alignItems="flex-start" gap={.5} sx={{ minWidth: 0 }}><Box sx={{ minWidth: 0, flex: 1 }}><CascadeDimensionFilter column={column} label={sourceDimensionLabel(column)} table={table} value={values} filters={filtersOf(filters).filter((filter) => filter.column !== column)} onChange={(nextValues) => setFilters((current) => ({ ...current, extra: { ...current.extra, [column]: nextValues } }))} /></Box><Chip size="small" color={values.length ? "success" : "default"} variant={values.length ? "filled" : "outlined"} label={values.length ? `${values.length} aplicado${values.length === 1 ? "" : "s"}` : "Sem filtro"} sx={{ mt: 1, flexShrink: 0 }} /><IconButton size="small" aria-label={`Remover filtro ${sourceDimensionLabel(column)}`} onClick={() => setFilters((current) => { const extra = { ...current.extra }; delete extra[column]; return { ...current, extra }; })}><CloseOutlined fontSize="small" /></IconButton></Stack>)}
         </Box>}
-        <Typography variant="caption" color="text.secondary" display="block" mt={1}>
-          Período e filtros dimensionais FOCUS são compartilhados pelos widgets executivos. Selecione colunas e valores; vários valores na mesma coluna usam OU e colunas diferentes usam E. As opções são pesquisadas no serviço de consultas considerando os demais filtros.
-        </Typography>
       </Paper>
 
-      {tab === "visao-executiva" && <>
-        <ExpectedView embedded director={globalDirector} departmentId={filters.deptId ?? undefined} directorView={filters.visaoDiretoria} table={table} measureColumn={measureFor(filters)} externalIncludeSharedCost={includeSharedCost} externalScope={executiveScope} groupByOptions={groupByOptions} onMeasureColumnChange={(value) => setFilters(f => ({ ...f, consumoFaturado: value === "realizado" }))} onPeriodFilterChange={setExecutivePeriodFilter} />
-      <ExecutiveHighlights items={highlights} loading={highlightsLoading} error={highlightsError} />
-      </>}
+      {tab === "visao-executiva" && (
+        <CostSummary
+          table={table}
+          director={globalDirector || "Consumo de nuvem"}
+          departmentId={filters.deptId ?? undefined}
+          path={filters.path}
+          includeSharedCost={includeSharedCost}
+          measureColumn={measureFor(filters)}
+          scope={executiveScope}
+          onDateRangeChange={(from, to) => {
+            setDateFrom(from);
+            setDateTo(to);
+            setFilters(current => ({ ...current, months: monthsInDateRange(from, to) }));
+          }}
+        />
+      )}
       {tab === "geral" && <VisaoGeral table={table} filters={filters} filterKey={filterKey} />}
       {tab === "evolucao" && <Evolucao table={table} filters={filters} filterKey={filterKey} />}
       {tab === "organizacao" && <Organizacao table={table} filters={filters} filterKey={filterKey} />}
@@ -890,8 +825,8 @@ function CascadeDimensionFilter({ column, label, table, value, filters, onChange
     onOpen={() => setOpen(true)}
     onClose={() => setOpen(false)}
     loading={loadingOptions}
-    loadingText="Carregando opções…"
-    noOptionsText={optionsError || (search ? "Nenhum resultado encontrado. Digite outro termo para adicionar um valor." : "Nenhuma opção encontrada.")}
+    loadingText="Carregando valores…"
+    noOptionsText={optionsError || (search ? "Nada encontrado. Digite outro termo para incluir um valor." : "Nenhum valor encontrado.")}
     options={options}
     value={value}
     onChange={(_, values) => onChange(values.map((item) => String(item).trim()).filter(Boolean))}
@@ -901,7 +836,7 @@ function CascadeDimensionFilter({ column, label, table, value, filters, onChange
       {selected.slice(0, 1).map((item, index) => <Chip {...getTagProps({ index })} key={`${item}-${index}`} label={item} size="small" sx={{ maxWidth: 155 }} />)}
       {selected.length > 1 && <Chip size="small" label={`+${selected.length - 1}`} title={selected.slice(1).join(", ")} />}
     </>}
-    renderInput={(params) => <TextField {...params} label={label} placeholder={value.length ? "Digite ou selecione valores" : "Selecione ou digite para buscar"} />}
+    renderInput={(params) => <TextField {...params} label={label} placeholder={value.length ? "Digite ou escolha valores" : "Escolha ou digite para buscar"} />}
   />;
 }
 
@@ -954,47 +889,47 @@ function VisaoGeral({ table, filters, filterKey }: { table: string; filters: Fil
   const dirLabel = DIM_LABELS[dirField] || dirField;
 
   const email = useMemo(() => {
-    const period = filters.months.length ? `competência(s) ${filters.months.map(monthLong).join(", ")}` : "todo o período disponível";
+    const period = filters.months.length ? `competência(s) ${filters.months.map(monthLong).join(", ")}` : "todo o histórico disponível";
     return [
       `Assunto: Resumo executivo FinOps — ${period}`,
       "",
-      `Realizado (BRL): ${moneyFull(total.realizado)} | Billed Cost (USD): ${moneyFull(total.billedcost, "USD")} | Quantidade: ${num(total.quantity)}`,
+      `Efetivado (BRL): ${moneyFull(total.realizado)} | Custo faturado (USD): ${moneyFull(total.billedcost, "USD")} | Volume consumido: ${num(total.quantity)}`,
       `Mês mais recente (${latest ? monthLong(latest.month) : "—"}): ${latest ? moneyFull(latest.value) : "—"}${mom !== null ? ` (${mom >= 0 ? "+" : ""}${pct(mom)} vs mês anterior)` : ""}`,
       `Top ${dirLabel.toLowerCase()}: ${topDir ? esc(topDir[dirField]) : "—"} (${topDir ? money(topDir.realizado) : "—"}) · Concentração top 5: ${pct(top5Share)}`,
       `Top cloud: ${topCloud ? esc(topCloud.cloud_origem) : "—"} · Top serviço: ${topServico ? esc(topServico.servicename) : "—"}`,
       `Health Score: ${health}/100 (${healthStatus.label}).`,
       "",
-      "Gerado automaticamente pelo Dashboard FinOps (base consolidada).",
+      "Gerado automaticamente pelo painel FinOps (base consolidada).",
     ].join("\n");
   }, [total, mensal, mom, topDir, topCloud, topServico, top5Share, health, healthStatus, filters.months, latest, dirField, dirLabel]);
 
   return (
     <LoadingBlock loading={loading} error={error}>
       <Grid container spacing={1.5} mb={1.5}>
-        <Grid item xs={6} sm={4} md={2}><KpiCard label="Realizado (BRL)" value={money(total.realizado)} sub="Soma da medida realizado" color={PURPLE} full={moneyFull(total.realizado)} /></Grid>
-        <Grid item xs={6} sm={4} md={2}><KpiCard label="Billed Cost (USD)" value={money(total.billedcost, "USD")} sub="Moeda de billing" color={ORANGE} full={moneyFull(total.billedcost, "USD")} /></Grid>
-        <Grid item xs={6} sm={4} md={2}><KpiCard label="Quantidade" value={num(total.quantity)} sub="Soma de ConsumedQuantity" color={BLUE} full={total.quantity.toLocaleString("pt-BR")} /></Grid>
-        <Grid item xs={6} sm={4} md={2}><KpiCard label="Linhas agregadas" value={num(total.count)} sub="Registros da base consolidada" color={GREEN} full={total.count.toLocaleString("pt-BR")} /></Grid>
-        <Grid item xs={6} sm={4} md={2}><KpiCard label="Health Score" value={`${health}/100`} sub={healthStatus.label} color={healthStatus.color} /></Grid>
-        <Grid item xs={6} sm={4} md={2}><KpiCard label="MoM último mês" value={mom === null ? "—" : `${mom >= 0 ? "+" : ""}${pct(mom)}`} sub={latest ? monthLabel(latest.month) : "sem histórico"} color={mom !== null && mom > 10 ? RED : GREEN} /></Grid>
+        <Grid item xs={6} sm={4} md={2}><KpiCard label="Efetivado (BRL)" value={money(total.realizado)} sub="Soma da medida efetivado" color={PURPLE} full={moneyFull(total.realizado)} /></Grid>
+        <Grid item xs={6} sm={4} md={2}><KpiCard label="Custo faturado (USD)" value={money(total.billedcost, "USD")} sub="Moeda de billing" color={ORANGE} full={moneyFull(total.billedcost, "USD")} /></Grid>
+        <Grid item xs={6} sm={4} md={2}><KpiCard label="Volume consumido" value={num(total.quantity)} sub="Total de ConsumedQuantity" color={BLUE} full={total.quantity.toLocaleString("pt-BR")} /></Grid>
+        <Grid item xs={6} sm={4} md={2}><KpiCard label="Linhas agrupadas" value={num(total.count)} sub="Linhas da base consolidada" color={GREEN} full={total.count.toLocaleString("pt-BR")} /></Grid>
+        <Grid item xs={6} sm={4} md={2}><KpiCard label="Índice de saúde financeira" value={`${health}/100`} sub={healthStatus.label} color={healthStatus.color} /></Grid>
+        <Grid item xs={6} sm={4} md={2}><KpiCard label="Variação do mês" value={mom === null ? "—" : `${mom >= 0 ? "+" : ""}${pct(mom)}`} sub={latest ? monthLabel(latest.month) : "sem histórico"} color={mom !== null && mom > 10 ? RED : GREEN} /></Grid>
       </Grid>
 
       <Grid container spacing={1.5}>
         <Grid item xs={12} md={7}>
-          <ChartCard title="Evolução mensal — Realizado vs Billed Cost" note="Valores somados da base consolidada para o escopo filtrado.">
+          <ChartCard title="Evolução mensal: efetivado e custo faturado" note="Valores somados da base consolidada para o recorte filtrado.">
             <Chart
               data={[
-                { x: mensal.map(r => monthLabel(r.month)), y: mensal.map(r => r.value), type: "bar", name: "Realizado (BRL)", marker: { color: PURPLE } },
-                { x: mensal.map(r => monthLabel(r.month)), y: monthlySeries(results.mensal, "billedcost").map(r => r.value), type: "scatter", mode: "lines+markers", name: "Billed Cost (USD)", yaxis: "y2", line: { color: ORANGE, width: 3 } },
+                { x: mensal.map(r => monthLabel(r.month)), y: mensal.map(r => r.value), type: "bar", name: "Efetivado (BRL)", marker: { color: PURPLE } },
+                { x: mensal.map(r => monthLabel(r.month)), y: monthlySeries(results.mensal, "billedcost").map(r => r.value), type: "scatter", mode: "lines+markers", name: "Custo faturado (USD)", yaxis: "y2", line: { color: ORANGE, width: 3 } },
               ]}
-              layout={{ height: 320, margin: { l: 56, r: 56, t: 8, b: 34 }, barmode: "group", legend: { orientation: "h", y: -0.22 }, yaxis: { title: { text: "BRL" }, gridcolor: "#EEF0F7" }, yaxis2: { title: { text: "USD" }, overlaying: "y", side: "right", showgrid: false } }}
+              layout={{ height: 320, margin: { l: 56, r: 56, t: 8, b: 34 }, barmode: "group", legend: { orientation: "h", y: -0.22 }, yaxis: { title: { text: "BRL" }, gridcolor: "#EEF3F8" }, yaxis2: { title: { text: "USD" }, overlaying: "y", side: "right", showgrid: false } }}
               config={{ displayModeBar: false }} style={{ width: "100%" }} />
           </ChartCard>
         </Grid>
         <Grid item xs={12} md={5}>
-          <ChartCard title="Mix por Categoria de Carga">
+          <ChartCard title="Peso das categorias de carga">
             <Chart
-              data={[{ labels: rowsOf(results.categorias).map(r => esc(r.servicecategory)), values: rowsOf(results.categorias).map(r => Number(r.realizado) || 0), type: "pie", hole: 0.55, marker: { colors: [PURPLE, ORANGE, BLUE, GREEN, YELLOW, RED, "#0f766e", "#7c3aed"] } }]}
+              data={[{ labels: rowsOf(results.categorias).map(r => esc(r.servicecategory)), values: rowsOf(results.categorias).map(r => Number(r.realizado) || 0), type: "pie", hole: 0.55, marker: { colors: [PURPLE, ORANGE, BLUE, GREEN, YELLOW, RED, "#0F62FE", "#64748B"] } }]}
               layout={{ height: 300, margin: { l: 8, r: 8, t: 8, b: 8 }, showlegend: true, legend: { orientation: "h", y: -0.25, font: { size: 10 } } }}
               config={{ displayModeBar: false }} style={{ width: "100%" }} />
           </ChartCard>
@@ -1003,16 +938,16 @@ function VisaoGeral({ table, filters, filterKey }: { table: string; filters: Fil
           <RankBars title={`Top ${dirLabel}`} rows={dirRows} measure="realizado" limit={8} color={PURPLE} />
         </Grid>
         <Grid item xs={12} md={3.5}>
-          <RankBars title="Top Clouds" rows={rowsOf(results.clouds)} measure="realizado" limit={6} color={BLUE} />
+          <RankBars title="Principais nuvens" rows={rowsOf(results.clouds)} measure="realizado" limit={6} color={BLUE} />
         </Grid>
         <Grid item xs={12} md={3.5}>
-          <RankBars title="Top Serviços" rows={rowsOf(results.servicos)} measure="realizado" limit={6} color={ORANGE} />
+          <RankBars title="Serviços de maior custo" rows={rowsOf(results.servicos)} measure="realizado" limit={6} color={ORANGE} />
         </Grid>
         <Grid item xs={12}>
           <Paper variant="outlined" sx={{ p: 2 }}>
             <Stack direction="row" justifyContent="space-between" alignItems="center" mb={1}>
-              <Typography variant="subtitle2" fontWeight={900}>E-mail executivo (auto-gerado)</Typography>
-              <Button size="small" startIcon={<ContentCopy />} onClick={() => copyEmail(email)}>{copied ? "Copiado!" : "Copiar"}</Button>
+              <Typography variant="subtitle2" fontWeight={900}>Resumo executivo para e-mail (automático)</Typography>
+              <Button size="small" startIcon={<ContentCopyOutlined />} onClick={() => copyEmail(email)}>{copied ? "Copiado!" : "Copiar"}</Button>
             </Stack>
             <TextField value={email} multiline minRows={6} fullWidth size="small" sx={{ fontFamily: "monospace", fontSize: 12 }} />
           </Paper>
@@ -1067,27 +1002,27 @@ function Evolucao({ table, filters, filterKey }: { table: string; filters: Filte
   return (
     <LoadingBlock loading={loading} error={error}>
       <Grid container spacing={1.5} mb={1.5}>
-        <Grid item xs={6} md={3}><KpiCard label="Média mensal (BRL)" value={money(runRateAvg)} full={moneyFull(runRateAvg)} color={PURPLE} /></Grid>
-        <Grid item xs={6} md={3}><KpiCard label="Run Rate anualizado" value={money(annualized)} full={moneyFull(annualized)} color={BLUE} /></Grid>
-        <Grid item xs={6} md={3}><KpiCard label="Projeção anual (ritmo 3m)" value={money(projected)} full={moneyFull(projected)} color={ORANGE} sub="Média 3m × 12" /></Grid>
-        <Grid item xs={6} md={3}><KpiCard label="Variação último mês" value={`${totalDelta >= 0 ? "+" : ""}${money(totalDelta)}`} sub={`${cur ? monthLabel(cur) : "—"} vs ${prev ? monthLabel(prev) : "—"}`} color={totalDelta > 0 ? RED : GREEN} /></Grid>
+        <Grid item xs={6} md={3}><KpiCard label="Média por mês (BRL)" value={money(runRateAvg)} full={moneyFull(runRateAvg)} color={PURPLE} /></Grid>
+        <Grid item xs={6} md={3}><KpiCard label="Anualizado no ritmo atual" value={money(annualized)} full={moneyFull(annualized)} color={BLUE} /></Grid>
+        <Grid item xs={6} md={3}><KpiCard label="Projeção anual (ritmo dos últimos 3 meses)" value={money(projected)} full={moneyFull(projected)} color={ORANGE} sub="Média de 3 meses × 12" /></Grid>
+        <Grid item xs={6} md={3}><KpiCard label="Variação do último mês" value={`${totalDelta >= 0 ? "+" : ""}${money(totalDelta)}`} sub={`${cur ? monthLabel(cur) : "—"} vs ${prev ? monthLabel(prev) : "—"}`} color={totalDelta > 0 ? RED : GREEN} /></Grid>
       </Grid>
 
       <Grid container spacing={1.5}>
         <Grid item xs={12}>
-          <ChartCard title="Realizado (BRL), Billed Cost (USD) e Quantidade por mês">
+          <ChartCard title="Efetivado (BRL), Custo faturado (USD) e Volume por mês">
             <Chart
               data={[
-                { x: mensal.map(r => monthLabel(r.month)), y: mensal.map(r => r.value), type: "bar", name: "Realizado (BRL)", marker: { color: PURPLE } },
-                { x: billed.map(r => monthLabel(r.month)), y: billed.map(r => r.value), type: "scatter", mode: "lines", name: "Billed Cost (USD)", line: { color: ORANGE, width: 3 } },
-                { x: qty.map(r => monthLabel(r.month)), y: qty.map(r => r.value), type: "scatter", mode: "lines+markers", name: "Quantidade", yaxis: "y2", line: { color: GREEN, width: 2, dash: "dot" } },
+                { x: mensal.map(r => monthLabel(r.month)), y: mensal.map(r => r.value), type: "bar", name: "Efetivado (BRL)", marker: { color: PURPLE } },
+                { x: billed.map(r => monthLabel(r.month)), y: billed.map(r => r.value), type: "scatter", mode: "lines", name: "Custo faturado (USD)", line: { color: ORANGE, width: 3 } },
+                { x: qty.map(r => monthLabel(r.month)), y: qty.map(r => r.value), type: "scatter", mode: "lines+markers", name: "Volume consumido", yaxis: "y2", line: { color: GREEN, width: 2, dash: "dot" } },
               ]}
-              layout={{ height: 340, margin: { l: 56, r: 56, t: 8, b: 34 }, legend: { orientation: "h", y: -0.22 }, yaxis: { title: { text: "Valor" }, gridcolor: "#EEF0F7" }, yaxis2: { title: { text: "Quantidade" }, overlaying: "y", side: "right", showgrid: false } }}
+              layout={{ height: 340, margin: { l: 56, r: 56, t: 8, b: 34 }, legend: { orientation: "h", y: -0.22 }, yaxis: { title: { text: "Valor" }, gridcolor: "#EEF3F8" }, yaxis2: { title: { text: "Volume consumido" }, overlaying: "y", side: "right", showgrid: false } }}
               config={{ displayModeBar: false }} style={{ width: "100%" }} />
           </ChartCard>
         </Grid>
         <Grid item xs={12} md={7}>
-          <ChartCard title={`What Changed? — variação ${cur ? monthLabel(cur) : "—"} vs ${prev ? monthLabel(prev) : "—"} por ${DIM_LABELS[dim] || dim}`} note="Maiores contribuintes absolutos da variação. Não presume causalidade operacional.">
+          <ChartCard title={`O que mudou? — variação ${cur ? monthLabel(cur) : "—"} vs ${prev ? monthLabel(prev) : "—"} por ${DIM_LABELS[dim] || dim}`} note="Maiores contribuidores absolutos da variação. Não presume causa operacional.">
             <FormControl size="small" sx={{ mb: 1, minWidth: 180 }}>
               <Select value={dim} onChange={e => setDim(e.target.value)}>
                 {dimOptions.map(d => <MenuItem key={d} value={d}>{DIM_LABELS[d] || d}</MenuItem>)}
@@ -1102,12 +1037,12 @@ function Evolucao({ table, filters, filterKey }: { table: string; filters: Filte
                 text: deltas.slice(0, 12).map(d => `${d.delta >= 0 ? "+" : ""}${money(d.delta)}`),
                 textposition: "outside",
               }]}
-              layout={{ height: 320, margin: { l: 56, r: 24, t: 8, b: 90 }, xaxis: { tickangle: -35 }, yaxis: { title: { text: "Δ BRL" }, gridcolor: "#EEF0F7" } }}
+              layout={{ height: 320, margin: { l: 56, r: 24, t: 8, b: 90 }, xaxis: { tickangle: -35 }, yaxis: { title: { text: "Δ BRL" }, gridcolor: "#EEF3F8" } }}
               config={{ displayModeBar: false }} style={{ width: "100%" }} />
           </ChartCard>
         </Grid>
         <Grid item xs={12} md={5}>
-          <ChartCard title="Contribuição para a variação" note={`Variação total: ${totalDelta >= 0 ? "+" : ""}${money(totalDelta)} (${prevTotal ? pct(totalDelta / Math.abs(prevTotal) * 100) : "—"} vs mês anterior)`}>
+          <ChartCard title="Peso de cada item na variação" note={`Variação consolidada: ${totalDelta >= 0 ? "+" : ""}${money(totalDelta)} (${prevTotal ? pct(totalDelta / Math.abs(prevTotal) * 100) : "—"} vs mês anterior)`}>
             <Stack spacing={1}>
               {deltas.slice(0, 10).map((d, i) => (
                 <Box key={i}>
@@ -1115,12 +1050,12 @@ function Evolucao({ table, filters, filterKey }: { table: string; filters: Filte
                     <Tooltip title={d.key}><Typography variant="caption" sx={{ fontWeight: 850, maxWidth: "60%", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{d.key}</Typography></Tooltip>
                     <Typography variant="caption" sx={{ fontWeight: 900 }}>{d.delta >= 0 ? "+" : ""}{money(d.delta)} · {totalDelta ? pct(Math.abs(d.delta) / Math.abs(totalDelta) * 100, 0) : "—"} do Δ</Typography>
                   </Stack>
-                  <Box sx={{ height: 9, borderRadius: 99, background: "#E2E5EE", overflow: "hidden", mt: 0.4 }}>
+                  <Box sx={{ height: 9, borderRadius: 99, background: "#E1E8F0", overflow: "hidden", mt: 0.4 }}>
                     <Box sx={{ height: "100%", width: `${Math.max(2, Math.min(100, Math.abs(d.delta) / (Math.max(...deltas.slice(0, 10).map(x => Math.abs(x.delta)), 1)) * 100))}%`, borderRadius: 99, background: d.delta >= 0 ? RED : GREEN }} />
                   </Box>
                 </Box>
               ))}
-              {!deltas.length && <Typography variant="caption" color="text.secondary">Sem dois meses consecutivos para comparar.</Typography>}
+              {!deltas.length && <Typography variant="caption" color="text.secondary">São necessários dois meses seguidos para comparar.</Typography>}
             </Stack>
           </ChartCard>
         </Grid>
@@ -1172,17 +1107,17 @@ function Organizacao({ table, filters, filterKey }: { table: string; filters: Fi
   return (
     <LoadingBlock loading={loading} error={error}>
       <Grid container spacing={1.5} mb={1.5}>
-        <Grid item xs={6} md={3}><KpiCard label="Governança (Diretoria)" value={pct(govShare)} sub="% do Realizado classificado" color={govShare >= 90 ? GREEN : govShare >= 70 ? YELLOW : RED} /></Grid>
-        <Grid item xs={6} md={3}><KpiCard label="Diretorias com custo" value={String(govRows.length)} color={PURPLE} /></Grid>
-        <Grid item xs={6} md={3}><KpiCard label="Níveis hierárquicos" value={hierRows.length ? String(hierLevels.length) : "—"} sub={filters.visaoDiretoria ? `Visão Diretoria (${ORG.directorViewLevels})` : "nivel_1 .. nivel_5"} color={BLUE} /></Grid>
-        <Grid item xs={6} md={3}><KpiCard label="Concentração Top 5 Dir." value={govRows.length ? pct(govRows.slice(0, 5).reduce((s, r) => s + Number(r.realizado || 0), 0) / (govTotal || 1) * 100) : "—"} color={ORANGE} /></Grid>
+        <Grid item xs={6} md={3}><KpiCard label="Governança (nível diretoria)" value={pct(govShare)} sub="% do efetivado classificado" color={govShare >= 90 ? GREEN : govShare >= 70 ? YELLOW : RED} /></Grid>
+        <Grid item xs={6} md={3}><KpiCard label="Diretorias com custo registrado" value={String(govRows.length)} color={PURPLE} /></Grid>
+        <Grid item xs={6} md={3}><KpiCard label="Níveis da estrutura" value={hierRows.length ? String(hierLevels.length) : "—"} sub={filters.visaoDiretoria ? `Visão Diretoria (${ORG.directorViewLevels})` : "nivel_1 .. nivel_5"} color={BLUE} /></Grid>
+        <Grid item xs={6} md={3}><KpiCard label="Peso das 5 maiores diretorias" value={govRows.length ? pct(govRows.slice(0, 5).reduce((s, r) => s + Number(r.realizado || 0), 0) / (govTotal || 1) * 100) : "—"} color={ORANGE} /></Grid>
       </Grid>
       <Grid container spacing={1.5}>
         {filters.visaoDiretoria ? (
           <>
             {VISAO_DIRETORIA_LEVELS.map((field, i) => {
               const ids = ["n1", "n2", "n4", "n3", "n5", "n6"];
-              const colors = [PURPLE, BLUE, "#7c3aed", GREEN, ORANGE, YELLOW];
+              const colors = [PURPLE, BLUE, "#64748B", GREEN, ORANGE, YELLOW];
               return (
                 <Grid item xs={12} sm={6} md={4} key={field}>
                   <RankBars
@@ -1198,18 +1133,18 @@ function Organizacao({ table, filters, filterKey }: { table: string; filters: Fi
           </>
         ) : (
           <>
-            <Grid item xs={12} md={4}><RankBars title="VP (Nível 3)" rows={rowsOf(results.n3)} measure="realizado" limit={10} color={PURPLE} /></Grid>
-            <Grid item xs={12} md={4}><RankBars title="Diretorias (Nível 4)" rows={rowsOf(results.n4)} measure="realizado" limit={12} color={BLUE} /></Grid>
+            <Grid item xs={12} md={4}><RankBars title="VP (nível 3)" rows={rowsOf(results.n3)} measure="realizado" limit={10} color={PURPLE} /></Grid>
+            <Grid item xs={12} md={4}><RankBars title="Diretorias (nível 4)" rows={rowsOf(results.n4)} measure="realizado" limit={12} color={BLUE} /></Grid>
             <Grid item xs={12} md={4}><RankBars title={`${ORG.level5} (Nível 5)`} rows={rowsOf(results.n5)} measure="realizado" limit={12} color={GREEN} /></Grid>
           </>
         )}
         <Grid item xs={12} md={4}><RankBars title="Áreas (legado)" rows={rowsOf(results.dept)} measure="realizado" limit={12} color={ORANGE} /></Grid>
-        <Grid item xs={12} md={4}><RankBars title="Centros de Custo" rows={rowsOf(results.cc)} measure="realizado" limit={10} color={YELLOW} /></Grid>
-        <Grid item xs={12} md={4}><RankBars title="Clouds" rows={rowsOf(results.cloud)} measure="realizado" limit={10} color="#7c3aed" /></Grid>
+        <Grid item xs={12} md={4}><RankBars title="Centros de custo" rows={rowsOf(results.cc)} measure="realizado" limit={10} color={YELLOW} /></Grid>
+        <Grid item xs={12} md={4}><RankBars title="Nuvens" rows={rowsOf(results.cloud)} measure="realizado" limit={10} color="#64748B" /></Grid>
         <Grid item xs={12}>
           <ChartCard
-            title={filters.visaoDiretoria ? `Hierarquia Visão Diretoria — custo por caminho (${ORG.directorViewLevels})` : "Hierarquia organizacional — custo por caminho (níveis 1→5)"}
-            note="Top 200 caminhos por Realizado; use os filtros globais para estreitar."
+            title={filters.visaoDiretoria ? `Estrutura organizacional · visão diretoria — custo por caminho (${ORG.directorViewLevels})` : "Estrutura organizacional — custo por caminho (níveis 1 a 5)"}
+            note="Top 200 caminhos por efetivado; use os filtros globais para reduzir."
           >
             <TableContainer sx={{ maxHeight: 460 }}>
               <Table size="small" stickyHeader>
@@ -1218,7 +1153,7 @@ function Organizacao({ table, filters, filterKey }: { table: string; filters: Fi
                     {hierLevels.map(level => (
                       <TableCell key={level} sx={{ fontWeight: 900, fontSize: 11 }}>{DIM_LABELS[level] || level}</TableCell>
                     ))}
-                    <TableCell sx={{ fontWeight: 900, fontSize: 11 }}>Realizado</TableCell>
+                    <TableCell sx={{ fontWeight: 900, fontSize: 11 }}>Efetivado</TableCell>
                   </TableRow>
                 </TableHead>
                 <TableBody>
@@ -1230,7 +1165,7 @@ function Organizacao({ table, filters, filterKey }: { table: string; filters: Fi
                       <TableCell sx={{ fontSize: 12, fontWeight: 900, whiteSpace: "nowrap" }}>{money(r.realizado)}</TableCell>
                     </TableRow>
                   ))}
-                  {!hierRows.length && <TableRow><TableCell colSpan={hierLevels.length + 1} align="center" sx={{ color: "text.secondary" }}>Sem dados para o escopo.</TableCell></TableRow>}
+                  {!hierRows.length && <TableRow><TableCell colSpan={hierLevels.length + 1} align="center" sx={{ color: "text.secondary" }}>Sem dados para o recorte selecionado.</TableCell></TableRow>}
                 </TableBody>
               </Table>
             </TableContainer>
@@ -1274,29 +1209,29 @@ function Servicos({ table, filters, filterKey }: { table: string; filters: Filte
   return (
     <LoadingBlock loading={loading} error={error}>
       <Grid container spacing={1.5}>
-        <Grid item xs={12} md={4}><RankBars title="Top Serviços" rows={rowsOf(results.serv)} measure="realizado" limit={12} color={PURPLE} /></Grid>
-        <Grid item xs={12} md={4}><RankBars title="Top Categorias" rows={rowsOf(results.cat)} measure="realizado" limit={12} color={BLUE} /></Grid>
-        <Grid item xs={12} md={4}><RankBars title="Top Subcategorias" rows={rowsOf(results.sub)} measure="realizado" limit={12} color={GREEN} /></Grid>
-        <Grid item xs={12} md={4}><RankBars title="Top SKUs (skumeter)" rows={rowsOf(results.sku)} measure="realizado" limit={12} color={ORANGE} /></Grid>
-        <Grid item xs={12} md={4}><RankBars title="Top Regiões" rows={rowsOf(results.reg)} measure="realizado" limit={12} color={YELLOW} /></Grid>
-        <Grid item xs={12} md={4}><RankBars title="Top Subcontas" rows={rowsOf(results.subacct)} measure="realizado" limit={10} color="#7c3aed" /></Grid>
+        <Grid item xs={12} md={4}><RankBars title="Serviços de maior custo" rows={rowsOf(results.serv)} measure="realizado" limit={12} color={PURPLE} /></Grid>
+        <Grid item xs={12} md={4}><RankBars title="Categorias de maior custo" rows={rowsOf(results.cat)} measure="realizado" limit={12} color={BLUE} /></Grid>
+        <Grid item xs={12} md={4}><RankBars title="Subcategorias de maior custo" rows={rowsOf(results.sub)} measure="realizado" limit={12} color={GREEN} /></Grid>
+        <Grid item xs={12} md={4}><RankBars title="SKUs de maior custo" rows={rowsOf(results.sku)} measure="realizado" limit={12} color={ORANGE} /></Grid>
+        <Grid item xs={12} md={4}><RankBars title="Regiões de maior custo" rows={rowsOf(results.reg)} measure="realizado" limit={12} color={YELLOW} /></Grid>
+        <Grid item xs={12} md={4}><RankBars title="Subcontas de maior custo" rows={rowsOf(results.subacct)} measure="realizado" limit={10} color="#64748B" /></Grid>
         <Grid item xs={12} md={4}>
-          <ChartCard title="Mix por Tipo de Carga">
+          <ChartCard title="Peso dos tipos de carga">
             <Chart
-              data={[{ labels: rowsOf(results.charge).map(r => esc(r.chargecategory)), values: rowsOf(results.charge).map(r => Number(r.realizado) || 0), type: "pie", hole: 0.5, marker: { colors: [PURPLE, ORANGE, BLUE, GREEN, YELLOW, RED, "#0f766e"] } }]}
+              data={[{ labels: rowsOf(results.charge).map(r => esc(r.chargecategory)), values: rowsOf(results.charge).map(r => Number(r.realizado) || 0), type: "pie", hole: 0.5, marker: { colors: [PURPLE, ORANGE, BLUE, GREEN, YELLOW, RED, "#0F62FE"] } }]}
               layout={{ height: 320, margin: { l: 8, r: 8, t: 8, b: 8 }, legend: { orientation: "h", y: -0.3, font: { size: 10 } } }}
               config={{ displayModeBar: false }} style={{ width: "100%" }} />
           </ChartCard>
         </Grid>
         <Grid item xs={12} md={8}>
-          <ChartCard title={`Heatmap ${DIM_LABELS[heatDim] || heatDim} × Mês — Realizado (BRL)`} note="Top 14 valores da dimensão; célula = soma mensal no escopo filtrado.">
+          <ChartCard title={`Heatmap ${DIM_LABELS[heatDim] || heatDim} × Mês — Efetivado (BRL)`} note="Top 14 valores da dimensão; célula = soma mensal neste recorte.">
             <FormControl size="small" sx={{ mb: 1, minWidth: 180 }}>
               <Select value={heatDim} onChange={e => setHeatDim(e.target.value)}>
                 {heatOptions.map(d => <MenuItem key={d} value={d}>{DIM_LABELS[d] || d}</MenuItem>)}
               </Select>
             </FormControl>
             <Chart
-              data={[{ z, x: heatMonths.map(monthLabel), y: heatDims, type: "heatmap", colorscale: [[0, "#f3e8ff"], [0.5, PURPLE], [1, "#2b003d"]], hoverongaps: false, text: (z.map(row => row.map(v => v === null ? "sem dados" : money(v))) as string[][]) as any, texttemplate: "%{text}", hovertemplate: "%{y} · %{x}<br>%{text}<extra></extra>" }]}
+              data={[{ z, x: heatMonths.map(monthLabel), y: heatDims, type: "heatmap", colorscale: [[0, "#EEF4FF"], [0.5, PURPLE], [1, "#2b003d"]], hoverongaps: false, text: (z.map(row => row.map(v => v === null ? "sem dados" : money(v))) as string[][]) as any, texttemplate: "%{text}", hovertemplate: "%{y} · %{x}<br>%{text}<extra></extra>" }]}
               layout={{ height: 380, margin: { l: 130, r: 16, t: 8, b: 40 }, xaxis: { tickangle: -35 } }}
               config={{ displayModeBar: false }} style={{ width: "100%" }} />
           </ChartCard>
@@ -1391,9 +1326,9 @@ function Investigacao({ table, filters, filterKey }: { table: string; filters: F
     <LoadingBlock loading={loading} error={error}>
       <Grid container spacing={1.5} mb={1.5}>
         <Grid item xs={12} md={4}>
-          <Paper variant="outlined" sx={{ p: 2, height: "100%", background: "linear-gradient(135deg,#2b003d,#660099)", color: "#fff" }}>
-            <Typography variant="subtitle2" fontWeight={900} mb={1}>Executive Attention Center</Typography>
-            {attention.length === 0 && <Typography variant="caption">Nenhum sinal relevante no escopo filtrado.</Typography>}
+          <Paper variant="outlined" sx={{ p: 2, height: "100%", background: "linear-gradient(135deg,#2b003d,#0B3FA8)", color: "#fff" }}>
+            <Typography variant="subtitle2" fontWeight={900} mb={1}>Onde olhar primeiro</Typography>
+            {attention.length === 0 && <Typography variant="caption">Nenhum sinal relevante no recorte.</Typography>}
             <Stack spacing={1}>
               {attention.map((a, i) => (
                 <Box key={i} sx={{ borderLeft: `5px solid ${a.color}`, background: "rgba(255,255,255,.12)", borderRadius: 1.5, p: 1.2 }}>
@@ -1407,7 +1342,7 @@ function Investigacao({ table, filters, filterKey }: { table: string; filters: F
           </Paper>
         </Grid>
         <Grid item xs={12} md={8}>
-          <ChartCard title={`Top Desvios MoM por ${DIM_LABELS[dim] || dim}`} note="Variação absoluta do último mês vs anterior.">
+          <ChartCard title={`Top Desvios MoM por ${DIM_LABELS[dim] || dim}`} note="Variação absoluta do último mês contra o anterior.">
             <FormControl size="small" sx={{ mb: 1, minWidth: 180 }}>
               <Select value={dim} onChange={e => setDim(e.target.value)}>
                 {dimOptions.map(d => <MenuItem key={d} value={d}>{DIM_LABELS[d] || d}</MenuItem>)}
@@ -1422,15 +1357,15 @@ function Investigacao({ table, filters, filterKey }: { table: string; filters: F
                 text: sortedByAbs.map(d => `${d.delta >= 0 ? "+" : ""}${money(d.delta)}`),
                 textposition: "outside",
               }]}
-              layout={{ height: 320, margin: { l: 56, r: 24, t: 8, b: 100 }, xaxis: { tickangle: -40 }, yaxis: { title: { text: "Δ BRL" }, gridcolor: "#EEF0F7" } }}
+              layout={{ height: 320, margin: { l: 56, r: 24, t: 8, b: 100 }, xaxis: { tickangle: -40 }, yaxis: { title: { text: "Δ BRL" }, gridcolor: "#EEF3F8" } }}
               config={{ displayModeBar: false }} style={{ width: "100%" }} />
           </ChartCard>
         </Grid>
         <Grid item xs={12} md={6}>
-          <ChartCard title="Anomalias (z-score do último mês vs histórico)" note="|z| ≥ 2 indica variação fora do padrão histórico do item.">
+          <ChartCard title="Anomalias (desvio do último mês em relação ao histórico)" note="|z| ≥ 2 indica variação fora do padrão histórico do item.">
             <TableContainer>
               <Table size="small">
-                <TableHead><TableRow>{["Item", "Último mês", "Histórico (média)", "Z-score", "Status"].map(h => <TableCell key={h} sx={{ fontWeight: 900, fontSize: 11 }}>{h}</TableCell>)}</TableRow></TableHead>
+                <TableHead><TableRow>{["Item", "Mês mais recente", "Histórico (média)", "Z-score", "Status"].map(h => <TableCell key={h} sx={{ fontWeight: 900, fontSize: 11 }}>{h}</TableCell>)}</TableRow></TableHead>
                 <TableBody>
                   {anomalies.map((a, i) => (
                     <TableRow key={i} hover>
@@ -1441,7 +1376,7 @@ function Investigacao({ table, filters, filterKey }: { table: string; filters: F
                       <TableCell><Chip size="small" label={Math.abs(a.z) >= 3 ? "Crítico" : "Atenção"} sx={{ background: Math.abs(a.z) >= 3 ? RED : YELLOW, color: "#fff", fontSize: 10, fontWeight: 900 }} /></TableCell>
                     </TableRow>
                   ))}
-                  {!anomalies.length && <TableRow><TableCell colSpan={5} align="center" sx={{ color: "text.secondary" }}>Nenhuma anomalia detectada (ou histórico insuficiente).</TableCell></TableRow>}
+                  {!anomalies.length && <TableRow><TableCell colSpan={5} align="center" sx={{ color: "text.secondary" }}>Nada fora do padrão (ou histórico insuficiente).</TableCell></TableRow>}
                 </TableBody>
               </Table>
             </TableContainer>
@@ -1453,9 +1388,9 @@ function Investigacao({ table, filters, filterKey }: { table: string; filters: F
               <ChartCard title={`Pareto 80/20 — ${DIM_LABELS[dim] || dim}`}>
                 <Chart
                   data={[
-                    { x: paretoRows.slice(0, 30).map(r => esc(r[dim])), y: paretoRows.slice(0, 30).map(r => Number(r.realizado) || 0), type: "bar", name: "Realizado", marker: { color: PURPLE } },
+                    { x: paretoRows.slice(0, 30).map(r => esc(r[dim])), y: paretoRows.slice(0, 30).map(r => Number(r.realizado) || 0), type: "bar", name: "Efetivado", marker: { color: PURPLE } },
                   ]}
-                  layout={{ height: 260, margin: { l: 56, r: 20, t: 8, b: 100 }, xaxis: { tickangle: -45, tickfont: { size: 9 } }, yaxis: { title: { text: "BRL" }, gridcolor: "#EEF0F7" } }}
+                  layout={{ height: 260, margin: { l: 56, r: 20, t: 8, b: 100 }, xaxis: { tickangle: -45, tickfont: { size: 9 } }, yaxis: { title: { text: "BRL" }, gridcolor: "#EEF3F8" } }}
                   config={{ displayModeBar: false }} style={{ width: "100%" }} />
                 <Typography variant="caption" color="text.secondary" sx={{ display: "block", mt: 0.5 }}>
                   <b>{paretoCount}</b> de {paretoRows.length} itens concentram ≥ 80% do custo ({pct(paretoTotal ? cum / paretoTotal * 100 : 0, 0)} acumulado).
@@ -1463,7 +1398,7 @@ function Investigacao({ table, filters, filterKey }: { table: string; filters: F
               </ChartCard>
             </Grid>
             <Grid item xs={12}>
-              <ChartCard title="Aceleração de custo (últimos 3 meses)" note="Diferença das diferenças mensais — aceleração real de crescimento.">
+              <ChartCard title="Ritmo de crescimento acelerado (3 meses)" note="Diferença das variações mensais — aceleração real de crescimento.">
                 <Stack spacing={1}>
                   {accelerated.slice(0, 6).map((a, i) => (
                     <Stack key={i} direction="row" justifyContent="space-between" sx={{ fontSize: 12, fontWeight: 800 }}>
@@ -1471,7 +1406,7 @@ function Investigacao({ table, filters, filterKey }: { table: string; filters: F
                       <Typography variant="caption" sx={{ fontWeight: 900, color: RED }}>+{money(a.accel!)}</Typography>
                     </Stack>
                   ))}
-                  {!accelerated.length && <Typography variant="caption" color="text.secondary">Sem aceleração relevante no escopo.</Typography>}
+                  {!accelerated.length && <Typography variant="caption" color="text.secondary">Nenhuma aceleração relevante no recorte.</Typography>}
                 </Stack>
               </ChartCard>
             </Grid>
@@ -1489,9 +1424,9 @@ function Investigacao({ table, filters, filterKey }: { table: string; filters: F
 // Aba 7 — Decisão (Decision Intelligence)
 // Widgets portados do cockpit de referência (ABRIR_FINOPS.html):
 // Executive Pulse, Risk Index, Waterfall executivo,
-// Financial Variance Bridge, Attention, Cost Drivers, Anomaly, Forecast Bias,
+// Ponte financeira: realizado, previsão e gap, Attention, Cost Drivers, Anomaly, Forecast Bias,
 // v42 (Run Rate/Reliability/Opportunity), Governance/Data Quality,
-// Comparator e Decomposição hierárquica encadeada.
+// Comparator e Decomposição hierárquica.
 // ═══════════════════════════════════════════════════════════════════
 
 // Dimensões disponíveis para os widgets de decisão (colunas válidas da Gold).
@@ -1533,7 +1468,7 @@ function monthlyByKey(rows: DimRow[], keyField: string, tipo: string): Map<strin
   const map = new Map<string, Map<string, number>>();
   for (const r of rows) {
     if (String(r.tipo ?? "") !== tipo) continue;
-    const k = String(r[keyField] ?? "Não informado");
+    const k = String(r[keyField] ?? "Sem classificação");
     const m = String(r._billing_period ?? "");
     if (!m) continue;
     if (!map.has(k)) map.set(k, new Map());
@@ -1574,34 +1509,6 @@ function SectionPanel({ title, subtitle, right, children }: {
       {children}
     </Paper>
   );
-}
-
-function ExecutiveHighlights({ items, loading, error }: { items: ForecastAck[]; loading: boolean; error?: string }) {
-  const severity = (value?: string): "error" | "warning" | "info" => {
-    const normalized = (value || "").toLocaleLowerCase("pt-BR");
-    return normalized.includes("crít") || normalized.includes("crit") ? "error" : normalized.includes("perigo") ? "warning" : "info";
-  };
-  const ordered = [...items].sort((a, b) => Number(a.ordem ?? 999) - Number(b.ordem ?? 999)
-    || severityRank(a.severity) - severityRank(b.severity)
-    || String(a.registered_at || a.created_at).localeCompare(String(b.registered_at || b.created_at)));
-  return <SectionPanel title="EXECUTIVE HIGHLIGHTS" subtitle="Anotações administrativas ativas no período e no caminho de organograma selecionado.">
-    {error ? <Alert severity="error">{dataDisplayText(error)}</Alert>
-      : loading ? <Typography color="text.secondary">Carregando registros do período…</Typography>
-      : ordered.length ? <Stack spacing={1}>{ordered.map(ack => <Alert key={ack.id} severity={severity(ack.severity)}>
-        <b>{ack.target_month} · {ack.department_name} · {ack.category}</b><br />
-        {ack.department_path.join(" > ")}<br />{ack.reason}
-        <Typography variant="caption" display="block">{ack.registered_at ? new Date(ack.registered_at).toLocaleDateString("pt-BR") : ""}</Typography>
-      </Alert>)}</Stack>
-        : <Typography color="text.secondary">Nenhum highlight ativo nos meses e caminhos selecionados.</Typography>}
-  </SectionPanel>;
-}
-
-function severityRank(value?: string) {
-  const severity = (value || "").toLocaleLowerCase("pt-BR");
-  if (severity.includes("crít") || severity.includes("crit")) return 0;
-  if (severity.includes("perigo")) return 1;
-  if (severity.includes("sucesso")) return 3;
-  return 2;
 }
 
 function Decisao({ table, filters, filterKey, setFilters }: {
@@ -1721,7 +1628,7 @@ function Decisao({ table, filters, filterKey, setFilters }: {
   const riskIndex = Math.round((100 - (globalAcc ?? 100)) * 0.4 + (100 - govScore) * 0.25 + top5Pct * 0.2 + (aiCost > 0 ? 15 : 5));
   const riskStatus = riskIndex > 60 ? "red" : riskIndex > 30 ? "yellow" : "green";
   const riskHex = riskStatus === "red" ? RED : riskStatus === "yellow" ? YELLOW : GREEN;
-  const riskLabel = riskStatus === "red" ? "AÇÃO IMEDIATA" : riskStatus === "yellow" ? "MONITORAR" : "CONTROLADO";
+  const riskLabel = riskStatus === "red" ? "AÇÃO URGENTE" : riskStatus === "yellow" ? "MONITORAR" : "CONTROLADO";
   const riskShort = riskStatus === "red" ? "ALTO" : riskStatus === "yellow" ? "MÉDIO" : "BAIXO";
 
   // ── prioritization matrix ──
@@ -1743,7 +1650,7 @@ function Decisao({ table, filters, filterKey, setFilters }: {
   const qColor = (cost: number, growth: number) =>
     cost >= matrix.mc && growth >= matrix.mg ? "#dc2626" :
     cost < matrix.mc && growth >= matrix.mg ? "#d97706" :
-    cost >= matrix.mc ? "#4338CA" : "#5A6378";
+    cost >= matrix.mc ? "#0F62FE" : "#526777";
 
   // ── waterfall executivo de variação ──
   const waterfall = useMemo(() => {
@@ -1765,7 +1672,7 @@ function Decisao({ table, filters, filterKey, setFilters }: {
       { key: prevMonth, value: prevReal, kind: "total" },
       ...top.map(x => ({ key: x.key, value: x.delta, kind: (x.delta >= 0 ? "inc" : "dec") as "inc" | "dec", contrib: totalDelta ? (x.delta / totalDelta) * 100 : 0 })),
     ];
-    if (Math.abs(other) > 1e-9) steps.push({ key: "Outros drivers", value: other, kind: other >= 0 ? "inc" : "dec" });
+    if (Math.abs(other) > 1e-9) steps.push({ key: "Demais motores", value: other, kind: other >= 0 ? "inc" : "dec" });
     steps.push({ key: latestMonth, value: latestReal, kind: "total" });
     return steps;
   }, [dimRowsAll, dim, latestMonth, prevMonth, latestReal, prevReal]);
@@ -1773,12 +1680,12 @@ function Decisao({ table, filters, filterKey, setFilters }: {
   // ── attention ──
   const attention = useMemo(() => {
     const items: Array<{ sev: "P1" | "P2" | "P3"; title: string; desc: string; impact: string }> = [];
-    if (globalAcc != null && globalAcc < 85) items.push({ sev: globalAcc < 70 ? "P1" : "P2", title: "Confiabilidade do Forecast", desc: `Confiabilidade global abaixo de 85% (${pct(globalAcc)}).`, impact: pct(globalAcc) });
+    if (globalAcc != null && globalAcc < 85) items.push({ sev: globalAcc < 70 ? "P1" : "P2", title: "Acerto da previsão", desc: `Confiabilidade global abaixo de 85% (${pct(globalAcc)}).`, impact: pct(globalAcc) });
     if (momPct != null && Math.abs(momPct) >= 15) items.push({ sev: Math.abs(momPct) >= 25 ? "P1" : "P2", title: "Mudança mensal material", desc: `Última competência (${monthLabel(latestMonth)}) variou ${pct(momPct)} contra a anterior.`, impact: compact(Math.abs(latestReal - prevReal)) });
     if (top5Pct > 70) items.push({ sev: "P2", title: "Concentração Financeira", desc: `Top 5 de ${dimLabel} concentram ${pct(top5Pct)} do custo.`, impact: "Top 5" });
     if (govScore < 90) items.push({ sev: govScore < 75 ? "P1" : "P2", title: "Governance Completeness", desc: "Classificação incompleta reduz rastreabilidade executiva.", impact: pct(govScore) });
     const totalDelta = latestReal - prevReal;
-    const growth = waterfall.find(s => s.kind === "inc" && s.contrib != null && s.contrib > 35 && s.key !== "Outros drivers");
+    const growth = waterfall.find(s => s.kind === "inc" && s.contrib != null && s.contrib > 35 && s.key !== "Demais motores");
     if (growth && totalDelta > 0) items.push({ sev: (growth.contrib || 0) > 55 ? "P1" : "P2", title: `Driver de crescimento: ${growth.key}`, desc: `${dimLabel} responde por ${pct(growth.contrib || 0)} do aumento mensal.`, impact: compact(growth.value) });
     return items.sort((a, b) => a.sev.localeCompare(b.sev)).slice(0, 10);
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -1909,21 +1816,21 @@ function Decisao({ table, filters, filterKey, setFilters }: {
 
   // ── ações do risk board ──
   const actions: Array<[string, string, string, string]> = [];
-  if (Math.abs(gapPct) > 10) actions.push(["Forecast x Realizado", compact(gap), `Desvio de ${pct(gapPct)}`, "Revisar premissas e Top Desvios."]);
-  if (top5Pct > 50) actions.push(["Concentração Top 5", pct(top5Pct), "Dependência financeira relevante", "Priorizar governança dos maiores itens."]);
-  if (aiCost > 0) actions.push(["IA Cost", compact(aiCost), "Consumo de IA identificado", "Validar ROI e tendência."]);
+  if (Math.abs(gapPct) > 10) actions.push(["Previsão x efetivado", compact(gap), `Desvio de ${pct(gapPct)}`, "Revisar premissas e maiores desvios."]);
+  if (top5Pct > 50) actions.push(["Peso das 5 maiores", pct(top5Pct), "Dependência de custo relevante", "Priorizar a governança dos itens de maior peso."]);
+  if (aiCost > 0) actions.push(["Custo de IA", compact(aiCost), "Consumo de IA mapeado", "Validar retorno e tendência."]);
 
   const bridgeSteps = [
-    { key: "Realizado", value: latestReal, kind: "total" as const },
-    { key: "Forecast (Δ)", value: latestFc - latestReal, kind: (latestFc - latestReal >= 0 ? "inc" : "dec") as "inc" | "dec" },
+    { key: "Efetivado", value: latestReal, kind: "total" as const },
+    { key: "Previsão (Δ)", value: latestFc - latestReal, kind: (latestFc - latestReal >= 0 ? "inc" : "dec") as "inc" | "dec" },
     { key: "Forecast", value: latestFc, kind: "total" as const },
   ];
 
   const riskCards = [
-    ["Forecast Accuracy", globalAcc != null ? pct(globalAcc) : "N/A", globalAcc == null ? "green" : globalAcc < 85 ? "red" : globalAcc < 95 ? "yellow" : "green"],
-    ["Governança", pct(govScore), govScore < 70 ? "red" : govScore < 90 ? "yellow" : "green"],
-    ["Concentração", pct(top5Pct), top5Pct > 70 ? "red" : top5Pct > 50 ? "yellow" : "green"],
-    ["IA Cost", aiCost > 0 ? compact(aiCost) : "—", aiCost > 0 ? "yellow" : "green"],
+    ["Acerto da previsão", globalAcc != null ? pct(globalAcc) : "N/A", globalAcc == null ? "green" : globalAcc < 85 ? "red" : globalAcc < 95 ? "yellow" : "green"],
+    ["Cobertura de governança", pct(govScore), govScore < 70 ? "red" : govScore < 90 ? "yellow" : "green"],
+    ["Concentração de custo", pct(top5Pct), top5Pct > 70 ? "red" : top5Pct > 50 ? "yellow" : "green"],
+    ["Custo de IA", aiCost > 0 ? compact(aiCost) : "—", aiCost > 0 ? "yellow" : "green"],
   ] as Array<[string, string, "red" | "yellow" | "green"]>;
   const riskColorOf = (c: "red" | "yellow" | "green") => (c === "red" ? RED : c === "yellow" ? YELLOW : GREEN);
 
@@ -1932,38 +1839,38 @@ function Decisao({ table, filters, filterKey, setFilters }: {
       <LoadingBlock loading={baseLoading} error={baseError}>
         <Stack direction="row" flexWrap="wrap" gap={1.2} alignItems="center" sx={{ mb: 2 }}>
           <FormControl size="small" sx={{ minWidth: 220 }}>
-            <InputLabel>Dimensão de análise</InputLabel>
-            <Select label="Dimensão de análise" value={dim} onChange={e => { setDim(e.target.value); setCompA(""); setCompB(""); }}>
+            <InputLabel>Eixo de análise</InputLabel>
+            <Select label="Eixo de análise" value={dim} onChange={e => { setDim(e.target.value); setCompA(""); setCompB(""); }}>
               {decisaoDims.map(d => <MenuItem key={d.field} value={d.field}>{d.label}</MenuItem>)}
             </Select>
           </FormControl>
           <Typography variant="caption" sx={{ color: MUT, fontWeight: 800 }}>
-            Escopo: {displayOrgPath(filters) === ORG.allNodes ? "Portfólio completo" : displayOrgPath(filters)}{Object.keys(filters.extra).length ? " · contexto da árvore" : ""} · {monthLabel(latestMonth) || "—"} vs {monthLabel(prevMonth) || "—"}
+            Escopo: {displayOrgPath(filters) === ORG.allNodes ? "Portfólio inteiro" : displayOrgPath(filters)}{Object.keys(filters.extra).length ? " · contexto da árvore" : ""} · {monthLabel(latestMonth) || "—"} vs {monthLabel(prevMonth) || "—"}
           </Typography>
         </Stack>
 
         {!latestMonth ? (
-          <Alert severity="info">Sem competências de Realizado no escopo filtrado. Ajuste os filtros globais (período/organograma) ou clique em “Limpar”.</Alert>
+          <Alert severity="info">Não há meses com efetivado neste recorte. Ajuste os filtros de período ou hierarquia, ou clique em “Limpar”.</Alert>
         ) : (
         <>
         {/* 01 · Executive Pulse */}
-        <SectionPanel title="Situação financeira agora" subtitle={`Executive Pulse · Realizado ${monthLabel(latestMonth) || "—"} · Forecast horizonte ${monthLabel(fcMonths[fcMonths.length - 1]) || "—"}`}>
+        <SectionPanel title="Posição financeira agora" subtitle={`Executive Pulse · Efetivado ${monthLabel(latestMonth) || "—"} · Forecast horizonte ${monthLabel(fcMonths[fcMonths.length - 1]) || "—"}`}>
           <Grid container spacing={1.5}>
-            <Grid item xs={6} sm={4} md={2}><KpiCard label="Realizado" value={compact(latestReal)} sub={`${monthLabel(latestMonth)} · ${momPct == null ? "sem base" : `${momPct >= 0 ? "+" : ""}${pct(momPct)} MoM`}`} color={PURPLE} full={moneyFull(latestReal)} /></Grid>
-            <Grid item xs={6} sm={4} md={2}><KpiCard label="Forecast" value={compact(latestFc)} sub={`${monthLabel(fcMonths[fcMonths.length - 1]) || "—"}`} color={ORANGE} full={moneyFull(latestFc)} /></Grid>
-            <Grid item xs={6} sm={4} md={2}><KpiCard label="Gap Forecast" value={`${gap >= 0 ? "+" : ""}${compact(gap)}`} sub={latestReal ? `${gapPct >= 0 ? "+" : ""}${pct(gapPct)} do Realizado` : "sem base"} color={gap >= 0 ? RED : GREEN} full={moneyFull(gap)} /></Grid>
-            <Grid item xs={6} sm={4} md={2}><KpiCard label="Tendência mensal" value={momPct == null ? "N/A" : `${momPct >= 0 ? "+" : ""}${pct(momPct)}`} sub="última vs anterior" color={BLUE} /></Grid>
-            <Grid item xs={6} sm={4} md={2}><KpiCard label="Concentração Top 5" value={pct(top5Pct)} sub={dimLabel} color="#8b5cf6" /></Grid>
-            <Grid item xs={6} sm={4} md={2}><KpiCard label="Forecast Accuracy" value={globalAcc != null ? pct(globalAcc) : "N/A"} sub="global (último mês com ambos)" color={globalAcc != null && globalAcc < 85 ? RED : GREEN} /></Grid>
+            <Grid item xs={6} sm={4} md={2}><KpiCard label="Efetivado" value={compact(latestReal)} sub={`${monthLabel(latestMonth)} · ${momPct == null ? "sem base" : `${momPct >= 0 ? "+" : ""}${pct(momPct)} MoM`}`} color={PURPLE} full={moneyFull(latestReal)} /></Grid>
+            <Grid item xs={6} sm={4} md={2}><KpiCard label="Previsão" value={compact(latestFc)} sub={`${monthLabel(fcMonths[fcMonths.length - 1]) || "—"}`} color={ORANGE} full={moneyFull(latestFc)} /></Grid>
+            <Grid item xs={6} sm={4} md={2}><KpiCard label="Desvio da previsão" value={`${gap >= 0 ? "+" : ""}${compact(gap)}`} sub={latestReal ? `${gapPct >= 0 ? "+" : ""}${pct(gapPct)} do efetivado` : "sem base"} color={gap >= 0 ? RED : GREEN} full={moneyFull(gap)} /></Grid>
+            <Grid item xs={6} sm={4} md={2}><KpiCard label="Tendência por mês" value={momPct == null ? "N/A" : `${momPct >= 0 ? "+" : ""}${pct(momPct)}`} sub="última vs anterior" color={BLUE} /></Grid>
+            <Grid item xs={6} sm={4} md={2}><KpiCard label="Peso das 5 maiores" value={pct(top5Pct)} sub={dimLabel} color="#6EA8FE" /></Grid>
+            <Grid item xs={6} sm={4} md={2}><KpiCard label="Acerto da previsão" value={globalAcc != null ? pct(globalAcc) : "N/A"} sub="global (último mês com ambos)" color={globalAcc != null && globalAcc < 85 ? RED : GREEN} /></Grid>
           </Grid>
         </SectionPanel>
 
         {/* 02 · FinOps Risk Index + Executive Action Center */}
-        <SectionPanel title="FinOps Risk Index & Executive Action Center" subtitle="Índice executivo: Confiabilidade 40% · Governança 25% · Concentração 20% · IA 15%">
+        <SectionPanel title="Índice de risco e próximos passos" subtitle="Ponderação: confiabilidade 40% · governança 25% · concentração 20% · IA 15%">
           <Grid container spacing={1.5}>
             <Grid item xs={12} md={4}>
-              <Box sx={{ borderRadius: 2, p: 2, color: "#fff", background: `radial-gradient(circle at 50% 40%, #9b22ff 0%, #5d00d2 40%, #160040 90%)`, textAlign: "center" }}>
-                <Typography variant="caption" sx={{ fontWeight: 900, opacity: 0.85 }}>FINOPS RISK INDEX</Typography>
+              <Box sx={{ borderRadius: 2, p: 2, color: "#fff", background: `radial-gradient(circle at 50% 40%, #6EA8FE 0%, #0B3FA8 40%, #162B3A 90%)`, textAlign: "center" }}>
+                <Typography variant="caption" sx={{ fontWeight: 900, opacity: 0.85 }}>Índice de risco FinOps</Typography>
                 <Typography variant="h3" sx={{ fontWeight: 950, mt: 0.5 }}>{riskIndex}<Typography component="span" variant="body2" sx={{ fontWeight: 900, opacity: 0.7 }}>/100</Typography></Typography>
                 <Box component="span" sx={{ display: "inline-block", mt: 1, px: 1.4, py: 0.4, borderRadius: 99, bgcolor: riskHex, fontWeight: 950, fontSize: 12 }}>{riskShort} · {riskLabel}</Box>
               </Box>
@@ -1982,20 +1889,20 @@ function Decisao({ table, filters, filterKey, setFilters }: {
               <Box sx={{ mt: 1 }}>
                 {actions.length ? actions.slice(0, 3).map((a, i) => (
                   <Box key={i} sx={{ display: "flex", gap: 1, alignItems: "flex-start", borderLeft: `4px solid ${i === 0 ? RED : YELLOW}`, bgcolor: "#FAFBFD", borderRadius: 1, p: 1, mb: 0.6 }}>
-                    <Box component="span" sx={{ bgcolor: i === 0 ? RED : YELLOW, color: "#fff", borderRadius: 99, px: 0.9, py: 0.15, fontSize: 10, fontWeight: 950, whiteSpace: "nowrap" }}>{i === 0 ? "AÇÃO IMEDIATA" : "MONITORAR"}</Box>
+                    <Box component="span" sx={{ bgcolor: i === 0 ? RED : YELLOW, color: "#fff", borderRadius: 99, px: 0.9, py: 0.15, fontSize: 10, fontWeight: 950, whiteSpace: "nowrap" }}>{i === 0 ? "AÇÃO URGENTE" : "MONITORAR"}</Box>
                     <Box>
                       <Typography variant="body2" sx={{ fontWeight: 950, color: INK }}>{a[0]} · {a[1]}</Typography>
-                      <Typography variant="caption" sx={{ color: MUT, fontWeight: 700 }}>{a[2]} — <b>Ação:</b> {a[3]}</Typography>
+                      <Typography variant="caption" sx={{ color: MUT, fontWeight: 700 }}>{a[2]} — <b>Ação sugerida:</b> {a[3]}</Typography>
                     </Box>
                   </Box>
-                )) : <Typography variant="body2" color="text.secondary" sx={{ fontWeight: 800 }}>Nenhum alerta crítico no escopo filtrado.</Typography>}
+                )) : <Typography variant="body2" color="text.secondary" sx={{ fontWeight: 800 }}>Nenhum alerta crítico no recorte.</Typography>}
               </Box>
             </Grid>
           </Grid>
         </SectionPanel>
 
         {/* 03 · O que merece atenção agora? */}
-        <SectionPanel title="O que merece atenção agora?" subtitle="Motor de atenção: sinais priorizados P1 (ação imediata) → P3 (monitorar)">
+        <SectionPanel title="Onde agir primeiro" subtitle="Sinais priorizados: P1 (agir já) a P3 (monitorar)">
           <Stack spacing={0.8}>
             {attention.length ? attention.map((a, i) => {
               const sevColor = a.sev === "P1" ? RED : a.sev === "P2" ? YELLOW : GREEN;
@@ -2009,15 +1916,15 @@ function Decisao({ table, filters, filterKey, setFilters }: {
                   <Typography variant="body2" sx={{ fontWeight: 950, color: sevColor, whiteSpace: "nowrap" }}>{a.impact}</Typography>
                 </Box>
               );
-            }) : <Typography variant="body2" color="text.secondary">Nenhum alerta material no escopo filtrado.</Typography>}
+            }) : <Typography variant="body2" color="text.secondary">Nenhum alerta material no recorte.</Typography>}
           </Stack>
         </SectionPanel>
 
-        {/* 05 · Waterfall executivo de variação */}
-        <SectionPanel title="Waterfall executivo de variação" subtitle={`${monthLabel(prevMonth)} → ${monthLabel(latestMonth)} por ${dimLabel} (top drivers por variação absoluta)`}>
+        {/* 05 · Ponte de variação do custo */}
+        <SectionPanel title="Ponte da variação do custo" subtitle={`${monthLabel(prevMonth)} → ${monthLabel(latestMonth)} por ${dimLabel} (top drivers por variação absoluta)`}>
           <Grid container spacing={1.5}>
             <Grid item xs={12} md={8}>
-              {waterfall.length < 2 ? <Typography variant="body2" color="text.secondary">Sem variação para o escopo.</Typography> : (
+              {waterfall.length < 2 ? <Typography variant="body2" color="text.secondary">Nenhuma variação no recorte.</Typography> : (
                 <Chart
                   data={[{
                     type: "waterfall",
@@ -2026,30 +1933,30 @@ function Decisao({ table, filters, filterKey, setFilters }: {
                     measure: waterfall.map(s => (s.kind === "total" ? "absolute" : "relative")),
                     increasing: { marker: { color: "#d92d20" } },
                     decreasing: { marker: { color: "#0b9f6e" } },
-                    totals: { marker: { color: "#344054" } },
-                    connector: { line: { color: "#CDD2DF", dash: "dot" } },
+                    totals: { marker: { color: "#162B3A" } },
+                    connector: { line: { color: "#C5D2DE", dash: "dot" } },
                     text: waterfall.map(s => compact(s.value)),
                     textposition: "outside",
-                    customdata: waterfall.map(s => s.contrib != null ? `Contribuição: ${pct(s.contrib)} do MoM` : ""),
+                    customdata: waterfall.map(s => s.contrib != null ? `Peso: ${pct(s.contrib)} do MoM` : ""),
                     hovertemplate: "%{x}<br>%{y}<br>%{customdata}<extra></extra>",
                   }]}
-                  layout={{ height: 360, margin: { l: 66, r: 20, t: 20, b: 110 }, xaxis: { tickangle: -30, automargin: true }, yaxis: { title: { text: "BRL" }, gridcolor: "#EEF0F7" }, showlegend: false }}
+                  layout={{ height: 360, margin: { l: 66, r: 20, t: 20, b: 110 }, xaxis: { tickangle: -30, automargin: true }, yaxis: { title: { text: "BRL" }, gridcolor: "#EEF3F8" }, showlegend: false }}
                   config={{ displayModeBar: false }} style={{ width: "100%" }} />
               )}
-              <Typography variant="caption" sx={{ color: MUT, fontWeight: 700 }}>“Outros drivers” reconcilia a diferença residual entre os top 7 e a variação total — não é uma categoria real da fonte.</Typography>
+              <Typography variant="caption" sx={{ color: MUT, fontWeight: 700 }}>“Outros” agrega a diferença entre os 7 maiores motores e a variação total. Não é uma categoria da fonte.</Typography>
             </Grid>
             <Grid item xs={12} md={4}>
               <Stack spacing={1}>
-                <KpiCard label="Mês anterior" value={compact(prevReal)} sub={monthLabel(prevMonth)} color={INK} full={moneyFull(prevReal)} />
-                <KpiCard label="Variação líquida" value={`${momPct == null ? "—" : `${momPct >= 0 ? "+" : ""}${compact(latestReal - prevReal)} (${momPct >= 0 ? "+" : ""}${pct(momPct)})`}`} sub="MoM" color={momPct != null && momPct >= 0 ? RED : GREEN} full={moneyFull(latestReal - prevReal)} />
-                <KpiCard label="Mês atual" value={compact(latestReal)} sub={monthLabel(latestMonth)} color={PURPLE} full={moneyFull(latestReal)} />
+                <KpiCard label="Competência anterior" value={compact(prevReal)} sub={monthLabel(prevMonth)} color={INK} full={moneyFull(prevReal)} />
+                <KpiCard label="Saldo da variação" value={`${momPct == null ? "—" : `${momPct >= 0 ? "+" : ""}${compact(latestReal - prevReal)} (${momPct >= 0 ? "+" : ""}${pct(momPct)})`}`} sub="MoM" color={momPct != null && momPct >= 0 ? RED : GREEN} full={moneyFull(latestReal - prevReal)} />
+                <KpiCard label="Competência atual" value={compact(latestReal)} sub={monthLabel(latestMonth)} color={PURPLE} full={moneyFull(latestReal)} />
               </Stack>
             </Grid>
           </Grid>
         </SectionPanel>
 
-        {/* 06 · Financial Variance Bridge */}
-        <SectionPanel title="Financial Variance Bridge" subtitle="Realizado → Forecast → Gap (ponte financeira do escopo filtrado)">
+        {/* 06 · Ponte financeira: realizado, previsão e gap */}
+        <SectionPanel title="Ponte financeira: efetivado, previsão e desvio" subtitle="Efetivado → previsão → desvio, neste recorte">
           <Grid container spacing={1.5}>
             <Grid item xs={12} md={8}>
               <Chart
@@ -2061,24 +1968,24 @@ function Decisao({ table, filters, filterKey, setFilters }: {
                   increasing: { marker: { color: ORANGE } },
                   decreasing: { marker: { color: RED } },
                   totals: { marker: { color: INK } },
-                  connector: { line: { color: "#CDD2DF", dash: "dot" } },
+                  connector: { line: { color: "#C5D2DE", dash: "dot" } },
                   text: bridgeSteps.map(s => compact(s.value)),
                   textposition: "outside",
                 }]}
-                layout={{ height: 300, margin: { l: 66, r: 20, t: 20, b: 40 }, yaxis: { title: { text: "BRL" }, gridcolor: "#EEF0F7" }, showlegend: false }}
+                layout={{ height: 300, margin: { l: 66, r: 20, t: 20, b: 40 }, yaxis: { title: { text: "BRL" }, gridcolor: "#EEF3F8" }, showlegend: false }}
                 config={{ displayModeBar: false }} style={{ width: "100%" }} />
             </Grid>
             <Grid item xs={12} md={4}>
               <Stack spacing={1}>
-                <KpiCard label="Gap Forecast" value={`${gap >= 0 ? "+" : ""}${compact(gap)}`} sub={`${gapPct >= 0 ? "+" : ""}${pct(gapPct)} do Realizado`} color={gap >= 0 ? RED : GREEN} full={moneyFull(gap)} />
-                <KpiCard label="Run Rate Executivo" value={compact(runRate.annualized)} sub={`média ${compact(runRate.avgReal)}/mês × 12 · ${runRate.meses} mês(es) realizado`} color={BLUE} full={moneyFull(runRate.annualized)} />
+                <KpiCard label="Desvio da previsão" value={`${gap >= 0 ? "+" : ""}${compact(gap)}`} sub={`${gapPct >= 0 ? "+" : ""}${pct(gapPct)} do efetivado`} color={gap >= 0 ? RED : GREEN} full={moneyFull(gap)} />
+                <KpiCard label="Ritmo de referência" value={compact(runRate.annualized)} sub={`média ${compact(runRate.avgReal)}/mês × 12 · ${runRate.meses} mês(es) efetivado`} color={BLUE} full={moneyFull(runRate.annualized)} />
               </Stack>
             </Grid>
           </Grid>
         </SectionPanel>
 
-        {/* 07 · Cost Drivers & Contribution to Growth */}
-        <SectionPanel title="Cost Drivers & Contribution to Growth" subtitle={`Top drivers por ${dimLabel} e por Cloud — custo, share, Δ e contribuição na variação mensal`}>
+        {/* 07 · Principais motores do custo */}
+        <SectionPanel title="Motores de maior custo" subtitle={`Maiores motores por ${dimLabel} e por nuvem — custo, participação, Δ e peso na variação mensal`}>
           <Grid container spacing={1.5}>
             {[
               { title: dimLabel, rows: driversDim },
@@ -2088,7 +1995,7 @@ function Decisao({ table, filters, filterKey, setFilters }: {
                 <TableContainer>
                   <Table size="small">
                     <TableHead><TableRow>
-                      {[card.title, "Custo", "Share", "Δ", "Contrib."].map(h => <TableCell key={h} sx={{ fontWeight: 900, fontSize: 11 }}>{h}</TableCell>)}
+                      {[card.title, "Custo", "Share", "Δ", "Contribuição"].map(h => <TableCell key={h} sx={{ fontWeight: 900, fontSize: 11 }}>{h}</TableCell>)}
                     </TableRow></TableHead>
                     <TableBody>
                       {card.rows.map((x, i) => (
@@ -2100,7 +2007,7 @@ function Decisao({ table, filters, filterKey, setFilters }: {
                           <TableCell sx={{ fontSize: 12, color: MUT }}>{pct(x.contrib)}</TableCell>
                         </TableRow>
                       ))}
-                      {!card.rows.length && <TableRow><TableCell colSpan={5} align="center" sx={{ color: "text.secondary", py: 2 }}>Sem dados.</TableCell></TableRow>}
+                      {!card.rows.length && <TableRow><TableCell colSpan={5} align="center" sx={{ color: "text.secondary", py: 2 }}>Nenhum dado.</TableCell></TableRow>}
                     </TableBody>
                   </Table>
                 </TableContainer>
@@ -2109,13 +2016,13 @@ function Decisao({ table, filters, filterKey, setFilters }: {
           </Grid>
         </SectionPanel>
 
-        {/* 08 · Anomaly & Cost Acceleration */}
-        <SectionPanel title="Anomaly & Cost Acceleration" subtitle={`Detecção simples por ${dimLabel}: |Z| ≥ 2 vs histórico anterior; aceleração = variação da velocidade nos últimos 3 meses`}>
+        {/* 08 · Anomalias e aceleração do custo */}
+        <SectionPanel title="Desvios e aceleração de custo" subtitle={`Detecção simples por ${dimLabel}: |Z| ≥ 2 vs histórico anterior; aceleração = variação da velocidade nos últimos 3 meses`}>
           <Grid container spacing={1.5}>
             <Grid item xs={12} md={6}>
-              <Typography variant="subtitle2" sx={{ fontWeight: 950, mb: 0.5 }}>Anomalias (|Z| ≥ 2)</Typography>
+              <Typography variant="subtitle2" sx={{ fontWeight: 950, mb: 0.5 }}>Desvios (|Z| ≥ 2)</Typography>
               <Table size="small">
-                <TableHead><TableRow><TableCell sx={{ fontWeight: 900, fontSize: 11 }}>{dimLabel}</TableCell><TableCell sx={{ fontWeight: 900, fontSize: 11 }}>Z</TableCell><TableCell sx={{ fontWeight: 900, fontSize: 11 }}>Custo atual</TableCell></TableRow></TableHead>
+                <TableHead><TableRow><TableCell sx={{ fontWeight: 900, fontSize: 11 }}>{dimLabel}</TableCell><TableCell sx={{ fontWeight: 900, fontSize: 11 }}>Z</TableCell><TableCell sx={{ fontWeight: 900, fontSize: 11 }}>Custo do mês</TableCell></TableRow></TableHead>
                 <TableBody>
                   {anomaly.anomalyList.map((x, i) => (
                     <TableRow key={i}>
@@ -2124,14 +2031,14 @@ function Decisao({ table, filters, filterKey, setFilters }: {
                       <TableCell sx={{ fontSize: 12, fontWeight: 900 }}>{money(x.current)}</TableCell>
                     </TableRow>
                   ))}
-                  {!anomaly.anomalyList.length && <TableRow><TableCell colSpan={3} align="center" sx={{ color: "text.secondary", py: 2 }}>Nenhuma anomalia material detectada.</TableCell></TableRow>}
+                  {!anomaly.anomalyList.length && <TableRow><TableCell colSpan={3} align="center" sx={{ color: "text.secondary", py: 2 }}>Nenhum desvio relevante.</TableCell></TableRow>}
                 </TableBody>
               </Table>
             </Grid>
             <Grid item xs={12} md={6}>
-              <Typography variant="subtitle2" sx={{ fontWeight: 950, mb: 0.5 }}>Cost Acceleration (top mudanças)</Typography>
+              <Typography variant="subtitle2" sx={{ fontWeight: 950, mb: 0.5 }}>Aceleração de custo (maiores mudanças)</Typography>
               <Table size="small">
-                <TableHead><TableRow><TableCell sx={{ fontWeight: 900, fontSize: 11 }}>{dimLabel}</TableCell><TableCell sx={{ fontWeight: 900, fontSize: 11 }}>Aceleração (BRL)</TableCell></TableRow></TableHead>
+                <TableHead><TableRow><TableCell sx={{ fontWeight: 900, fontSize: 11 }}>{dimLabel}</TableCell><TableCell sx={{ fontWeight: 900, fontSize: 11 }}>Aceleração em BRL</TableCell></TableRow></TableHead>
                 <TableBody>
                   {anomaly.accelList.map((x, i) => (
                     <TableRow key={i}>
@@ -2139,25 +2046,25 @@ function Decisao({ table, filters, filterKey, setFilters }: {
                       <TableCell sx={{ fontSize: 12, fontWeight: 900, color: x.acceleration >= 0 ? RED : GREEN }}>{x.acceleration >= 0 ? "+" : ""}{compact(x.acceleration)}</TableCell>
                     </TableRow>
                   ))}
-                  {!anomaly.accelList.length && <TableRow><TableCell colSpan={2} align="center" sx={{ color: "text.secondary", py: 2 }}>Sem séries suficientes.</TableCell></TableRow>}
+                  {!anomaly.accelList.length && <TableRow><TableCell colSpan={2} align="center" sx={{ color: "text.secondary", py: 2 }}>Séries insuficientes para análise.</TableCell></TableRow>}
                 </TableBody>
               </Table>
             </Grid>
           </Grid>
         </SectionPanel>
 
-        {/* 09 · Forecast Bias & Reliability */}
-        <SectionPanel title="Forecast Bias & Reliability" subtitle={`Ranking por ${dimLabel}: confiabilidade média (Forecast vs Realizado), bias e erro acumulado`}>
+        {/* 09 · Viés e confiabilidade da previsão */}
+        <SectionPanel title="Viés e acerto da previsão" subtitle={`Ranking por ${dimLabel}: acerto médio (previsão x efetivado), viés e erro acumulado`}>
           <Grid container spacing={1.5} sx={{ mb: 1.5 }}>
-            <Grid item xs={6} sm={3}><KpiCard label="Entidades avaliadas" value={String(biasRows.length)} sub="com pares Forecast/Realizado" color={BLUE} /></Grid>
-            <Grid item xs={6} sm={3}><KpiCard label="Pior accuracy" value={biasRows[0] ? pct(biasRows[0].accuracy) : "—"} sub={biasRows[0]?.key || "N/A"} color={biasRows[0] && biasRows[0].accuracy < 70 ? RED : GREEN} /></Grid>
-            <Grid item xs={6} sm={3}><KpiCard label="Bias (pior)" value={biasRows[0] ? `${biasRows[0].bias >= 0 ? "+" : ""}${pct(biasRows[0].bias)}` : "—"} sub="+ over / − under forecast" color={ORANGE} /></Grid>
-            <Grid item xs={6} sm={3}><KpiCard label="Erro absoluto (top)" value={biasRows[0] ? compact(biasRows[0].absErr) : "—"} sub={biasRows[0]?.key || "N/A"} color={PURPLE} /></Grid>
+            <Grid item xs={6} sm={3}><KpiCard label="Itens avaliados" value={String(biasRows.length)} sub="com pares previsão/efetivado" color={BLUE} /></Grid>
+            <Grid item xs={6} sm={3}><KpiCard label="Pior acerto" value={biasRows[0] ? pct(biasRows[0].accuracy) : "—"} sub={biasRows[0]?.key || "N/A"} color={biasRows[0] && biasRows[0].accuracy < 70 ? RED : GREEN} /></Grid>
+            <Grid item xs={6} sm={3}><KpiCard label="Viés (pior caso)" value={biasRows[0] ? `${biasRows[0].bias >= 0 ? "+" : ""}${pct(biasRows[0].bias)}` : "—"} sub="+ over / − under forecast" color={ORANGE} /></Grid>
+            <Grid item xs={6} sm={3}><KpiCard label="Erro absoluto (maior caso)" value={biasRows[0] ? compact(biasRows[0].absErr) : "—"} sub={biasRows[0]?.key || "N/A"} color={PURPLE} /></Grid>
           </Grid>
           <TableContainer>
             <Table size="small">
               <TableHead><TableRow>
-                {[dimLabel, "Accuracy", "Bias médio", "Over", "Under", "Erro R$"].map(h => <TableCell key={h} sx={{ fontWeight: 900, fontSize: 11 }}>{h}</TableCell>)}
+                {[dimLabel, "Acerto", "Viés médio", "Over", "Under", "Erro em R$"].map(h => <TableCell key={h} sx={{ fontWeight: 900, fontSize: 11 }}>{h}</TableCell>)}
               </TableRow></TableHead>
               <TableBody>
                 {biasRows.map((x, i) => (
@@ -2170,56 +2077,56 @@ function Decisao({ table, filters, filterKey, setFilters }: {
                     <TableCell sx={{ fontSize: 12, fontWeight: 900 }}>{compact(x.absErr)}</TableCell>
                   </TableRow>
                 ))}
-                {!biasRows.length && <TableRow><TableCell colSpan={6} align="center" sx={{ color: "text.secondary", py: 2 }}>Não há pares Forecast/Realizado suficientes por {dimLabel.toLowerCase()} no histórico.</TableCell></TableRow>}
+                {!biasRows.length && <TableRow><TableCell colSpan={6} align="center" sx={{ color: "text.secondary", py: 2 }}>Não há pares previsão/efetivado suficientes por {dimLabel.toLowerCase()} no histórico.</TableCell></TableRow>}
               </TableBody>
             </Table>
           </TableContainer>
         </SectionPanel>
 
         {/* 10 · v42: Forecast Reliability / Opportunity Gap / Run Rate */}
-        <SectionPanel title="Prioridade financeira preliminar" subtitle="Confiabilidade, gaps positivos de Forecast e ritmo anualizado — indicação para direcionar investigação, não economia garantida">
+        <SectionPanel title="Prioridade preliminar de análise" subtitle="Acerto, desvios positivos da previsão e ritmo anualizado — indicação para direcionar investigação, não economia garantida">
           <Grid container spacing={1.5}>
             <Grid item xs={12} md={6}>
               <Typography variant="subtitle2" sx={{ fontWeight: 950, mb: 0.5 }}>Maiores gaps por {dimLabel}</Typography>
               {oppDim.length ? oppDim.map((x, i) => (
                 <Box key={i} sx={{ mb: 0.6 }}>
                   <Stack direction="row" justifyContent="space-between"><Typography variant="caption" sx={{ fontWeight: 900 }}>{i + 1}. {x.key}</Typography><Typography variant="caption" sx={{ fontWeight: 950, color: ORANGE }}>Gap {compact(x.gap)}</Typography></Stack>
-                  <Box sx={{ height: 8, borderRadius: 99, bgcolor: "#EEF0F7", overflow: "hidden" }}><Box sx={{ height: "100%", width: `${Math.max(2, Math.min(100, (Math.abs(x.gap) / Math.max(1, Math.abs(oppDim[0].gap))) * 100))}%`, bgcolor: i < 3 ? ORANGE : PURPLE }} /></Box>
+                  <Box sx={{ height: 8, borderRadius: 99, bgcolor: "#EEF3F8", overflow: "hidden" }}><Box sx={{ height: "100%", width: `${Math.max(2, Math.min(100, (Math.abs(x.gap) / Math.max(1, Math.abs(oppDim[0].gap))) * 100))}%`, bgcolor: i < 3 ? ORANGE : PURPLE }} /></Box>
                 </Box>
-              )) : <Typography variant="body2" color="text.secondary">Nenhum gap positivo no escopo.</Typography>}
-              <Typography variant="subtitle2" sx={{ fontWeight: 950, mb: 0.5, mt: 2 }}>Maiores gaps por Serviço</Typography>
+              )) : <Typography variant="body2" color="text.secondary">Nenhum desvio positivo no recorte.</Typography>}
+              <Typography variant="subtitle2" sx={{ fontWeight: 950, mb: 0.5, mt: 2 }}>Maiores desvios por serviço</Typography>
               {oppServ.length ? oppServ.map((x, i) => (
                 <Stack key={i} direction="row" justifyContent="space-between"><Typography variant="caption" sx={{ fontWeight: 900 }}>{i + 1}. {x.key}</Typography><Typography variant="caption" sx={{ fontWeight: 950, color: BLUE }}>Gap {compact(x.gap)}</Typography></Stack>
-              )) : <Typography variant="body2" color="text.secondary">Nenhum gap positivo por serviço.</Typography>}
+              )) : <Typography variant="body2" color="text.secondary">Nenhum desvio positivo por serviço.</Typography>}
             </Grid>
             <Grid item xs={12} md={6}>
-              <Typography variant="subtitle2" sx={{ fontWeight: 950, mb: 0.5 }}>Confiabilidade do Forecast (piores)</Typography>
+              <Typography variant="subtitle2" sx={{ fontWeight: 950, mb: 0.5 }}>Acerto da previsão (piores)</Typography>
               {biasRows.slice(0, 5).map((x, i) => (
                 <Box key={i} sx={{ mb: 0.6 }}>
                   <Stack direction="row" justifyContent="space-between"><Typography variant="caption" sx={{ fontWeight: 900 }}>{i + 1}. {x.key}</Typography><Typography variant="caption" sx={{ fontWeight: 950, color: x.accuracy < 70 ? RED : x.accuracy < 90 ? YELLOW : GREEN }}>{pct(x.accuracy)} · erro {compact(x.absErr)}</Typography></Stack>
-                  <Box sx={{ height: 8, borderRadius: 99, bgcolor: "#EEF0F7", overflow: "hidden" }}><Box sx={{ height: "100%", width: `${Math.max(2, Math.min(100, 100 - x.accuracy))}%`, bgcolor: x.accuracy < 70 ? RED : x.accuracy < 90 ? YELLOW : GREEN }} /></Box>
+                  <Box sx={{ height: 8, borderRadius: 99, bgcolor: "#EEF3F8", overflow: "hidden" }}><Box sx={{ height: "100%", width: `${Math.max(2, Math.min(100, 100 - x.accuracy))}%`, bgcolor: x.accuracy < 70 ? RED : x.accuracy < 90 ? YELLOW : GREEN }} /></Box>
                 </Box>
               ))}
-              {!biasRows.length && <Typography variant="body2" color="text.secondary">Sem pares Forecast/Realizado.</Typography>}
+              {!biasRows.length && <Typography variant="body2" color="text.secondary">Sem pares de previsão e efetivado.</Typography>}
               <Box sx={{ mt: 1.5 }}>
-                <KpiCard label="Run Rate Executivo" value={compact(runRate.annualized)} sub={`média ${compact(runRate.avgReal)}/mês × 12`} color={BLUE} full={moneyFull(runRate.annualized)} />
+                <KpiCard label="Ritmo de referência" value={compact(runRate.annualized)} sub={`média ${compact(runRate.avgReal)}/mês × 12`} color={BLUE} full={moneyFull(runRate.annualized)} />
               </Box>
             </Grid>
           </Grid>
         </SectionPanel>
 
         {/* 11 · Governance / Data Quality */}
-        <SectionPanel title="Governance Completeness & Data Quality" subtitle="Completude ponderada pelo custo realizado — registros ausentes (nulos/vazios) reduzem o score proporcionalmente à materialidade">
+        <SectionPanel title="Completude da governança e qualidade dos dados" subtitle="Completude ponderada pelo custo efetivado — registros ausentes (nulos/vazios) reduzem o score proporcionalmente à materialidade">
           <Grid container spacing={1.5} sx={{ mb: 1.5 }}>
-            <Grid item xs={6} sm={3}><KpiCard label="Data Quality Score" value={pct(Math.max(0, govScore))} sub="média de completude ponderada pelo custo" color={govScore >= 90 ? GREEN : govScore >= 80 ? YELLOW : RED} /></Grid>
-            <Grid item xs={6} sm={3}><KpiCard label="Pior dimensão" value={gov.rowsPer[0]?.label || "—"} sub={gov.rowsPer[0] ? `${pct(gov.rowsPer[0].spendPct)} do custo sem classificação` : ""} color={gov.rowsPer[0] && gov.rowsPer[0].spendPct >= 20 ? RED : YELLOW} /></Grid>
-            <Grid item xs={6} sm={3}><KpiCard label="Custo exposto (pior)" value={compact(gov.rowsPer[0]?.missingSpend || 0)} sub="na pior dimensão de qualidade" color={ORANGE} full={moneyFull(gov.rowsPer[0]?.missingSpend || 0)} /></Grid>
-            <Grid item xs={6} sm={3}><KpiCard label="Critérios críticos" value={String(gov.rowsPer.filter(x => x.spendPct >= 20).length)} sub="dimensões com ≥20% do custo sem classificação" color={gov.rowsPer.filter(x => x.spendPct >= 20).length ? RED : GREEN} /></Grid>
+            <Grid item xs={6} sm={3}><KpiCard label="Índice de qualidade de dados" value={pct(Math.max(0, govScore))} sub="média de completude ponderada por custo" color={govScore >= 90 ? GREEN : govScore >= 80 ? YELLOW : RED} /></Grid>
+            <Grid item xs={6} sm={3}><KpiCard label="Pior eixo" value={gov.rowsPer[0]?.label || "—"} sub={gov.rowsPer[0] ? `${pct(gov.rowsPer[0].spendPct)} do custo sem classificação` : ""} color={gov.rowsPer[0] && gov.rowsPer[0].spendPct >= 20 ? RED : YELLOW} /></Grid>
+            <Grid item xs={6} sm={3}><KpiCard label="Custo exposto (pior caso)" value={compact(gov.rowsPer[0]?.missingSpend || 0)} sub="no pior eixo de qualidade" color={ORANGE} full={moneyFull(gov.rowsPer[0]?.missingSpend || 0)} /></Grid>
+            <Grid item xs={6} sm={3}><KpiCard label="Critérios em alerta" value={String(gov.rowsPer.filter(x => x.spendPct >= 20).length)} sub="eixos com ≥20% do custo sem classificação" color={gov.rowsPer.filter(x => x.spendPct >= 20).length ? RED : GREEN} /></Grid>
           </Grid>
           <TableContainer>
             <Table size="small">
               <TableHead><TableRow>
-                {["Dimensão", "Severidade", "% registros", "% custo", "Custo material", "Materialidade"].map(h => <TableCell key={h} sx={{ fontWeight: 900, fontSize: 11 }}>{h}</TableCell>)}
+                {["Eixo", "Severidade", "% de linhas", "% do custo", "Custo relevante", "Materialidade"].map(h => <TableCell key={h} sx={{ fontWeight: 900, fontSize: 11 }}>{h}</TableCell>)}
               </TableRow></TableHead>
               <TableBody>
                 {gov.rowsPer.map((x, i) => {
@@ -2232,7 +2139,7 @@ function Decisao({ table, filters, filterKey, setFilters }: {
                       <TableCell sx={{ fontSize: 12 }}>{pct(x.rowPct)}</TableCell>
                       <TableCell sx={{ fontSize: 12, fontWeight: 900 }}>{pct(x.spendPct)}</TableCell>
                       <TableCell sx={{ fontSize: 12, fontWeight: 900 }}>{money(x.missingSpend)}</TableCell>
-                      <TableCell sx={{ minWidth: 120 }}><Box sx={{ height: 8, borderRadius: 99, bgcolor: "#EEF0F7", overflow: "hidden" }}><Box sx={{ height: "100%", width: `${Math.min(100, x.spendPct)}%`, bgcolor: sevColor }} /></Box></TableCell>
+                      <TableCell sx={{ minWidth: 120 }}><Box sx={{ height: 8, borderRadius: 99, bgcolor: "#EEF3F8", overflow: "hidden" }}><Box sx={{ height: "100%", width: `${Math.min(100, x.spendPct)}%`, bgcolor: sevColor }} /></Box></TableCell>
                     </TableRow>
                   );
                 })}
@@ -2242,16 +2149,16 @@ function Decisao({ table, filters, filterKey, setFilters }: {
         </SectionPanel>
 
         {/* 12 · Comparator */}
-        <SectionPanel title="Compare duas entidades no mesmo contexto" subtitle={`Selecione duas entidades de ${dimLabel} e compare trajetória, participação e variação mensal`}
+        <SectionPanel title="Compare dois itens no mesmo recorte" subtitle={`Escolha duas entidades de ${dimLabel} e compare trajetória, participação e variação mensal`}
           right={
             <Stack direction="row" gap={1} flexWrap="wrap">
-              <FormControl size="small" sx={{ minWidth: 200 }}><InputLabel>Entidade A</InputLabel>
-                <Select label="Entidade A" value={aKey} onChange={e => setCompA(e.target.value)}>
+              <FormControl size="small" sx={{ minWidth: 200 }}><InputLabel>Item A</InputLabel>
+                <Select label="Item A" value={aKey} onChange={e => setCompA(e.target.value)}>
                   {entities.map(e => <MenuItem key={e.key} value={e.key}>{e.key}</MenuItem>)}
                 </Select>
               </FormControl>
-              <FormControl size="small" sx={{ minWidth: 200 }}><InputLabel>Entidade B</InputLabel>
-                <Select label="Entidade B" value={bKey} onChange={e => setCompB(e.target.value)}>
+              <FormControl size="small" sx={{ minWidth: 200 }}><InputLabel>Item B</InputLabel>
+                <Select label="Item B" value={bKey} onChange={e => setCompB(e.target.value)}>
                   {entities.map(e => <MenuItem key={e.key} value={e.key}>{e.key}</MenuItem>)}
                 </Select>
               </FormControl>
@@ -2260,27 +2167,27 @@ function Decisao({ table, filters, filterKey, setFilters }: {
           <Grid container spacing={1.5}>
             <Grid item xs={12} md={4}>
               <Stack spacing={1}>
-                <KpiCard label={aKey || "A"} value={entA ? compact(entA.latest) : "—"} sub={mA ? `${mA.mom == null ? "sem base" : `${mA.mom >= 0 ? "▲ " : "▼ "}${pct(Math.abs(mA.mom))} MoM`} · share ${pct(mA.share)}` : ""} color="#5b00cb" full={entA ? moneyFull(entA.latest) : ""} />
-                <KpiCard label={bKey || "B"} value={entB ? compact(entB.latest) : "—"} sub={mB ? `${mB.mom == null ? "sem base" : `${mB.mom >= 0 ? "▲ " : "▼ "}${pct(Math.abs(mB.mom))} MoM`} · share ${pct(mB.share)}` : ""} color="#155eef" full={entB ? moneyFull(entB.latest) : ""} />
-                <Typography variant="caption" sx={{ color: MUT, fontWeight: 700 }}>A comparação evidencia trajetória e participação — não afirma eficiência ou desperdício apenas pela diferença de custo.</Typography>
+                <KpiCard label={aKey || "A"} value={entA ? compact(entA.latest) : "—"} sub={mA ? `${mA.mom == null ? "sem base" : `${mA.mom >= 0 ? "▲ " : "▼ "}${pct(Math.abs(mA.mom))} MoM`} · share ${pct(mA.share)}` : ""} color="#0B3FA8" full={entA ? moneyFull(entA.latest) : ""} />
+                <KpiCard label={bKey || "B"} value={entB ? compact(entB.latest) : "—"} sub={mB ? `${mB.mom == null ? "sem base" : `${mB.mom >= 0 ? "▲ " : "▼ "}${pct(Math.abs(mB.mom))} MoM`} · share ${pct(mB.share)}` : ""} color="#0EA5C6" full={entB ? moneyFull(entB.latest) : ""} />
+                <Typography variant="caption" sx={{ color: MUT, fontWeight: 700 }}>A comparação mostra trajetória e participação — não afirma eficiência ou desperdício apenas pela diferença de custo.</Typography>
               </Stack>
             </Grid>
             <Grid item xs={12} md={8}>
               {entA && entB ? (
                 <Chart
                   data={[
-                    { x: entA.series.map(s => monthLabel(s[0])), y: entA.series.map(s => s[1]), type: "scatter", mode: "lines+markers", name: aKey, line: { color: "#5b00cb", width: 3 }, marker: { size: 4 } },
-                    { x: entB.series.map(s => monthLabel(s[0])), y: entB.series.map(s => s[1]), type: "scatter", mode: "lines+markers", name: bKey, line: { color: "#155eef", width: 3 }, marker: { size: 4 } },
+                    { x: entA.series.map(s => monthLabel(s[0])), y: entA.series.map(s => s[1]), type: "scatter", mode: "lines+markers", name: aKey, line: { color: "#0B3FA8", width: 3 }, marker: { size: 4 } },
+                    { x: entB.series.map(s => monthLabel(s[0])), y: entB.series.map(s => s[1]), type: "scatter", mode: "lines+markers", name: bKey, line: { color: "#0EA5C6", width: 3 }, marker: { size: 4 } },
                   ]}
-                  layout={{ height: 300, margin: { l: 60, r: 20, t: 12, b: 36 }, yaxis: { title: { text: "BRL" }, gridcolor: "#EEF0F7" }, legend: { orientation: "h", y: 1.05 } }}
+                  layout={{ height: 300, margin: { l: 60, r: 20, t: 12, b: 36 }, yaxis: { title: { text: "BRL" }, gridcolor: "#EEF3F8" }, legend: { orientation: "h", y: 1.05 } }}
                   config={{ displayModeBar: false }} style={{ width: "100%" }} />
-              ) : <Typography variant="body2" color="text.secondary">Sem entidades disponíveis no escopo.</Typography>}
+              ) : <Typography variant="body2" color="text.secondary">Nenhum item disponível no recorte.</Typography>}
             </Grid>
           </Grid>
         </SectionPanel>
 
-        {/* 13 · Decomposição hierárquica encadeada (v233 — árvore de fluxo interativa) */}
-        <SectionPanel title="Decomposição hierárquica encadeada" subtitle={`Navegue do custo total para ${decompChain.map(c => c.label).join(" → ")}. Cada seleção recalcula os filhos; a espessura das conexões é o share do custo no nó pai.`}>
+        {/* 13 · Decomposição hierárquica (v233 — árvore de fluxo interativa) */}
+        <SectionPanel title="Decomposição pela estrutura organizacional" subtitle={`Avance do custo total para ${decompChain.map(c => c.label).join(" → ")}. Cada seleção recalcula os filhos; a espessura das conexões é o share do custo no nó pai.`}>
           <HierarchicalDecompTree
             table={table}
             baseFilters={filtersOf(filters)}
@@ -2288,7 +2195,7 @@ function Decisao({ table, filters, filterKey, setFilters }: {
             queryKey={"decisao-tree-" + filterKey}
             measureColumn={measureFor(filters)}
             onApplyContext={applyTreeContext}
-            shareCaption="participação no contexto global"
+            shareCaption="participação no total"
           />
           <Typography variant="caption" sx={{ color: MUT, fontWeight: 700, display: "block", mt: 1 }}>“Outros” abre a lista dos demais filhos; cada item pode ser selecionado para continuar a decomposição. “Aplicar contexto” transforma a trilha em filtros globais do cockpit.</Typography>
         </SectionPanel>
@@ -2368,7 +2275,7 @@ function Drilldown({ table, filters, filterKey }: { table: string; filters: Filt
       <Grid item xs={12}>
         <Paper variant="outlined" sx={{ p: 1.5 }}>
           <Stack direction="row" alignItems="center" gap={0.6} flexWrap="wrap">
-            <Chip label="Portfólio" size="small" onClick={() => setPath([])} color={level === 0 ? "primary" : "default"} />
+            <Chip label="Visão total" size="small" onClick={() => setPath([])} color={level === 0 ? "primary" : "default"} />
             {path.map((p, i) => (
               <Box key={i} display="flex" alignItems="center" gap={0.6}>
                 <Typography sx={{ color: MUT, fontWeight: 950 }}>→</Typography>
@@ -2381,7 +2288,7 @@ function Drilldown({ table, filters, filterKey }: { table: string; filters: Filt
       </Grid>
       {!next ? (
         <Grid item xs={12}>
-          <Alert severity="info">Drilldown completo — fim da cadeia. Use os filtros globais ou a aba Tabela para auditar.</Alert>
+          <Alert severity="info">Fim da trilha. Use os filtros globais ou a aba Tabela para conferir.</Alert>
         </Grid>
       ) : (
         <>
@@ -2392,10 +2299,10 @@ function Drilldown({ table, filters, filterKey }: { table: string; filters: Filt
           </Grid>
           <Grid item xs={12} md={5}>
             <LoadingBlock loading={loading} error={error}>
-              <ChartCard title="Evolução do escopo selecionado">
+              <ChartCard title="Evolução do recorte escolhido">
                 <Chart
                   data={[{ x: months.map(r => monthLabel(r.month)), y: months.map(r => r.value), type: "bar", marker: { color: BLUE } }]}
-                  layout={{ height: 280, margin: { l: 56, r: 20, t: 8, b: 34 }, yaxis: { title: { text: "BRL" }, gridcolor: "#EEF0F7" } }}
+                  layout={{ height: 280, margin: { l: 56, r: 20, t: 8, b: 34 }, yaxis: { title: { text: "BRL" }, gridcolor: "#EEF3F8" } }}
                   config={{ displayModeBar: false }} style={{ width: "100%" }} />
                 <Stack direction="row" spacing={2} mt={1}>
                   <Typography variant="caption" fontWeight={900}>Total: {money(childTotal)}</Typography>
@@ -2410,7 +2317,7 @@ function Drilldown({ table, filters, filterKey }: { table: string; filters: Filt
               <TableContainer>
                 <Table size="small">
                   <TableHead><TableRow>
-                    {[drillChain[level].label, "Realizado", "Billed Cost", "Quantidade", "% do nível"].map(h => <TableCell key={h} sx={{ fontWeight: 900, fontSize: 11 }}>{h}</TableCell>)}
+                    {[drillChain[level].label, "Efetivado", "BilledCost", "Volume consumido", "% do nível pai"].map(h => <TableCell key={h} sx={{ fontWeight: 900, fontSize: 11 }}>{h}</TableCell>)}
                   </TableRow></TableHead>
                   <TableBody>
                     {children.slice(0, 30).map((r, i) => {
@@ -2425,7 +2332,7 @@ function Drilldown({ table, filters, filterKey }: { table: string; filters: Filt
                         </TableRow>
                       );
                     })}
-                    {!children.length && <TableRow><TableCell colSpan={5} align="center" sx={{ color: "text.secondary" }}>Sem dados para o escopo.</TableCell></TableRow>}
+                    {!children.length && <TableRow><TableCell colSpan={5} align="center" sx={{ color: "text.secondary" }}>Sem dados para o recorte selecionado.</TableCell></TableRow>}
                   </TableBody>
                 </Table>
               </TableContainer>

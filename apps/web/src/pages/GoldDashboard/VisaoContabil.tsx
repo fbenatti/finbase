@@ -4,7 +4,7 @@ import {
   Box, Paper, Typography, Stack, Alert, Button, Table, TableBody, TableCell,
   TableContainer, TableHead, TableRow, CircularProgress,
 } from "@mui/material";
-import { FileDownload } from "@mui/icons-material";
+import { FileDownloadOutlined } from "@mui/icons-material";
 import * as XLSX from "xlsx";
 import {
   queryDimonTable, runForecastHistoryPivot, getForecastAccuracyMonths,
@@ -12,7 +12,7 @@ import {
 } from "../../services/api";
 
 // ── Helpers (autocontidos) ──
-const PURPLE = "#660099", ORANGE = "#ff7a00", GREEN = "#10b981", RED = "#ef4444", INK = "#161B2E", MUT = "#5A6378";
+const PURPLE = "#0B3FA8", ORANGE = "#ff7a00", GREEN = "#10b981", RED = "#ef4444", INK = "#162B3A", MUT = "#526777";
 const COMPACT_BRL = new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL", notation: "compact", maximumFractionDigits: 1 });
 const FULL_BRL = new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL", maximumFractionDigits: 0 });
 
@@ -154,10 +154,10 @@ export default function VisaoContabil({ table, filters, filterKey, dollarEvoluti
         o.real += real; o.prov += prov;
       };
       for (const rec of pivotRes?.records ?? []) {
-        bump(String(rec.d0 ?? "Não informado"), String(rec.d1 ?? "Não informado"), 0, Number(rec.value || 0));
+        bump(String(rec.d0 ?? "Sem classificação"), String(rec.d1 ?? "Sem classificação"), 0, Number(rec.value || 0));
       }
       for (const r of goldRes?.rows ?? []) {
-        bump(String(r.cloud_origem ?? "Não informado"), String(r.centro_custo ?? "Não informado"), Number(r.realizado || 0), 0);
+        bump(String(r.cloud_origem ?? "Sem classificação"), String(r.centro_custo ?? "Sem classificação"), Number(r.realizado || 0), 0);
       }
       const clouds = [...map.entries()].map(([cloud, ccMap]) => ({
         cloud,
@@ -179,12 +179,12 @@ export default function VisaoContabil({ table, filters, filterKey, dollarEvoluti
     const wb = XLSX.utils.book_new();
     const sanitize = (name: string) => String(name || "Cloud").replace(/[\[\]:*?/\\]/g, "_").slice(0, 31);
     XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet([
-      ["Cloud", "Valor Realizado", "Provisão", "Δ (Prov − Real)", "Provisão % do Realizado"],
+      ["Cloud", "Valor efetivado", "Provisão contábil", "Δ (Provisão − efetivado)", "Provisão % do efetivado"],
       ...det.clouds.map(c => [c.cloud, c.totalReal, c.totalProv, c.totalProv - c.totalReal, c.totalReal ? ((c.totalProv - c.totalReal) / Math.abs(c.totalReal)) * 100 : 0]),
     ]), "Resumo");
     det.clouds.forEach(c => {
       XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet([
-        ["Centro de Custo", "Valor Realizado", "Provisão", "Δ (Prov − Real)", "Provisão % do Realizado"],
+        ["Centro de custo", "Valor efetivado", "Provisão contábil", "Δ (Provisão − efetivado)", "Provisão % do efetivado"],
         ...c.rows.map(x => [x.cc, x.real, x.prov, x.prov - x.real, x.real ? (x.prov / Math.abs(x.real)) * 100 : 0]),
         ["TOTAL", c.totalReal, c.totalProv, c.totalProv - c.totalReal, c.totalReal ? ((c.totalProv - c.totalReal) / Math.abs(c.totalReal)) * 100 : 0],
       ]), sanitize(c.cloud));
@@ -194,9 +194,9 @@ export default function VisaoContabil({ table, filters, filterKey, dollarEvoluti
 
   return (
     <Box>
-      {view === "evolucao-dolar" ? (dollarEvolution ?? <Alert severity="warning">Dashboard de evolução indisponível.</Alert>) : <>
-      <SectionPanel title="Pedido SAP — Realizado × Provisão"
-        subtitle="Selecione o par Realizado do mês X → Provisão do mês seguinte. Confira o detalhe por cloud e centro de custo e exporte o pedido SAP em Excel.">
+      {view === "evolucao-dolar" ? (dollarEvolution ?? <Alert severity="warning">Série histórica indisponível no momento.</Alert>) : <>
+      <SectionPanel title="Pedido SAP — efetivado × provisão"
+        subtitle="Escolha o par efetivado do mês X → Provisão do mês seguinte. Confira o detalhe por cloud e centro de custo e exporte o pedido SAP em Excel.">
         <LoadingBlock loading={monthsLoading}>
           {pares.length ? (
             <Stack spacing={0.6}>
@@ -212,11 +212,11 @@ export default function VisaoContabil({ table, filters, filterKey, dollarEvoluti
                       "&:hover": { borderColor: PURPLE, bgcolor: "#faf7ff" },
                     }}>
                     <Stack direction="row" justifyContent="space-between" flexWrap="wrap" gap={0.5} alignItems="center">
-                      <Typography variant="body2" sx={{ fontWeight: 950, color: active ? PURPLE : "#5b21b6", textDecoration: "underline", textDecorationColor: active ? PURPLE : "#b79be0", textUnderlineOffset: 2 }}>
-                        Realizado {monthLabel(p.mesReal)} → Provisão {monthLabel(p.mesProv)}
+                      <Typography variant="body2" sx={{ fontWeight: 950, color: active ? PURPLE : "#0B3FA8", textDecoration: "underline", textDecorationColor: active ? PURPLE : "#7DB4FF", textUnderlineOffset: 2 }}>
+                        Efetivado {monthLabel(p.mesReal)} → Provisão {monthLabel(p.mesProv)}
                       </Typography>
                       <Typography variant="caption" sx={{ color: MUT, fontWeight: 750 }}>
-                        Realizado {compact(p.realVal)} · Provisão {compact(p.provVal)}
+                        Efetivado {compact(p.realVal)} · Provisão {compact(p.provVal)}
                       </Typography>
                     </Stack>
                   </Box>
@@ -224,22 +224,22 @@ export default function VisaoContabil({ table, filters, filterKey, dollarEvoluti
               })}
             </Stack>
           ) : (
-            <Alert severity="info">Nenhum par (mês realizado → provisão do mês seguinte) disponível. Reprocesse o Forecast Accuracy (aba Reprocess → Forecast Accuracy) para gerar os snapshots simulados.</Alert>
+            <Alert severity="info">Nenhum par disponível (efetivado do mês e previsão do mês seguinte). Reprocesse a precisão das previsões (Operações → Precisão das previsões) para gerar os snapshots.</Alert>
           )}
         </LoadingBlock>
       </SectionPanel>
 
       {selectedPair && (
-        <SectionPanel title={`Detalhe ${monthLabel(selectedPair[0])} (Realizado) × ${monthLabel(selectedPair[1])} (Provisão)`}
-          subtitle="Uma dinâmica por cloud, agrupada por centro de custo — provisão do snapshot imutável do forecast"
+        <SectionPanel title={`Detalhe ${monthLabel(selectedPair[0])} (Efetivado) × ${monthLabel(selectedPair[1])} (Provisão)`}
+          subtitle="Uma visão por nuvem, agrupada por centro de custo — provisão do snapshot imutável do forecast"
           right={
             <Stack direction="row" spacing={2} alignItems="center" flexWrap="wrap">
-              <Typography variant="caption" sx={{ fontWeight: 900, color: PURPLE }}>Total Realizado: {compact(totalReal)}</Typography>
+              <Typography variant="caption" sx={{ fontWeight: 900, color: PURPLE }}>Total Efetivado: {compact(totalReal)}</Typography>
               <Typography variant="caption" sx={{ fontWeight: 900, color: ORANGE }}>Total Provisão: {compact(totalProv)}</Typography>
               <Typography variant="caption" sx={{ fontWeight: 900, color: totalProv >= totalReal ? RED : GREEN }}>
                 Δ {totalProv >= totalReal ? "+" : ""}{compact(totalProv - totalReal)} ({totalReal ? pct(((totalProv - totalReal) / Math.abs(totalReal)) * 100) : "—"})
               </Typography>
-              <Button size="small" variant="contained" startIcon={<FileDownload />} onClick={exportPedidoSap} disabled={!det.clouds.length}>
+              <Button size="small" variant="contained" startIcon={<FileDownloadOutlined />} onClick={exportPedidoSap} disabled={!det.clouds.length}>
                 Export pedido SAP
               </Button>
             </Stack>
@@ -252,7 +252,7 @@ export default function VisaoContabil({ table, filters, filterKey, dollarEvoluti
                     <Stack direction="row" justifyContent="space-between" flexWrap="wrap" gap={1} sx={{ mb: 1 }}>
                       <Typography variant="subtitle2" sx={{ fontWeight: 950, color: INK }}>{c.cloud}</Typography>
                       <Stack direction="row" spacing={2}>
-                        <Typography variant="caption" sx={{ fontWeight: 900, color: PURPLE }}>Realizado {compact(c.totalReal)}</Typography>
+                        <Typography variant="caption" sx={{ fontWeight: 900, color: PURPLE }}>Efetivado {compact(c.totalReal)}</Typography>
                         <Typography variant="caption" sx={{ fontWeight: 900, color: ORANGE }}>Provisão {compact(c.totalProv)}</Typography>
                         <Typography variant="caption" sx={{ fontWeight: 900, color: c.totalProv >= c.totalReal ? RED : GREEN }}>
                           Δ {c.totalProv >= c.totalReal ? "+" : ""}{compact(c.totalProv - c.totalReal)}
@@ -262,7 +262,7 @@ export default function VisaoContabil({ table, filters, filterKey, dollarEvoluti
                     <TableContainer>
                       <Table size="small">
                         <TableHead><TableRow>
-                          {["Centro de Custo", "Valor Realizado", "Provisão", "Δ (Prov − Real)", "Provisão % do Realizado"].map(h => <TableCell key={h} sx={{ fontWeight: 900, fontSize: 11 }}>{h}</TableCell>)}
+                          {["Centro de custo", "Valor efetivado", "Provisão contábil", "Δ (Provisão − efetivado)", "Provisão % do efetivado"].map(h => <TableCell key={h} sx={{ fontWeight: 900, fontSize: 11 }}>{h}</TableCell>)}
                         </TableRow></TableHead>
                         <TableBody>
                           {c.rows.map((x, i) => {
@@ -278,7 +278,7 @@ export default function VisaoContabil({ table, filters, filterKey, dollarEvoluti
                               </TableRow>
                             );
                           })}
-                          {!c.rows.length && <TableRow><TableCell colSpan={5} align="center" sx={{ color: "text.secondary", py: 2 }}>Sem centros de custo para esta cloud no par selecionado.</TableCell></TableRow>}
+                          {!c.rows.length && <TableRow><TableCell colSpan={5} align="center" sx={{ color: "text.secondary", py: 2 }}>Sem centros de custo para esta nuvem no par selecionado.</TableCell></TableRow>}
                         </TableBody>
                       </Table>
                     </TableContainer>
@@ -287,7 +287,7 @@ export default function VisaoContabil({ table, filters, filterKey, dollarEvoluti
               </Stack>
             ) : (
               <Alert severity="info">
-                {det.loading ? "Carregando detalhe…" : "Nenhum dado para o par selecionado. Se o snapshot do forecast ainda não tiver centro_custo, aguarde o reprocessamento do Forecast Accuracy full."}
+                {det.loading ? "Carregando o detalhamento…" : "Nenhum dado para o par selecionado. Se a versão salva da previsão ainda não tiver centro_custo, aguarde o reprocessamento do Forecast Accuracy full."}
               </Alert>
             )}
           </LoadingBlock>

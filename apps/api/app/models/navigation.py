@@ -20,6 +20,7 @@ class NavigationModule(Base):
     development_only = Column(Boolean, nullable=False, default=False)
     active = Column(Boolean, nullable=False, default=True)
     visible = Column(Boolean, nullable=False, default=True)
+    custom_label = Column(String(160))
 
 
 class NavigationCustomer(Base):

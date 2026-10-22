@@ -38,7 +38,7 @@ export default function SortableTable<T extends object>({
   size = "small",
   stickyHeader = false,
   maxHeight,
-  placeholder = "Filtrar...",
+  placeholder = "Filtrar registros…",
   searchValue,
   onSearchChange,
   defaultSortKey,
@@ -96,7 +96,7 @@ export default function SortableTable<T extends object>({
       <Stack direction={{ xs: "column", sm: "row" }} alignItems={{ sm: "center" }} justifyContent="space-between" gap={1} sx={{ p: 2, bgcolor: "background.default", borderBottom: 1, borderColor: "divider" }}>
       <TextField
         size="small"
-        label="Buscar registros"
+        label="Pesquisar nos registros"
         placeholder={placeholder}
         value={effectiveSearch}
         onChange={(e) => {

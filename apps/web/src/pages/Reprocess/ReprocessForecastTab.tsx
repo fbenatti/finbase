@@ -2,10 +2,10 @@ import { dataDisplayText } from "../../utils/dataPresentation";
 import { useCallback, useEffect, useState } from "react";
 import { useNotifications } from "../../context/NotificationContext";
 import {
-  Alert, Box, Button, Card, CardContent, CircularProgress, Stack, Typography,
+  Alert, Box, Button, CircularProgress, Paper, Stack, Typography,
 } from "@mui/material";
 import { useMenuSearchParams as useSearchParams } from "../../navigation/useMenuSearchParams";
-import { PlayArrow } from "@mui/icons-material";
+import { PlayArrowOutlined } from "@mui/icons-material";
 import {
   ForecastConfig, createForecastRun, getForecastConfigs,
 } from "../../services/api";
@@ -24,14 +24,13 @@ export default function ReprocessForecastTab() {
       const nextConfigs = await getForecastConfigs();
       setConfigs(nextConfigs);
     } catch (e: unknown) {
-      setError(e instanceof Error ? e.message : "Não foi possível carregar o forecast");
+      setError(e instanceof Error ? e.message : "Não foi possível carregar a previsão");
     }
   }, []);
 
   useEffect(() => {
     if (subtab === "forecast") void load();
   }, [subtab, load]);
-
 
   const run = async (configId: number) => {
     setRunningConfig(configId);
@@ -41,48 +40,55 @@ export default function ReprocessForecastTab() {
       await notifications.addTaskById(result.task_id, { kind: "forecast", title: "Forecast" });
       await load();
     } catch (e: unknown) {
-      setError(e instanceof Error ? e.message : "Falha ao enfileirar o forecast");
+      setError(e instanceof Error ? e.message : "Não foi possível enviar a previsão para a fila");
     } finally {
       setRunningConfig(null);
     }
   };
 
-
   return (
-    <Box>
+    <Stack spacing={2}>
       {subtab === "accuracy" ? <ReprocessAccuracyTab /> : <>
-      <Alert severity="info" sx={{ mb: 2 }}>
-        Reprocessa o forecast da base consolidada configurada. Na sequência, o worker também publica o rateio
-        de custo compartilhado e enfileira a materialização do <strong>base consolidada de visão completa</strong>
-        (realizado + forecast + rateio) automaticamente. Acompanhe o andamento no sino de notificações
-        (canto superior direito).
-      </Alert>
-      {error && <Alert severity="error" sx={{ mb: 2 }} onClose={() => setError("")}>{dataDisplayText(error)}</Alert>}
-      <Card sx={{ mb: 2 }}>
-        <CardContent>
-          <Typography variant="h6">Configurações</Typography>
-          {configs.length === 0 && (
-            <Typography color="text.secondary" sx={{ mt: 1 }}>Nenhuma configuração de forecast. Crie em Forecast.</Typography>
-          )}
+      <Box>
+        <Typography variant="h6">Execuções da previsão</Typography>
+        <Typography variant="body2" color="text.secondary">
+          Reprocessa o forecast da base consolidada. Depois, o worker publica o rateio de custo compartilhado
+          e enfileira a materialização da <strong>base consolidada de visão total</strong> (efetivado + forecast + rateio).
+          O andamento aparece nas notificações.
+        </Typography>
+      </Box>
+
+      {error && <Alert severity="error" onClose={() => setError("")}>{dataDisplayText(error)}</Alert>}
+
+      {configs.length === 0 ? (
+        <Typography color="text.secondary">Nenhuma configuração de previsão. Crie em Previsão.</Typography>
+      ) : (
+        <Stack spacing={1}>
           {configs.map(config => (
-            <Stack key={config.id} direction="row" gap={1} alignItems="center" mt={1} flexWrap="wrap">
-              <Typography sx={{ flex: 1 }}>
-                {config.name} · {config.measure_column} · {config.horizon_months} meses
-              </Typography>
-              <Button
-                size="small"
-                variant="contained"
-                startIcon={runningConfig === config.id ? <CircularProgress size={16} /> : <PlayArrow />}
-                disabled={runningConfig === config.id}
-                onClick={() => void run(config.id)}
-              >
-                Reprocessar forecast
-              </Button>
-            </Stack>
+            <Paper key={config.id} variant="outlined" sx={{ p: 1.5 }}>
+              <Stack direction={{ xs: "column", sm: "row" }} spacing={1.5} alignItems={{ sm: "center" }}>
+                <Box sx={{ flex: 1, minWidth: 0 }}>
+                  <Typography variant="body2" fontWeight={600} noWrap>{config.name}</Typography>
+                  <Typography variant="caption" color="text.secondary" noWrap>
+                    {config.measure_column} · {config.horizon_months} meses de horizonte
+                  </Typography>
+                </Box>
+                <Button
+                  size="small"
+                  variant="outlined"
+                  startIcon={runningConfig === config.id ? <CircularProgress size={16} /> : <PlayArrowOutlined />}
+                  disabled={runningConfig === config.id}
+                  onClick={() => void run(config.id)}
+                  sx={{ alignSelf: { sm: "center" } }}
+                >
+                  Reprocessar forecast
+                </Button>
+              </Stack>
+            </Paper>
           ))}
-        </CardContent>
-      </Card>
+        </Stack>
+      )}
       </>}
-    </Box>
+    </Stack>
   );
 }

@@ -7,7 +7,7 @@ from app.models.fact_cost import FactCost
 from app.models.source_connection import SourceConnection
 from app.services.fact_service import populate_fact_from_normalized, export_fact_to_parquet
 
-router = APIRouter(prefix="/fact", tags=["fact"])
+router = APIRouter(prefix="/dados/fato", tags=["fact"])
 
 
 def _parse_conn_ids(raw: str | None) -> list[int]:
@@ -19,7 +19,7 @@ def _parse_conn_ids(raw: str | None) -> list[int]:
         return []
 
 
-@router.post("/populate/{connection_id}")
+@router.post("/popular/{connection_id}")
 async def populate_fact(
     connection_id: int,
     billing_period: str | None = Query(None, description="Specific billing period (YYYYMM)"),
@@ -32,7 +32,7 @@ async def populate_fact(
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@router.get("/query")
+@router.get("/consulta")
 async def query_fact(
     connection_ids: str | None = Query(None, description="Comma-separated connection IDs, e.g. '1,2'"),
     billing_period: str | None = Query(None, description="Billing period (YYYYMM)"),
@@ -108,7 +108,7 @@ async def query_fact(
     return {"total": total, "limit": limit, "offset": offset, "rows": items}
 
 
-@router.get("/summary")
+@router.get("/resumo")
 async def summary_fact(
     connection_ids: str | None = Query(None, description="Comma-separated connection IDs"),
     billing_period: str | None = Query(None, description="Billing period (YYYYMM)"),
@@ -173,7 +173,7 @@ async def summary_fact(
     }
 
 
-@router.post("/export")
+@router.post("/exportar")
 async def export_fact(
     connection_id: int | None = Query(None),
     billing_period: str | None = Query(None),

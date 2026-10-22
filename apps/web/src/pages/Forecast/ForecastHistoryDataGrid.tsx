@@ -14,6 +14,7 @@ import {
 import { CompareArrows, FilterAlt, Stop, Visibility } from "../../components/FinbaseIcons";
 import { GridColDef, GridFilterModel, GridPaginationModel, GridSortModel, useGridApiRef } from "@mui/x-data-grid";
 import { ForecastRun } from "../../services/api";
+import { RowAction } from "../../components/RowAction";
 
 export type ForecastGridFilter = {
   field: string;
@@ -67,7 +68,7 @@ export default function ForecastHistoryDataGrid({
   onOpenResult,
 }: Props) {
   const apiRef = useGridApiRef();
-  const [paginationModel, setPaginationModel] = useState<GridPaginationModel>({ page: 0, pageSize: 25 });
+  const [paginationModel, setPaginationModel] = useState<GridPaginationModel>({ page: 0, pageSize: 50 });
   const [sortModel, setSortModel] = useState<GridSortModel>([]);
   const [filterModel, setFilterModel] = useState<GridFilterModel>({ items: [] });
   const [activeFilters, setActiveFilters] = useState<Record<string, ForecastGridFilter>>({});
@@ -78,7 +79,7 @@ export default function ForecastHistoryDataGrid({
     <Stack direction="row" alignItems="center" gap={0.5} sx={{ overflow: "hidden" }}>
       <Typography component="span" variant="inherit" noWrap>{label}</Typography>
       {activeFilters[field] && (
-        <Tooltip title="Esta coluna possui um filtro ativo">
+        <Tooltip title="Esta coluna tem filtro ativo">
           <FilterAlt fontSize="small" color="primary" />
         </Tooltip>
       )}
@@ -104,13 +105,13 @@ export default function ForecastHistoryDataGrid({
     },
     {
       field: "config_name",
-      headerName: "Configuração",
-      renderHeader: () => filteredHeader("Configuração", "config_name"),
+      headerName: "Perfil",
+      renderHeader: () => filteredHeader("Perfil", "config_name"),
       minWidth: 200,
       flex: 1,
       valueGetter: (_: unknown, row: ForecastRun) => row.config_name || "—",
       renderCell: ({ row }: { row: ForecastRun }) => (
-        <Tooltip title={row.config_name || "Configuração excluída"}>
+        <Tooltip title={row.config_name || "Perfil excluído"}>
           <Typography variant="body2" noWrap>{row.config_name || "—"}</Typography>
         </Tooltip>
       ),
@@ -118,19 +119,19 @@ export default function ForecastHistoryDataGrid({
     {
       field: "rows_written",
       headerName: "Linhas",
-      renderHeader: () => filteredHeader("Linhas", "rows_written"),
+      renderHeader: () => filteredHeader("Linhas gravadas", "rows_written"),
       minWidth: 110,
       valueFormatter: (value: unknown) => Number(value || 0).toLocaleString("pt-BR"),
     },
     {
       field: "phase",
-      headerName: "Fase / Mensagem",
-      renderHeader: () => filteredHeader("Fase / Mensagem", "phase"),
+      headerName: "Fase / mensagem",
+      renderHeader: () => filteredHeader("Fase / mensagem", "phase"),
       minWidth: 230,
       flex: 1.2,
       renderCell: ({ row }: { row: ForecastRun }) => (
-        <Tooltip title={row.phase || "Aguardando worker..."}>
-          <Typography noWrap variant="body2" color="text.secondary">{row.phase || "Aguardando worker..."}</Typography>
+        <Tooltip title={row.phase || "Aguardando processamento..."}>
+          <Typography noWrap variant="body2" color="text.secondary">{row.phase || "Aguardando processamento..."}</Typography>
         </Tooltip>
       ),
     },
@@ -146,7 +147,7 @@ export default function ForecastHistoryDataGrid({
     {
       field: "finished_at",
       headerName: "Fim",
-      renderHeader: () => filteredHeader("Fim", "finished_at"),
+      renderHeader: () => filteredHeader("Término", "finished_at"),
       minWidth: 165,
       type: "dateTime",
       valueGetter: (_, row: ForecastRun) => (row.finished_at ? new Date(row.finished_at) : null),
@@ -166,41 +167,19 @@ export default function ForecastHistoryDataGrid({
         const completed = status === "COMPLETED";
         return (
           <Stack direction="row" alignItems="center" justifyContent="center" sx={{ height: "100%" }}>
-            <Tooltip title="Cancelar execução">
+            <Tooltip title="Interromper execução">
               <span>
-                <IconButton
-                  size="small"
-                  color="error"
-                  disabled={!active || cancellingId === row.id}
-                  aria-label={"Cancelar execução " + row.id}
-                  onClick={(event) => { event.stopPropagation(); onCancel(row); }}
-                >
-                  <Stop fontSize="small" />
-                </IconButton>
+                <RowAction kind="cancel" label={"Interromper execução " + row.id} disabled={!active || cancellingId === row.id} onClick={(event) => { event.stopPropagation(); onCancel(row); }} />
               </span>
             </Tooltip>
-            <Tooltip title="Abrir resultado">
+            <Tooltip title="Ver resultado">
               <span>
-                <IconButton
-                  size="small"
-                  disabled={!completed}
-                  aria-label={"Abrir resultado da execução " + row.id}
-                  onClick={(event) => { event.stopPropagation(); onOpenResult(row, false); }}
-                >
-                  <Visibility fontSize="small" />
-                </IconButton>
+                <RowAction kind="view" label={"Ver resultado da execução " + row.id} disabled={!completed} onClick={(event) => { event.stopPropagation(); onOpenResult(row, false); }} />
               </span>
             </Tooltip>
-            <Tooltip title="Comparar com realizado">
+            <Tooltip title="Comparar com o realizado">
               <span>
-                <IconButton
-                  size="small"
-                  disabled={!completed}
-                  aria-label={"Comparar resultado da execução " + row.id}
-                  onClick={(event) => { event.stopPropagation(); onOpenResult(row, true); }}
-                >
-                  <CompareArrows fontSize="small" />
-                </IconButton>
+                <RowAction kind="compare" label={"Comparar com outra execução " + row.id} disabled={!completed} onClick={(event) => { event.stopPropagation(); onOpenResult(row, true); }} />
               </span>
             </Tooltip>
           </Stack>
@@ -334,7 +313,7 @@ export default function ForecastHistoryDataGrid({
 
   const exportDisplayed = () => {
     const escape = (value: unknown) => '"' + String(value ?? "").replace(/"/g, '""') + '"';
-    const header = ["ID", "Status", "Configuração", "Linhas", "Fase / Mensagem", "Início", "Fim"];
+    const header = ["ID", "Status", "Configuração", "Linhas", "Etapa / mensagem", "Início", "Fim"];
     const lines = [
       header.join(";"),
       ...rows.map((run) => [
@@ -373,7 +352,7 @@ export default function ForecastHistoryDataGrid({
           paginationMode="server"
           sortingMode="server"
           filterMode="server"
-          pageSizeOptions={[10, 25, 50]}
+          pageSizeOptions={[50, 100, 500, 1000]}
           paginationModel={paginationModel}
           sortModel={sortModel}
           filterModel={filterModel}
@@ -400,10 +379,10 @@ export default function ForecastHistoryDataGrid({
         anchorReference="anchorPosition"
         anchorPosition={context ? { top: context.mouseY, left: context.mouseX } : undefined}
       >
-        <MenuItem onClick={() => applyContextFilter("equals")}>Mostrar iguais</MenuItem>
-        <MenuItem onClick={() => applyContextFilter("notEquals")}>Mostrar diferentes</MenuItem>
-        <MenuItem disabled={!context || !activeFilters[context.field]} onClick={() => clearFilter(context?.field)}>Limpar filtro da coluna</MenuItem>
-        <MenuItem disabled={Object.keys(activeFilters).length === 0} onClick={() => clearFilter()}>Limpar todos os filtros</MenuItem>
+        <MenuItem onClick={() => applyContextFilter("equals")}>Filtrar iguais</MenuItem>
+        <MenuItem onClick={() => applyContextFilter("notEquals")}>Filtrar diferentes</MenuItem>
+        <MenuItem disabled={!context || !activeFilters[context.field]} onClick={() => clearFilter(context?.field)}>Remover filtro da coluna</MenuItem>
+        <MenuItem disabled={Object.keys(activeFilters).length === 0} onClick={() => clearFilter()}>Remover todos os filtros</MenuItem>
       </Menu>
 
       <Menu
@@ -416,11 +395,11 @@ export default function ForecastHistoryDataGrid({
           const field = headerContext?.field;
           setHeaderContext(null);
           if (field) apiRef.current.showColumnMenu(field);
-        }}>Opções da coluna</MenuItem>
-        <MenuItem onClick={() => { exportDisplayed(); setHeaderContext(null); }}>Exportar resultados exibidos</MenuItem>
+        }}>Configurar coluna</MenuItem>
+        <MenuItem onClick={() => { exportDisplayed(); setHeaderContext(null); }}>Baixar resultados exibidos</MenuItem>
         <Divider />
-        <MenuItem disabled={!headerContext || !activeFilters[headerContext.field]} onClick={() => clearFilter(headerContext?.field)}>Limpar filtro da coluna</MenuItem>
-        <MenuItem disabled={Object.keys(activeFilters).length === 0} onClick={() => clearFilter()}>Limpar todos os filtros</MenuItem>
+        <MenuItem disabled={!headerContext || !activeFilters[headerContext.field]} onClick={() => clearFilter(headerContext?.field)}>Remover filtro da coluna</MenuItem>
+        <MenuItem disabled={Object.keys(activeFilters).length === 0} onClick={() => clearFilter()}>Remover todos os filtros</MenuItem>
       </Menu>
     </>
   );

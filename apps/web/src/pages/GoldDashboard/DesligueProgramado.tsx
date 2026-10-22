@@ -4,7 +4,7 @@ import { dataDisplayText } from "../../utils/dataPresentation";
 import { useEffect, useMemo, useState } from "react";
 import { useMenuSearchParams as useSearchParams } from "../../navigation/useMenuSearchParams";
 import { Box, Typography, Paper, Grid, Alert, CircularProgress, LinearProgress, Button, Checkbox, ListItemText, Table, TableBody, TableCell, TableContainer, TableHead, TableRow, Chip, Tooltip, TextField, FormControl, InputLabel, Select, MenuItem, IconButton, Stack } from "@mui/material";
-import { Refresh, Add, Delete, Edit } from "@mui/icons-material";
+import { RefreshOutlined, AddOutlined, DeleteOutlined, EditOutlined } from "@mui/icons-material";
 import Plot from "@/components/Plot";
 // Wrapper: typings do react-plotly são rígidos para títulos/textos customizados.
 function Chart(props: any) {
@@ -17,8 +17,9 @@ import {
   SavingsFilter, VmMonthSaving, ShutdownExceptionRule, ScheduleDeltaResponse, TagDeltaResponse, OpportunityResponse, SavingsMonthlyRow, OpportunitySubscription,
   formatApiError,
 } from "../../services/api";
+import { colors } from "../../theme/tokens";
 
-const PURPLE = "#660099", GREEN = "#10b981", RED = "#ef4444", BLUE = "#155eef", ORANGE = "#ff7a00";
+const PURPLE = colors.brandDark, GREEN = "#10b981", RED = "#ef4444", BLUE = colors.info, ORANGE = "#ff7a00";
 const COMPACT_BRL = new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL", notation: "compact", maximumFractionDigits: 1 });
 const FULL_BRL = new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL", maximumFractionDigits: 0 });
 const COMPACT_NUM = new Intl.NumberFormat("pt-BR", { notation: "compact", maximumFractionDigits: 1 });
@@ -27,7 +28,7 @@ function money(v: unknown) { return COMPACT_BRL.format(Number(v ?? 0)); }
 function moneyFull(v: unknown) { return FULL_BRL.format(Number(v ?? 0)); }
 function num(v: unknown) { return COMPACT_NUM.format(Number(v ?? 0)); }
 function pct(v: unknown) { return `${Number(v ?? 0).toLocaleString("pt-BR", { maximumFractionDigits: 1 })}%`; }
-function esc(s: unknown) { return String(s ?? "Não informado"); }
+function esc(s: unknown) { return String(s ?? "Sem classificação"); }
 function duration(v: unknown) {
   const minutes = Math.max(0, Math.round(Number(v ?? 0) * 60));
   const hours = Math.floor(minutes / 60);
@@ -48,11 +49,11 @@ function monthLabel(m: string) {
 // histórico mensal de horas faturadas — BilledCost/h por hora on-demand).
 const PADRAO_EXPLICACAO: Record<string, string> = {
   DESLIGUE_PROGRAMADO:
-    "Horas faturadas consistentes entre 100–450h/mês (≈15h/dia em dias úteis) com desvio padrão < 80h, ≥5 dias materiais (≥4h/dia) nos últimos 14 dias do mês, uptime <75% na janela e no mês, histórico ≥3 meses e ciclo de vida estável. Confirma desligue recorrente via billing.",
+    "Horas faturadas estáveis entre 100–450h/mês (≈15h/dia em dias úteis) com desvio padrão < 80h, ≥5 dias materiais (≥4h/dia) nos últimos 14 dias do mês, uptime <75% na janela e no mês, histórico ≥3 meses e ciclo de vida estável. Confirma desligue recorrente via billing.",
   CICLO_CURTO:
-    "Menos de 5 dias materiais (≥4h faturadas) nos últimos 14 dias do mês — consumo efêmero ou VM que nasceu/morreu no período, sem padrão de desligue recorrente.",
+    "Menos de 5 dias relevantes (≥4h faturadas) nos últimos 14 dias do mês — consumo efêmero ou VM que nasceu/morreu no período, sem padrão de desligue recorrente.",
   AKS_GERENCIADO:
-    "Nó gerenciado de AKS (resource group MC_AKS*) — não é candidato a desligue isolado de VM.",
+    "Nó de AKS gerenciado (resource group MC_AKS*) — não é candidato a desligue isolado de VM.",
   LIGADA_24x7:
     "Uptime ≥75% na janela diária de 14 dias ou no mês (ou média mensal >700h) — VM praticamente sempre ligada, sem padrão de desligue.",
   VM_DESLIGADA:
@@ -60,10 +61,10 @@ const PADRAO_EXPLICACAO: Record<string, string> = {
   USO_IRREGULAR:
     "Desvio padrão de horas > 150h/mês — as horas variam muito de um mês para outro (uso esporádico/manual, sem padrão de schedule).",
   POUCO_HISTORICO:
-    "Menos de 3 meses de histórico disponível (60+ dias) ou ciclo de vida recente (nascimento/morte na janela) — ainda não é possível afirmar um padrão de desligue.",
+    "Menos de 3 meses de histórico (60+ dias) ou ciclo de vida recente (nascimento/morte na janela) — ainda não é possível afirmar um padrão de desligue.",
   ANALISAR:
-    "Não se encaixa nos padrões acima — horas entre os limiares ou comportamento misto. Requer revisão manual.",
-  SEM_PADRAO: "Sem classificação atribuída.",
+    "Não se enquadra nos padrões acima — horas entre os limiares ou comportamento misto. Requer revisão manual.",
+  SEM_PADRAO: "Sem classificação definida.",
 };
 
 export default function DesligueProgramado({ embedded }: { embedded?: boolean }) {
@@ -107,7 +108,7 @@ export default function DesligueProgramado({ embedded }: { embedded?: boolean })
         setData(res.rows); setPeriods(res.billing_periods);
         setSummary({ total_saving_brl: res.total_saving_brl, total_saved_hours: res.total_saved_hours, vm_count: res.vm_count, new_vm_count: res.new_vm_count, vm_with_shutdown: res.vm_with_shutdown });
       })
-      .catch((e) => setError(formatApiError(e, "Falha ao carregar saving")))
+      .catch((e) => setError(formatApiError(e, "Não foi possível carregar o saving")))
       .finally(() => setLoading(false));
   }, [filter, refreshTick]);
 
@@ -154,7 +155,7 @@ export default function DesligueProgramado({ embedded }: { embedded?: boolean })
   };
 
   const totals = useMemo(() => {
-    // SAVING ESTIMADO e HORAS usam o total ACUMULADO do gráfico mensal
+    // ECONOMIA ESTIMADA e HORAS usam o total ACUMULADO do gráfico mensal
     // (todos os meses da Gold) para bater com as barras.
     const monthlySaving = monthly.reduce((s, r) => s + r.saving_brl, 0);
     const monthlyHours = monthly.reduce((s, r) => s + r.saved_hours, 0);
@@ -192,7 +193,7 @@ export default function DesligueProgramado({ embedded }: { embedded?: boolean })
   };
 
   const removeException = async (id: number) => {
-    if (!(await confirm("Excluir regra de exceção?", { title: "Confirmar exclusão", confirmLabel: "Excluir", danger: true }))) return;
+    if (!(await confirm("Remover regra de exceção?", { title: "Excluir exceção?", confirmLabel: "Excluir", danger: true }))) return;
     await deleteShutdownException(id);
     loadExceptions();
   };
@@ -210,19 +211,19 @@ export default function DesligueProgramado({ embedded }: { embedded?: boolean })
 
   const registerDeltaException = async (r: { resource_id?: string | null; vm?: string | null; connection_code?: string | null; subscription_id?: string | null }) => {
     if (!r.resource_id) return;
-    if (!(await confirm("Registrar este recurso como exceção (saiu do schedule de desligue)?", { title: "Registrar exceção", confirmLabel: "Registrar exceção" }))) return;
+    if (!(await confirm("Registrar este recurso como exceção (saiu do schedule de desligue)?", { title: "Criar exceção", confirmLabel: "Criar exceção" }))) return;
     try {
       await createExceptionFromDelta({
         resource_id: r.resource_id,
         resource_name: r.vm || undefined,
         connection_code: r.connection_code || undefined,
         subscription_name: r.subscription_id || undefined,
-        reason: "Saiu do schedule de desligue programado",
+        reason: "Saiu da programação de desligamento",
       });
       loadExceptions();
       setRefreshTick(t => t + 1);
     } catch (e) {
-      setError(formatApiError(e, "Falha ao registrar exceção"));
+      setError(formatApiError(e, "Não foi possível registrar a exceção"));
     }
   };
 
@@ -230,7 +231,7 @@ export default function DesligueProgramado({ embedded }: { embedded?: boolean })
     setUsageDialog({ resource, data: null, loading: true, error: "" });
     getVmDailyUsage(resource, 30)
       .then((data) => setUsageDialog({ resource, data, loading: false, error: "" }))
-      .catch((e) => setUsageDialog({ resource, data: null, loading: false, error: formatApiError(e, "Falha ao carregar consumo") }));
+      .catch((e) => setUsageDialog({ resource, data: null, loading: false, error: formatApiError(e, "Não foi possível carregar o consumo") }));
   };
 
   // Mês realizado (fechado) = anterior ao atual. O dialog de consumo sempre
@@ -253,32 +254,32 @@ export default function DesligueProgramado({ embedded }: { embedded?: boolean })
           <Grid container spacing={1.5} mb={2}>
             <Grid item xs={6} md={2.4}>
               <Paper variant="outlined" sx={{ p: 2, height: "100%" }}>
-                <Typography variant="caption" sx={{ color: "#5A6378", fontWeight: 900 }}>SAVING ESTIMADO</Typography>
+                <Typography variant="caption" sx={{ color: colors.textSecondary, fontWeight: 900 }}>ECONOMIA ESTIMADA</Typography>
                 <Typography variant="h6" sx={{ fontWeight: 950, color: PURPLE }}>{money(totals.totalSaving)}</Typography>
                 <Typography variant="caption">{moneyFull(totals.totalSaving)}{monthly.length ? ` · acumulado ${monthLabel(monthly[0].billing_period)}–${monthLabel(monthly[monthly.length - 1].billing_period)}` : ""}</Typography>
               </Paper>
             </Grid>
             <Grid item xs={6} md={2.4}>
               <Paper variant="outlined" sx={{ p: 2, height: "100%" }}>
-                <Typography variant="caption" sx={{ color: "#5A6378", fontWeight: 900 }}>HORAS ECONOMIZADAS</Typography>
+                <Typography variant="caption" sx={{ color: colors.textSecondary, fontWeight: 900 }}>HORAS EVITADAS</Typography>
                 <Typography variant="h6" sx={{ fontWeight: 950, color: GREEN }}>{num(totals.totalSavedHours)} h</Typography>
               </Paper>
             </Grid>
             <Grid item xs={6} md={2.4}>
               <Paper variant="outlined" sx={{ p: 2, height: "100%" }}>
-                <Typography variant="caption" sx={{ color: "#5A6378", fontWeight: 900 }}>VMs ÚNICAS COM DESLIGUE</Typography>
+                <Typography variant="caption" sx={{ color: colors.textSecondary, fontWeight: 900 }}>VMs ÚNICAS COM DESLIGAMENTO</Typography>
                 <Typography variant="h6" sx={{ fontWeight: 950, color: BLUE }}>{totals.vmCount}</Typography>
               </Paper>
             </Grid>
             <Grid item xs={6} md={2.4}>
               <Paper variant="outlined" sx={{ p: 2, height: "100%" }}>
-                <Typography variant="caption" sx={{ color: "#5A6378", fontWeight: 900 }}>COM AUTOMAÇÃO</Typography>
+                <Typography variant="caption" sx={{ color: colors.textSecondary, fontWeight: 900 }}>COM AUTOMAÇÃO ATIVA</Typography>
                 <Typography variant="h6" sx={{ fontWeight: 950, color: ORANGE }}>{totals.automated}</Typography>
               </Paper>
             </Grid>
             <Grid item xs={6} md={2.4}>
               <Paper variant="outlined" sx={{ p: 2, height: "100%" }}>
-                <Typography variant="caption" sx={{ color: "#5A6378", fontWeight: 900 }}>CUSTO DAS EXCEÇÕES</Typography>
+                <Typography variant="caption" sx={{ color: colors.textSecondary, fontWeight: 900 }}>CUSTO EM EXCEÇÃO</Typography>
                 <Typography variant="h6" sx={{ fontWeight: 950, color: RED }}>{money(totals.totalExceptionCost)}</Typography>
                 <Typography variant="caption">{moneyFull(totals.totalExceptionCost)}</Typography>
               </Paper>
@@ -293,13 +294,13 @@ export default function DesligueProgramado({ embedded }: { embedded?: boolean })
                     Padrões identificados {padroes?.billing_period ? `· ${monthLabel(padroes.billing_period)}` : ""}
                   </Typography>
                   <FormControl size="small" sx={{ minWidth: 140 }}>
-                    <InputLabel>Período</InputLabel>
+                    <InputLabel>Competência</InputLabel>
                     <Select
                       value={padraoPeriod}
-                      label="Período"
+                      label="Competência"
                       onChange={(e) => setPadraoPeriod(e.target.value)}
                     >
-                      <MenuItem value="">Mais recente</MenuItem>
+                      <MenuItem value="">Último mês disponível</MenuItem>
                       {padroesPeriodos.map((p) => (
                         <MenuItem key={p} value={p}>{monthLabel(p)}</MenuItem>
                       ))}
@@ -307,12 +308,12 @@ export default function DesligueProgramado({ embedded }: { embedded?: boolean })
                   </FormControl>
                 </Stack>
                 <Alert severity="info" sx={{ mb: 1.5, py: 0.5 }} icon={false}>
-                  VMs efêmeras (<strong>CICLO_CURTO</strong>, <strong>AKS gerenciado</strong>) e{" "}
-                  <strong>ligadas 24×7</strong> não aparecem nesta lista. Os totais de saving consideram apenas{" "}
-                  <strong>desligue confirmado</strong> — escopo de subscriptions configurável na Origem base consolidada da regra de consolidação.
+                  VMs efêmeras (<strong>CICLO_CURTO</strong>, <strong>AKS (gerenciado)</strong>) e{" "}
+                  <strong>ligadas 24x7 (sem parada)</strong> não aparecem nesta lista. Os totais de saving consideram apenas{" "}
+                  <strong>desligamento confirmado</strong> — escopo de subscriptions configurável na Origem base consolidada da regra de consolidação.
                 </Alert>
                 {!padroes || padroes.rows.length === 0 ? (
-                  <Typography variant="caption" color="text.secondary">Sem padrões. Atualize os dados em Dados e operação → Materialização de cubos.</Typography>
+                  <Typography variant="caption" color="text.secondary">Sem padrões. Atualize os dados em Dados e operação → Materialização de modelos.</Typography>
                 ) : (
                   <>
                     <Box sx={{ display: "flex", flexWrap: "wrap", gap: 1 }}>
@@ -321,18 +322,18 @@ export default function DesligueProgramado({ embedded }: { embedded?: boolean })
                           <Box
                             onClick={() => selectPadrao(p.padrao)}
                             sx={{
-                              border: p.desligue_programado ? `1.5px solid ${GREEN}` : "1px solid #E2E5EE",
-                              borderRadius: 2, px: 1.5, py: 1, bgcolor: p.desligue_programado ? "#f0fdf4" : "#FAFBFD",
+                              border: p.desligue_programado ? `1.5px solid ${GREEN}` : "1px solid #E1E8F0",
+                              borderRadius: 2, px: 1.5, py: 1, bgcolor: p.desligue_programado ? "#f0fdf4" : colors.raised,
                               cursor: "pointer",
                               outline: padraoSelected === p.padrao ? `2px solid ${PURPLE}` : "none",
                               "&:hover": { boxShadow: 1 },
                             }}
                           >
-                            <Typography variant="caption" sx={{ fontWeight: 900, color: p.desligue_programado ? GREEN : "#5A6378" }}>
+                            <Typography variant="caption" sx={{ fontWeight: 900, color: p.desligue_programado ? GREEN : colors.textSecondary }}>
                               {p.padrao.replace(/_/g, " ")}
                             </Typography>
                             <Typography variant="body2" sx={{ fontWeight: 950 }}>{num(p.resources)} VMs</Typography>
-                            <Typography variant="caption" sx={{ color: "#5A6378" }}>{num(p.saved_hours)}h · {money(p.saving_brl)}</Typography>
+                            <Typography variant="caption" sx={{ color: colors.textSecondary }}>{num(p.saved_hours)}h · {money(p.saving_brl)}</Typography>
                           </Box>
                         </Tooltip>
                       ))}
@@ -344,7 +345,7 @@ export default function DesligueProgramado({ embedded }: { embedded?: boolean })
                         </Typography>
                         {padraoRecursosLoading ? (
                           <Box sx={{ display: "flex", alignItems: "center", gap: 1, mt: 0.5 }}>
-                            <CircularProgress size={16} /> <Typography variant="caption">Carregando…</Typography>
+                            <CircularProgress size={16} /> <Typography variant="caption">Buscando…</Typography>
                           </Box>
                         ) : padraoRecursos && padraoRecursos.rows.length > 0 ? (
                           <TableContainer>
@@ -353,7 +354,7 @@ export default function DesligueProgramado({ embedded }: { embedded?: boolean })
                                 <TableRow>
                                   <TableCell />
                                   <TableCell>Recurso</TableCell>
-                                  <TableCell align="right">Saving (R$)</TableCell>
+                                  <TableCell align="right">Saving (BRL)</TableCell>
                                 </TableRow>
                               </TableHead>
                               <TableBody>
@@ -361,7 +362,7 @@ export default function DesligueProgramado({ embedded }: { embedded?: boolean })
                                   <TableRow key={r.resource_name} hover sx={{ cursor: "pointer" }} onClick={() => openUsageDialog(r.resource_name)}>
                                     <TableCell>
                                       <IconButton size="small" onClick={(e) => { e.stopPropagation(); openUsageDialog(r.resource_name); }} aria-label={`Consumo de ${r.resource_name}`}>
-                                        <Add fontSize="small" />
+                                        <AddOutlined fontSize="small" />
                                       </IconButton>
                                     </TableCell>
                                     <TableCell>
@@ -374,7 +375,7 @@ export default function DesligueProgramado({ embedded }: { embedded?: boolean })
                             </Table>
                           </TableContainer>
                         ) : (
-                          <Typography variant="caption" color="text.secondary">Nenhum recurso neste padrão.</Typography>
+                          <Typography variant="caption" color="text.secondary">Nenhum recurso nesse padrão.</Typography>
                         )}
                       </Box>
                     )}
@@ -384,9 +385,9 @@ export default function DesligueProgramado({ embedded }: { embedded?: boolean })
             </Grid>
             <Grid item xs={12} md={6}>
               <Paper variant="outlined" sx={{ p: 2 }}>
-                <Typography variant="subtitle2" fontWeight={900} mb={1}>Saving gerado por mês (barras)</Typography>
+                <Typography variant="subtitle2" fontWeight={900} mb={1}>Saving apurado por mês (barras)</Typography>
                 {monthly.length === 0 ? (
-                  <Typography variant="caption" color="text.secondary">Sem dados.</Typography>
+                  <Typography variant="caption" color="text.secondary">Sem dados disponíveis.</Typography>
                 ) : (
                   <Chart
                     data={[{
@@ -403,9 +404,9 @@ export default function DesligueProgramado({ embedded }: { embedded?: boolean })
                       margin: { l: 60, r: 16, t: 8, b: 40 },
                       paper_bgcolor: "transparent",
                       plot_bgcolor: "transparent",
-                      font: { family: "Inter, system-ui, sans-serif", size: 12, color: "#334155" },
-                      xaxis: { title: "Mês", gridcolor: "#E2E5EE" },
-                      yaxis: { title: "Saving (BRL)", gridcolor: "#E2E5EE", tickformat: ".2s" },
+                      font: { family: "Inter, system-ui, sans-serif", size: 12, color: colors.text },
+                      xaxis: { title: "Mês", gridcolor: colors.border },
+                      yaxis: { title: "Saving (BRL)", gridcolor: colors.border, tickformat: ".2s" },
                     }}
                     config={{ displayModeBar: false }}
                     style={{ width: "100%" }}
@@ -415,13 +416,13 @@ export default function DesligueProgramado({ embedded }: { embedded?: boolean })
             </Grid>
             <Grid item xs={12} md={6}>
               <Paper variant="outlined" sx={{ p: 2 }}>
-                <Typography variant="subtitle2" fontWeight={900} mb={1}>Top VMs em saving</Typography>
+                <Typography variant="subtitle2" fontWeight={900} mb={1}>VMs com maior saving</Typography>
                 <TableContainer>
                   <Table size="small">
                     <TableHead>
                       <TableRow>
                         <TableCell sx={{ fontWeight: 900, fontSize: 11 }}>VM</TableCell>
-                        <TableCell sx={{ fontWeight: 900, fontSize: 11 }}>Saving</TableCell>
+                        <TableCell sx={{ fontWeight: 900, fontSize: 11 }}>Saving apurado</TableCell>
                       </TableRow>
                     </TableHead>
                     <TableBody>
@@ -431,7 +432,7 @@ export default function DesligueProgramado({ embedded }: { embedded?: boolean })
                           <TableCell sx={{ fontSize: 12, fontWeight: 900 }}>{money(r.saving_brl)}</TableCell>
                         </TableRow>
                       ))}
-                      {!topVMs.length && <TableRow><TableCell colSpan={2} align="center" sx={{ color: "text.secondary" }}>Sem dados.</TableCell></TableRow>}
+                      {!topVMs.length && <TableRow><TableCell colSpan={2} align="center" sx={{ color: "text.secondary" }}>Sem dados disponíveis.</TableCell></TableRow>}
                     </TableBody>
                   </Table>
                 </TableContainer>
@@ -443,7 +444,7 @@ export default function DesligueProgramado({ embedded }: { embedded?: boolean })
                   Saving por Departamento {savingDept?.billing_period ? `· ${monthLabel(savingDept.billing_period)}` : ""}
                 </Typography>
                 {!savingDept || savingDept.rows.length === 0 ? (
-                  <Typography variant="caption" color="text.secondary">Sem dados.</Typography>
+                  <Typography variant="caption" color="text.secondary">Sem dados disponíveis.</Typography>
                 ) : (
                   <Chart
                     data={[{
@@ -460,9 +461,9 @@ export default function DesligueProgramado({ embedded }: { embedded?: boolean })
                       margin: { l: 200, r: 20, t: 8, b: 40 },
                       paper_bgcolor: "transparent",
                       plot_bgcolor: "transparent",
-                      font: { family: "Inter, system-ui, sans-serif", size: 12, color: "#334155" },
-                      xaxis: { title: "Saving (BRL)", gridcolor: "#E2E5EE", tickformat: ".2s", zeroline: false },
-                      yaxis: { gridcolor: "#E2E5EE", automargin: true, zeroline: false },
+                      font: { family: "Inter, system-ui, sans-serif", size: 12, color: colors.text },
+                      xaxis: { title: "Saving (BRL)", gridcolor: colors.border, tickformat: ".2s", zeroline: false },
+                      yaxis: { gridcolor: colors.border, automargin: true, zeroline: false },
                       showlegend: false,
                     }}
                     config={{ displayModeBar: false }}
@@ -483,30 +484,30 @@ export default function DesligueProgramado({ embedded }: { embedded?: boolean })
               Governança do Desligue — schedules
               {delta?.latest_snapshot ? ` (${delta.latest_snapshot}${delta.previous_snapshot ? ` vs ${delta.previous_snapshot}` : " — inventário, aguardando 2ª coleta"})` : ""}
             </Typography>
-            <Button size="small" startIcon={<Refresh />} onClick={() => setRefreshTick(t => t + 1)}>Atualizar</Button>
+            <Button size="small" startIcon={<RefreshOutlined />} onClick={() => setRefreshTick(t => t + 1)}>Recarregar dados</Button>
           </Box>
           <Grid container spacing={1.5} mb={2}>
             <Grid item xs={6} md={3}>
               <Paper variant="outlined" sx={{ p: 1.5 }}>
-                <Typography variant="caption" sx={{ color: "#5A6378", fontWeight: 900 }}>REMOVIDAS DO SCHEDULE</Typography>
+                <Typography variant="caption" sx={{ color: colors.textSecondary, fontWeight: 900 }}>SAÍRAM DA PROGRAMAÇÃO</Typography>
                 <Typography variant="h6" sx={{ fontWeight: 950, color: RED }}>{delta?.total_removed ?? 0}</Typography>
               </Paper>
             </Grid>
             <Grid item xs={6} md={3}>
               <Paper variant="outlined" sx={{ p: 1.5 }}>
-                <Typography variant="caption" sx={{ color: "#5A6378", fontWeight: 900 }}>DESABILITADAS</Typography>
+                <Typography variant="caption" sx={{ color: colors.textSecondary, fontWeight: 900 }}>DESABILITADAS</Typography>
                 <Typography variant="h6" sx={{ fontWeight: 950, color: "#f59e0b" }}>{delta?.total_disabled ?? 0}</Typography>
               </Paper>
             </Grid>
             <Grid item xs={6} md={3}>
               <Paper variant="outlined" sx={{ p: 1.5 }}>
-                <Typography variant="caption" sx={{ color: "#5A6378", fontWeight: 900 }}>ADICIONADAS</Typography>
+                <Typography variant="caption" sx={{ color: colors.textSecondary, fontWeight: 900 }}>ENTRARAM NA PROGRAMAÇÃO</Typography>
                 <Typography variant="h6" sx={{ fontWeight: 950, color: GREEN }}>{delta?.total_added ?? 0}</Typography>
               </Paper>
             </Grid>
             <Grid item xs={6} md={3}>
               <Paper variant="outlined" sx={{ p: 1.5 }}>
-                <Typography variant="caption" sx={{ color: "#5A6378", fontWeight: 900 }}>CUSTO DESDE A SAÍDA</Typography>
+                <Typography variant="caption" sx={{ color: colors.textSecondary, fontWeight: 900 }}>CUSTO DESDE A PARADA</Typography>
                 <Typography variant="h6" sx={{ fontWeight: 950, color: RED }}>{money(delta?.total_cost_since_removal ?? 0)}</Typography>
               </Paper>
             </Grid>
@@ -520,9 +521,9 @@ export default function DesligueProgramado({ embedded }: { embedded?: boolean })
               <Table size="small" stickyHeader>
                 <TableHead>
                   <TableRow>
-                    <TableCell sx={{ fontWeight: 900, fontSize: 11 }}>Schedule / VM</TableCell>
-                    <TableCell sx={{ fontWeight: 900, fontSize: 11 }}>Situação</TableCell>
-                    <TableCell sx={{ fontWeight: 900, fontSize: 11 }}>Custo desde saída</TableCell>
+                    <TableCell sx={{ fontWeight: 900, fontSize: 11 }}>Programação / VM</TableCell>
+                    <TableCell sx={{ fontWeight: 900, fontSize: 11 }}>Estado</TableCell>
+                    <TableCell sx={{ fontWeight: 900, fontSize: 11 }}>Custo desde a saída</TableCell>
                     <TableCell sx={{ fontWeight: 900, fontSize: 11 }}>Exceção</TableCell>
                   </TableRow>
                 </TableHead>
@@ -540,16 +541,16 @@ export default function DesligueProgramado({ embedded }: { embedded?: boolean })
                       <TableCell sx={{ fontSize: 12, fontWeight: 900 }}>{r.cost_since_removal ? money(r.cost_since_removal) : "—"}</TableCell>
                       <TableCell sx={{ fontSize: 12 }}>
                         {r.is_exception ? (
-                          <Chip size="small" color="primary" label="Exceção registrada" />
+                          <Chip size="small" color="primary" label="Exceção gravada" />
                         ) : (r.change_type === "REMOVIDO" || r.change_type === "DESABILITADO" || (r.change_type === "ATUAL" && !r.enabled)) ? (
                           <Button
                             size="small"
                             variant="outlined"
                             color="error"
-                            startIcon={<Add />}
+                            startIcon={<AddOutlined />}
                             onClick={() => registerDeltaException(r)}
                           >
-                            Registrar exceção
+                            Criar exceção
                           </Button>
                         ) : (
                           "—"
@@ -558,7 +559,7 @@ export default function DesligueProgramado({ embedded }: { embedded?: boolean })
                     </TableRow>
                   ))}
                   {!delta.rows.some(r => r.change_type !== "INALTERADO") && (
-                    <TableRow><TableCell colSpan={4} align="center" sx={{ color: "text.secondary" }}>Nenhuma mudança entre os snapshots.</TableCell></TableRow>
+                    <TableRow><TableCell colSpan={4} align="center" sx={{ color: "text.secondary" }}>Nenhuma mudança entre os inventários.</TableCell></TableRow>
                   )}
                 </TableBody>
               </Table>
@@ -581,25 +582,25 @@ export default function DesligueProgramado({ embedded }: { embedded?: boolean })
           <Grid container spacing={1.5} mb={1.5}>
             <Grid item xs={3}>
               <Paper variant="outlined" sx={{ p: 1.5 }}>
-                <Typography variant="caption" sx={{ color: "#5A6378", fontWeight: 900 }}>RECURSOS NO SNAPSHOT</Typography>
+                <Typography variant="caption" sx={{ color: colors.textSecondary, fontWeight: 900 }}>RECURSOS NO INVENTÁRIO</Typography>
                 <Typography variant="h6" sx={{ fontWeight: 950, color: BLUE }}>{tagDelta?.total_resources ?? 0}</Typography>
               </Paper>
             </Grid>
             <Grid item xs={3}>
               <Paper variant="outlined" sx={{ p: 1.5 }}>
-                <Typography variant="caption" sx={{ color: "#5A6378", fontWeight: 900 }}>COM shutdown=auto</Typography>
+                <Typography variant="caption" sx={{ color: colors.textSecondary, fontWeight: 900 }}>COM shutdown=auto</Typography>
                 <Typography variant="h6" sx={{ fontWeight: 950, color: GREEN }}>{tagDelta?.total_with_tag ?? 0}</Typography>
               </Paper>
             </Grid>
             <Grid item xs={3}>
               <Paper variant="outlined" sx={{ p: 1.5 }}>
-                <Typography variant="caption" sx={{ color: "#5A6378", fontWeight: 900 }}>SAÍRAM DA AUTOMAÇÃO</Typography>
+                <Typography variant="caption" sx={{ color: colors.textSecondary, fontWeight: 900 }}>DEIXARAM A AUTOMAÇÃO</Typography>
                 <Typography variant="h6" sx={{ fontWeight: 950, color: RED }}>{tagDelta?.total_exited ?? 0}</Typography>
               </Paper>
             </Grid>
             <Grid item xs={3}>
               <Paper variant="outlined" sx={{ p: 1.5 }}>
-                <Typography variant="caption" sx={{ color: "#5A6378", fontWeight: 900 }}>CUSTO DESDE A SAÍDA</Typography>
+                <Typography variant="caption" sx={{ color: colors.textSecondary, fontWeight: 900 }}>CUSTO DESDE A PARADA</Typography>
                 <Typography variant="h6" sx={{ fontWeight: 950, color: RED }}>{money(tagDelta?.total_cost_since_removal ?? 0)}</Typography>
               </Paper>
             </Grid>
@@ -607,7 +608,7 @@ export default function DesligueProgramado({ embedded }: { embedded?: boolean })
           {!tagDelta || !tagDelta.rows.length ? (
             <Typography color="text.secondary" variant="body2">
               {tagDelta?.previous_snapshot
-                ? "Nenhuma mudança de tag entre os snapshots."
+                ? "Nenhuma mudança de tag entre os inventários."
                 : "Ainda só existe 1 inventário — a comparação diária aparecerá após a 2ª coleta e consolidação dos dados. O estado atual mostra os recursos monitorados."}
             </Typography>
           ) : (
@@ -617,7 +618,7 @@ export default function DesligueProgramado({ embedded }: { embedded?: boolean })
                   <TableRow>
                     <TableCell sx={{ fontWeight: 900, fontSize: 11 }}>Recurso</TableCell>
                     <TableCell sx={{ fontWeight: 900, fontSize: 11 }}>Mudança</TableCell>
-                    <TableCell sx={{ fontWeight: 900, fontSize: 11 }}>Custo desde saída</TableCell>
+                    <TableCell sx={{ fontWeight: 900, fontSize: 11 }}>Custo desde a saída</TableCell>
                   </TableRow>
                 </TableHead>
                 <TableBody>
@@ -638,16 +639,16 @@ export default function DesligueProgramado({ embedded }: { embedded?: boolean })
 
         <Paper variant="outlined" sx={{ p: 2, mt: 2 }}>
           <Box sx={{ display: "flex", justifyContent: "space-between", alignItems: "center", mb: 1 }}>
-            <Typography variant="subtitle2" fontWeight={900}>Oportunidade de Saving — VMs/VMSS desligáveis</Typography>
-            <Button size="small" variant="contained" startIcon={<Refresh />} onClick={loadOpportunity}>Buscar</Button>
+            <Typography variant="subtitle2" fontWeight={900}>Oportunidade de saving — VMs/VMSS desligáveis</Typography>
+            <Button size="small" variant="contained" startIcon={<RefreshOutlined />} onClick={loadOpportunity}>Buscar</Button>
           </Box>
           <Box sx={{ display: "flex", gap: 2, flexWrap: "wrap", mb: 1.5, alignItems: "center" }}>
             <FormControl size="small" sx={{ minWidth: 380, maxWidth: 560 }}>
-              <InputLabel>Subscriptions (pré-marcadas hml/dev/hmp)</InputLabel>
+              <InputLabel>Assinaturas (pré-marcadas hml/dev/hmp)</InputLabel>
               <Select
                 multiple
                 value={oppSelectedSubs}
-                label="Subscriptions (pré-marcadas hml/dev/hmp)"
+                label="Assinaturas (pré-marcadas hml/dev/hmp)"
                 onChange={(e) => setOppSelectedSubs(e.target.value as string[])}
                 renderValue={(sel) => `${(sel as string[]).length} subscription(s) selecionada(s)`}
                 MenuProps={{ PaperProps: { style: { maxHeight: 320 } } }}
@@ -658,15 +659,15 @@ export default function DesligueProgramado({ embedded }: { embedded?: boolean })
                     <ListItemText primary={s.name} secondary={`${s.resources} recursos`} />
                   </MenuItem>
                 ))}
-                {!oppSubs.length && <MenuItem disabled><em>Carregando subscriptions…</em></MenuItem>}
+                {!oppSubs.length && <MenuItem disabled><em>Carregando assinaturas…</em></MenuItem>}
               </Select>
             </FormControl>
             <FormControl size="small" sx={{ minWidth: 220 }}>
-              <InputLabel>Tipo de recurso</InputLabel>
+              <InputLabel>Tipo do recurso</InputLabel>
               <Select
                 multiple
                 value={oppTypes}
-                label="Tipo de recurso"
+                label="Tipo do recurso"
                 onChange={(e) => setOppTypes(e.target.value as string[])}
                 renderValue={(sel) => (sel as string[]).join(", ") || "Todos"}
               >
@@ -678,20 +679,20 @@ export default function DesligueProgramado({ embedded }: { embedded?: boolean })
           <Grid container spacing={1.5} mb={1.5}>
             <Grid item xs={4}>
               <Paper variant="outlined" sx={{ p: 1.5 }}>
-                <Typography variant="caption" sx={{ color: "#5A6378", fontWeight: 900 }}>OPORTUNIDADE TOTAL</Typography>
+                <Typography variant="caption" sx={{ color: colors.textSecondary, fontWeight: 900 }}>OPORTUNIDADE NO TOTAL</Typography>
                 <Typography variant="h6" sx={{ fontWeight: 950, color: PURPLE }}>{money(opp?.total_opportunity_brl ?? 0)}</Typography>
                 <Typography variant="caption">{opp?.billing_period || ""}</Typography>
               </Paper>
             </Grid>
             <Grid item xs={4}>
               <Paper variant="outlined" sx={{ p: 1.5 }}>
-                <Typography variant="caption" sx={{ color: "#5A6378", fontWeight: 900 }}>VMs</Typography>
+                <Typography variant="caption" sx={{ color: colors.textSecondary, fontWeight: 900 }}>VMs</Typography>
                 <Typography variant="h6" sx={{ fontWeight: 950, color: BLUE }}>{opp?.vm_count ?? 0}</Typography>
               </Paper>
             </Grid>
             <Grid item xs={4}>
               <Paper variant="outlined" sx={{ p: 1.5 }}>
-                <Typography variant="caption" sx={{ color: "#5A6378", fontWeight: 900 }}>VMSS</Typography>
+                <Typography variant="caption" sx={{ color: colors.textSecondary, fontWeight: 900 }}>VMSS</Typography>
                 <Typography variant="h6" sx={{ fontWeight: 950, color: ORANGE }}>{opp?.vmss_count ?? 0}</Typography>
               </Paper>
             </Grid>
@@ -730,17 +731,17 @@ export default function DesligueProgramado({ embedded }: { embedded?: boolean })
       {tab === 2 && (
         <Paper variant="outlined" sx={{ p: 2 }}>
           <Box sx={{ display: "flex", justifyContent: "space-between", alignItems: "center", mb: 2 }}>
-            <Typography variant="subtitle2" fontWeight={900}>Regras de exceção</Typography>
-            <Button size="small" variant="contained" startIcon={<Add />} onClick={openNewException}>Nova exceção</Button>
+            <Typography variant="subtitle2" fontWeight={900}>Exceções cadastradas</Typography>
+            <Button size="small" variant="contained" startIcon={<AddOutlined />} onClick={openNewException}>Criar exceção</Button>
           </Box>
           <TableContainer>
             <Table size="small">
               <TableHead>
                 <TableRow>
-                  <TableCell sx={{ fontWeight: 900, fontSize: 11 }}>Nome</TableCell>
-                  <TableCell sx={{ fontWeight: 900, fontSize: 11 }}>Escopo</TableCell>
-                  <TableCell sx={{ fontWeight: 900, fontSize: 11 }}>Vigência</TableCell>
-                  <TableCell sx={{ fontWeight: 900, fontSize: 11 }}>Ativa</TableCell>
+                  <TableCell sx={{ fontWeight: 900, fontSize: 11 }}>Nome da regra</TableCell>
+                  <TableCell sx={{ fontWeight: 900, fontSize: 11 }}>Abrangência</TableCell>
+                  <TableCell sx={{ fontWeight: 900, fontSize: 11 }}>Período de vigência</TableCell>
+                  <TableCell sx={{ fontWeight: 900, fontSize: 11 }}>Em uso</TableCell>
                   <TableCell sx={{ fontWeight: 900, fontSize: 11 }}></TableCell>
                 </TableRow>
               </TableHead>
@@ -752,12 +753,12 @@ export default function DesligueProgramado({ embedded }: { embedded?: boolean })
                     <TableCell sx={{ fontSize: 12 }}>{esc(ex.valid_from)} → {esc(ex.valid_until)}</TableCell>
                     <TableCell sx={{ fontSize: 12 }}>{ex.is_active ? "Sim" : "Não"}</TableCell>
                     <TableCell sx={{ fontSize: 12 }}>
-                      <IconButton size="small" onClick={() => { setEditingEx(ex); setExDialogOpen(true); }}><Edit fontSize="small" /></IconButton>
-                      <IconButton size="small" color="error" onClick={() => ex.id && removeException(ex.id)}><Delete fontSize="small" /></IconButton>
+                      <IconButton size="small" onClick={() => { setEditingEx(ex); setExDialogOpen(true); }}><EditOutlined fontSize="small" /></IconButton>
+                      <IconButton size="small" color="error" onClick={() => ex.id && removeException(ex.id)}><DeleteOutlined fontSize="small" /></IconButton>
                     </TableCell>
                   </TableRow>
                 ))}
-                {!exceptions.length && <TableRow><TableCell colSpan={5} align="center" sx={{ color: "text.secondary" }}>Nenhuma exceção cadastrada.</TableCell></TableRow>}
+                {!exceptions.length && <TableRow><TableCell colSpan={5} align="center" sx={{ color: "text.secondary" }}>Nenhuma exceção registrada.</TableCell></TableRow>}
               </TableBody>
             </Table>
           </TableContainer>
@@ -774,7 +775,7 @@ export default function DesligueProgramado({ embedded }: { embedded?: boolean })
                 <Box>
                   <Typography variant="h6">Consumo diário — {usageDialog.resource}</Typography>
                   <Typography variant="body2" color="text.secondary">
-                    {monthLabel(realizadoPeriod)} (realizado) · horas faturadas da VM dia a dia (base consolidada FOCUS)
+                    {monthLabel(realizadoPeriod)} (efetivado) · horas faturadas da VM dia a dia (base consolidada FOCUS)
                   </Typography>
                 </Box>
                 <Button size="small" onClick={() => setUsageDialog(null)}>Fechar</Button>
@@ -807,38 +808,38 @@ export default function DesligueProgramado({ embedded }: { embedded?: boolean })
                   )}
                   <Stack direction="row" spacing={3} sx={{ mb: 2 }} flexWrap="wrap">
                     <Box>
-                      <Typography variant="caption" color="text.secondary">Tempo faturado (mês)</Typography>
+                      <Typography variant="caption" color="text.secondary">Horas faturadas (mês)</Typography>
                       <Typography variant="subtitle1" fontWeight={600}>{duration(usageDialog.data.total_hours)}</Typography>
                     </Box>
                     <Box>
-                      <Typography variant="caption" color="text.secondary">Total custo (mês)</Typography>
+                      <Typography variant="caption" color="text.secondary">Custo total (mês)</Typography>
                       <Typography variant="subtitle1" fontWeight={600}>{money(usageDialog.data.total_cost_brl)}</Typography>
                     </Box>
                     <Box>
-                      <Typography variant="caption" color="text.secondary">Dias materiais (14d, ≥4h)</Typography>
+                      <Typography variant="caption" color="text.secondary">Dias relevantes (14d, ≥4h)</Typography>
                       <Typography variant="subtitle1" fontWeight={600}>
                         {usageDialog.data.active_days ?? 0} / {usageDialog.data.min_active_days ?? 5} mín.
                       </Typography>
                     </Box>
                     <Box>
-                      <Typography variant="caption" color="text.secondary">Uptime janela 14d</Typography>
+                      <Typography variant="caption" color="text.secondary">Disponibilidade na janela de 14 dias</Typography>
                       <Typography variant="subtitle1" fontWeight={600}>{pct((usageDialog.data.window_uptime_pct ?? 0) * 100)}</Typography>
                     </Box>
                     <Box>
-                      <Typography variant="caption" color="text.secondary">Uptime mensal</Typography>
+                      <Typography variant="caption" color="text.secondary">Disponibilidade mensal</Typography>
                       <Typography variant="subtitle1" fontWeight={600}>
                         {usageDialog.data.monthly_uptime_pct != null ? pct(usageDialog.data.monthly_uptime_pct * 100) : "—"}
                       </Typography>
                     </Box>
                     <Box>
-                      <Typography variant="caption" color="text.secondary">Dias com consumo</Typography>
+                      <Typography variant="caption" color="text.secondary">Dias com uso</Typography>
                       <Typography variant="subtitle1" fontWeight={600}>{usageDialog.data.rows.length}</Typography>
                     </Box>
                   </Stack>
                   <Chart
                     data={[{
                       type: "bar",
-                      name: "Horas do dia",
+                      name: "Perfil de horas do dia",
                       x: usageDialog.data.rows.map(r => r.day),
                       y: usageDialog.data.rows.map(r => r.hours),
                       customdata: usageDialog.data.rows.map(r => Math.round(r.hours * 60)),
@@ -852,7 +853,7 @@ export default function DesligueProgramado({ embedded }: { embedded?: boolean })
                       paper_bgcolor: "transparent",
                       plot_bgcolor: "transparent",
                       xaxis: { title: { text: "Dia" }, dtick: 2 },
-                      yaxis: { title: { text: "Horas faturadas" }, gridcolor: "#E2E5EE", zeroline: false },
+                      yaxis: { title: { text: "Horas cobradas" }, gridcolor: colors.border, zeroline: false },
                       showlegend: true,
                       legend: { orientation: "h", y: -0.18 },
                     }}
@@ -887,9 +888,9 @@ export default function DesligueProgramado({ embedded }: { embedded?: boolean })
                                 <TableHead>
                                   <TableRow>
                                     <TableCell>Dia</TableCell>
-                                    <TableCell align="right">Tempo faturado</TableCell>
-                                    <TableCell align="right">Custo (R$)</TableCell>
-                                    <TableCell align="right">Custo/hora</TableCell>
+                                    <TableCell align="right">Horas cobradas</TableCell>
+                                    <TableCell align="right">Custo (BRL)</TableCell>
+                                    <TableCell align="right">Custo por hora</TableCell>
                                   </TableRow>
                                 </TableHead>
                                 <TableBody>
@@ -905,7 +906,7 @@ export default function DesligueProgramado({ embedded }: { embedded?: boolean })
                               </Table>
                             </TableContainer>
                           ) : (
-                            <Typography variant="body2" color="text.secondary">Nenhum dia com consumo ≥4h no mês.</Typography>
+                            <Typography variant="body2" color="text.secondary">Nenhum dia com uso ≥4h no mês.</Typography>
                           )}
 
                           <Typography variant="subtitle1" fontWeight={700} sx={{ color: RED, mt: 2, mb: 1 }}>
@@ -917,9 +918,9 @@ export default function DesligueProgramado({ embedded }: { embedded?: boolean })
                                 <TableHead>
                                   <TableRow>
                                     <TableCell>Dia</TableCell>
-                                    <TableCell align="right">Tempo faturado</TableCell>
-                                    <TableCell align="right">Custo (R$)</TableCell>
-                                    <TableCell align="right">Custo/hora</TableCell>
+                                    <TableCell align="right">Horas cobradas</TableCell>
+                                    <TableCell align="right">Custo (BRL)</TableCell>
+                                    <TableCell align="right">Custo por hora</TableCell>
                                   </TableRow>
                                 </TableHead>
                                 <TableBody>
@@ -939,7 +940,7 @@ export default function DesligueProgramado({ embedded }: { embedded?: boolean })
                               </Table>
                             </TableContainer>
                           ) : (
-                            <Typography variant="body2" color="text.secondary">Nenhum dia desligado no mês.</Typography>
+                            <Typography variant="body2" color="text.secondary">Nenhum dia desligado na competência.</Typography>
                           )}
                         </>
                       );
@@ -952,7 +953,7 @@ export default function DesligueProgramado({ embedded }: { embedded?: boolean })
                 </>
               )}
               {usageDialog.data && usageDialog.data.rows.length === 0 && !usageDialog.error && (
-                <Typography color="text.secondary" variant="body2">Sem consumo no mês realizado ({monthLabel(realizadoPeriod)}).</Typography>
+                <Typography color="text.secondary" variant="body2">Sem consumo no mês efetivado ({monthLabel(realizadoPeriod)}).</Typography>
               )}
             </DialogContent>
           </>
@@ -970,30 +971,30 @@ function ExceptionDialog({ open, rule, onClose, onSave }: {
   if (!rule) return null;
   return (
     <Dialog open={open} onClose={onClose} maxWidth="sm" fullWidth>
-      <DialogTitle>{rule.id ? "Editar exceção" : "Nova exceção"}</DialogTitle>
+      <DialogTitle>{rule.id ? "Alterar exceção" : "Criar exceção"}</DialogTitle>
       <DialogContent>
         <Box sx={{ display: "flex", flexDirection: "column", gap: 2, mt: 1 }}>
-          <TextField label="Nome" value={form.name || ""} onChange={e => setForm(f => ({ ...f, name: e.target.value }))} />
-          <TextField label="Descrição" value={form.description || ""} onChange={e => setForm(f => ({ ...f, description: e.target.value }))} multiline />
+          <TextField label="Nome da regra" value={form.name || ""} onChange={e => setForm(f => ({ ...f, name: e.target.value }))} />
+          <TextField label="Finalidade" value={form.description || ""} onChange={e => setForm(f => ({ ...f, description: e.target.value }))} multiline />
           <FormControl>
-            <InputLabel>Tipo de escopo</InputLabel>
-            <Select value={form.scope_type} label="Tipo de escopo" onChange={e => setForm(f => ({ ...f, scope_type: e.target.value }))}>
+            <InputLabel>Tipo de abrangência</InputLabel>
+            <Select value={form.scope_type} label="Tipo de abrangência" onChange={e => setForm(f => ({ ...f, scope_type: e.target.value }))}>
               <MenuItem value="resource">ResourceId</MenuItem>
-              <MenuItem value="resource_group">Resource Group</MenuItem>
-              <MenuItem value="subscription">Subscription</MenuItem>
-              <MenuItem value="tag">Tag</MenuItem>
+              <MenuItem value="resource_group">Grupo de recursos</MenuItem>
+              <MenuItem value="subscription">Assinatura</MenuItem>
+              <MenuItem value="tag">Tag de recurso</MenuItem>
             </Select>
           </FormControl>
           {form.scope_type === "tag" ? (
             <>
-              <TextField label="Tag key" value={form.tag_key || ""} onChange={e => setForm(f => ({ ...f, tag_key: e.target.value }))} />
-              <TextField label="Tag value" value={form.tag_value || ""} onChange={e => setForm(f => ({ ...f, tag_value: e.target.value }))} />
+              <TextField label="Chave da tag" value={form.tag_key || ""} onChange={e => setForm(f => ({ ...f, tag_key: e.target.value }))} />
+              <TextField label="Valor da tag" value={form.tag_value || ""} onChange={e => setForm(f => ({ ...f, tag_value: e.target.value }))} />
             </>
           ) : (
-            <TextField label="Valor do escopo" value={form.scope_value || ""} onChange={e => setForm(f => ({ ...f, scope_value: e.target.value }))} />
+            <TextField label="Valor da abrangência" value={form.scope_value || ""} onChange={e => setForm(f => ({ ...f, scope_value: e.target.value }))} />
           )}
-          <TextField label="Válido de (YYYYMM)" value={form.valid_from || ""} onChange={e => setForm(f => ({ ...f, valid_from: e.target.value }))} />
-          <TextField label="Válido até (YYYYMM)" value={form.valid_until || ""} onChange={e => setForm(f => ({ ...f, valid_until: e.target.value }))} />
+          <TextField label="Vigência inicial (AAAAMM)" value={form.valid_from || ""} onChange={e => setForm(f => ({ ...f, valid_from: e.target.value }))} />
+          <TextField label="Vigência final (AAAAMM)" value={form.valid_until || ""} onChange={e => setForm(f => ({ ...f, valid_until: e.target.value }))} />
         </Box>
       </DialogContent>
       <DialogActions>

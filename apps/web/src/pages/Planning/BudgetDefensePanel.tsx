@@ -2,15 +2,7 @@ import { Dialog, DialogActions, DialogContent, DialogTitle } from "../../compone
 import { dataDisplayText } from "../../utils/dataPresentation";
 import { useEffect, useMemo, useState } from "react";
 import { Alert, Box, Button, Chip, CircularProgress, Divider, IconButton, Paper, Stack, Table, TableBody, TableCell, TableHead, TableRow, TextField, Tooltip, Typography } from "@mui/material";
-import {
-  Add,
-  Business,
-  CheckCircle,
-  Edit,
-  HighlightOff,
-  Publish,
-  Send,
-} from "@mui/icons-material";
+import { AddOutlined, BusinessOutlined, CheckCircleOutlined, EditOutlined, HighlightOffOutlined, PublishOutlined, SendOutlined } from "@mui/icons-material";
 import {
   approveDefenseRequest,
   BudgetDefenseRequest,
@@ -41,15 +33,15 @@ const STATUS_META: Record<
   { label: string; color: "default" | "info" | "warning" | "success" | "error" }
 > = {
   RASCUNHO: { label: "Rascunho", color: "default" },
-  SOLICITADA: { label: "Aguardando aprovação", color: "info" },
-  APROVADA: { label: "Aprovada — pronta para publicar", color: "warning" },
-  PUBLICADA: { label: "Publicada no orçamento", color: "success" },
+  SOLICITADA: { label: "Esperando aprovação", color: "info" },
+  APROVADA: { label: "Aprovada, pronta para publicar", color: "warning" },
+  PUBLICADA: { label: "Publicada na meta", color: "success" },
   REJEITADA: { label: "Rejeitada", color: "error" },
 };
 
 const today = () => new Date().toISOString().slice(0, 10);
 
-/** ID Orçamento e cloud herdados pelo nó (o ancestral mais próximo que define). */
+/** código de orçamento e cloud herdados pelo nó (o ancestral mais próximo que define). */
 function inheritedScope(
   flat: Array<Department & { path: string }>,
   node: Department | null,
@@ -132,7 +124,7 @@ export default function BudgetDefensePanel({
       const data = await getDefenseRequests(year);
       setRequests(data);
     } catch (e) {
-      setError(formatApiError(e, "Não foi possível carregar as solicitações de defesa"));
+      setError(formatApiError(e, "Não foi possível abrir as solicitações de defesa"));
     } finally {
       setLoading(false);
     }
@@ -151,11 +143,11 @@ export default function BudgetDefensePanel({
   useEffect(() => {
     if (!canRequest && !canPublish) return;
     void loadDepartments().catch((e) =>
-      setError(formatApiError(e, "Não foi possível carregar o organograma")),
+      setError(formatApiError(e, "Não foi possível carregar a estrutura organizacional")),
     );
   }, [canRequest, canPublish]);
 
-  // Ao trocar o ano, esqueça a seleção (o organograma continua válido, mas a
+  // Ao trocar o ano, esqueça a seleção (o estrutura continua válido, mas a
   // solicitação destacada não existe mais).
   useEffect(() => {
     setSelectedDepartmentId(null);
@@ -195,7 +187,7 @@ export default function BudgetDefensePanel({
 
   const requireSelection = () => {
     if (selectedDepartment) return true;
-    setError("Selecione no organograma onde o projeto vai ficar.");
+    setError("Escolha na estrutura onde o projeto vai ficar.");
     return false;
   };
 
@@ -216,7 +208,7 @@ export default function BudgetDefensePanel({
   const submitProject = async () => {
     if (!selectedDepartment) return;
     if (!projectForm.name.trim() || !projectForm.id_orcamento.trim()) {
-      setError("Informe o nome do projeto e o novo ID Orçamento.");
+      setError("Informe o nome do projeto e o novo código de orçamento.");
       return;
     }
     setBusy(true);
@@ -230,16 +222,16 @@ export default function BudgetDefensePanel({
         centro_custo: projectForm.centro_custo.trim() || null,
         description: projectForm.description.trim() || null,
       });
-      setMessage("Projeto criado no organograma e solicitação de defesa aberta.");
+      setMessage("Projeto criado na estrutura e solicitação de defesa aberta.");
       setNewProjectOpen(false);
       await load();
-      // Recarrega o organograma com o nó novo e já o deixa selecionado.
+      // Recarrega o estrutura com o nó novo e já o deixa selecionado.
       await loadDepartments();
       setSelectedDepartmentId(created.department.id);
       onChanged();
       onSelectRequest(created.request);
     } catch (e) {
-      setError(formatApiError(e, "Não foi possível criar o projeto"));
+      setError(formatApiError(e, "Não foi possível incluir o projeto"));
     } finally {
       setBusy(false);
     }
@@ -248,7 +240,7 @@ export default function BudgetDefensePanel({
   const submitRequest = async () => {
     if (!selectedDepartment) return;
     if (!requestForm.requested_id_orcamento.trim()) {
-      setError("Informe o ID Orçamento solicitado.");
+      setError("Informe o código de orçamento solicitado.");
       return;
     }
     setBusy(true);
@@ -261,15 +253,15 @@ export default function BudgetDefensePanel({
       });
       setMessage(
         created.is_individual_line
-          ? "Solicitação aberta como linha individual: o organograma só muda na publicação."
-          : "Solicitação de defesa aberta.",
+          ? "Solicitação aberta como linha individual: a estrutura só muda na publicação."
+          : "Pedido de defesa aberto.",
       );
       setNewRequestOpen(false);
       await load();
       onChanged();
       onSelectRequest(created);
     } catch (e) {
-      setError(formatApiError(e, "Não foi possível abrir a solicitação"));
+      setError(formatApiError(e, "Não foi possível abrir o pedido"));
     } finally {
       setBusy(false);
     }
@@ -294,7 +286,7 @@ export default function BudgetDefensePanel({
   const submitApprove = async () => {
     if (!approveTarget) return;
     if (!approvalForm.final_id_orcamento.trim() || !approvalForm.decision_note.trim()) {
-      setError("Informe o ID Orçamento final e o motivo da aprovação.");
+      setError("Informe o código de orçamento final e o motivo da aprovação.");
       return;
     }
     const ok = await run(
@@ -304,7 +296,7 @@ export default function BudgetDefensePanel({
           decision_note: approvalForm.decision_note.trim(),
           effective_date: approvalForm.effective_date,
         }),
-      "Defesa aprovada. Use Publicar no Orçamento para efetivar o merge.",
+      "Defesa aprovada. Use Publicar na meta para efetivar a alteração.",
     );
     if (ok) setApproveTarget(null);
   };
@@ -323,7 +315,7 @@ export default function BudgetDefensePanel({
   const submitPublish = async () => {
     if (!publishTarget) return;
     if (!publishForm.title.trim() || !publishForm.description.trim() || !publishForm.final_id_orcamento.trim()) {
-      setError("Preencha aprovação, motivo e o ID Orçamento final antes de publicar.");
+      setError("Preencha aprovação, motivo e o código de orçamento final antes de publicar.");
       return;
     }
     const ok = await run(
@@ -335,7 +327,7 @@ export default function BudgetDefensePanel({
           final_id_orcamento: publishForm.final_id_orcamento.trim(),
           decision_note: publishForm.decision_note.trim() || null,
         }),
-      "Defesa publicada no Orçamento. O projeto passou para o ID Orçamento final.",
+      "Defesa publicada na meta. O projeto passou para o código de orçamento final.",
     );
     if (ok) setPublishTarget(null);
   };
@@ -343,12 +335,12 @@ export default function BudgetDefensePanel({
   const submitReject = async () => {
     if (!rejectTarget) return;
     if (!rejectNote.trim()) {
-      setError("Descreva o motivo da rejeição.");
+      setError("Explique o motivo da rejeição.");
       return;
     }
     const ok = await run(
       () => rejectDefenseRequest(rejectTarget.id, { decision_note: rejectNote.trim() }),
-      "Solicitação de defesa rejeitada.",
+      "Pedido de defesa recusado.",
     );
     if (ok) {
       setRejectTarget(null);
@@ -360,27 +352,27 @@ export default function BudgetDefensePanel({
     <Paper variant="outlined" sx={{ p: 2, mb: 2 }}>
       <Stack direction="row" justifyContent="space-between" alignItems="flex-start" gap={2} flexWrap="wrap">
         <Box>
-          <Typography variant="h6">Solicitações de defesa do projeto</Typography>
+          <Typography variant="h6">Pedidos de defesa do projeto</Typography>
           <Typography variant="body2" color="text.secondary">
-            Navegue pelo organograma e selecione onde o projeto vai ficar: crie um projeto novo
+            Navegue pela estrutura e selecione onde o projeto vai ficar: crie um projeto novo
             naquele nó ou defenda um projeto existente. Projetos existentes defendidos em outro ID
-            Orçamento ficam em <b>linha individual</b> até a publicação.
+            meta ficam em <b>linha individual</b> até a publicação.
           </Typography>
         </Box>
         <Stack direction="row" gap={1} flexWrap="wrap">
           <Button
-            startIcon={<Add />}
+            startIcon={<AddOutlined />}
             disabled={!canRequest}
             onClick={openNewProject}
           >
-            Novo projeto
+            Incluir projeto
           </Button>
           <Button
-            startIcon={<Add />}
+            startIcon={<AddOutlined />}
             disabled={!canRequest}
             onClick={openNewRequest}
           >
-            Solicitar defesa de projeto existente
+            Pedir defesa de projeto existente
           </Button>
           <Button onClick={() => void load()} disabled={loading}>
             Atualizar
@@ -413,11 +405,11 @@ export default function BudgetDefensePanel({
               onChange={setSelectedDepartmentId}
               allowClear
               clearLabel="Nenhum"
-              label="Onde o projeto vai ficar"
+              label="Onde o projeto será alocado"
               placeholder={ORG.selectNode}
               menuHint={ORG.selectNodeFilterHint}
               helperText={ORG.selectNodeFilterHint}
-              startIcon={<Business fontSize="small" />}
+              startIcon={<BusinessOutlined fontSize="small" />}
             />
           </Box>
           <Box sx={{ mt: { md: "22px" }, minWidth: 260, flex: 1 }}>
@@ -425,12 +417,12 @@ export default function BudgetDefensePanel({
               Nó selecionado
             </Typography>
             <Typography variant="body2" fontWeight={700}>
-              {selectedDepartment?.path || "Nenhum nó selecionado"}
+              {selectedDepartment?.path || "Nenhum nó escolhido"}
             </Typography>
             <Stack direction="row" gap={2} flexWrap="wrap">
               <Box>
                 <Typography variant="caption" color="text.secondary">
-                  ID Orçamento {scope.own ? "(próprio)" : "(herdado)"}
+                  Código de orçamento {scope.own ? "(próprio)" : "(herdado)"}
                 </Typography>
                 <Typography variant="body2" fontWeight={700}>
                   {scope.budgetId || "—"}
@@ -458,7 +450,7 @@ export default function BudgetDefensePanel({
             <Button
               size="small"
               variant="outlined"
-              startIcon={<Add />}
+              startIcon={<AddOutlined />}
               disabled={!canRequest || !selectedDepartment}
               onClick={openNewProject}
             >
@@ -467,7 +459,7 @@ export default function BudgetDefensePanel({
             <Button
               size="small"
               variant="outlined"
-              startIcon={<Add />}
+              startIcon={<AddOutlined />}
               disabled={!canRequest || !selectedDepartment}
               onClick={openNewRequest}
             >
@@ -481,7 +473,7 @@ export default function BudgetDefensePanel({
 
       {selected && (
         <Alert severity="info" sx={{ mb: 2 }}>
-          Editando a defesa de <b>{selected.project_name}</b> no ID Orçamento{" "}
+          Editando a defesa de <b>{selected.project_name}</b> no código de orçamento{" "}
           <b>{selected.requested_id_orcamento}</b>. Use <b>Salvar</b> na grade abaixo para gravar
           os valores; <b>Enviar</b> submete para aprovação.
         </Alert>
@@ -493,8 +485,8 @@ export default function BudgetDefensePanel({
         </Box>
       ) : requests.length === 0 ? (
         <Typography color="text.secondary">
-          Nenhuma solicitação de defesa para {year}. Selecione um nó no organograma e use{" "}
-          <b>Novo projeto</b> ou <b>Solicitar defesa de projeto existente</b>.
+          Nenhuma solicitação de defesa para {year}. Escolha um nó na estrutura e use{" "}
+          <b>Incluir projeto</b> ou <b>Pedir defesa de projeto existente</b>.
         </Typography>
       ) : (
         <Box sx={{ overflowX: "auto" }}>
@@ -502,10 +494,10 @@ export default function BudgetDefensePanel({
             <TableHead>
               <TableRow>
                 <TableCell>Projeto</TableCell>
-                <TableCell>Caminho no organograma</TableCell>
-                <TableCell>ID Orçamento pedido</TableCell>
-                <TableCell>ID Orçamento atual (organograma)</TableCell>
-                <TableCell align="right">Total anual</TableCell>
+                <TableCell>Caminho na estrutura</TableCell>
+                <TableCell>Código pedido</TableCell>
+                <TableCell>Código atual (estrutura)</TableCell>
+                <TableCell align="right">Total do ano</TableCell>
                 <TableCell>Status</TableCell>
                 <TableCell align="right">Ações</TableCell>
               </TableRow>
@@ -527,8 +519,8 @@ export default function BudgetDefensePanel({
                         <Typography fontWeight={600}>{request.project_name || "—"}</Typography>
                         {request.is_new_project && <Chip size="small" label="Novo" color="secondary" />}
                         {request.is_individual_line && (
-                          <Tooltip title="Defendido em um ID Orçamento diferente do organograma. Ao publicar, o projeto passa para o ID final.">
-                            <Chip size="small" label="Linha individual" color="warning" variant="outlined" />
+                          <Tooltip title="Defendido em um código de orçamento diferente da estrutura. Ao publicar, o projeto passa para o código final.">
+                            <Chip size="small" label="Linha avulsa" color="warning" variant="outlined" />
                           </Tooltip>
                         )}
                       </Stack>
@@ -559,22 +551,22 @@ export default function BudgetDefensePanel({
                     </TableCell>
                     <TableCell align="right" onClick={(event) => event.stopPropagation()}>
                       <Stack direction="row" gap={0.5} justifyContent="flex-end" flexWrap="wrap">
-                        <Tooltip title="Editar a defesa deste projeto na grade abaixo">
-                          <Button size="small" startIcon={<Edit />} onClick={() => focusRequest(request)}>
+                        <Tooltip title="Alterar a defesa deste projeto na grade abaixo">
+                          <Button size="small" startIcon={<EditOutlined />} onClick={() => focusRequest(request)}>
                             Editar defesa
                           </Button>
                         </Tooltip>
                         {canRequest && request.status === "RASCUNHO" && (
-                          <Tooltip title="Enviar a defesa para aprovação">
+                          <Tooltip title="Encaminhar a defesa para aprovação">
                             <span>
                               <Button
                                 size="small"
-                                startIcon={<Send />}
+                                startIcon={<SendOutlined />}
                                 disabled={busy || !request.defense_version_id}
                                 onClick={() =>
                                   void run(
                                     () => submitDefenseRequest(request.id),
-                                    "Defesa enviada para aprovação.",
+                                    "Defesa encaminhada para aprovação.",
                                   )
                                 }
                               >
@@ -587,7 +579,7 @@ export default function BudgetDefensePanel({
                           <Button
                             size="small"
                             variant="outlined"
-                            startIcon={<CheckCircle />}
+                            startIcon={<CheckCircleOutlined />}
                             onClick={() => openApprove(request)}
                           >
                             Aprovar
@@ -597,14 +589,14 @@ export default function BudgetDefensePanel({
                           <Button
                             size="small"
                             variant="contained"
-                            startIcon={<Publish />}
+                            startIcon={<PublishOutlined />}
                             onClick={() => openPublish(request)}
                           >
-                            Publicar no Orçamento
+                            Publicar na meta
                           </Button>
                         )}
                         {canPublish && request.status !== "PUBLICADA" && request.status !== "REJEITADA" && (
-                          <Tooltip title="Rejeitar a solicitação">
+                          <Tooltip title="Recusar a solicitação">
                             <IconButton
                               size="small"
                               onClick={() => {
@@ -612,7 +604,7 @@ export default function BudgetDefensePanel({
                                 setRejectNote("");
                               }}
                             >
-                              <HighlightOff fontSize="small" />
+                              <HighlightOffOutlined fontSize="small" />
                             </IconButton>
                           </Tooltip>
                         )}
@@ -626,23 +618,23 @@ export default function BudgetDefensePanel({
         </Box>
       )}
 
-      {/* Novo projeto ------------------------------------------------------ */}
+      {/* Incluir projeto ------------------------------------------------------ */}
       <Dialog open={newProjectOpen} onClose={() => !busy && setNewProjectOpen(false)} maxWidth="sm" fullWidth>
-        <DialogTitle>Novo projeto na Defesa Orçamentária</DialogTitle>
+        <DialogTitle>Incluir projeto na defesa orçamentária</DialogTitle>
         <DialogContent>
           <Stack gap={2} sx={{ pt: 1 }}>
             <Alert severity="info">
-              O projeto será criado no organograma em <b>{selectedDepartment?.path || "—"}</b>, já
-              com o novo ID Orçamento.
+              O projeto será criado na estrutura em <b>{selectedDepartment?.path || "—"}</b>, já
+              com o novo código de orçamento.
             </Alert>
             <TextField
-              label="Nome do projeto"
+              label="Denominação do projeto"
               value={projectForm.name}
               onChange={(event) => setProjectForm((form) => ({ ...form, name: event.target.value }))}
               required
             />
             <TextField
-              label="Novo ID Orçamento"
+              label="Novo código de orçamento"
               value={projectForm.id_orcamento}
               onChange={(event) => setProjectForm((form) => ({ ...form, id_orcamento: event.target.value }))}
               required
@@ -653,7 +645,7 @@ export default function BudgetDefensePanel({
               onChange={(event) => setProjectForm((form) => ({ ...form, centro_custo: event.target.value }))}
             />
             <TextField
-              label="Justificativa da inclusão"
+              label="Motivo da inclusão"
               multiline
               minRows={2}
               value={projectForm.description}
@@ -669,25 +661,25 @@ export default function BudgetDefensePanel({
         </DialogActions>
       </Dialog>
 
-      {/* Solicitar defesa de projeto existente ----------------------------- */}
+      {/* Pedir defesa de projeto existente ----------------------------- */}
       <Dialog open={newRequestOpen} onClose={() => !busy && setNewRequestOpen(false)} maxWidth="sm" fullWidth>
-        <DialogTitle>Solicitar defesa de projeto existente</DialogTitle>
+        <DialogTitle>Pedir defesa de projeto existente</DialogTitle>
         <DialogContent>
           <Stack gap={2} sx={{ pt: 1 }}>
             <Alert severity="warning">
-              O organograma <b>não</b> é alterado agora. Se o ID Orçamento solicitado for diferente
+              A estrutura <b>não</b> é alterada agora. Se o código de orçamento solicitado for diferente
               do herdado, o projeto aparece como linha individual na defesa e só muda de linha na
               publicação.
             </Alert>
             <Box sx={{ p: 1.5, borderRadius: 2, bgcolor: "#FAFBFD", border: "1px solid", borderColor: "divider" }}>
-              <Typography variant="caption" color="text.secondary">Projeto selecionado</Typography>
+              <Typography variant="caption" color="text.secondary">Projeto escolhido</Typography>
               <Typography variant="body2" fontWeight={700}>{selectedDepartment?.path || "—"}</Typography>
               <Typography variant="caption" color="text.secondary">
-                ID Orçamento atual: {scope.budgetId || "—"}
+                Código de orçamento atual: {scope.budgetId || "—"}
               </Typography>
             </Box>
             <TextField
-              label="ID Orçamento solicitado"
+              label="Código de orçamento solicitado"
               value={requestForm.requested_id_orcamento}
               onChange={(event) =>
                 setRequestForm((form) => ({ ...form, requested_id_orcamento: event.target.value }))
@@ -706,16 +698,16 @@ export default function BudgetDefensePanel({
 
       {/* Aprovar ------------------------------------------------------------ */}
       <Dialog open={Boolean(approveTarget)} onClose={() => !busy && setApproveTarget(null)} maxWidth="sm" fullWidth>
-        <DialogTitle>Aprovar defesa</DialogTitle>
+        <DialogTitle>Aprovar a defesa</DialogTitle>
         <DialogContent>
           <Stack gap={2} sx={{ pt: 1 }}>
             <Alert severity="info">
-              O analista decide se mantém o projeto no ID Orçamento solicitado (
-              <b>{approveTarget?.requested_id_orcamento}</b>) ou o move para outro. A mudança no
-              organograma acontece somente na publicação.
+              O analista decide se mantém o projeto no código de orçamento solicitado (
+              <b>{approveTarget?.requested_id_orcamento}</b>) ou o move para outro. A mudança na
+              hierarquia acontece somente na publicação.
             </Alert>
             <TextField
-              label="ID Orçamento final"
+              label="Código de orçamento final"
               value={approvalForm.final_id_orcamento}
               onChange={(event) =>
                 setApprovalForm((form) => ({ ...form, final_id_orcamento: event.target.value }))
@@ -723,7 +715,7 @@ export default function BudgetDefensePanel({
               required
             />
             <TextField
-              label="Data da aprovação"
+              label="Data de aprovação"
               type="date"
               InputLabelProps={{ shrink: true }}
               value={approvalForm.effective_date}
@@ -732,7 +724,7 @@ export default function BudgetDefensePanel({
               }
             />
             <TextField
-              label="Motivo e observações da aprovação"
+              label="Motivo e comentários da decisão"
               multiline
               minRows={3}
               value={approvalForm.decision_note}
@@ -753,13 +745,13 @@ export default function BudgetDefensePanel({
 
       {/* Publicar ----------------------------------------------------------- */}
       <Dialog open={Boolean(publishTarget)} onClose={() => !busy && setPublishTarget(null)} maxWidth="sm" fullWidth>
-        <DialogTitle>Publicar defesa no Orçamento</DialogTitle>
+        <DialogTitle>Publicar defesa na meta</DialogTitle>
         <DialogContent>
           <Stack gap={2} sx={{ pt: 1 }}>
             <Alert severity="warning">
-              Será criado um snapshot de Orçamento para {year} substituindo somente o escopo{" "}
+              Será criado um snapshot de meta para {year} substituindo somente o escopo{" "}
               <b>{publishForm.final_id_orcamento || "a definir"}</b>. O projeto{" "}
-              <b>{publishTarget?.project_name}</b> passará a pertencer ao ID Orçamento final e
+              <b>{publishTarget?.project_name}</b> passará a pertencer ao código de orçamento final e
               deixará de ser linha individual.
             </Alert>
             <TextField
@@ -769,7 +761,7 @@ export default function BudgetDefensePanel({
               required
             />
             <TextField
-              label="ID Orçamento final"
+              label="Código de orçamento final"
               value={publishForm.final_id_orcamento}
               onChange={(event) =>
                 setPublishForm((form) => ({ ...form, final_id_orcamento: event.target.value }))
@@ -777,7 +769,7 @@ export default function BudgetDefensePanel({
               required
             />
             <TextField
-              label="Data da publicação"
+              label="Data de publicação"
               type="date"
               InputLabelProps={{ shrink: true }}
               value={publishForm.effective_date}
@@ -786,7 +778,7 @@ export default function BudgetDefensePanel({
               }
             />
             <TextField
-              label="Motivo e observações"
+              label="Motivo e comentários"
               multiline
               minRows={3}
               value={publishForm.description}
@@ -800,21 +792,21 @@ export default function BudgetDefensePanel({
         <DialogActions>
           <Button onClick={() => setPublishTarget(null)}>Cancelar</Button>
           <Button variant="contained" disabled={busy} onClick={() => void submitPublish()}>
-            Publicar no Orçamento
+            Publicar na meta
           </Button>
         </DialogActions>
       </Dialog>
 
       {/* Rejeitar ----------------------------------------------------------- */}
       <Dialog open={Boolean(rejectTarget)} onClose={() => !busy && setRejectTarget(null)} maxWidth="sm" fullWidth>
-        <DialogTitle>Rejeitar solicitação de defesa</DialogTitle>
+        <DialogTitle>Recusar solicitação de defesa</DialogTitle>
         <DialogContent>
           <Stack gap={2} sx={{ pt: 1 }}>
             <Typography variant="body2" color="text.secondary">
               {rejectTarget?.project_name} · {rejectTarget?.requested_id_orcamento}
             </Typography>
             <TextField
-              label="Motivo da rejeição"
+              label="Motivo da recusa"
               multiline
               minRows={3}
               value={rejectNote}

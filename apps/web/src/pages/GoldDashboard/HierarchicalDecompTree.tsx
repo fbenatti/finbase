@@ -34,11 +34,11 @@ const DIRECTOR_VIEW_LABELS: Record<string, string> = {
 };
 
 /** Raiz do organograma na UI — não corresponde a organograma_nivel_1 nos dados Gold. */
-const DIRECTOR_PATH_ROOT_PREFIXES = ["Consumo Cloud"] as const;
+const DIRECTOR_PATH_ROOT_PREFIXES = ["Consumo de nuvem"] as const;
 
 const DEFAULT_CHILD_LIMIT = 7;
 const OTHER_CHILD_PAGE_SIZE = 100;
-export const EMPTY_DIMENSION_LABEL = "Não informado";
+export const EMPTY_DIMENSION_LABEL = "Sem classificação";
 const MAX_EMPTY_ORG_SKIP = 6;
 
 /** Remove prefixo de raiz da árvore para alinhar profundidade → organograma_nivel_N. */
@@ -76,7 +76,7 @@ function aggregateTreeChildren(rows: Record<string, unknown>[], field: string, f
     const rawKey = String(rawValue ?? EMPTY_DIMENSION_LABEL);
     const isManualForecast = labelManualForecast && tipo === "forecast-manual" && isOrgField(field) &&
       (rawValue == null || rawKey.trim() === "" || rawKey.trim().toLowerCase() === EMPTY_DIMENSION_LABEL.toLowerCase());
-    const k = isManualForecast ? "Forecast Manual" : rawKey;
+    const k = isManualForecast ? "Previsão manual" : rawKey;
     if (!map.has(k)) map.set(k, { cost: 0, byMonth: new Map(), manualForecast: false });
     const o = map.get(k)!;
     o.manualForecast ||= isManualForecast;
@@ -191,7 +191,7 @@ export default function HierarchicalDecompTree({
   chain,
   queryKey,
   onApplyContext,
-  shareCaption = "participação no contexto atual",
+  shareCaption = "participação no contexto vigente",
   filterRowTypes = true,
   measureColumn = "realizado",
   labelManualForecast = false,
@@ -305,7 +305,7 @@ export default function HierarchicalDecompTree({
       setResults(m);
     };
     load().catch(e => {
-      if (alive) setError(formatApiError(e, "Falha ao consultar a decomposição"));
+      if (alive) setError(formatApiError(e, "Não foi possível consultar o detalhamento"));
     }).finally(() => {
       if (alive) setLoading(false);
     });
@@ -355,14 +355,14 @@ export default function HierarchicalDecompTree({
         <Box sx={{ display: "inline-flex", border: "1px solid #d8dce7", borderRadius: 1.5, p: 0.3, bgcolor: "#FAFBFD" }}>
           {(["cost", "share", "mom"] as const).map(m => (
             <Button key={m} size="small" onClick={() => setTreeMetric(m)}
-              sx={{ minWidth: 0, px: 1.2, py: 0.4, borderRadius: 1.2, fontWeight: 950, fontSize: 11, textTransform: "none", color: treeMetric === m ? "#fff" : theme.palette.text.secondary, bgcolor: treeMetric === m ? "#161B2E" : "transparent", "&:hover": { bgcolor: treeMetric === m ? "#161B2E" : "#eef0f4" } }}>
+              sx={{ minWidth: 0, px: 1.2, py: 0.4, borderRadius: 1.2, fontWeight: 950, fontSize: 11, textTransform: "none", color: treeMetric === m ? "#fff" : theme.palette.text.secondary, bgcolor: treeMetric === m ? "#162B3A" : "transparent", "&:hover": { bgcolor: treeMetric === m ? "#162B3A" : "#eef0f4" } }}>
               {m === "cost" ? "Custo" : m === "share" ? "Share" : "MoM"}
             </Button>
           ))}
         </Box>
         <Button size="small" variant="outlined" onClick={() => setTreePath([])}>Limpar seleção</Button>
         {onApplyContext && treePath.length > 0 && (
-          <Button size="small" variant="contained" onClick={() => onApplyContext(treePath)}>Aplicar contexto</Button>
+          <Button size="small" variant="contained" onClick={() => onApplyContext(treePath)}>Aplicar recorte</Button>
         )}
       </Stack>
       {error && <Alert severity="error" sx={{ mb: 1 }}>{dataDisplayText(error)}</Alert>}
@@ -374,7 +374,7 @@ export default function HierarchicalDecompTree({
         )}
         <Box sx={{ display: "flex", justifyContent: "space-between", gap: 1.5, alignItems: "flex-start", p: 1.6, borderBottom: "1px solid", borderColor: "divider", bgcolor: "background.default", flexWrap: "wrap" }}>
           <Box sx={{ minWidth: 0, flex: 1 }}>
-            <Typography variant="caption" sx={{ display: "block", fontSize: 9, fontWeight: 950, textTransform: "none", letterSpacing: 0, color: theme.palette.text.secondary, mb: 0.6 }}>Caminho de investigação</Typography>
+            <Typography variant="caption" sx={{ display: "block", fontSize: 9, fontWeight: 950, textTransform: "none", letterSpacing: 0, color: theme.palette.text.secondary, mb: 0.6 }}>Trilha de investigação</Typography>
             <Stack direction="row" gap={0.5} alignItems="center" flexWrap="wrap">
               <Chip size="small" label="TOTAL" onClick={() => setTreePath([])} color={treePath.length === 0 ? "primary" : "default"} sx={{ fontWeight: 950 }} />
               {treePath.map((p, i) => (
@@ -388,23 +388,23 @@ export default function HierarchicalDecompTree({
         </Box>
         <Box sx={{ display: "grid", gridTemplateColumns: { xs: "1fr 1fr", md: "repeat(4,1fr)" }, gap: 1, p: 1.6, borderBottom: "1px solid", borderColor: "divider" }}>
           <Box sx={{ border: "1px solid", borderColor: "divider", borderRadius: 2, p: 1.2, minWidth: 0 }}>
-            <Typography variant="caption" sx={{ display: "block", fontSize: 9, fontWeight: 950, textTransform: "uppercase", letterSpacing: 0.65, color: theme.palette.text.secondary }}>Custo no nó atual</Typography>
-            <Typography variant="h6" sx={{ mt: 0.4, fontWeight: 950, color: "#161B2E", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{compact(nodeTotal)}</Typography>
+            <Typography variant="caption" sx={{ display: "block", fontSize: 9, fontWeight: 950, textTransform: "uppercase", letterSpacing: 0.65, color: theme.palette.text.secondary }}>Custo do nível atual</Typography>
+            <Typography variant="h6" sx={{ mt: 0.4, fontWeight: 950, color: "#162B3A", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{compact(nodeTotal)}</Typography>
             <Typography variant="caption" sx={{ color: theme.palette.text.secondary, fontWeight: 800, display: "block", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{treePath.length ? treePath[treePath.length - 1].value : "TOTAL"}</Typography>
           </Box>
           <Box sx={{ border: "1px solid", borderColor: "divider", borderRadius: 2, p: 1.2, minWidth: 0 }}>
-            <Typography variant="caption" sx={{ display: "block", fontSize: 9, fontWeight: 950, textTransform: "uppercase", letterSpacing: 0.65, color: theme.palette.text.secondary }}>Share do total</Typography>
-            <Typography variant="h6" sx={{ mt: 0.4, fontWeight: 950, color: "#161B2E" }}>{pct(shareTotal)}</Typography>
+            <Typography variant="caption" sx={{ display: "block", fontSize: 9, fontWeight: 950, textTransform: "uppercase", letterSpacing: 0.65, color: theme.palette.text.secondary }}>Participação no total</Typography>
+            <Typography variant="h6" sx={{ mt: 0.4, fontWeight: 950, color: "#162B3A" }}>{pct(shareTotal)}</Typography>
             <Typography variant="caption" sx={{ color: theme.palette.text.secondary, fontWeight: 800 }}>{shareCaption}</Typography>
           </Box>
           <Box sx={{ border: "1px solid", borderColor: "divider", borderRadius: 2, p: 1.2, minWidth: 0 }}>
-            <Typography variant="caption" sx={{ display: "block", fontSize: 9, fontWeight: 950, textTransform: "uppercase", letterSpacing: 0.65, color: theme.palette.text.secondary }}>Maior filho</Typography>
-            <Typography variant="h6" sx={{ mt: 0.4, fontWeight: 950, color: "#161B2E", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{treeChildren[0] ? treeChildren[0].key : "N/A"}</Typography>
-            <Typography variant="caption" sx={{ color: theme.palette.text.secondary, fontWeight: 800 }}>{treeChildren[0] ? `${pct(topShare)} do nó atual` : "sem próximo nível"}</Typography>
+            <Typography variant="caption" sx={{ display: "block", fontSize: 9, fontWeight: 950, textTransform: "uppercase", letterSpacing: 0.65, color: theme.palette.text.secondary }}>Maior subitem</Typography>
+            <Typography variant="h6" sx={{ mt: 0.4, fontWeight: 950, color: "#162B3A", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{treeChildren[0] ? treeChildren[0].key : "N/A"}</Typography>
+            <Typography variant="caption" sx={{ color: theme.palette.text.secondary, fontWeight: 800 }}>{treeChildren[0] ? `${pct(topShare)} do nível atual` : "sem próximo nível"}</Typography>
           </Box>
           <Box sx={{ border: "1px solid", borderColor: "divider", borderRadius: 2, p: 1.2, minWidth: 0 }}>
-            <Typography variant="caption" sx={{ display: "block", fontSize: 9, fontWeight: 950, textTransform: "uppercase", letterSpacing: 0.65, color: theme.palette.text.secondary }}>Concentração Top 3</Typography>
-            <Typography variant="h6" sx={{ mt: 0.4, fontWeight: 950, color: "#161B2E" }}>{pct(top3Share)}</Typography>
+            <Typography variant="caption" sx={{ display: "block", fontSize: 9, fontWeight: 950, textTransform: "uppercase", letterSpacing: 0.65, color: theme.palette.text.secondary }}>Peso das 3 maiores</Typography>
+            <Typography variant="h6" sx={{ mt: 0.4, fontWeight: 950, color: "#162B3A" }}>{pct(top3Share)}</Typography>
             <Typography variant="caption" sx={{ color: theme.palette.text.secondary, fontWeight: 800 }}>{nextLabel || "fim da hierarquia"}</Typography>
           </Box>
         </Box>
@@ -439,12 +439,12 @@ export default function HierarchicalDecompTree({
               const col = it.mom == null ? ACCENT : it.mom >= 0 ? chartSemantic.negative : chartSemantic.positive;
               return (
                 <path key={`bl${idx}`} d={`M ${left + (pathCount - 1) * (nodeW + stageGap) + nodeW} ${pathY + nodeH / 2} C ${left + (pathCount - 1) * (nodeW + stageGap) + nodeW + 34} ${pathY + nodeH / 2}, ${branchX - 34} ${cy}, ${branchX} ${cy}`} stroke={col} strokeWidth={sw} fill="none" strokeLinecap="round" opacity={0.42}>
-                  <title>{`${it.key} · ${pct(share)} do nó atual`}</title>
+                  <title>{`${it.key} · ${pct(share)} do nível atual`}</title>
                 </path>
               );
             });
             const emptyBranch = effectiveTreeIndex >= chain.length && (
-              <text x={branchX} y={pathY + 20} fontSize={12} fontWeight={600} fill={theme.palette.text.secondary}>Fim da hierarquia disponível</text>
+              <text x={branchX} y={pathY + 20} fontSize={12} fontWeight={600} fill={theme.palette.text.secondary}>Fim da estrutura disponível</text>
             );
             return (
               <svg viewBox={`0 0 ${W} ${H}`} role="img" aria-label="Árvore interativa de decomposição de custo" style={{ width: "100%", minWidth: 1050, height: "auto", display: "block", fontFamily: theme.typography.fontFamily }}>
@@ -498,11 +498,11 @@ export default function HierarchicalDecompTree({
           })()}
         </Box>
         <Stack direction="row" justifyContent="space-between" gap={1.5} alignItems="center" flexWrap="wrap" sx={{ px: 1.6, py: 1.2, color: theme.palette.text.secondary, fontSize: 10, fontWeight: 750 }}>
-          <Box><Typography component="span" sx={{ color: theme.palette.text.primary, fontWeight: 900 }}>Como ler:</Typography> a espessura das conexões representa o share do custo no nó pai. Clique em um filho para aprofundar até ServiceSubcategory e Sub Serviço (SKU name). Clique em “Outros” para listar os demais filhos.</Box>
+          <Box><Typography component="span" sx={{ color: theme.palette.text.primary, fontWeight: 900 }}>Como interpretar:</Typography> a espessura das conexões representa a participação do custo no nível pai. Clique em um filho para aprofundar até ServiceSubcategory e Sub Serviço (SKU name). Clique em “Outros” para listar os demais filhos.</Box>
           <Stack direction="row" gap={1.5} alignItems="center">
-            <Box><Box component="span" sx={{ display: "inline-block", width: 9, height: 9, borderRadius: 99, bgcolor: ACCENT, mr: 0.6 }} />estrutura / share</Box>
-            <Box><Box component="span" sx={{ display: "inline-block", width: 9, height: 9, borderRadius: 99, bgcolor: chartSemantic.negative, mr: 0.6 }} />MoM positivo</Box>
-            <Box><Box component="span" sx={{ display: "inline-block", width: 9, height: 9, borderRadius: 99, bgcolor: chartSemantic.positive, mr: 0.6 }} />MoM negativo</Box>
+            <Box><Box component="span" sx={{ display: "inline-block", width: 9, height: 9, borderRadius: 99, bgcolor: ACCENT, mr: 0.6 }} />estrutura / participação</Box>
+            <Box><Box component="span" sx={{ display: "inline-block", width: 9, height: 9, borderRadius: 99, bgcolor: chartSemantic.negative, mr: 0.6 }} />Variação mensal positiva</Box>
+            <Box><Box component="span" sx={{ display: "inline-block", width: 9, height: 9, borderRadius: 99, bgcolor: chartSemantic.positive, mr: 0.6 }} />Variação mensal negativa</Box>
           </Stack>
         </Stack>
       </Box>

@@ -14,6 +14,7 @@ import {
 import { Delete, Edit, FilterAlt, PlayArrow } from "../../components/FinbaseIcons";
 import { GridColDef, GridFilterModel, GridPaginationModel, GridSortModel, useGridApiRef } from "@mui/x-data-grid";
 import { ForecastConfig } from "../../services/api";
+import { RowAction } from "../../components/RowAction";
 
 export type ForecastGridFilter = {
   field: string;
@@ -47,9 +48,9 @@ function formatDateTime(value: string | Date | null | undefined): string {
 
 const rateioLabel = (config: ForecastConfig): string => {
   const count = (config.connection_allocation_rules || []).length;
-  if (count > 0) return "Rateio (" + count + ")";
-  if (config.period_allocation === "charge_interval") return "Rateio (legado global)";
-  return "Diário";
+  if (count > 0) return "Alocação (" + count + ")";
+  if (config.period_allocation === "charge_interval") return "Alocação (legado global)";
+  return "Diária";
 };
 
 export default function ForecastConfigsDataGrid({
@@ -64,7 +65,7 @@ export default function ForecastConfigsDataGrid({
   onDelete,
 }: Props) {
   const apiRef = useGridApiRef();
-  const [paginationModel, setPaginationModel] = useState<GridPaginationModel>({ page: 0, pageSize: 10 });
+  const [paginationModel, setPaginationModel] = useState<GridPaginationModel>({ page: 0, pageSize: 50 });
   const [sortModel, setSortModel] = useState<GridSortModel>([]);
   const [filterModel, setFilterModel] = useState<GridFilterModel>({ items: [] });
   const [activeFilters, setActiveFilters] = useState<Record<string, ForecastGridFilter>>({});
@@ -75,7 +76,7 @@ export default function ForecastConfigsDataGrid({
     <Stack direction="row" alignItems="center" gap={0.5} sx={{ overflow: "hidden" }}>
       <Typography component="span" variant="inherit" noWrap>{label}</Typography>
       {activeFilters[field] && (
-        <Tooltip title="Esta coluna possui um filtro ativo">
+        <Tooltip title="Esta coluna tem filtro ativo">
           <FilterAlt fontSize="small" color="primary" />
         </Tooltip>
       )}
@@ -86,7 +87,7 @@ export default function ForecastConfigsDataGrid({
     {
       field: "name",
       headerName: "Nome",
-      renderHeader: () => filteredHeader("Nome", "name"),
+      renderHeader: () => filteredHeader("Nome do perfil", "name"),
       minWidth: 220,
       flex: 1.2,
       align: "left",
@@ -100,8 +101,8 @@ export default function ForecastConfigsDataGrid({
     },
     {
       field: "table_name",
-      headerName: "base consolidada",
-      renderHeader: () => filteredHeader("base consolidada", "table_name"),
+      headerName: "Base consolidada",
+      renderHeader: () => filteredHeader("Base consolidada", "table_name"),
       minWidth: 180,
       flex: 1,
       align: "left",
@@ -126,7 +127,7 @@ export default function ForecastConfigsDataGrid({
     {
       field: "horizon_months",
       headerName: "Horizonte",
-      renderHeader: () => filteredHeader("Horizonte", "horizon_months"),
+      renderHeader: () => filteredHeader("Horizonte (meses)", "horizon_months"),
       minWidth: 100,
       align: "left",
       headerAlign: "left",
@@ -134,8 +135,8 @@ export default function ForecastConfigsDataGrid({
     },
     {
       field: "version",
-      headerName: "Versão",
-      renderHeader: () => filteredHeader("Versão", "version"),
+      headerName: "Revisão",
+      renderHeader: () => filteredHeader("Revisão", "version"),
       minWidth: 90,
       align: "left",
       headerAlign: "left",
@@ -143,7 +144,7 @@ export default function ForecastConfigsDataGrid({
     {
       field: "active",
       headerName: "Ativa",
-      renderHeader: () => filteredHeader("Ativa", "active"),
+      renderHeader: () => filteredHeader("Em uso", "active"),
       minWidth: 90,
       align: "left",
       headerAlign: "left",
@@ -155,8 +156,8 @@ export default function ForecastConfigsDataGrid({
     },
     {
       field: "updated_at",
-      headerName: "Atualizado em",
-      renderHeader: () => filteredHeader("Atualizado em", "updated_at"),
+      headerName: "Última alteração",
+      renderHeader: () => filteredHeader("Última alteração", "updated_at"),
       minWidth: 165,
       type: "dateTime",
       align: "left",
@@ -174,16 +175,16 @@ export default function ForecastConfigsDataGrid({
       headerAlign: "center",
       renderCell: ({ row }: { row: ForecastConfig }) => (
         <Stack direction="row" alignItems="center" justifyContent="center" sx={{ height: "100%" }}>
-          <Tooltip title="Executar forecast">
+          <Tooltip title="Executar previsão">
             <span>
-              <IconButton size="small" color="primary" disabled={runningConfigId === row.id} aria-label={"Executar " + row.name} onClick={(event) => { event.stopPropagation(); onRun(row); }}><PlayArrow fontSize="small" /></IconButton>
+              <RowAction kind="run" label={"Executar " + row.name} onClick={(event) => { event.stopPropagation(); onRun(row); }} disabled={runningConfigId === row.id} aria-label={"Executar " + row.name} />
             </span>
           </Tooltip>
-          <Tooltip title="Editar configuração">
-            <IconButton size="small" aria-label={"Editar " + row.name} onClick={(event) => { event.stopPropagation(); onEdit(row); }}><Edit fontSize="small" /></IconButton>
+          <Tooltip title="Alterar perfil">
+            <RowAction kind="edit" label={"Editar " + row.name} onClick={(event) => { event.stopPropagation(); onEdit(row); }} />
           </Tooltip>
-          <Tooltip title="Excluir configuração">
-            <IconButton size="small" color="error" aria-label={"Excluir " + row.name} onClick={(event) => { event.stopPropagation(); onDelete(row); }}><Delete fontSize="small" /></IconButton>
+          <Tooltip title="Remover perfil">
+            <RowAction kind="delete" label={"Remover " + row.name} onClick={(event) => { event.stopPropagation(); onDelete(row); }} />
           </Tooltip>
         </Stack>
       ),
@@ -303,7 +304,7 @@ export default function ForecastConfigsDataGrid({
 
   const exportDisplayed = () => {
     const escape = (value: unknown) => '"' + String(value ?? "").replace(/"/g, '""') + '"';
-    const header = ["Nome", "base consolidada", "Medida", "Horizonte", "Rateio", "Versão", "Ativa", "Atualizado em"];
+    const header = ["Nome do perfil", "Base consolidada", "Medida", "Horizonte (meses)", "Alocação", "Revisão", "Em uso", "Última alteração"];
     const lines = [
       header.join(";"),
       ...rows.map((config) => [
@@ -321,7 +322,7 @@ export default function ForecastConfigsDataGrid({
     const url = URL.createObjectURL(blob);
     const link = document.createElement("a");
     link.setAttribute("href", url);
-    link.setAttribute("download", "configuracoes-forecast-" + new Date().toISOString().slice(0, 10) + ".csv");
+    link.setAttribute("download", "perfis-previsao-" + new Date().toISOString().slice(0, 10) + ".csv");
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
@@ -343,7 +344,7 @@ export default function ForecastConfigsDataGrid({
           paginationMode="server"
           sortingMode="server"
           filterMode="server"
-          pageSizeOptions={[10, 25, 50]}
+          pageSizeOptions={[50, 100, 500, 1000]}
           paginationModel={paginationModel}
           sortModel={sortModel}
           filterModel={filterModel}
@@ -375,10 +376,10 @@ export default function ForecastConfigsDataGrid({
         anchorReference="anchorPosition"
         anchorPosition={context ? { top: context.mouseY, left: context.mouseX } : undefined}
       >
-        <MenuItem onClick={() => applyContextFilter("equals")}>Mostrar iguais</MenuItem>
-        <MenuItem onClick={() => applyContextFilter("notEquals")}>Mostrar diferentes</MenuItem>
-        <MenuItem disabled={!context || !activeFilters[context.field]} onClick={() => clearFilter(context?.field)}>Limpar filtro da coluna</MenuItem>
-        <MenuItem disabled={Object.keys(activeFilters).length === 0} onClick={() => clearFilter()}>Limpar todos os filtros</MenuItem>
+        <MenuItem onClick={() => applyContextFilter("equals")}>Exibir valores iguais</MenuItem>
+        <MenuItem onClick={() => applyContextFilter("notEquals")}>Exibir valores diferentes</MenuItem>
+        <MenuItem disabled={!context || !activeFilters[context.field]} onClick={() => clearFilter(context?.field)}>Remover filtro da coluna</MenuItem>
+        <MenuItem disabled={Object.keys(activeFilters).length === 0} onClick={() => clearFilter()}>Remover todos os filtros</MenuItem>
       </Menu>
 
       <Menu
@@ -391,11 +392,11 @@ export default function ForecastConfigsDataGrid({
           const field = headerContext?.field;
           setHeaderContext(null);
           if (field) apiRef.current.showColumnMenu(field);
-        }}>Opções da coluna</MenuItem>
-        <MenuItem onClick={() => { exportDisplayed(); setHeaderContext(null); }}>Exportar resultados exibidos</MenuItem>
+        }}>Configurar coluna</MenuItem>
+        <MenuItem onClick={() => { exportDisplayed(); setHeaderContext(null); }}>Exportar o que está na tela</MenuItem>
         <Divider />
-        <MenuItem disabled={!headerContext || !activeFilters[headerContext.field]} onClick={() => clearFilter(headerContext?.field)}>Limpar filtro da coluna</MenuItem>
-        <MenuItem disabled={Object.keys(activeFilters).length === 0} onClick={() => clearFilter()}>Limpar todos os filtros</MenuItem>
+        <MenuItem disabled={!headerContext || !activeFilters[headerContext.field]} onClick={() => clearFilter(headerContext?.field)}>Remover filtro da coluna</MenuItem>
+        <MenuItem disabled={Object.keys(activeFilters).length === 0} onClick={() => clearFilter()}>Remover todos os filtros</MenuItem>
       </Menu>
     </>
   );

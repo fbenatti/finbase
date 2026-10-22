@@ -21,6 +21,7 @@ import {
 } from "./ConnectionIcons";
 import { GridColDef, GridFilterModel, GridPaginationModel, GridSortModel, useGridApiRef } from "@mui/x-data-grid";
 import { SourceConnection } from "../../services/api";
+import { RowAction } from "../../components/RowAction";
 
 export type ConnectionTestMessage = {
   severity: "success" | "warning" | "error";
@@ -45,24 +46,24 @@ type Props = {
 const connectorLabels: Record<string, string> = {
   azure_blob: "Arquivos de custo Azure",
   azure_mca_invoice: "Faturas e compromissos Azure",
-  azure_pricesheet: "Preços contratados Azure",
-  azure_automation_jobs: "Automações Azure",
-  azure_resource_graph: "Inventário Azure",
-  manual_csv: "Importação de arquivos CSV",
+  azure_pricesheet: "Tabela de preços contratados (Azure)",
+  azure_automation_jobs: "Jobs de automação Azure",
+  azure_resource_graph: "Inventário de recursos Azure",
+  manual_csv: "Carga manual de CSV",
   azure_openai_ptu: "Capacidade provisionada Azure",
-  gcp_bigquery: "GCP BigQuery",
-  oci: "Oracle Cloud (OCI)",
-  mongodb_atlas: "MongoDB Atlas",
+  gcp_bigquery: "GCP: BigQuery",
+  oci: "Oracle Cloud Infrastructure (OCI)",
+  mongodb_atlas: "Atlas (MongoDB)",
   github_billing: "Faturamento GitHub",
-  github_license: "GitHub Licenças (Copilot)",
-  github_token: "GitHub Tokens (Copilot)",
-  notebooklm_license: "NotebookLM Licenças",
-  notebooklm_token: "NotebookLM Tokens",
-  claude_license: "Claude Licenças",
-  claude_token: "Claude Tokens",
-  gemini_license: "Gemini Licenças",
-  gemini_token: "Gemini Tokens",
-  gemini_notebooklm: "Gemini NotebookLM",
+  github_license: "GitHub: licenças (Copilot)",
+  github_token: "GitHub: tokens (Copilot)",
+  notebooklm_license: "NotebookLM: licenças",
+  notebooklm_token: "NotebookLM: tokens",
+  claude_license: "Claude: licenças",
+  claude_token: "Claude: tokens",
+  gemini_license: "Gemini: licenças",
+  gemini_token: "Gemini: tokens",
+  gemini_notebooklm: "Gemini e NotebookLM",
   databricks: "Consumo Databricks",
 };
 
@@ -73,10 +74,10 @@ const providerLabels: Record<string, string> = {
   gcp: "GCP",
   ibm: "IBM Cloud",
   aws: "AWS",
-  oci: "Oracle Cloud (OCI)",
-  atlas: "MongoDB Atlas",
-  mongodb: "MongoDB Atlas",
-  github: "GitHub",
+  oci: "Oracle Cloud Infrastructure (OCI)",
+  atlas: "Atlas (MongoDB)",
+  mongodb: "Atlas (MongoDB)",
+  github: "GitHub Enterprise",
   notebooklm: "NotebookLM",
   gemini: "Gemini",
   claude: "Claude",
@@ -84,7 +85,7 @@ const providerLabels: Record<string, string> = {
 };
 
 export function getProviderLabel(scope: string | null): string {
-  if (!scope) return "Não informado";
+  if (!scope) return "Sem escopo informado";
   return providerLabels[scope] || scope;
 }
 
@@ -92,40 +93,40 @@ function getConnectionSummary(connection: SourceConnection): string {
   const config = connection.config_json as Record<string, string>;
   switch (connection.connector_type) {
     case "azure_openai_ptu":
-      return [config.credential_profile || "azure-4p", "PTU operacional"].join(" · ");
+      return [config.credential_profile || "azure-4p", "PTU em produção"].join(" · ");
     case "azure_blob": {
       const location = [config.storage_account, config.container_name].filter(Boolean).join(" / ");
-      return location || "Storage e container não informados";
+      return location || "Conta e container não definidos";
     }
     case "gcp_bigquery": {
       const dataset = [config.project_id, config.dataset_id].filter(Boolean).join(" / ");
-      return dataset || config.table_name || "Projeto e dataset não informados";
+      return dataset || config.table_name || "Projeto e dataset não definidos";
     }
     case "oci":
-      return [config.region, config.tenancy_ocid || config.tenancy].filter(Boolean).join(" · ") || "Região não informada";
+      return [config.region, config.tenancy_ocid || config.tenancy].filter(Boolean).join(" · ") || "Região não definida";
     case "mongodb_atlas":
-      return [config.group_id, config.contract_type].filter(Boolean).join(" · ") || "Grupo e contrato não informados";
+      return [config.group_id, config.contract_type].filter(Boolean).join(" · ") || "Grupo e contrato não definidos";
     case "manual_csv":
-      return "Arquivo CSV enviado manualmente";
+      return "CSV carregado manualmente";
     case "github_billing":
-      return [config.enterprise_slug, "Faturamento"].filter(Boolean).join(" · ") || "Enterprise não informada";
+      return [config.enterprise_slug, "Faturamento"].filter(Boolean).join(" · ") || "Enterprise não definida";
     case "github_license":
-      return [config.enterprise_slug, "Licenças (Copilot)"].filter(Boolean).join(" · ") || "Enterprise não informada";
+      return [config.enterprise_slug, "Licenças (Copilot)"].filter(Boolean).join(" · ") || "Enterprise não definida";
     case "github_token":
-      return [config.enterprise_slug, "Tokens (Copilot)"].filter(Boolean).join(" · ") || "Enterprise não informada";
+      return [config.enterprise_slug, "Tokens (Copilot)"].filter(Boolean).join(" · ") || "Enterprise não definida";
     case "notebooklm_license":
     case "notebooklm_token":
     case "gemini_license":
     case "gemini_token":
     case "gemini_notebooklm":
-      return [config.project_id, config.project_number].filter(Boolean).join(" · ") || "Project ID não informado";
+      return [config.project_id, config.project_number].filter(Boolean).join(" · ") || "Project ID não definido";
     case "claude_license":
     case "claude_token":
-      return [config.org_id, config.org_name].filter(Boolean).join(" · ") || "Org não informada";
+      return [config.org_id, config.org_name].filter(Boolean).join(" · ") || "Org não definida";
     case "databricks":
-      return [config.server_hostname, config.table_name].filter(Boolean).join(" · ") || "Host não informado";
+      return [config.server_hostname, config.table_name].filter(Boolean).join(" · ") || "Host não definido";
     default:
-      return connection.cloud_name || "Configuração disponível ao editar";
+      return connection.cloud_name || "Detalhes visíveis ao editar";
   }
 }
 
@@ -150,7 +151,7 @@ export default function ConnectionsDataGrid({
 }: Props) {
   const apiRef = useGridApiRef();
   const [rowMenu, setRowMenu] = useState<{ anchor: HTMLElement; connection: SourceConnection } | null>(null);
-  const [paginationModel, setPaginationModel] = useState<GridPaginationModel>({ page: 0, pageSize: 25 });
+  const [paginationModel, setPaginationModel] = useState<GridPaginationModel>({ page: 0, pageSize: 50 });
   const [sortModel, setSortModel] = useState<GridSortModel>([]);
   const [filterModel, setFilterModel] = useState<GridFilterModel>({ items: [] });
   const [activeFilters, setActiveFilters] = useState<Record<string, ConnectionGridFilter>>({});
@@ -160,25 +161,25 @@ export default function ConnectionsDataGrid({
   const filteredHeader = (label: string, field: string) => (
     <Stack direction="row" alignItems="center" gap={0.5} sx={{ overflow: "hidden" }}>
       <Typography component="span" variant="inherit" fontWeight={600} noWrap>{label}</Typography>
-      {activeFilters[field] && <Tooltip title="Esta coluna possui um filtro ativo"><FilterAlt fontSize="small" color="primary" /></Tooltip>}
+      {activeFilters[field] && <Tooltip title="Filtro ativo nesta coluna"><FilterAlt fontSize="small" color="primary" /></Tooltip>}
     </Stack>
   );
   const columns = useMemo<GridColDef[]>(() => {
     const definitions: GridColDef[] = [
     {
       field: "name",
-      headerName: "Conexão",
-      renderHeader: () => filteredHeader("Conexão", "name"),
+      headerName: "Nome",
+      renderHeader: () => filteredHeader("Nome", "name"),
       minWidth: 220,
       flex: 1.15,
       renderCell: ({ row }: { row: SourceConnection }) => (
         <Stack justifyContent="center" sx={{ minWidth: 0, height: "100%" }}>
           <Typography variant="body2" fontWeight={700} noWrap>{row.name}</Typography>
-          <Typography variant="caption" color="text.secondary" noWrap>{row.cloud_name || "Sem nome de conta"}</Typography>
+          <Typography variant="caption" color="text.secondary" noWrap>{row.cloud_name || "Conta sem nome"}</Typography>
         </Stack>
       ),
     },
-    { field: "code", headerName: "Código", renderHeader: () => filteredHeader("Código", "code"), minWidth: 145, flex: 0.7 },
+    { field: "code", headerName: "Identificador", renderHeader: () => filteredHeader("Identificador", "code"), minWidth: 145, flex: 0.7 },
     {
       field: "provider",
       headerName: "Provedor",
@@ -190,15 +191,15 @@ export default function ConnectionsDataGrid({
     },
     {
       field: "connector_type",
-      headerName: "Tipo de conexão",
-      renderHeader: () => filteredHeader("Tipo de conexão", "connector_type"),
+      headerName: "Tipo de integração",
+      renderHeader: () => filteredHeader("Tipo de integração", "connector_type"),
       minWidth: 180,
       flex: 0.9,
       valueGetter: (_, row: SourceConnection) => getConnectorLabel(row.connector_type),
       renderCell: ({ row }: { row: SourceConnection }) => (
         <Stack direction="row" alignItems="center" gap={0.5} sx={{ minWidth: 0 }}>
           <Typography variant="body2" noWrap>{getConnectorLabel(row.connector_type)}</Typography>
-          {row.config_json?.marketplace === true && <Chip label="Marketplace" size="small" color="secondary" />}
+          {row.config_json?.marketplace === true && <Chip label="Oferta no marketplace" size="small" color="secondary" />}
         </Stack>
       ),
     },
@@ -217,8 +218,8 @@ export default function ConnectionsDataGrid({
     },
     {
       field: "updated_at",
-      headerName: "Atualizado em",
-      renderHeader: () => filteredHeader("Atualizado em", "updated_at"),
+      headerName: "Última atualização",
+      renderHeader: () => filteredHeader("Última atualização", "updated_at"),
       minWidth: 165,
       flex: 0.75,
       type: "dateTime",
@@ -227,19 +228,19 @@ export default function ConnectionsDataGrid({
     },
     {
       field: "test_status",
-      headerName: "Validação",
+      headerName: "Resultado do último teste",
       minWidth: 135,
       sortable: false,
       filterable: false,
       renderCell: ({ row }: { row: SourceConnection }) => {
         const persistedMessage: ConnectionTestMessage | undefined = row.last_test_status ? {
           severity: row.last_test_status === "OK" ? "success" : row.last_test_status === "PENDING" ? "warning" : "error",
-          msg: row.last_test_message || "Teste concluído sem mensagem.",
+          msg: row.last_test_message || "Teste concluído, sem detalhes.",
         } : undefined;
         const message = testMessages[row.id] || persistedMessage;
-        if (testingId === row.id) return <Chip label="Validando…" size="small" color="info" />;
-        if (!message) return <Typography variant="caption" color="text.secondary">Não validada</Typography>;
-        const label = message.severity === "success" ? "Validada" : message.severity === "warning" ? "Pendente" : "Falhou";
+        if (testingId === row.id) return <Chip label="Testando…" size="small" color="info" />;
+        if (!message) return <Typography variant="caption" color="text.secondary">Sem teste</Typography>;
+        const label = message.severity === "success" ? "Testada com sucesso" : message.severity === "warning" ? "Pendente" : "Falha no teste";
         const color = message.severity === "success" ? "success" : message.severity === "warning" ? "warning" : "error";
         const testedAt = row.last_tested_at ? formatUpdatedAt(row.last_tested_at) : "Agora";
         return (
@@ -254,7 +255,7 @@ export default function ConnectionsDataGrid({
     },
     {
       field: "actions",
-      headerName: "Ações",
+      headerName: "Operações",
       width: 104,
       sortable: false,
       filterable: false,
@@ -262,11 +263,11 @@ export default function ConnectionsDataGrid({
       headerAlign: "center",
       renderCell: ({ row }: { row: SourceConnection }) => (
         <Stack direction="row" alignItems="center" justifyContent="center" sx={{ height: "100%" }}>
-          <Tooltip title="Editar conexão">
-            <IconButton size="small" aria-label={`Editar ${row.name}`} onClick={() => onEdit(row)}><Edit fontSize="small" /></IconButton>
+          <Tooltip title="Alterar conexão">
+            <RowAction kind="edit" label={`Alterar ${row.name}`} onClick={() => onEdit(row)} />
           </Tooltip>
-          <Tooltip title="Mais ações">
-            <IconButton aria-label={`Mais ações de ${row.name}`} aria-haspopup="menu" onClick={event => setRowMenu({ anchor: event.currentTarget, connection: row })}><More /></IconButton>
+          <Tooltip title="Outras opções">
+            <IconButton aria-label={`Outras opções de ${row.name}`} aria-haspopup="menu" onClick={event => setRowMenu({ anchor: event.currentTarget, connection: row })}><More /></IconButton>
           </Tooltip>
         </Stack>
       ),
@@ -360,7 +361,7 @@ export default function ConnectionsDataGrid({
     <>
       <Box sx={{ height: 560, width: "100%" }} onContextMenu={onCellContextMenu}>
         <DataGrid
-          aria-label="Conexões de fontes de dados"
+          aria-label="Lista de conexões de dados"
           apiRef={apiRef}
           initialState={{ columns: { columnVisibilityModel: { code: false, origin: false, updated_at: false } } }}
           rows={connections}
@@ -372,7 +373,7 @@ export default function ConnectionsDataGrid({
           paginationMode="server"
           sortingMode="server"
           filterMode="server"
-          pageSizeOptions={[10, 25, 50]}
+          pageSizeOptions={[50, 100, 500, 1000]}
           paginationModel={paginationModel}
           sortModel={sortModel}
           filterModel={filterModel}
@@ -392,10 +393,10 @@ export default function ConnectionsDataGrid({
         />
       </Box>
       <Menu anchorEl={rowMenu?.anchor} open={Boolean(rowMenu)} onClose={() => setRowMenu(null)}>
-        <MenuItem disabled={testingId === rowMenu?.connection.id} onClick={() => { if (rowMenu) onTest(rowMenu.connection); setRowMenu(null); }}><ListItemIcon><Cable /></ListItemIcon>Validar conexão</MenuItem>
-        <MenuItem onClick={() => { if (rowMenu) onHistory(rowMenu.connection); setRowMenu(null); }}><ListItemIcon><History /></ListItemIcon>Ver histórico de alterações</MenuItem>
+        <MenuItem disabled={testingId === rowMenu?.connection.id} onClick={() => { if (rowMenu) onTest(rowMenu.connection); setRowMenu(null); }}><ListItemIcon><Cable /></ListItemIcon>Testar conexão</MenuItem>
+        <MenuItem onClick={() => { if (rowMenu) onHistory(rowMenu.connection); setRowMenu(null); }}><ListItemIcon><History /></ListItemIcon>Abrir log de alterações</MenuItem>
         <Divider />
-        <MenuItem sx={{ color: "error.main" }} onClick={() => { if (rowMenu) onDelete(rowMenu.connection); setRowMenu(null); }}><ListItemIcon><Delete color="error" /></ListItemIcon>Excluir conexão</MenuItem>
+        <MenuItem sx={{ color: "error.main" }} onClick={() => { if (rowMenu) onDelete(rowMenu.connection); setRowMenu(null); }}><ListItemIcon><Delete color="error" /></ListItemIcon>Remover conexão</MenuItem>
       </Menu>
       <Menu
         open={context !== null}
@@ -403,10 +404,10 @@ export default function ConnectionsDataGrid({
         anchorReference="anchorPosition"
         anchorPosition={context ? { top: context.mouseY, left: context.mouseX } : undefined}
       >
-        <MenuItem onClick={() => applyContextFilter("equals")}>Mostrar iguais</MenuItem>
-        <MenuItem onClick={() => applyContextFilter("notEquals")}>Mostrar diferentes</MenuItem>
-        <MenuItem disabled={!context || !activeFilters[context.field]} onClick={() => clearFilter(context?.field)}>Limpar filtro da coluna</MenuItem>
-        <MenuItem disabled={Object.keys(activeFilters).length === 0} onClick={() => clearFilter()}>Limpar todos os filtros</MenuItem>
+        <MenuItem onClick={() => applyContextFilter("equals")}>Filtrar iguais</MenuItem>
+        <MenuItem onClick={() => applyContextFilter("notEquals")}>Filtrar diferentes</MenuItem>
+        <MenuItem disabled={!context || !activeFilters[context.field]} onClick={() => clearFilter(context?.field)}>Remover filtro da coluna</MenuItem>
+        <MenuItem disabled={Object.keys(activeFilters).length === 0} onClick={() => clearFilter()}>Remover todos os filtros</MenuItem>
       </Menu>
       <Menu
         open={headerContext !== null}
@@ -418,10 +419,10 @@ export default function ConnectionsDataGrid({
           const field = headerContext?.field;
           setHeaderContext(null);
           if (field) apiRef.current.showColumnMenu(field);
-        }}>Opções da coluna</MenuItem>
+        }}>Configurar coluna</MenuItem>
         <Divider />
-        <MenuItem disabled={!headerContext || !activeFilters[headerContext.field]} onClick={() => clearFilter(headerContext?.field)}>Limpar filtro da coluna</MenuItem>
-        <MenuItem disabled={Object.keys(activeFilters).length === 0} onClick={() => clearFilter()}>Limpar todos os filtros</MenuItem>
+        <MenuItem disabled={!headerContext || !activeFilters[headerContext.field]} onClick={() => clearFilter(headerContext?.field)}>Remover filtro da coluna</MenuItem>
+        <MenuItem disabled={Object.keys(activeFilters).length === 0} onClick={() => clearFilter()}>Remover todos os filtros</MenuItem>
       </Menu>
     </>
   );

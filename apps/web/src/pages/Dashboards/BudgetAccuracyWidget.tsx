@@ -2,7 +2,7 @@ import { Dialog, DialogActions, DialogContent, DialogTitle } from "../../compone
 import { dataDisplayText } from "../../utils/dataPresentation";
 import { useEffect, useMemo, useState } from "react";
 import { Alert, Box, Button, Chip, CircularProgress, FormControl, FormControlLabel, IconButton, InputLabel, MenuItem, Paper, Select, Stack, ToggleButton, ToggleButtonGroup, Table, TableBody, TableCell, TableContainer, TableHead, TableRow, Switch, TextField, Tooltip, Typography } from "@mui/material";
-import { Add, ArrowDownward, ArrowUpward, EditNote, Remove } from "@mui/icons-material";
+import { AddOutlined, ArrowDownwardOutlined, ArrowUpwardOutlined, EditNoteOutlined, RemoveOutlined } from "@mui/icons-material";
 import Plot from "@/components/Plot";
 import {
   BudgetAccuracyDetail,
@@ -111,19 +111,19 @@ function BudgetRows({
             <TableRow>
               <TableCell />
               <TableCell>Projeto</TableCell>
-              <TableCell align="right">Orçamento aprovado</TableCell>
-              <TableCell align="right">Realizado</TableCell>
-              <TableCell align="right">Desvio</TableCell>
-              <TableCell align="right">Desvio (%)</TableCell>
-              <TableCell align="center">Status</TableCell>
-              <TableCell>Motivo de desvio</TableCell>
+              <TableCell align="right">Meta aprovada</TableCell>
+              <TableCell align="right">Efetivado</TableCell>
+              <TableCell align="right">Variação</TableCell>
+              <TableCell align="right">Variação (%)</TableCell>
+              <TableCell align="center">Situação</TableCell>
+              <TableCell>Causa da variação</TableCell>
             </TableRow>
           </TableHead>
           <TableBody>
             {ordered.map((line) => {
               const name =
                 line.department_levels[line.department_levels.length - 1] ||
-                "Sem projeto";
+                "Sem projeto vinculado";
               const projected =
                 (line.comparison_value ?? line.actual_value) || 0;
               const noActual = line.status === "sem_realizado";
@@ -134,12 +134,12 @@ function BudgetRows({
                   : line.variance < 0;
               const ack = acksByDepartment.get(line.department_id);
               const statusLabel = noActual
-                ? "Sem realizado"
+                ? "Sem efetivado"
                 : valid
                   ? direction === "underestimated"
-                    ? "Acima do orçamento"
-                    : "Abaixo do orçamento"
-                  : "Sem consumo";
+                    ? "Acima da meta"
+                    : "Abaixo da meta"
+                  : "Sem gasto";
               return (
                 <TableRow key={line.department_id} hover>
                   <TableCell>
@@ -148,7 +148,7 @@ function BudgetRows({
                       aria-label={`Abrir detalhe de ${name}`}
                       onClick={() => onOpen(line)}
                     >
-                      <Add />
+                      <AddOutlined />
                     </Button>
                   </TableCell>
                   <TableCell>
@@ -183,7 +183,7 @@ function BudgetRows({
                   <TableCell align="center">
                     <Tooltip title={statusLabel}>
                       <Box component="span" sx={{ display: "inline-flex", color: noActual ? "text.disabled" : line.variance > 0 ? "#DC2626" : line.variance < 0 ? "#16A34A" : "text.disabled" }}>
-                        {noActual || line.variance === 0 ? <Remove fontSize="small" /> : line.variance > 0 ? <ArrowUpward fontSize="small" /> : <ArrowDownward fontSize="small" />}
+                        {noActual || line.variance === 0 ? <RemoveOutlined fontSize="small" /> : line.variance > 0 ? <ArrowUpwardOutlined fontSize="small" /> : <ArrowDownwardOutlined fontSize="small" />}
                       </Box>
                     </Tooltip>
                   </TableCell>
@@ -194,9 +194,9 @@ function BudgetRows({
                         <Typography variant="body2">{ack.reason}</Typography>
                       </Stack>
                     ) : (
-                      <Tooltip title="Reconhecer desvio">
-                        <IconButton size="small" onClick={() => onRecognize(line)} aria-label="Reconhecer desvio" sx={{ color: "#5B00CB" }}>
-                          <EditNote fontSize="small" />
+                      <Tooltip title="Aceitar variação">
+                        <IconButton size="small" onClick={() => onRecognize(line)} aria-label="Aceitar variação" sx={{ color: "#0B3FA8" }}>
+                          <EditNoteOutlined fontSize="small" />
                         </IconButton>
                       </Tooltip>
                     )}
@@ -216,7 +216,7 @@ function BudgetRows({
       </TableContainer>
       {rows.length > 5 && (
         <Button size="small" sx={{ mt: 0.5 }} onClick={onToggle}>
-          {expanded ? "Ver menos" : "Ver tudo"}
+          {expanded ? "Mostrar menos" : "Mostrar tudo"}
         </Button>
       )}
       <Typography
@@ -225,8 +225,8 @@ function BudgetRows({
         sx={{ display: "block", mt: 0.25 }}
       >
         {direction === "underestimated"
-          ? "Ordenado do menor desvio para o maior, incluindo projetos com orçamento sem realizado."
-          : "Ordenado do maior valor economizado para o menor."}
+          ? "Da menor variação para a maior, incluindo projetos com orçamento sem efetivado."
+          : "Do maior valor economizado para o menor."}
       </Typography>
     </Box>
   );
@@ -399,7 +399,7 @@ function BudgetPanel({ department }: { department?: string }) {
         gap={1}
       >
         <Box>
-          <Typography variant="h6">Acurácia de orçamento</Typography>
+          <Typography variant="h6">Aderência à meta</Typography>
         </Box>
         <Stack direction="row" gap={1}>
           <FormControl size="small" sx={{ minWidth: 100 }}>
@@ -484,7 +484,7 @@ function BudgetPanel({ department }: { department?: string }) {
           >
             <DialogTitle>
               {detail?.department_levels[detail.department_levels.length - 1] ||
-                "Detalhe do projeto"}{" "}
+                "Detalhe por projeto"}{" "}
               · visão anual {year}
             </DialogTitle>
             <DialogContent>
@@ -501,14 +501,14 @@ function BudgetPanel({ department }: { department?: string }) {
                       flexWrap="wrap"
                     >
                       <Chip
-                        label={`Orçamento anual: ${money.format(detailBudget)}`}
+                        label={`Meta anual: ${money.format(detailBudget)}`}
                       />
                       <Chip
                         color="primary"
-                        label={`Realizado + Forecast: ${money.format(detailProjected)}`}
+                        label={`Efetivado + Previsão: ${money.format(detailProjected)}`}
                       />
                       <Chip
-                        label={`Realizado: ${money.format(detailActual)}`}
+                        label={`Efetivado: ${money.format(detailActual)}`}
                       />
                       <Chip
                         label={`Forecast: ${money.format(detailForecast)}`}
@@ -521,14 +521,14 @@ function BudgetPanel({ department }: { department?: string }) {
                         color={detailVariance < 0 ? "error" : "success"}
                         label={
                           detailVariance < 0
-                            ? "Fora do orçamento"
-                            : "Dentro do orçamento"
+                            ? "Acima da meta"
+                            : "Dentro da meta"
                         }
                       />
                     </Stack>
                     <ToggleButtonGroup exclusive size="small" value={detailTab} onChange={(_, value: number | null) => { if (value !== null) setDetailTab(value); }}>
-                      <ToggleButton value={0}>Visão anual</ToggleButton>
-                      <ToggleButton value={1}>Registrar desvio</ToggleButton>
+                      <ToggleButton value={0}>Visão do ano</ToggleButton>
+                      <ToggleButton value={1}>Registrar variação</ToggleButton>
                     </ToggleButtonGroup>
                     {detailTab === 0 ? (
                       <>
@@ -544,8 +544,8 @@ function BudgetPanel({ department }: { department?: string }) {
                                 y: detail.monthly.map(
                                   (item) => item.actual_value,
                                 ),
-                                type: "bar",
-                                name: "Realizado",
+                                type: "bar" as const,
+                                name: "Efetivado",
                                 marker: { color: "#F2A900" },
                               },
                               {
@@ -555,7 +555,7 @@ function BudgetPanel({ department }: { department?: string }) {
                                 y: detail.monthly.map(
                                   (item) => item.forecast_value,
                                 ),
-                                type: "bar",
+                                type: "bar" as const,
                                 name: "Forecast",
                                 marker: { color: "#22C55E" },
                               },
@@ -569,7 +569,7 @@ function BudgetPanel({ department }: { department?: string }) {
                                 type: "scatter",
                                 mode: "lines+markers",
                                 name: "Orçamento",
-                                line: { color: "#5A6378", width: 3 },
+                                line: { color: "#526777", width: 3 },
                               },
                             ]}
                             layout={{
@@ -617,12 +617,12 @@ function BudgetPanel({ department }: { department?: string }) {
                                   }
                                 />
                               }
-                              label="Incluir Outros"
+                              label="Incluir demais projetos"
                             />
                           </Stack>
                           <Typography variant="body2" color="text.secondary">
                             Top 5 anual do projeto, com a opção de detalhar
-                            outras categorias na tela de Acurácia de Orçamento.
+                            outras categorias na tela de Aderência à meta.
                           </Typography>
                           <Plot
                             data={[
@@ -631,14 +631,14 @@ function BudgetPanel({ department }: { department?: string }) {
                                   point.period.slice(4),
                                 ),
                                 y: item.monthly_values,
-                                type: "bar",
+                                type: "bar" as const,
                                 name: item.name,
                                 marker: {
                                   color: [
-                                    "#4338CA",
-                                    "#0F766E",
+                                    "#0F62FE",
+                                    "#0F62FE",
                                     "#F2A900",
-                                    "#7C3AED",
+                                    "#64748B",
                                     "#DC2626",
                                   ][index],
                                 },
@@ -652,7 +652,7 @@ function BudgetPanel({ department }: { department?: string }) {
                                       y: detail.others_monthly,
                                       type: "bar" as const,
                                       name: "Outros",
-                                      marker: { color: "#8A93A8" },
+                                      marker: { color: "#8497A8" },
                                     },
                                   ]
                                 : []),
@@ -678,7 +678,7 @@ function BudgetPanel({ department }: { department?: string }) {
                     ) : (
                       <Stack spacing={2} sx={{ maxWidth: 720, py: 2 }}>
                         <Typography variant="body2" color="text.secondary">
-                          Registre a categoria e o motivo do desvio para este
+                          Registre a categoria e o motivo da variação para este
                           projeto.
                         </Typography>
                         <FormControl fullWidth>
@@ -704,7 +704,7 @@ function BudgetPanel({ department }: { department?: string }) {
                           </Select>
                         </FormControl>
                         <TextField
-                          label="Motivo do desvio"
+                          label="Justificativa da variação"
                           value={ackReason}
                           onChange={(event) => setAckReason(event.target.value)}
                           multiline
@@ -720,7 +720,7 @@ function BudgetPanel({ department }: { department?: string }) {
                         >
                           {savingAck
                             ? "Salvando..."
-                            : "Registrar reconhecimento"}
+                            : "Registrar aceite"}
                         </Button>
                       </Stack>
                     )}
@@ -755,8 +755,8 @@ export default function AccuracyWidget({
       }}
     >
       <ToggleButtonGroup exclusive size="small" value={tab} onChange={(_, value: number | null) => { if (value !== null) setTab(value); }} sx={{ mb: 2 }}>
-        <ToggleButton value={0}>Acurácia de projeções</ToggleButton>
-        <ToggleButton value={1}>Acurácia do orçamento</ToggleButton>
+        <ToggleButton value={0}>Precisão das previsões</ToggleButton>
+        <ToggleButton value={1}>Aderência à meta</ToggleButton>
       </ToggleButtonGroup>
       {tab === 0 ? (
         <AcksWidget department={department} />

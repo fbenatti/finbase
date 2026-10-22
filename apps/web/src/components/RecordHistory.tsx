@@ -1,8 +1,10 @@
 import { dataDisplayText } from "../utils/dataPresentation";
-import { Box, Chip, CircularProgress, Stack, Typography, Alert, Divider, Avatar, IconButton, Tooltip } from "@mui/material";
+import { Alert, Box, CircularProgress, Stack, Typography } from "@mui/material";
 import { useEffect, useState } from "react";
 import { api } from "../services/api";
 import { FIELD_LABELS } from "../audit/fieldLabels";
+import { colors, radius } from "../theme/tokens";
+import VersionTimeline, { type TimelineItem } from "./VersionTimeline";
 
 export interface HistoryEvent {
   id: number;
@@ -15,45 +17,43 @@ export interface HistoryEvent {
   has_full_snapshot: boolean;
 }
 
-const ACTION_META: Record<string, { label: string; color: "success" | "primary" | "error" | "default" }> = {
-  create: { label: "Criado", color: "success" },
-  update: { label: "Alterado", color: "primary" },
-  delete: { label: "Excluído", color: "error" },
-  execute: { label: "Executado", color: "default" },
-  login: { label: "Login", color: "default" },
-  logout: { label: "Logout", color: "default" },
-  failed: { label: "Falhou", color: "error" },
+const ACTION_META: Record<string, { label: string; tone: "success" | "primary" | "error" | "neutral" }> = {
+  create: { label: "Criação", tone: "success" },
+  update: { label: "Alteração", tone: "primary" },
+  delete: { label: "Exclusão", tone: "error" },
+  execute: { label: "Execução", tone: "neutral" },
+  login: { label: "Acesso", tone: "neutral" },
+  logout: { label: "Saída", tone: "neutral" },
+  failed: { label: "Falha", tone: "error" },
+};
+
+const SUMMARY_BY_ACTION: Record<string, string> = {
+  create: "Objeto criado",
+  delete: "Objeto excluído",
 };
 
 function fmt(value: unknown): string {
-  if (value === null || value === undefined) return "—";
+  if (value === null || value === undefined || value === "") return "—";
   if (typeof value === "object") return JSON.stringify(value);
   return String(value);
-}
-
-function fmtDate(iso: string): string {
-  const d = new Date(iso);
-  return d.toLocaleString("pt-BR", { day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit" });
 }
 
 function Snapshots({ eventId, module, entityType, entityId }: { eventId: number; module: string; entityType: string; entityId: number | string }) {
   const [data, setData] = useState<any>(null);
   const [error, setError] = useState(false);
   useEffect(() => {
-    api.get(`/audit/history/${module}/${entityType}/${entityId}/${eventId}`).then((r) => setData(r.data)).catch(() => setError(true));
+    api.get(`/administracao/auditoria/historico/${module}/${entityType}/${entityId}/${eventId}`).then((r) => setData(r.data)).catch(() => setError(true));
   }, [eventId, module, entityType, entityId]);
-  if (error) return <Typography variant="caption" color="error">Falha ao carregar detalhe</Typography>;
-  if (!data) return <CircularProgress size={16} />;
+  if (error) return <Typography variant="caption" color="error">Não foi possível abrir o detalhe</Typography>;
+  if (!data) return <CircularProgress size={16} sx={{ mt: 1 }} />;
   return (
-    <Stack direction={{ xs: "column", md: "row" }} spacing={1} sx={{ mt: 1 }}>
-      <Box flex={1} sx={{ bgcolor: "#fafafa", p: 1, borderRadius: 1, overflow: "auto", maxHeight: 220 }}>
-        <Typography variant="caption" fontWeight={700}>Antes</Typography>
-        <pre style={{ fontSize: 11, margin: 0 }}>{JSON.stringify(data.before_json ?? null, null, 2)}</pre>
-      </Box>
-      <Box flex={1} sx={{ bgcolor: "#f0f7ff", p: 1, borderRadius: 1, overflow: "auto", maxHeight: 220 }}>
-        <Typography variant="caption" fontWeight={700}>Depois</Typography>
-        <pre style={{ fontSize: 11, margin: 0 }}>{JSON.stringify(data.after_json ?? null, null, 2)}</pre>
-      </Box>
+    <Stack direction={{ xs: "column", md: "row" }} spacing={1} sx={{ mt: 1.25 }}>
+      {[{ title: "Antes da alteração", value: data.before_json, bg: colors.raised }, { title: "Depois da alteração", value: data.after_json, bg: colors.brandTint }].map(side => (
+        <Box key={side.title} flex={1} sx={{ bgcolor: side.bg, border: `1px solid ${colors.border}`, p: 1.25, borderRadius: radius.control, overflow: "auto", maxHeight: 220 }}>
+          <Typography variant="caption" fontWeight={700} color={colors.textSecondary}>{side.title}</Typography>
+          <Box component="pre" sx={{ fontSize: 11, m: 0, mt: 0.5, fontFamily: "monospace" }}>{JSON.stringify(side.value ?? null, null, 2)}</Box>
+        </Box>
+      ))}
     </Stack>
   );
 }
@@ -61,56 +61,36 @@ function Snapshots({ eventId, module, entityType, entityId }: { eventId: number;
 export default function RecordHistory({ module, entityType, entityId }: { module: string; entityType: string; entityId: number | string }) {
   const [events, setEvents] = useState<HistoryEvent[] | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [expanded, setExpanded] = useState<number | null>(null);
 
   useEffect(() => {
     setEvents(null);
     setError(null);
-    api.get(`/audit/history/${module}/${entityType}/${entityId}`)
+    api.get(`/administracao/auditoria/historico/${module}/${entityType}/${entityId}`)
       .then((r) => setEvents(r.data))
-      .catch((e) => setError(e?.response?.data?.detail || "Erro ao carregar histórico"));
+      .catch((e) => setError(e?.response?.data?.detail || "Não foi possível carregar o histórico"));
   }, [module, entityType, entityId]);
 
   if (error) return <Alert severity="info" sx={{ mt: 1 }}>Histórico indisponível ({dataDisplayText(error)})</Alert>;
   if (!events) return <Box sx={{ display: "flex", justifyContent: "center", p: 3 }}><CircularProgress size={22} /></Box>;
-  if (events.length === 0) return <Typography color="text.secondary" sx={{ py: 3, textAlign: "center" }}>Nenhuma alteração registrada</Typography>;
 
-  return (
-    <Box sx={{ mt: 1 }}>
-      {events.map((ev) => {
-        const meta = ACTION_META[ev.action] || { label: ev.action, color: "default" as const };
-        const initials = (ev.user?.username || "?").slice(0, 2).toUpperCase();
-        return (
-          <Box key={ev.id} sx={{ display: "flex", gap: 1.5, py: 1 }}>
-            <Avatar sx={{ width: 30, height: 30, fontSize: 12 }}>{initials}</Avatar>
-            <Box flex={1} sx={{ borderBottom: "1px solid #eee", pb: 1 }}>
-              <Stack direction="row" alignItems="center" spacing={1} flexWrap="wrap">
-                <Typography variant="body2" fontWeight={600}>{ev.user?.username || "—"}</Typography>
-                <Typography variant="caption" color="text.secondary">{fmtDate(ev.created_at)}</Typography>
-                <Chip size="small" label={meta.label} color={meta.color} variant="outlined" sx={{ height: 20 }} />
-                {ev.has_full_snapshot && (
-                  <Tooltip title="Ver snapshots completos">
-                    <IconButton size="small" onClick={() => setExpanded(expanded === ev.id ? null : ev.id)}>
-                      <span style={{ fontSize: 14 }}>{expanded === ev.id ? "▾" : "▸"}</span>
-                    </IconButton>
-                  </Tooltip>
-                )}
-              </Stack>
-              {ev.action === "create" && <Typography variant="body2" color="text.secondary">Registro criado</Typography>}
-              {ev.action === "delete" && <Typography variant="body2" color="text.secondary">Registro excluído</Typography>}
-              {ev.changes && ev.changes.map((c, i) => {
-                const label = FIELD_LABELS[module]?.[c.field] || c.field;
-                return (
-                  <Typography key={i} variant="body2" sx={{ my: 0.25 }}>
-                    <b>{label}</b>: {fmt(c.old)} → {fmt(c.new)}
-                  </Typography>
-                );
-              })}
-              {expanded === ev.id && <Snapshots eventId={ev.id} module={module} entityType={entityType} entityId={entityId} />}
-            </Box>
-          </Box>
-        );
-      })}
-    </Box>
-  );
+  const items: TimelineItem[] = events.map(ev => {
+    const meta = ACTION_META[ev.action] ?? { label: ev.action, tone: "neutral" as const };
+    const changes = (ev.changes ?? []).map(c => ({
+      label: FIELD_LABELS[module]?.[c.field] || c.field,
+      from: fmt(c.old),
+      to: fmt(c.new),
+    }));
+    return {
+      id: ev.id,
+      title: meta.label,
+      date: ev.created_at,
+      author: ev.user?.full_name || ev.user?.username || null,
+      tag: { label: meta.label, tone: meta.tone },
+      summary: SUMMARY_BY_ACTION[ev.action],
+      changes,
+      details: ev.has_full_snapshot ? <Snapshots eventId={ev.id} module={module} entityType={entityType} entityId={entityId} /> : undefined,
+    };
+  });
+
+  return <VersionTimeline items={items} emptyText="Nenhuma mudança registrada" />;
 }

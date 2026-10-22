@@ -19,7 +19,7 @@ from app.models.etl_task import EtlTask
 from app.services.forecast_service import fetch_metadata, gold_date_expr, validate_config
 from app.services.trino_service import execute as trino_execute
 
-router = APIRouter(prefix="/forecast", tags=["forecast"])
+router = APIRouter(prefix="/projecoes", tags=["forecast"])
 
 class ConnectionAllocationRuleIn(BaseModel):
     connection_id: int | None = None
@@ -406,14 +406,14 @@ def _apply_destination_suggestions(dest: DestinationTable, metadata: dict[str, A
     metadata["default_period_allocation"] = "none"
     return metadata
 
-@router.get("/metadata/{destination_table_id}")
+@router.get("/metadados/{destination_table_id}")
 async def metadata(destination_table_id: int, db: AsyncSession = Depends(get_db)):
     dest, result = await _dest_metadata(db, destination_table_id)
     result = _apply_destination_suggestions(dest, result)
     result.update(destination_table_id=destination_table_id, destination_table=dest.physical_name, default_type="realizado")
     return result
 
-@router.get("/configs")
+@router.get("/configuracoes")
 async def list_configs(db: AsyncSession = Depends(get_db)):
     rows = (await db.execute(
         select(ForecastConfig, DestinationTable.name)
@@ -422,7 +422,7 @@ async def list_configs(db: AsyncSession = Depends(get_db)):
     )).all()
     return [{**_out(row), "table_name": table_name} for row, table_name in rows]
 
-@router.get("/configs/grid")
+@router.get("/configuracoes/grade")
 async def list_configs_grid(
     limit: int = Query(25, ge=1, le=100),
     offset: int = Query(0, ge=0),
@@ -521,7 +521,7 @@ async def list_configs_grid(
     } for row, name in rows]
     return {"items": items, "total": total}
 
-@router.post("/configs", status_code=201)
+@router.post("/configuracoes", status_code=201)
 async def create_config(body: ConfigIn, db: AsyncSession = Depends(get_db)):
     row = ForecastConfig(**body.model_dump()); db.add(row); await db.commit(); await db.refresh(row)
     # A FOCUS configuration is usable out of the box: the editable business
@@ -529,7 +529,7 @@ async def create_config(body: ConfigIn, db: AsyncSession = Depends(get_db)):
     await ensure_provider_forecast_rules(db, config_id=row.id)
     return _out(row)
 
-@router.put("/configs/{config_id}")
+@router.put("/configuracoes/{config_id}")
 async def update_config(config_id: int, body: ConfigIn, db: AsyncSession = Depends(get_db)):
     row = await db.get(ForecastConfig, config_id)
     if not row: raise HTTPException(404, "Configuração não encontrada")
@@ -537,7 +537,7 @@ async def update_config(config_id: int, body: ConfigIn, db: AsyncSession = Depen
     row.version += 1; await db.commit(); await db.refresh(row)
     return _out(row)
 
-@router.delete("/configs/{config_id}", status_code=204)
+@router.delete("/configuracoes/{config_id}", status_code=204)
 async def delete_config(config_id: int, db: AsyncSession = Depends(get_db)):
     row = await db.get(ForecastConfig, config_id)
     if not row: raise HTTPException(404, "Configuração não encontrada")
@@ -550,7 +550,7 @@ async def delete_config(config_id: int, db: AsyncSession = Depends(get_db)):
         run.forecast_config_id = None
     await db.delete(row); await db.commit()
 
-@router.post("/configs/{config_id}/duplicate", status_code=201)
+@router.post("/configuracoes/{config_id}/duplicar", status_code=201)
 async def duplicate_config(config_id: int, db: AsyncSession = Depends(get_db)):
     src = await db.get(ForecastConfig, config_id)
     if not src: raise HTTPException(404, "Configuração não encontrada")
@@ -559,7 +559,7 @@ async def duplicate_config(config_id: int, db: AsyncSession = Depends(get_db)):
     row = ForecastConfig(**values); db.add(row); await db.commit(); await db.refresh(row)
     return _out(row)
 
-@router.post("/configs/{config_id}/validate")
+@router.post("/configuracoes/{config_id}/validar")
 async def validate(config_id: int, db: AsyncSession = Depends(get_db)):
     row = await db.get(ForecastConfig, config_id)
     if not row: raise HTTPException(404, "Configuração não encontrada")
@@ -579,14 +579,14 @@ async def validate(config_id: int, db: AsyncSession = Depends(get_db)):
         if not rule.start_period or len(rule.start_period) != 6: errors.append(f"Regra '{rule.name}': período inicial deve ser YYYYMM")
     return {"valid": not errors, "errors": errors, "metadata": meta}
 
-@router.get("/configs/{config_id}/business-rules")
+@router.get("/configuracoes/{config_id}/regras-negocio")
 async def list_business_rules(config_id: int, db: AsyncSession = Depends(get_db)):
     if not await db.get(ForecastConfig, config_id): raise HTTPException(404, "Configuração não encontrada")
     await ensure_provider_forecast_rules(db, config_id=config_id)
     rows = (await db.execute(select(ForecastBusinessRule).where(ForecastBusinessRule.forecast_config_id == config_id).order_by(ForecastBusinessRule.priority, ForecastBusinessRule.id))).scalars().all()
     return [_out(r) for r in rows]
 
-@router.get("/configs/{config_id}/business-rules/grid")
+@router.get("/configuracoes/{config_id}/regras-negocio/grade")
 async def list_business_rules_grid(
     config_id: int,
     limit: int = Query(25, ge=1, le=100),
@@ -687,14 +687,14 @@ async def _validate_rule_fields(config_id: int, body: BusinessRuleIn, db: AsyncS
     if body.end_period and (len(body.end_period) != 6 or not body.end_period.isdigit()): raise HTTPException(422, "end_period deve estar em YYYYMM")
     return config
 
-@router.post("/configs/{config_id}/business-rules", status_code=201)
+@router.post("/configuracoes/{config_id}/regras-negocio", status_code=201)
 async def create_business_rule(config_id: int, body: BusinessRuleIn, db: AsyncSession = Depends(get_db)):
     await _validate_rule_fields(config_id, body, db)
     row = ForecastBusinessRule(forecast_config_id=config_id, **body.model_dump())
     db.add(row); await db.commit(); await db.refresh(row)
     return _out(row)
 
-@router.put("/business-rules/{rule_id}")
+@router.put("/regras-negocio/{rule_id}")
 async def update_business_rule(rule_id: int, body: BusinessRuleIn, db: AsyncSession = Depends(get_db)):
     row = await db.get(ForecastBusinessRule, rule_id)
     if not row: raise HTTPException(404, "Regra de forecast não encontrada")
@@ -703,18 +703,18 @@ async def update_business_rule(rule_id: int, body: BusinessRuleIn, db: AsyncSess
     row.version += 1; await db.commit(); await db.refresh(row)
     return _out(row)
 
-@router.delete("/business-rules/{rule_id}", status_code=204)
+@router.delete("/regras-negocio/{rule_id}", status_code=204)
 async def delete_business_rule(rule_id: int, db: AsyncSession = Depends(get_db)):
     row = await db.get(ForecastBusinessRule, rule_id)
     if not row: raise HTTPException(404, "Regra de forecast não encontrada")
     await db.delete(row); await db.commit()
 
-@router.get("/configs/{config_id}/adjustments")
+@router.get("/configuracoes/{config_id}/ajustes")
 async def list_adjustments(config_id: int, db: AsyncSession = Depends(get_db)):
     rows = (await db.execute(select(ForecastAdjustment).where(ForecastAdjustment.forecast_config_id == config_id).order_by(ForecastAdjustment.priority))).scalars().all()
     return [_out(r) for r in rows]
 
-@router.post("/configs/{config_id}/adjustments", status_code=201)
+@router.post("/configuracoes/{config_id}/ajustes", status_code=201)
 async def create_adjustment(config_id: int, body: AdjustmentIn, db: AsyncSession = Depends(get_db)):
     allowed = {"PERCENTAGE", "FIXED_VALUE", "ADD_VALUE", "SUBTRACT_VALUE", "ZERO", "CUSTOM_GROWTH"}
     if body.adjustment_type not in allowed: raise HTTPException(422, "Tipo de ajuste inválido")
@@ -722,7 +722,7 @@ async def create_adjustment(config_id: int, body: AdjustmentIn, db: AsyncSession
     row = ForecastAdjustment(forecast_config_id=config_id, **body.model_dump()); db.add(row); await db.commit(); await db.refresh(row)
     return _out(row)
 
-@router.put("/adjustments/{adjustment_id}")
+@router.put("/ajustes/{adjustment_id}")
 async def update_adjustment(adjustment_id: int, body: AdjustmentIn, db: AsyncSession = Depends(get_db)):
     row = await db.get(ForecastAdjustment, adjustment_id)
     if not row: raise HTTPException(404, "Ajuste não encontrado")
@@ -732,13 +732,13 @@ async def update_adjustment(adjustment_id: int, body: AdjustmentIn, db: AsyncSes
     await db.commit(); await db.refresh(row)
     return _out(row)
 
-@router.delete("/adjustments/{adjustment_id}", status_code=204)
+@router.delete("/ajustes/{adjustment_id}", status_code=204)
 async def delete_adjustment(adjustment_id: int, db: AsyncSession = Depends(get_db)):
     row = await db.get(ForecastAdjustment, adjustment_id)
     if not row: raise HTTPException(404, "Ajuste não encontrado")
     await db.delete(row); await db.commit()
 
-@router.post("/runs", status_code=201)
+@router.post("/execucoes", status_code=201)
 async def create_run(config_id: int, trigger_type: str = "MANUAL", simulated_as_of: str | None = None, db: AsyncSession = Depends(get_db)):
     config = await db.get(ForecastConfig, config_id)
     if not config: raise HTTPException(404, "Configuração não encontrada")
@@ -809,7 +809,7 @@ async def create_run(config_id: int, trigger_type: str = "MANUAL", simulated_as_
     await db.commit(); await db.refresh(row)
     return {"run_id": row.id, "task_id": task.id, "status": row.status}
 
-@router.get("/runs")
+@router.get("/execucoes")
 async def list_runs(db: AsyncSession = Depends(get_db)):
     rows = (await db.execute(select(ForecastRun).order_by(ForecastRun.started_at.desc()).limit(100))).scalars().all()
     items = [_out(r) for r in rows]
@@ -817,7 +817,7 @@ async def list_runs(db: AsyncSession = Depends(get_db)):
         item["simulated_as_of"] = (run.config_snapshot or {}).get("simulated_as_of")
     return items
 
-@router.get("/runs/grid")
+@router.get("/execucoes/grade")
 async def list_runs_grid(
     limit: int = Query(25, ge=1, le=100),
     offset: int = Query(0, ge=0),
@@ -920,7 +920,7 @@ async def list_runs_grid(
     } for run, name in rows]
     return {"items": items, "total": total}
 
-@router.get("/runs/{run_id}/history/metadata")
+@router.get("/execucoes/{run_id}/historico/metadados")
 async def history_metadata(run_id: int, db: AsyncSession = Depends(get_db)):
     run, snapshot, schema = await _history_context(run_id, db)
     dimensions = [field for field in snapshot.get("dimensions", []) if field in schema]
@@ -931,7 +931,7 @@ async def history_metadata(run_id: int, db: AsyncSession = Depends(get_db)):
         "default_columns": ["forecast_month"], "types": ["realizado", "forecast"],
     }
 
-@router.post("/runs/{run_id}/history/pivot")
+@router.post("/execucoes/{run_id}/historico/dinamica")
 async def history_pivot(run_id: int, body: HistoryPivotIn, db: AsyncSession = Depends(get_db)):
     run, snapshot, schema = await _history_context(run_id, db)
     rows, columns = _validate_history_request(body, snapshot, schema)
@@ -950,7 +950,7 @@ async def history_pivot(run_id: int, body: HistoryPivotIn, db: AsyncSession = De
         raise HTTPException(503, f"Falha ao consultar snapshot de forecast: {exc}")
     return {"run_id": run_id, "comparison": False, "rows": rows, "columns": columns, "records": records, "offset": body.offset, "limit": body.row_limit}
 
-@router.post("/runs/{run_id}/history/comparison")
+@router.post("/execucoes/{run_id}/historico/comparacao")
 async def history_comparison(run_id: int, body: HistoryPivotIn, db: AsyncSession = Depends(get_db)):
     run, snapshot, schema = await _history_context(run_id, db)
     rows, columns = _validate_history_request(body, snapshot, schema)
@@ -1015,7 +1015,7 @@ async def history_comparison(run_id: int, body: HistoryPivotIn, db: AsyncSession
     return {"run_id": run_id, "comparison": True, "rows": rows, "columns": columns, "records": records, "offset": body.offset, "limit": body.row_limit, "wape": (wape_result[0].get("wape") if wape_result else None), "compared_at": datetime.utcnow().isoformat() + "Z"}
 
 # ---------------------------------------------------------------------------
-# Acurácia de Forecast (snapshots simulados mês a mês)
+# Precisão de Forecast (snapshots simulados mês a mês)
 # ---------------------------------------------------------------------------
 
 def _month_after(as_of: date) -> str:
@@ -1101,7 +1101,7 @@ def _daily_gold_actual_context(snapshot: dict[str, Any]) -> tuple[str, str, str,
 def _accuracy_snapshot_context(run: ForecastRun, snapshot: dict[str, Any], schema: dict[str, str]) -> tuple[str, str, str, str, str | None, str]:
     """Return (result_table, actual_source, date_expr, measure, type_col, type_filter)."""
     if not snapshot.get("destination_physical_name") or not snapshot.get("measure_column") or not snapshot.get("date_column"):
-        raise HTTPException(422, "Snapshot sem contrato congelado; acurácia não disponível")
+        raise HTTPException(422, "Snapshot sem contrato congelado; precisão não disponível")
     actual_source, date_expr, measure, type_col, type_filter = _accuracy_actual_context(snapshot)
     return run.result_table, actual_source, date_expr, measure, type_col, type_filter
 
@@ -1158,7 +1158,7 @@ async def _accuracy_totals(db: AsyncSession, run: ForecastRun, target_month: str
             timeout_s=120,
         )
     except Exception as exc:
-        raise HTTPException(503, f"Falha ao calcular acurácia: {exc}")
+        raise HTTPException(503, f"Falha ao calcular precisão: {exc}")
     forecast_value = float(f_records[0].get("forecast_value") or 0) if f_records else 0.0
     actual_value = float(a_records[0].get("actual_value") or 0) if a_records else 0.0
     metrics = _accuracy_metrics(forecast_value, actual_value)
@@ -1185,7 +1185,7 @@ async def _accuracy_batch_totals(
         return {}, {}
     snapshot = dict(pairs[0][0].config_snapshot or {})
     if not snapshot.get("destination_physical_name") or not snapshot.get("measure_column"):
-        raise HTTPException(422, "Snapshot sem contrato congelado; acurácia não disponível")
+        raise HTTPException(422, "Snapshot sem contrato congelado; precisão não disponível")
     actual_source, date_expr, measure, type_col, type_filter = _accuracy_actual_context(snapshot)
     scope_filter = _department_scope_filter(department)
     mode_filter = _accuracy_mode_filter(mode)
@@ -1213,7 +1213,7 @@ async def _accuracy_batch_totals(
             timeout_s=180,
         )
     except Exception as exc:
-        raise HTTPException(503, f"Falha ao calcular acurácia: {exc}")
+        raise HTTPException(503, f"Falha ao calcular precisão: {exc}")
     fmap: dict[tuple[int, str], tuple[float, int]] = {}
     for record in f_records:
         fmap[(int(record.get("run_id") or 0), str(record.get("fmonth") or ""))] = (
@@ -1314,7 +1314,7 @@ async def _accuracy_months_items(
     return items
 
 
-@router.get("/accuracy/months")
+@router.get("/aderencia/meses")
 async def accuracy_months(
     config_id: int | None = None,
     department: str | None = None,
@@ -1334,14 +1334,14 @@ async def accuracy_months(
     )
 
 
-@router.get("/accuracy/summary")
+@router.get("/aderencia/resumo")
 async def accuracy_summary(run_id: int, target_month: str | None = None, db: AsyncSession = Depends(get_db)):
     run = await db.get(ForecastRun, run_id)
     if not run:
         raise HTTPException(404, "Execução não encontrada")
     snapshot = dict(run.config_snapshot or {})
     if not snapshot.get("simulated_as_of"):
-        raise HTTPException(422, "Esta execução não é um simulado de acurácia")
+        raise HTTPException(422, "Esta execução não é um simulado de precisão")
     target = target_month or _month_after(date.fromisoformat(str(snapshot["simulated_as_of"])))
     metrics = await _accuracy_totals(db, run, target)
     metrics.update({
@@ -1357,7 +1357,7 @@ async def accuracy_summary(run_id: int, target_month: str | None = None, db: Asy
     return metrics
 
 
-@router.get("/accuracy/dimensions")
+@router.get("/aderencia/dimensoes")
 async def accuracy_dimensions(
     run_id: int,
     target_month: str | None = None,
@@ -1371,7 +1371,7 @@ async def accuracy_dimensions(
         raise HTTPException(404, "Execução não encontrada")
     run, snapshot, schema = await _history_context(run.id, db)
     if not snapshot.get("simulated_as_of"):
-        raise HTTPException(422, "Esta execução não é um simulado de acurácia")
+        raise HTTPException(422, "Esta execução não é um simulado de precisão")
     target = target_month or _month_after(date.fromisoformat(str(snapshot["simulated_as_of"])))
     table, actual_source, date_expr, measure, _, type_filter = _accuracy_snapshot_context(run, snapshot, schema)
     available = [field for field in snapshot.get("dimensions", []) if field in schema]
@@ -1405,7 +1405,7 @@ async def accuracy_dimensions(
     try:
         records = await trino_execute(sql, timeout_s=120)
     except Exception as exc:
-        raise HTTPException(503, f"Falha ao consultar dimensões de acurácia: {exc}")
+        raise HTTPException(503, f"Falha ao consultar dimensões de precisão: {exc}")
     out = []
     for record in records:
         dim_v = record.get("dim_v")
@@ -1418,7 +1418,7 @@ async def accuracy_dimensions(
     return {"run_id": run.id, "target_month": target, "dimension": dim, "simulated_as_of": snapshot.get("simulated_as_of"), "records": out}
 
 
-@router.get("/accuracy/delta")
+@router.get("/aderencia/delta")
 async def accuracy_delta(
     run_id: int,
     target_month: str | None = None,
@@ -1434,7 +1434,7 @@ async def accuracy_delta(
         raise HTTPException(404, "Execução não encontrada")
     snapshot = dict(run.config_snapshot or {})
     if not snapshot.get("simulated_as_of"):
-        raise HTTPException(422, "Esta execução não é um simulado de acurácia")
+        raise HTTPException(422, "Esta execução não é um simulado de precisão")
     target = target_month or _month_after(date.fromisoformat(str(snapshot["simulated_as_of"])))
     table, actual_source, date_expr, measure, _, type_filter = _accuracy_snapshot_context(run, snapshot, {})
     scope_path = [part.strip() for part in (department or "").split(">") if part.strip()]
@@ -1515,7 +1515,7 @@ async def accuracy_delta(
     try:
         records = await trino_execute(sql, timeout_s=120)
     except Exception as exc:
-        raise HTTPException(503, f"Falha ao consultar delta de acurácia: {exc}")
+        raise HTTPException(503, f"Falha ao consultar delta de precisão: {exc}")
     out = []
     for record in records:
         metrics = _accuracy_metrics(record.get("forecast_value"), record.get("actual_value"))
@@ -1741,7 +1741,7 @@ async def _desvios_subcat(
 
 
 async def _resolve_accuracy_run(db: AsyncSession, run_id: int | None) -> ForecastRun:
-    """Resolve a run de acurácia pedida ou a mais recente disponível.
+    """Resolve a run de precisão pedida ou a mais recente disponível.
 
     O dashboard executivo não conhece o id da run simulada; sem esta resolução
     ele enviava um placeholder (`run_id=1`) que não existe e recebia 404. Escolher
@@ -1759,10 +1759,10 @@ async def _resolve_accuracy_run(db: AsyncSession, run_id: int | None) -> Forecas
     for candidate in runs:
         if dict(candidate.config_snapshot or {}).get("simulated_as_of"):
             return candidate
-    raise HTTPException(404, "Nenhuma execução de acurácia disponível")
+    raise HTTPException(404, "Nenhuma execução de precisão disponível")
 
 
-@router.get("/accuracy/desvios")
+@router.get("/aderencia/desvios")
 async def accuracy_desvios(
     run_id: int | None = None,
     target_month: str | None = None,
@@ -1776,7 +1776,7 @@ async def accuracy_desvios(
     run = await _resolve_accuracy_run(db, run_id)
     snapshot = dict(run.config_snapshot or {})
     if not snapshot.get("simulated_as_of"):
-        raise HTTPException(422, "Esta execução não é um simulado de acurácia")
+        raise HTTPException(422, "Esta execução não é um simulado de precisão")
     target = target_month or _month_after(date.fromisoformat(str(snapshot["simulated_as_of"])))
     scope_path = [part.strip() for part in (department or "").split(">") if part.strip()]
     departments = (await db.execute(select(Department).where(Department.active == True))).scalars().all()
@@ -1812,7 +1812,7 @@ async def accuracy_desvios(
     }
 
 
-@router.get("/accuracy/desvios/subcategories")
+@router.get("/aderencia/desvios/subcategorias")
 async def accuracy_desvios_subcategories(
     run_id: int | None = None,
     target_month: str | None = None,
@@ -1826,7 +1826,7 @@ async def accuracy_desvios_subcategories(
     run = await _resolve_accuracy_run(db, run_id)
     snapshot = dict(run.config_snapshot or {})
     if not snapshot.get("simulated_as_of"):
-        raise HTTPException(422, "Esta execução não é um simulado de acurácia")
+        raise HTTPException(422, "Esta execução não é um simulado de precisão")
     target = target_month or _month_after(date.fromisoformat(str(snapshot["simulated_as_of"])))
     leaf = [part.strip() for part in (department or "").split(">") if part.strip()]
     if not leaf:
@@ -1847,7 +1847,7 @@ def _subcategory_filter(subcategory: str) -> str:
     return f" AND TRIM(CAST(\"servicesubcategory\" AS VARCHAR)) = {_ql(subcategory)}"
 
 
-@router.get("/accuracy/delta/series")
+@router.get("/aderencia/delta/series")
 async def accuracy_delta_series(
     run_id: int | None = None,
     target_month: str | None = None,
@@ -1864,7 +1864,7 @@ async def accuracy_delta_series(
     run = await _resolve_accuracy_run(db, run_id)
     snapshot = dict(run.config_snapshot or {})
     if not snapshot.get("simulated_as_of"):
-        raise HTTPException(422, "Esta execução não é um simulado de acurácia")
+        raise HTTPException(422, "Esta execução não é um simulado de precisão")
     if not subcategory:
         raise HTTPException(422, "Informe o subcategory")
     target = target_month or _month_after(date.fromisoformat(str(snapshot["simulated_as_of"])))
@@ -1980,7 +1980,7 @@ def _severity_rank(severity: str | None) -> int:
     }.get(str(severity or "").strip().lower(), 2)
 
 
-@router.post("/accuracy/acks", status_code=201)
+@router.post("/aderencia/reconhecimentos", status_code=201)
 async def create_ack(body: AckIn, db: AsyncSession = Depends(get_db)):
     """Registra o motivo do desvio (Ack) de um departamento.
 
@@ -2037,7 +2037,7 @@ async def create_ack(body: AckIn, db: AsyncSession = Depends(get_db)):
     return _out(row)
 
 
-@router.get("/accuracy/acks")
+@router.get("/aderencia/reconhecimentos")
 async def list_acks(
     target_month: str | None = None,
     department: str | None = None,
@@ -2073,7 +2073,7 @@ async def list_acks(
     return {"items": items}
 
 
-@router.get("/accuracy/acks/range")
+@router.get("/aderencia/reconhecimentos/intervalo")
 async def list_executive_manual_acks(
     month_from: str,
     month_to: str,
@@ -2104,7 +2104,7 @@ class AckUpdateIn(BaseModel):
     registered_at: str | None = None
 
 
-@router.put("/accuracy/acks/{ack_id}")
+@router.put("/aderencia/reconhecimentos/{ack_id}")
 async def update_ack(ack_id: int, body: AckUpdateIn, db: AsyncSession = Depends(get_db)):
     """Edita o Ack preservando o histórico da versão anterior."""
     row = await db.get(ForecastAck, ack_id)
@@ -2147,7 +2147,7 @@ async def update_ack(ack_id: int, body: AckUpdateIn, db: AsyncSession = Depends(
     return out
 
 
-@router.post("/accuracy/acks/{ack_id}/deactivate")
+@router.post("/aderencia/reconhecimentos/{ack_id}/desativar")
 async def deactivate_ack(ack_id: int, db: AsyncSession = Depends(get_db)):
     """Desativa (soft-delete) um Ack: deixa de aparecer nos widgets/dashboards
     sem perder o registro nem o histórico de edições."""
@@ -2160,7 +2160,7 @@ async def deactivate_ack(ack_id: int, db: AsyncSession = Depends(get_db)):
     return _out(row)
 
 
-@router.post("/accuracy/acks/{ack_id}/activate")
+@router.post("/aderencia/reconhecimentos/{ack_id}/ativar")
 async def activate_ack(ack_id: int, db: AsyncSession = Depends(get_db)):
     """Reativa um Ack desativado."""
     row = await db.get(ForecastAck, ack_id)
@@ -2172,7 +2172,7 @@ async def activate_ack(ack_id: int, db: AsyncSession = Depends(get_db)):
     return _out(row)
 
 
-@router.delete("/accuracy/acks/{ack_id}", status_code=204)
+@router.delete("/aderencia/reconhecimentos/{ack_id}", status_code=204)
 async def delete_ack(ack_id: int, db: AsyncSession = Depends(get_db)):
     row = await db.get(ForecastAck, ack_id)
     if not row:
@@ -2181,14 +2181,14 @@ async def delete_ack(ack_id: int, db: AsyncSession = Depends(get_db)):
     await db.commit()
 
 
-@router.get("/accuracy/history")
+@router.get("/aderencia/historico")
 async def accuracy_history(
     config_id: int | None = None,
     department: str | None = None,
     mode: str = "showback",
     db: AsyncSession = Depends(get_db),
 ):
-    """Evolução da acurácia mês a mês (derivada do mesmo cálculo cacheado de /months)."""
+    """Evolução da precisão mês a mês (derivada do mesmo cálculo cacheado de /months)."""
     items = await _accuracy_months_items(config_id, db, department=department, mode=mode)
     return {"items": [
         {key: item[key] for key in (
@@ -2239,7 +2239,7 @@ async def _accuracy_eligible_months(config: ForecastConfig, dest: DestinationTab
     return {month for month in actual_months if _previous_month(month) in actual_months}
 
 
-@router.get("/accuracy/available-months")
+@router.get("/aderencia/meses-disponiveis")
 async def accuracy_available_months(config_id: int | None = None, db: AsyncSession = Depends(get_db)):
     """Months eligible for accuracy reprocessing.
 
@@ -2265,7 +2265,7 @@ async def accuracy_available_months(config_id: int | None = None, db: AsyncSessi
     return {"months": sorted(months)}
 
 
-@router.post("/accuracy/reprocess", status_code=202)
+@router.post("/aderencia/reprocessar", status_code=202)
 async def accuracy_reprocess(body: AccuracyReprocessIn, db: AsyncSession = Depends(get_db)):
     """Queue a batch that regenerates the simulated forecast snapshots for the
     given months (simulated_as_of = day 2 of each month).  The accuracy
@@ -2302,14 +2302,14 @@ async def accuracy_reprocess(body: AccuracyReprocessIn, db: AsyncSession = Depen
         ).limit(1)
     )).scalar_one_or_none()
     if active is not None:
-        raise HTTPException(409, f"Já existe reprocessamento de acurácia ativo: task {active}")
+        raise HTTPException(409, f"Já existe reprocessamento de precisão ativo: task {active}")
     now = datetime.now(timezone.utc)
     task = EtlTask(
         task_type="forecast_accuracy", status="QUEUED", destination_table_id=config.id,
         result_json={
             "config_id": config.id, "months": months, "total_months": len(months),
             "event_log": [{"at": now.isoformat(), "level": "INFO",
-                           "message": f"Reprocessar acurácia: {len(months)} meses ({months[0]}–{months[-1]})"}],
+                           "message": f"Reprocessar precisão: {len(months)} meses ({months[0]}–{months[-1]})"}],
         },
         total_blobs=len(months), processed_blobs=0, errors=[], phase=f"Na fila: {len(months)} simulado(s)",
     )
@@ -2318,13 +2318,13 @@ async def accuracy_reprocess(body: AccuracyReprocessIn, db: AsyncSession = Depen
     await db.refresh(task)
     return {"task_id": task.id, "status": task.status, "months": months}
 
-@router.get("/runs/{run_id}")
+@router.get("/execucoes/{run_id}")
 async def get_run(run_id: int, db: AsyncSession = Depends(get_db)):
     row = await db.get(ForecastRun, run_id)
     if not row: raise HTTPException(404, "Execução não encontrada")
     return _out(row)
 
-@router.post("/runs/{run_id}/cancel")
+@router.post("/execucoes/{run_id}/cancelar")
 async def cancel_run(run_id: int, db: AsyncSession = Depends(get_db)):
     row = await db.get(ForecastRun, run_id)
     if not row: raise HTTPException(404, "Execução não encontrada")
@@ -2350,19 +2350,19 @@ async def cancel_run(run_id: int, db: AsyncSession = Depends(get_db)):
         await db.commit()
     return {"run_id": run_id, "status": row.status}
 
-@router.get("/runs/{run_id}/results")
+@router.get("/execucoes/{run_id}/resultados")
 async def run_results(run_id: int, db: AsyncSession = Depends(get_db)):
     row = await db.get(ForecastRun, run_id)
     if not row: raise HTTPException(404, "Execução não encontrada")
     return {"run_id": run_id, "status": row.status, "table": row.result_table, "rows_written": row.rows_written, "selected_models": row.selected_models, "metrics": row.error_metrics}
 
-@router.get("/runs/{run_id}/backtest")
+@router.get("/execucoes/{run_id}/teste-retroativo")
 async def run_backtest(run_id: int, db: AsyncSession = Depends(get_db)):
     row = await db.get(ForecastRun, run_id)
     if not row: raise HTTPException(404, "Execução não encontrada")
     return {"run_id": run_id, "models": row.selected_models or {}, "metrics": row.error_metrics or {}}
 
-@router.get("/runs/{run_id}/export")
+@router.get("/execucoes/{run_id}/exportar")
 async def export_run(run_id: int, db: AsyncSession = Depends(get_db)):
     row = await db.get(ForecastRun, run_id)
     if not row or not row.result_table: raise HTTPException(404, "Resultado de forecast não encontrado")

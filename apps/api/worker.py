@@ -1048,7 +1048,7 @@ def consumer_main(worker_id: int):
                             task_row.finished_at = datetime.now(timezone.utc)
                         s.commit(); s.close()
 
-                elif task.task_type in ("ai_cost_relationship_reprocess", "gold_reprocess"):
+                elif task.task_type == "gold_reprocess":
                     task.status = "RUNNING"
                     task.phase = "Agregando cubos Gold e publicando as tabelas Gold"
                     from app.services.processing_logs import sync_etl_task_log

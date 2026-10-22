@@ -1,13 +1,11 @@
 import { dataDisplayText } from "../../utils/dataPresentation";
-import { useState, useEffect, useRef, useCallback } from "react";
+import { useState, useEffect, useRef, useCallback, type ReactNode } from "react";
 import { useNotifications } from "../../context/NotificationContext";
 import {
-  Box, Typography, Button, Alert, Chip, CircularProgress,
-  FormControl, InputLabel, Select, MenuItem, Checkbox, ListItemText,
-  OutlinedInput, Paper, LinearProgress, Divider, FormControlLabel, Switch,
-  TextField,
+  Box, Typography, Button, Alert, Chip, CircularProgress, Checkbox, FormControlLabel,
+  FormControl, InputLabel, Select, MenuItem, Paper, LinearProgress, Stack, ToggleButton, ToggleButtonGroup,
 } from "@mui/material";
-import { Refresh, Stop } from "@mui/icons-material";
+import { RefreshOutlined as Refresh, StopOutlined as Stop } from "@mui/icons-material";
 import {
   getDestinationTables, DestinationTable,
   getConnectionsForDestination, MappedConnection,
@@ -18,16 +16,28 @@ import {
 } from "../../services/api";
 import EmptyState from "../../components/EmptyState";
 
-const ITEM_HEIGHT = 48;
-const ITEM_PADDING_TOP = 8;
-const MenuProps = {
-  PaperProps: {
-    style: {
-      maxHeight: ITEM_HEIGHT * 4.5 + ITEM_PADDING_TOP,
-      width: 320,
-    },
-  },
+type Mode = "update" | "rebuild" | "classify";
+
+const MODE_HINTS: Record<Mode, string> = {
+  update: "Recarrega as competências escolhidas e substitui só o que mudou nelas.",
+  rebuild: "Apaga a tabela de destino e reprocessa tudo a partir das fontes. Use com cautela.",
+  classify: "Não recarrega dados. Reaplica a classificação dos projetos.",
 };
+
+function StepCard({ n, title, hint, disabled, children }: {
+  n: number; title: string; hint?: string; disabled?: boolean; children: ReactNode;
+}) {
+  return (
+    <Paper variant="outlined" sx={{ p: 2.5, opacity: disabled ? 0.55 : 1 }}>
+      <Stack direction="row" spacing={1.5} alignItems="baseline" sx={{ mb: hint ? 0.25 : 1.5 }}>
+        <Typography variant="body2" sx={{ fontWeight: 700, color: "primary.main", minWidth: 20 }}>{n}</Typography>
+        <Typography variant="subtitle1" fontWeight={700}>{title}</Typography>
+      </Stack>
+      {hint && <Typography variant="caption" color="text.secondary" component="p" sx={{ mb: 1.5, ml: 3.5 }}>{hint}</Typography>}
+      <Box sx={{ ml: { xs: 0, sm: 3.5 } }}>{children}</Box>
+    </Paper>
+  );
+}
 
 export default function ReprocessDataTab() {
   const [destTables, setDestTables] = useState<DestinationTable[]>([]);
@@ -35,13 +45,13 @@ export default function ReprocessDataTab() {
   const [selDestId, setSelDestId] = useState<number | "">("");
   const [selConnIds, setSelConnIds] = useState<number[]>([]);
   const [selPeriods, setSelPeriods] = useState<string[]>([]);
-  const [replaceExisting, setReplaceExisting] = useState(false);
-  const [classificationOnly, setClassificationOnly] = useState(false);
+  const [mode, setMode] = useState<Mode>("update");
   const [chainGoldCubes, setChainGoldCubes] = useState(false);
   const [chainGoldCubeRuleId, setChainRuleId] = useState<number | "">("");
   const [goldRules, setGoldRules] = useState<GoldCubeRule[]>([]);
   const [periods, setPeriods] = useState<AvailablePeriod[]>([]);
   const [processing, setProcessing] = useState(false);
+  const [cancelling, setCancelling] = useState(false);
   const [taskId, setTaskId] = useState<number | null>(null);
   const [taskStatus, setTaskStatus] = useState<ReprocessStatus | null>(null);
   const [result, setResult] = useState<{
@@ -63,8 +73,7 @@ export default function ReprocessDataTab() {
     return () => clearInterval(healthTimer);
   }, []);
 
-
-  // When dest table changes: load only connections with active mappings
+  // Ao trocar a tabela de destino: carrega só as fontes com mapeamento ativo
   useEffect(() => {
     if (!selDestId) {
       setMappedConns([]);
@@ -85,7 +94,7 @@ export default function ReprocessDataTab() {
       .finally(() => setLoadingConns(false));
   }, [selDestId]);
 
-  // Load periods when connection selection changes
+  // Ao mudar as fontes: carrega os meses disponíveis
   useEffect(() => {
     if (selConnIds.length === 0) { setPeriods([]); setSelPeriods([]); return; }
     setLoadingPeriods(true);
@@ -107,7 +116,7 @@ export default function ReprocessDataTab() {
       .finally(() => setLoadingPeriods(false));
   }, [selConnIds]);
 
-  // Poll task status — finds running reprocess tasks globally
+  // Acompanha as tarefas de reprocessamento
   const pollTask = useCallback((taskIds: number[]) => {
     pollRef.current = setInterval(async () => {
       try {
@@ -128,9 +137,9 @@ export default function ReprocessDataTab() {
               message: `${statuses.reduce((total, item) => total + item.rows_written, 0).toLocaleString()} linhas publicadas em ${statuses.length} fonte(s)/mês(es)`,
             });
           } else if (failed) {
-            setResult({ type: "error", message: failed.error || "Falha ao reprocessar" });
+            setResult({ type: "error", message: failed.error || "Não foi possível reprocessar" });
           } else {
-            setResult({ type: "error", message: "Processamento cancelado." });
+            setResult({ type: "error", message: "Processamento interrompido." });
           }
         }
       } catch {
@@ -141,7 +150,7 @@ export default function ReprocessDataTab() {
     }, taskIds.length > 4 ? 4000 : 2000);
   }, []);
 
-  // On mount + when dest table changes: recover running tasks from global queue
+  // Ao escolher o destino: retoma tarefas em andamento da fila global
   useEffect(() => {
     if (!selDestId) return;
     const check = async () => {
@@ -162,12 +171,10 @@ export default function ReprocessDataTab() {
       } catch { /* ignore */ }
     };
     check();
-    // Also set up periodic global check (every 5s) to catch tasks started elsewhere
     const interval = setInterval(check, 5000);
     return () => clearInterval(interval);
   }, [selDestId, pollTask]);
 
-  // Cleanup poll on unmount
   useEffect(() => {
     return () => {
       if (pollRef.current) clearInterval(pollRef.current);
@@ -181,22 +188,22 @@ export default function ReprocessDataTab() {
     setTaskId(null);
     setTaskStatus(null);
     try {
-      const res = classificationOnly
+      const res = mode === "classify"
         ? await reclassifyDest({ destination_table_id: selDestId as number, connection_ids: selConnIds, billing_periods: selPeriods })
         : await reprocessDest({
             destination_table_id: selDestId as number,
             connection_ids: selConnIds,
             billing_periods: selPeriods,
-            replace_existing: replaceExisting,
+            replace_existing: mode === "rebuild",
             chain_gold_cubes: { enabled: chainGoldCubes, rule_ids: chainGoldCubeRuleId === "" ? [] : [chainGoldCubeRuleId as number] },
           });
-      await notifications.addTaskById(res.task_id, { kind: "reprocess", title: classificationOnly ? "Reclassificar projetos" : "Reprocessar dados" });
+      await notifications.addTaskById(res.task_id, { kind: "reprocess", title: mode === "classify" ? "Refazer a classificação de projetos" : "Refazer a carga de dados" });
       setTaskId(res.task_id);
       pollTask(res.task_ids || [res.task_id]);
     } catch (e: unknown) {
       setResult({
         type: "error",
-        message: e instanceof Error ? e.message : "Erro de conexao",
+        message: e instanceof Error ? e.message : "Erro de conexão",
       });
       setProcessing(false);
     }
@@ -210,10 +217,19 @@ export default function ReprocessDataTab() {
     } catch { /* ignore */ }
   };
 
-  const selectedDestName = selDestId ? destTables.find(t => t.id === selDestId)?.name : null;
+  const changeMode = (next: Mode | null) => {
+    if (!next) return;
+    setMode(next);
+    if (next === "classify") setChainGoldCubes(false);
+  };
+
+  const selectedDest = selDestId ? destTables.find(t => t.id === selDestId) : undefined;
   const selectedPtuConns = mappedConns.filter(c => selConnIds.includes(c.id) && c.connector_type === "azure_openai_ptu");
   const isPtuReprocess = selectedPtuConns.length > 0 && selectedPtuConns.length === selConnIds.length;
 
+  const toggleConn = (id: number) => {
+    setSelConnIds(prev => prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id]);
+  };
   const togglePeriod = (p: string) => {
     setSelPeriods(prev =>
       prev.includes(p) ? prev.filter(x => x !== p) : [...prev, p]
@@ -228,244 +244,180 @@ export default function ReprocessDataTab() {
 
   const isRunning = taskStatus && (taskStatus.status === "RUNNING" || taskStatus.status === "QUEUED");
   const isQueued = taskStatus && taskStatus.status === "QUEUED";
-  const [cancelling, setCancelling] = useState(false);
   const progress = taskStatus?.progress ?? 0;
+  const busy = !!isRunning || processing;
+  const workerOk = workerHealth?.status === "ok";
+  const canRun = !!selDestId && selConnIds.length > 0 && !busy && !!workerOk;
+
+  const periodLabel = (p: AvailablePeriod) =>
+    isPtuReprocess
+      ? `${p.label || `${p.period.slice(4)}/${p.period.slice(0, 4)}`} (${p.blob_count} janelas)`
+      : `${p.period} (${p.blob_count} blobs)`;
+
+  const monthsSummary = selPeriods.length === 0 || selPeriods.length === periods.length
+    ? `todos (${periods.length} meses)`
+    : `${selPeriods.length} de ${periods.length} meses`;
 
   return (
-    <Box>
+    <Stack spacing={2}>
       {workerHealth && workerHealth.status !== "ok" && (
-        <Alert severity="error" sx={{ mb: 2 }}>
+        <Alert severity="error">
           Serviço de processamento {workerHealth.status === "offline" ? "indisponível" : "sem sinal de atividade"}. O reprocessamento será liberado quando o serviço estiver ativo.
         </Alert>
       )}
 
-      <Box sx={{ display: "flex", gap: 2, mb: 3, flexWrap: "wrap", alignItems: "flex-start" }}>
-        {/* ── Tabela Destino ── */}
-        <FormControl sx={{ minWidth: 260 }} size="small">
-          <InputLabel>Tabela Destino *</InputLabel>
-          <Select
-            value={selDestId}
-            label="Tabela Destino *"
-            onChange={(e) => setSelDestId(e.target.value as number | "")}
-            disabled={!!isRunning}
-          >
-            {destTables.map((t) => (
-              <MenuItem key={t.id} value={t.id}>{t.name}</MenuItem>
-            ))}
-          </Select>
-        </FormControl>
+      {result && (
+        <Alert severity={result.type} onClose={() => setResult(null)}>
+          {dataDisplayText(result.message)}
+        </Alert>
+      )}
 
-        {/* ── Fontes de Origem (only those with mappings) ── */}
-        <FormControl sx={{ minWidth: 320 }} size="small">
-          <InputLabel>
-            {loadingConns ? "Carregando..." : `Fontes de Origem (${selConnIds.length})`}
-          </InputLabel>
-          <Select
-            multiple
-            value={selConnIds}
-            label={`Fontes de Origem (${selConnIds.length})`}
-            onChange={(e) => setSelConnIds(e.target.value as number[])}
-            input={<OutlinedInput label={`Fontes de Origem (${selConnIds.length})`} />}
-            renderValue={(selected) => {
-              const names = mappedConns
-                .filter(c => (selected as number[]).includes(c.id))
-                .map(c => c.code);
-              return names.join(", ") || "Nenhuma";
-            }}
-            MenuProps={MenuProps}
-            disabled={!selDestId || loadingConns || !!isRunning}
-          >
-            {mappedConns.length === 0 && selDestId && !loadingConns && (
-              <MenuItem disabled><em>Nenhuma conexao mapeada</em></MenuItem>
-            )}
-            {mappedConns.map((c) => (
-              <MenuItem key={c.id} value={c.id}>
-                <Checkbox checked={selConnIds.includes(c.id)} />
-                <ListItemText
-                  primary={`${c.name} (${c.code})`}
-                  secondary={`${c.mapping_count} colunas mapeadas`}
-                />
-              </MenuItem>
-            ))}
-          </Select>
-        </FormControl>
-
-        {/* ── Meses ── */}
-        <FormControl sx={{ minWidth: 280 }} size="small">
-          <InputLabel>
-            {loadingPeriods ? "Carregando..." : `Meses (${selPeriods.length})`}
-          </InputLabel>
-          <Select
-            multiple
-            value={selPeriods}
-            label={`Meses (${selPeriods.length})`}
-            onChange={() => {}}
-            input={<OutlinedInput label={`Meses (${selPeriods.length})`} />}
-            renderValue={(selected) => {
-              const arr = selected as string[];
-              if (arr.length === 0) return `Todos (${periods.length} meses)`;
-              if (arr.length === periods.length) return `Todos (${arr.length} meses)`;
-              return `${arr.length} de ${periods.length} meses`;
-            }}
-            readOnly
-            disabled={periods.length === 0 || !!isRunning}
-          />
-        </FormControl>
-
-        {!isRunning && (
-          <>
-            <Button
-              variant="contained"
-              color="primary"
-              startIcon={<Refresh />}
-              onClick={doReprocess}
-            disabled={!selDestId || selConnIds.length === 0 || processing || workerHealth?.status !== "ok"}
-            >
-              Reprocessar
+      {busy && (
+        <Paper variant="outlined" sx={{ p: 2.5 }}>
+          <Stack direction={{ xs: "column", sm: "row" }} alignItems={{ sm: "center" }} spacing={2}>
+            <Box sx={{ flex: 1, width: "100%" }}>
+              <Typography variant="subtitle2" fontWeight={700}>
+                {selectedDest?.name ?? "Reprocessamento"} · {isQueued ? "aguardando worker" : `${Math.round(progress)}%`}
+              </Typography>
+              <LinearProgress variant={isQueued ? "indeterminate" : "determinate"} value={progress} sx={{ mt: 1, height: 8, borderRadius: 4 }} />
+              <Typography variant="caption" color="text.secondary">
+                Acompanhe também no ícone de notificações.
+              </Typography>
+            </Box>
+            <Button variant="outlined" color="error" disabled={cancelling || !taskId}
+              startIcon={cancelling ? <CircularProgress size={18} /> : <Stop />} onClick={doCancel}>
+              {cancelling ? "Interrompendo..." : "Cancelar"}
             </Button>
+          </Stack>
+        </Paper>
+      )}
+
+      {/* 1 · Destino */}
+      <StepCard n={1} title="Escolha onde gravar os dados" hint="Onde os dados serão gravados.">
+        <FormControl sx={{ minWidth: 320 }}>
+          <InputLabel>Destino dos dados</InputLabel>
+          <Select value={selDestId} label="Destino dos dados" disabled={busy}
+            onChange={(e) => setSelDestId(e.target.value as number | "")}>
+            {destTables.map((t) => <MenuItem key={t.id} value={t.id}>{t.name}</MenuItem>)}
+          </Select>
+        </FormControl>
+      </StepCard>
+
+      {/* 2 · Fontes */}
+      <StepCard n={2} title="Escolha as fontes"
+        hint="Aparecem apenas as fontes com mapeamento configurado para o destino."
+        disabled={!selDestId}>
+        {!selDestId && <Typography variant="body2" color="text.secondary">Escolha primeiro um destino.</Typography>}
+        {selDestId && loadingConns && <Typography variant="body2" color="text.secondary">Carregando fontes…</Typography>}
+        {selDestId && !loadingConns && mappedConns.length === 0 && (
+          <EmptyState message={`Nenhuma fonte mapeada para "${selectedDest?.name}". Configure em Dados › Relacionamentos.`} />
+        )}
+        {mappedConns.length > 0 && (
+          <Stack direction="row" spacing={1.5} flexWrap="wrap" useFlexGap>
+            {mappedConns.map((c) => {
+              const on = selConnIds.includes(c.id);
+              return (
+                <Paper key={c.id} variant="outlined" role="checkbox" aria-checked={on} tabIndex={0}
+                  onClick={() => !busy && toggleConn(c.id)}
+                  onKeyDown={(e) => { if ((e.key === " " || e.key === "Enter") && !busy) { e.preventDefault(); toggleConn(c.id); } }}
+                  sx={{
+                    p: 1.5, width: 260, cursor: busy ? "default" : "pointer", display: "flex", gap: 1, alignItems: "flex-start",
+                    borderColor: on ? "primary.main" : "divider", bgcolor: on ? "action.selected" : "background.paper",
+                  }}>
+                  <Checkbox size="small" checked={on} tabIndex={-1} sx={{ p: 0.5 }} />
+                  <Box sx={{ minWidth: 0 }}>
+                    <Typography variant="body2" fontWeight={600} noWrap>{c.name}</Typography>
+                    <Typography variant="caption" color="text.secondary" component="p">
+                      {c.code} · {c.mapping_count} colunas mapeadas
+                    </Typography>
+                  </Box>
+                </Paper>
+              );
+            })}
+          </Stack>
+        )}
+      </StepCard>
+
+      {/* 3 · Meses */}
+      <StepCard n={3} title="Escolha as competências"
+        hint={isPtuReprocess ? "Fonte Azure PTU: escolha uma competência. Sem seleção, busca os últimos ~93 dias." : "Sem seleção, todas as competências disponíveis entram."}
+        disabled={selConnIds.length === 0}>
+        {loadingPeriods && <Typography variant="body2" color="text.secondary">Carregando competências…</Typography>}
+        {!loadingPeriods && selConnIds.length > 0 && periods.length === 0 && (
+          <Typography variant="body2" color="text.secondary">Nenhuma competência disponível para as fontes escolhidas.</Typography>
+        )}
+        {periods.length > 0 && (
+          <>
+            <Stack direction="row" spacing={1} alignItems="center" sx={{ mb: 1.5 }}>
+              <Button size="small" onClick={selectAllPeriods} disabled={busy}>Todos ({periods.length})</Button>
+              <Button size="small" onClick={clearPeriods} disabled={busy}>Sem seleção</Button>
+              <Typography variant="caption" color="text.secondary">{monthsSummary}</Typography>
+            </Stack>
+            <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap>
+              {periods.map(p => {
+                const on = selPeriods.includes(p.period);
+                return (
+                  <Chip key={p.period} label={periodLabel(p)} size="small" disabled={busy}
+                    variant={on ? "filled" : "outlined"} color={on ? "primary" : "default"}
+                    onClick={() => togglePeriod(p.period)} sx={{ cursor: "pointer" }} />
+                );
+              })}
+            </Stack>
+          </>
+        )}
+      </StepCard>
+
+      {/* 4 · Modo */}
+      <StepCard n={4} title="Escolha o tipo de recarga" hint={MODE_HINTS[mode]} disabled={selConnIds.length === 0}>
+        <ToggleButtonGroup exclusive value={mode} disabled={busy} onChange={(_, v: Mode | null) => changeMode(v)} sx={{ flexWrap: "wrap" }}>
+          <ToggleButton value="update">Recarregar competências</ToggleButton>
+          <ToggleButton value="rebuild">Recriar tabela inteira</ToggleButton>
+          <ToggleButton value="classify">Apenas reclassificar projetos</ToggleButton>
+        </ToggleButtonGroup>
+        {mode !== "classify" && (
+          <Box sx={{ mt: 2 }}>
             <FormControlLabel
-              control={<Switch checked={replaceExisting} onChange={(e) => setReplaceExisting(e.target.checked)} color="warning" disabled={classificationOnly} />}
-              label="Reconstruir tabela completa (substituir dados antigos)"
-            />
-            <FormControlLabel
-              control={<Switch checked={classificationOnly} onChange={(e) => { setClassificationOnly(e.target.checked); if (e.target.checked) { setReplaceExisting(false); setChainGoldCubes(false); } }} color="primary" />}
-              label="Reprocessar apenas classificação dos projetos"
-            />
-            <FormControlLabel
-              control={<Switch checked={chainGoldCubes} onChange={(e) => setChainGoldCubes(e.target.checked)} color="primary" disabled={classificationOnly} />}
-              label="Materializar base consolidada na sequência (visão completa)"
+              control={<Checkbox checked={chainGoldCubes} disabled={busy} onChange={(e) => setChainGoldCubes(e.target.checked)} />}
+              label="Materializar a base consolidada ao concluir"
             />
             {chainGoldCubes && (
-              <FormControl sx={{ minWidth: 280 }} size="small">
-                <InputLabel>base consolidada</InputLabel>
-                <Select
-                  value={chainGoldCubeRuleId}
-                  label="base consolidada"
-                  onChange={(e) => setChainRuleId(e.target.value as number | "")}
-                >
-                  <MenuItem value=""><em>Todas as regras ativas</em></MenuItem>
+              <FormControl sx={{ minWidth: 320, ml: 4, mt: 1 }}>
+                <InputLabel>Base consolidada de destino</InputLabel>
+                <Select value={chainGoldCubeRuleId} label="Base consolidada de destino" disabled={busy}
+                  onChange={(e) => setChainRuleId(e.target.value as number | "")}>
+                  <MenuItem value=""><em>Todos os ajustes ativos</em></MenuItem>
                   {goldRules.filter(r => r.active).map(r => (
                     <MenuItem key={r.id} value={r.id!}>{r.name} ({r.materialization_table || r.code})</MenuItem>
                   ))}
                 </Select>
               </FormControl>
             )}
-          </>
+          </Box>
         )}
+      </StepCard>
 
-        {isRunning && (
-          <Button
-            variant="outlined"
-            color="error"
-            disabled={cancelling}
-            startIcon={cancelling ? <CircularProgress size={18} /> : <Stop />}
-            onClick={doCancel}
-          >
-            {cancelling ? "Cancelando..." : "Cancelar"}
-          </Button>
-        )}
-      </Box>
-
-      {/* ── Seleção de meses ── */}
-      {periods.length > 0 && !isRunning && (
-        <Box sx={{ mb: 3, display: "flex", gap: 1, flexWrap: "wrap", alignItems: "center" }}>
-          <Button size="small" variant="text" onClick={selectAllPeriods} sx={{ fontSize: "0.7rem" }}>
-            Todos ({periods.length})
-          </Button>
-          <Button size="small" variant="text" onClick={clearPeriods} sx={{ fontSize: "0.7rem" }}>
-            Nenhum
-          </Button>
-          <Divider orientation="vertical" flexItem />
-          {periods.map(p => (
-            <Chip
-              key={p.period}
-              label={isPtuReprocess ? `${p.label || `${p.period.slice(4)}/${p.period.slice(0, 4)}`} (${p.blob_count} janelas)` : `${p.period} (${p.blob_count} blobs)`}
-              size="small"
-              variant={selPeriods.includes(p.period) ? "filled" : "outlined"}
-              color={selPeriods.includes(p.period) ? "primary" : "default"}
-              onClick={() => togglePeriod(p.period)}
-              sx={{ cursor: "pointer" }}
-            />
-          ))}
-        </Box>
-      )}
-      {isPtuReprocess && selConnIds.length > 0 && !isRunning && (
-        <Alert severity="info" sx={{ mb: 2 }}>
-          Fonte Azure PTU: selecione o mês (ex.: <strong>08/2026</strong>) e clique em Reprocessar para buscar
-          métricas horárias via Azure Monitor (janelas de até 30 dias) em <strong>dest_azure_ptu_metrics</strong>.
-          Sem mês selecionado, busca os últimos ~93 dias. Azure Monitor retém plataforma por ~93 dias — não usa blobs base de origem.
-        </Alert>
-      )}
-      {/* ── Andamento — movido para o ícone de notificações ── */}
-      {chainGoldCubes && !isRunning && (
-        <Alert severity="info" sx={{ mb: 2 }}>
-          A base consolidada selecionada será materializada <strong>na sequência</strong>, depois que o último
-          reprocessamento do grupo concluir (visão completa = realizado + forecast + rateio). Acompanhe
-          a execução da base consolidada no sino de notificações e na aba <strong>Custos consolidados</strong>.
-        </Alert>
-      )}
-      {(isRunning || isQueued) && (
-        <Alert severity="info" sx={{ mb: 2 }}>
-          Processando dados{isQueued ? " (aguardando worker)" : ""} — acompanhe o andamento no ícone de notificações (canto superior direito).
-        </Alert>
-      )}
-
-      {/* ── Context summary ── */}
-      {selectedDestName && selConnIds.length > 0 && !isRunning && (
-        <Paper variant="outlined" sx={{ p: 2, mb: 3, bgcolor: "#f5f5f5" }}>
+      {/* Resumo e ação */}
+      <Paper variant="outlined" sx={{ p: 2.5, position: "sticky", bottom: 16, bgcolor: "background.paper", boxShadow: 2 }}>
+        <Stack direction={{ xs: "column", md: "row" }} alignItems={{ md: "center" }} justifyContent="space-between" spacing={2}>
           <Typography variant="body2" color="text.secondary">
-            <strong>Tabela Destino:</strong> {selectedDestName}
-            {" · "}
-            <strong>Fontes:</strong>{" "}
-            {selConnIds.map(id => mappedConns.find(c => c.id === id)?.code || id).join(", ")}
-            {" · "}
-            <strong>Meses:</strong>{" "}
-            {isPtuReprocess
-              ? (selPeriods.length === 0 ? "coleta completa (93 dias)" : `${selPeriods.length} mês(es) selecionado(s)`)
-              : selPeriods.length === 0
-              ? `todos (${periods.length} meses)`
-              : selPeriods.length === periods.length && periods.length > 0
-                ? `todos (${periods.length} meses)`
-                : `${selPeriods.length} de ${periods.length}`}
-            {" · "}
-            <strong>{isPtuReprocess ? "Janelas Monitor:" : "Total blobs:"}</strong>{" "}
-            {isPtuReprocess
-              ? (selPeriods.length === 0
-                ? totalBlobs || "backfill ~93d"
-                : `${totalBlobs || selPeriods.reduce((sum, p) => sum + (periods.find(x => x.period === p)?.blob_count || 0), 0)} janelas`)
-              : totalBlobs}
+            {selDestId && selConnIds.length > 0 ? (
+              <>
+                <strong>{selectedDest?.name}</strong> · {selConnIds.length} fonte(s) · {monthsSummary}
+                {!isPtuReprocess && totalBlobs ? ` · ${totalBlobs} blobs` : ""} · {mode === "update" ? "atualizar meses" : mode === "rebuild" ? "reconstruir tabela" : "reclassificar projetos"}
+                {chainGoldCubes && mode !== "classify" ? " · materializa base consolidada" : ""}
+              </>
+            ) : "Conclua os passos 1 e 2 para reprocessar."}
           </Typography>
-        </Paper>
-      )}
-
-      {/* ── Result ── */}
-      {result && (
-        <Alert severity={result.type} sx={{ mb: 2 }} onClose={() => setResult(null)}>
-          {dataDisplayText(result.message)}
-        </Alert>
-      )}
-
-
-      {/* ── Empty state ── */}
-      {!selDestId && !isRunning && (
-        <Box sx={{ mt: 4 }}>
-          <EmptyState message="Selecione uma Tabela Destino. As fontes com mapeamento configurado aparecerao automaticamente." />
-        </Box>
-      )}
-
-      {selDestId && !loadingConns && mappedConns.length === 0 && !isRunning && (
-        <Box sx={{ mt: 4 }}>
-          <EmptyState message={`Nenhuma fonte mapeada para "${selectedDestName}". Va em Relacionamento.`} />
-        </Box>
-      )}
-
-      {selDestId && mappedConns.length > 0 && selConnIds.length === 0 && !isRunning && (
-        <Box sx={{ mt: 4 }}>
-          <Alert severity="info">
-            Selecione ao menos uma Fonte de Origem para ver os meses disponiveis.
-          </Alert>
-        </Box>
-      )}
-    </Box>
+          <Button variant="contained" size="large" startIcon={<Refresh />} onClick={doReprocess} disabled={!canRun}>
+            {mode === "classify" ? "Reclassificar" : "Reprocessar"}
+          </Button>
+        </Stack>
+        {!workerOk && workerHealth && (
+          <Typography variant="caption" color="error" component="p" sx={{ mt: 1 }}>
+            O serviço de processamento precisa estar ativo para liberar o botão.
+          </Typography>
+        )}
+      </Paper>
+    </Stack>
   );
 }

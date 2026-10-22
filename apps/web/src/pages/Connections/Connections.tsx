@@ -8,6 +8,7 @@ import {
   getConnections, createConnection, updateConnection,
   deleteConnection, getConnectionsGrid, testConnection, testConnectionConfig, SourceConnection,
   formatApiError, extractMcaCommitmentInvoices, getMcaCommitmentProfiles, getMcaCommitmentStatus,
+  getHiddenConnectorTypes,
 } from "../../services/api";
 import { api } from "../../services/api";
 import EmptyState from "../../components/EmptyState";
@@ -15,27 +16,28 @@ import ConnectionsDataGrid, { ConnectionTestMessage, getProviderLabel, getConnec
 import RecordHistory from "../../components/RecordHistory";
 import AzureSourcesPanel from "./AzureSourcesPanel";
 import IntegrationsPanel from "./IntegrationsPanel";
+import VersionHistorySection from "../../components/VersionHistorySection";
 
-const CONNECTOR_TYPES = [
-  { value: "azure_mca_invoice", label: "Azure MCA — faturas e compromissos", scope: "azure" },
-  { value: "azure_blob", label: "Azure — arquivos de custo", scope: "azure" },
-  { value: "azure_pricesheet", label: "Azure — preços contratados", scope: "azure" },
-  { value: "azure_openai_ptu", label: "Azure OpenAI PTU", scope: "azure" },
-  { value: "azure_automation_jobs", label: "Azure Automation Jobs", scope: "azure" },
-  { value: "azure_resource_graph", label: "Azure Resource Graph", scope: "azure" },
-  { value: "gcp_bigquery", label: "GCP BigQuery", scope: "gcp" },
-  { value: "oci", label: "Oracle Cloud (OCI)", scope: "oci" },
-  { value: "mongodb_atlas", label: "MongoDB Atlas", scope: "atlas" },
-  { value: "github_billing", label: "GitHub Billing (Copilot)", scope: "github" },
-  { value: "github_license", label: "GitHub Licenças (Copilot)", scope: "github" },
-  { value: "github_token", label: "GitHub Tokens (Copilot)", scope: "github" },
-  { value: "notebooklm_license", label: "NotebookLM Licenças", scope: "notebooklm" },
-  { value: "notebooklm_token", label: "NotebookLM Tokens", scope: "notebooklm" },
-  { value: "gemini_license", label: "Gemini Licenças", scope: "gemini" },
-  { value: "gemini_token", label: "Gemini Tokens", scope: "gemini" },
-  { value: "claude_license", label: "Claude Licenças (Enterprise)", scope: "claude" },
-  { value: "claude_token", label: "Claude Tokens (Enterprise)", scope: "claude" },
-  { value: "databricks", label: "Databricks — consumo", scope: "databricks" },
+export const CONNECTOR_TYPES = [
+  { value: "azure_mca_invoice", label: "Azure MCA: faturas e contratos", scope: "azure" },
+  { value: "azure_blob", label: "Azure: relatórios de custo em arquivo", scope: "azure" },
+  { value: "azure_pricesheet", label: "Azure: tabela de preços contratados", scope: "azure" },
+  { value: "azure_openai_ptu", label: "Azure OpenAI (PTU)", scope: "azure" },
+  { value: "azure_automation_jobs", label: "Azure Automation (jobs)", scope: "azure" },
+  { value: "azure_resource_graph", label: "Azure Resource Graph (inventário)", scope: "azure" },
+  { value: "gcp_bigquery", label: "GCP: BigQuery", scope: "gcp" },
+  { value: "oci", label: "Oracle Cloud Infrastructure (OCI)", scope: "oci" },
+  { value: "mongodb_atlas", label: "Atlas (MongoDB)", scope: "atlas" },
+  { value: "github_billing", label: "GitHub: faturamento (Copilot)", scope: "github" },
+  { value: "github_license", label: "GitHub: licenças (Copilot)", scope: "github" },
+  { value: "github_token", label: "GitHub: tokens (Copilot)", scope: "github" },
+  { value: "notebooklm_license", label: "NotebookLM: licenças", scope: "notebooklm" },
+  { value: "notebooklm_token", label: "NotebookLM: tokens", scope: "notebooklm" },
+  { value: "gemini_license", label: "Gemini: licenças", scope: "gemini" },
+  { value: "gemini_token", label: "Gemini: tokens", scope: "gemini" },
+  { value: "claude_license", label: "Claude: licenças (Enterprise)", scope: "claude" },
+  { value: "claude_token", label: "Claude: tokens (Enterprise)", scope: "claude" },
+  { value: "databricks", label: "Databricks: consumo do workspace", scope: "databricks" },
 ];
 
 function describeConnectionLoadError(error: unknown, endpoint: string, fallback: string): string {
@@ -47,13 +49,13 @@ function describeConnectionLoadError(error: unknown, endpoint: string, fallback:
   return `${endpoint}${status}: ${detail}`;
 }
 
-// Categorias da página de Conexões.
+// Tipo de fontes da página de Conexões.
 export type ConnectionCategory = "provedor" | "ferramenta" | "marketplace";
 
 const CATEGORY_TABS: { value: ConnectionCategory; label: string }[] = [
-  { value: "provedor", label: "Provedores de nuvem" },
-  { value: "ferramenta", label: "Aplicações e serviços" },
-  { value: "marketplace", label: "Serviços de marketplace" },
+  { value: "provedor", label: "Nuvens e provedores" },
+  { value: "ferramenta", label: "Ferramentas e plataformas" },
+  { value: "marketplace", label: "Oferta no marketplace" },
 ];
 
 function categoryOfConnection(connection: { connector_type: string; cloud_scope?: string | null }): ConnectionCategory {
@@ -74,48 +76,48 @@ function categoryOfConnection(connection: { connector_type: string; cloud_scope?
 // Sub-tipos de extração por ferramenta.
 const TOOL_EXTRACTION_TYPES: Record<string, { value: string; connectorType: string; cloudName: string; emoji: string; title: string; description: string }[]> = {
   github: [
-    { value: "billing", connectorType: "github_billing", cloudName: "github-billing", emoji: "billing", title: "Custos e faturamento", description: "Relatórios detalhados de custo" },
-    { value: "token", connectorType: "github_token", cloudName: "github-token", emoji: "token", title: "Consumo mensal", description: "Uso detalhado por mês (Copilot / Actions)" },
-    { value: "license", connectorType: "github_license", cloudName: "github-license", emoji: "license", title: "Licenças e usuários", description: "Lista de usuários e licenças ativas da Enterprise" },
+    { value: "billing", connectorType: "github_billing", cloudName: "github-billing", emoji: "billing", title: "Custos e faturas", description: "Relatórios de custo detalhados" },
+    { value: "token", connectorType: "github_token", cloudName: "github-token", emoji: "token", title: "Consumo por mês", description: "Uso mensal detalhado (Copilot / Actions)" },
+    { value: "license", connectorType: "github_license", cloudName: "github-license", emoji: "license", title: "Licenças e usuários", description: "Usuários e licenças ativas da Enterprise" },
   ],
   notebooklm: [
-    { value: "token", connectorType: "notebooklm_token", cloudName: "notebooklm-token", emoji: "token", title: "Consumo mensal", description: "Relatório detalhado de consumo de tokens" },
-    { value: "license", connectorType: "notebooklm_license", cloudName: "notebooklm-license", emoji: "license", title: "Licenças (Usuários ativos)", description: "Colaboradores com licenças ativas" },
+    { value: "token", connectorType: "notebooklm_token", cloudName: "notebooklm-token", emoji: "token", title: "Consumo por mês", description: "Relatório de consumo de tokens" },
+    { value: "license", connectorType: "notebooklm_license", cloudName: "notebooklm-license", emoji: "license", title: "Licenças (usuários em uso)", description: "Colaboradores com licença em uso" },
   ],
   gemini: [
-    { value: "token", connectorType: "gemini_token", cloudName: "gemini-token", emoji: "token", title: "Consumo mensal", description: "Relatório detalhado de consumo de tokens" },
-    { value: "license", connectorType: "gemini_license", cloudName: "gemini-license", emoji: "license", title: "Licenças (Usuários ativos)", description: "Usuários e licenças ativas do Gemini" },
+    { value: "token", connectorType: "gemini_token", cloudName: "gemini-token", emoji: "token", title: "Consumo por mês", description: "Relatório de consumo de tokens" },
+    { value: "license", connectorType: "gemini_license", cloudName: "gemini-license", emoji: "license", title: "Licenças (usuários em uso)", description: "Usuários com licença ativa no Gemini" },
   ],
   claude: [
-    { value: "token", connectorType: "claude_token", cloudName: "claude-token", emoji: "token", title: "Consumo mensal", description: "Relatório detalhado de tokens e atividades" },
-    { value: "license", connectorType: "claude_license", cloudName: "claude-license", emoji: "license", title: "Licenças (Colaboradores)", description: "Colaboradores com licenças ativas" },
+    { value: "token", connectorType: "claude_token", cloudName: "claude-token", emoji: "token", title: "Consumo por mês", description: "Relatório de tokens e atividades" },
+    { value: "license", connectorType: "claude_license", cloudName: "claude-license", emoji: "license", title: "Licenças por colaborador", description: "Colaboradores com licença em uso" },
   ],
 };
 
 const TOOL_LABELS: Record<string, string> = {
-  github: "GitHub",
+  github: "GitHub Enterprise",
   notebooklm: "NotebookLM",
   gemini: "Google Gemini",
-  claude: "Claude (Anthropic)",
+  claude: "Claude (Anthropic, Enterprise)",
 };
 
 const CONNECTOR_PICKER_OPTIONS: { value: string; label: string; description: string; icon: React.ReactNode; category: ConnectionCategory; tool?: string }[] = [
   // Provedores Cloud
-  { value: "azure_mca_invoice", label: "Azure MCA", description: "Faturas e compromissos contratados", icon: <Cloud />, category: "provedor" },
-  { value: "azure_blob", label: "Azure", description: "Relatórios de custo em arquivos", icon: <Cloud />, category: "provedor" },
-  { value: "azure_pricesheet", label: "Azure — preços contratados", description: "Tabela de preços contratados", icon: <Cloud />, category: "provedor" },
-  { value: "azure_openai_ptu", label: "Azure OpenAI", description: "PTU / capacidade provisionada", icon: <SmartToy />, category: "ferramenta" },
-  { value: "azure_automation_jobs", label: "Azure Automation", description: "Jobs de Start/Stop de VMs", icon: <Cloud />, category: "ferramenta" },
-  { value: "azure_resource_graph", label: "Azure Resource Graph", description: "Inventário / recursos órfãos", icon: <Search />, category: "ferramenta" },
+  { value: "azure_mca_invoice", label: "Azure MCA", description: "Faturas e compromissos firmados", icon: <Cloud />, category: "provedor" },
+  { value: "azure_blob", label: "Azure", description: "Relatórios de custo em arquivos CSV", icon: <Cloud />, category: "provedor" },
+  { value: "azure_pricesheet", label: "Azure: tabela de preços contratados", description: "Tabela de preços negociados", icon: <Cloud />, category: "provedor" },
+  { value: "azure_openai_ptu", label: "Azure OpenAI", description: "PTU (capacidade provisionada)", icon: <SmartToy />, category: "ferramenta" },
+  { value: "azure_automation_jobs", label: "Azure Automation", description: "Jobs de liga e desliga de VMs", icon: <Cloud />, category: "ferramenta" },
+  { value: "azure_resource_graph", label: "Azure Resource Graph (inventário)", description: "Inventário e recursos ociosos", icon: <Search />, category: "ferramenta" },
   { value: "gcp_bigquery", label: "GCP", description: "BigQuery", icon: <Storage />, category: "provedor" },
   { value: "oci", label: "OCI", description: "Oracle Cloud", icon: <Cloud />, category: "provedor" },
   // Ferramentas Cloud
-  { value: "github", label: "GitHub", description: "Copilot / Tokens / Licenças", icon: <Cloud />, category: "ferramenta", tool: "github" },
-  { value: "notebooklm", label: "NotebookLM", description: "Licenças / Tokens", icon: <MenuBook />, category: "ferramenta", tool: "notebooklm" },
-  { value: "gemini", label: "Gemini", description: "Licenças / Tokens", icon: <AutoAwesome />, category: "ferramenta", tool: "gemini" },
-  { value: "claude", label: "Claude", description: "Claude.ai / Anthropic", icon: <Psychology />, category: "ferramenta", tool: "claude" },
-  { value: "databricks", label: "Databricks", description: "Consumo do ambiente de trabalho", icon: <Storage />, category: "ferramenta" },
-  // Marketplace
+  { value: "github", label: "GitHub Enterprise", description: "Copilot: faturamento, tokens e licenças", icon: <Cloud />, category: "ferramenta", tool: "github" },
+  { value: "notebooklm", label: "NotebookLM", description: "Licenças e tokens de IA", icon: <MenuBook />, category: "ferramenta", tool: "notebooklm" },
+  { value: "gemini", label: "Gemini", description: "Licenças e tokens de IA", icon: <AutoAwesome />, category: "ferramenta", tool: "gemini" },
+  { value: "claude", label: "Claude", description: "Claude.ai e API Anthropic", icon: <Psychology />, category: "ferramenta", tool: "claude" },
+  { value: "databricks", label: "Databricks", description: "Consumo do workspace", icon: <Storage />, category: "ferramenta" },
+  // Oferta no marketplace
   { value: "mongodb_atlas", label: "MongoDB", description: "Atlas", icon: <Dataset />, category: "marketplace" },
 ];
 
@@ -124,14 +126,14 @@ const CLOUD_SCOPES = [
   { value: "gcp", label: "GCP" },
   { value: "ibm", label: "IBM Cloud" },
   { value: "aws", label: "AWS" },
-  { value: "oci", label: "Oracle Cloud (OCI)" },
-  { value: "atlas", label: "MongoDB Atlas" },
-  { value: "github", label: "GitHub" },
+  { value: "oci", label: "Oracle Cloud Infrastructure (OCI)" },
+  { value: "atlas", label: "Atlas (MongoDB)" },
+  { value: "github", label: "GitHub Enterprise" },
   { value: "notebooklm", label: "NotebookLM" },
-  { value: "gemini", label: "Google Gemini AI" },
-  { value: "claude", label: "Claude (Anthropic)" },
+  { value: "gemini", label: "Google Gemini (IA)" },
+  { value: "claude", label: "Claude (Anthropic, Enterprise)" },
   { value: "databricks", label: "Databricks" },
-  { value: "other", label: "Outra / Desconhecida" },
+  { value: "other", label: "Outra ou não identificada" },
 ];
 
 const emptyForm = {
@@ -213,6 +215,8 @@ export default function Connections() {
   const activeView = searchParams.get("view") === "integrations" ? "integrations" : "connections";
   const [connections, setConnections] = useState<SourceConnection[]>([]);
   const [connectionCatalog, setConnectionCatalog] = useState<SourceConnection[]>([]);
+  // Tipos desligados em Conectores (Administração): ficam fora das abas e da lista.
+  const [hiddenConnectorTypes, setHiddenConnectorTypes] = useState<Set<string>>(new Set());
   const [gridTotal, setGridTotal] = useState(0);
   const [gridLoading, setGridLoading] = useState(true);
   const [loading, setLoading] = useState(true);
@@ -245,9 +249,14 @@ export default function Connections() {
   const load = async () => {
     try {
       setLoading(true);
-      setConnectionCatalog(await getConnections());
+      const [catalog, hidden] = await Promise.all([
+        getConnections(),
+        getHiddenConnectorTypes().catch(() => [] as string[]),
+      ]);
+      setConnectionCatalog(catalog);
+      setHiddenConnectorTypes(new Set(hidden));
     } catch (e: unknown) {
-      setError(describeConnectionLoadError(e, "Falha ao atualizar conexões — GET /connections/", "Erro desconhecido"));
+      setError(describeConnectionLoadError(e, "Falha ao recarregar conexões — GET /connections/", "Erro não identificado"));
     } finally {
       setLoading(false);
     }
@@ -255,14 +264,25 @@ export default function Connections() {
 
   useEffect(() => { load(); }, []);
 
+  const visibleCatalog = useMemo(
+    () => connectionCatalog.filter((connection) => !hiddenConnectorTypes.has(connection.connector_type)),
+    [connectionCatalog, hiddenConnectorTypes],
+  );
+
+  // Opção do seletor "Conectar fonte" some quando todos os seus tipos estão desligados em Conectores.
+  const isPickerOptionVisible = (option: (typeof CONNECTOR_PICKER_OPTIONS)[number]) => {
+    const types = option.tool ? (TOOL_EXTRACTION_TYPES[option.tool] ?? []).map((type) => type.connectorType) : [option.value];
+    return types.some((type) => !hiddenConnectorTypes.has(type));
+  };
+
   const categoryTabs = useMemo(() => CATEGORY_TABS.map((category) => ({
     ...category,
-    count: connectionCatalog.filter((connection) => categoryOfConnection(connection) === category.value).length,
-  })), [connectionCatalog]);
+    count: visibleCatalog.filter((connection) => categoryOfConnection(connection) === category.value).length,
+  })), [visibleCatalog]);
 
   // Scopes de provedor presentes em uma categoria específica (ou em todas, quando "all").
   const providerTabsFor = (category: "all" | ConnectionCategory) => Array.from(new Set(
-    connectionCatalog
+    visibleCatalog
       .filter((connection) => {
         if (!connection.cloud_scope) return false;
         if (category === "all") return true;
@@ -272,7 +292,7 @@ export default function Connections() {
   )).sort((left, right) => getProviderLabel(left).localeCompare(getProviderLabel(right), "pt-BR"));
 
   // Abas de provedor (2º nível): scopes presentes nas conexões da categoria ativa.
-  const providerTabs = useMemo(() => providerTabsFor(activeCategory), [activeCategory, connectionCatalog]);
+  const providerTabs = useMemo(() => providerTabsFor(activeCategory), [activeCategory, visibleCatalog]);
 
   // Start with every connection visible; categories and providers are filters.
   useEffect(() => { if (!loading) setTabsReady(true); }, [loading]);
@@ -301,7 +321,7 @@ export default function Connections() {
       setGridTotal(data.total);
     } catch (gridError: unknown) {
       if (requestId !== gridRequestId.current) return;
-      setError(describeConnectionLoadError(gridError, "Falha ao atualizar a tabela — GET /connections/grid", "Erro desconhecido"));
+      setError(describeConnectionLoadError(gridError, "Falha ao recarregar a tabela — GET /connections/grid", "Erro não identificado"));
     } finally {
       if (requestId === gridRequestId.current) setGridLoading(false);
     }
@@ -322,7 +342,7 @@ export default function Connections() {
     const initialForm = { ...emptyForm, connector_type: connectorType, cloud_scope: scope, mca_start_period: latestPeriod, mca_end_period: latestPeriod };
     if (connectorType === "azure_pricesheet") {
       Object.assign(initialForm, {
-        code: "azure-pricesheet", name: "Azure Price Sheet", cloud_name: "Azure Price Sheet",
+        code: "azure-pricesheet", name: "Tabela de preços do Azure", cloud_name: "Tabela de preços do Azure",
         blob_prefixes: "reports/report_-pricesheet/",
       });
     }
@@ -739,7 +759,7 @@ export default function Connections() {
     try {
       if (form.connector_type === "azure_mca_invoice") {
         const billingAccountIds = form.mca_billing_account_ids.split(/[\n,;]/).map((value) => value.trim()).filter(Boolean);
-        await api.put("/mca-commitment/credentials", {
+        await api.put("/custos/compromisso-mca/credenciais", {
           auth_mode: form.mca_auth_mode,
           billing_account_ids: billingAccountIds,
           ...(form.mca_auth_mode === "bearer"
@@ -790,11 +810,11 @@ export default function Connections() {
       const isPending = result.status === "PENDING";
       setFormTestMessage({
         severity: isOk ? "success" : isPending ? "warning" : "error",
-        msg: isOk ? "Conexão validada: " + result.message : isPending ? "Aguardando configuração: " + result.message : "Falha ao testar: " + result.message,
+        msg: isOk ? "Conexão testada com sucesso: " + result.message : isPending ? "Pendente de configuração: " + result.message : "Falha no teste: " + result.message,
       });
     } catch (testError: unknown) {
-      const message = testError instanceof Error ? testError.message : "Não foi possível testar a conexão";
-      setFormTestMessage({ severity: "error", msg: "Falha ao testar: " + message });
+      const message = testError instanceof Error ? testError.message : "Não foi possível executar o teste";
+      setFormTestMessage({ severity: "error", msg: "Falha no teste: " + message });
     } finally {
       setTestingForm(false);
     }
@@ -805,11 +825,11 @@ export default function Connections() {
     const endPeriod = form.mca_end_period.replace("-", "");
     const billingAccountIds = form.mca_billing_account_ids.split(/[\n,;]/).map((value) => value.trim()).filter(Boolean);
     if (!/^\d{6}$/.test(startPeriod) || !/^\d{6}$/.test(endPeriod) || startPeriod > endPeriod) {
-      setFormTestMessage({ severity: "error", msg: "Informe um período válido: início menor ou igual ao fim." });
+      setFormTestMessage({ severity: "error", msg: "Escolha um período válido: o início não pode ser depois do fim." });
       return;
     }
     if (!billingAccountIds.length) {
-      setFormTestMessage({ severity: "error", msg: "Nenhum Billing Account está configurado para a extração." });
+      setFormTestMessage({ severity: "error", msg: "Nenhuma conta de cobrança está configurada para a extração." });
       return;
     }
     setTestingForm(true);
@@ -823,7 +843,7 @@ export default function Connections() {
       void load();
       void loadGrid();
     } catch (extractError: unknown) {
-      setFormTestMessage({ severity: "error", msg: extractError instanceof Error ? `Falha na extração MCA: ${extractError.message}` : "Falha na extração MCA." });
+      setFormTestMessage({ severity: "error", msg: extractError instanceof Error ? `Falha na extração MCA: ${extractError.message}` : "Falha na extração do MCA." });
     } finally {
       setTestingForm(false);
     }
@@ -841,7 +861,7 @@ export default function Connections() {
       await load();
       await loadGrid();
     } catch (e: unknown) {
-      setDeleteError(formatApiError(e, "Falha ao excluir conexão"));
+      setDeleteError(formatApiError(e, "Falha ao remover conexão"));
     } finally {
       setDeleting(false);
     }
@@ -867,7 +887,7 @@ export default function Connections() {
         last_tested_at: new Date().toISOString(),
       } : item));
     } catch (testError: unknown) {
-      const message = testError instanceof Error ? testError.message : "Não foi possível testar a conexão";
+      const message = testError instanceof Error ? testError.message : "Não foi possível executar o teste";
       setTestMsgs((previous) => ({ ...previous, [connection.id]: { severity: "error", msg: `Erro: ${message}` } }));
     } finally {
       setTestingId(null);
@@ -877,7 +897,7 @@ export default function Connections() {
   const exportConnections = () => {
     const escape = (value: unknown) => `"${String(value ?? "").replace(/"/g, '""')}"`;
     const csv = [
-      ["Conexão", "Código", "Provedor", "Tipo", "Atualizado em", "Último teste"],
+      ["Nome", "Identificador", "Provedor", "Tipo", "Última atualização", "Resultado do último teste"],
       ...connections.map((connection) => [
         connection.name,
         connection.code,
@@ -895,46 +915,46 @@ export default function Connections() {
     URL.revokeObjectURL(url);
   };
 
-  if (loading || !tabsReady) return <Stack direction="row" gap={1} alignItems="center" sx={{ p: 3 }}><CircularProgress size={20} /><Typography variant="body2">Carregando fontes de dados…</Typography></Stack>;
+  if (loading || !tabsReady) return <Stack direction="row" gap={1} alignItems="center" sx={{ p: 3 }}><CircularProgress size={20} /><Typography variant="body2">Carregando origens de dados…</Typography></Stack>;
 
   return (
     <Box sx={{ minWidth: 0 }}>
       <Stack direction={{ xs: "column", sm: "row" }} justifyContent="space-between" alignItems={{ sm: "center" }} gap={2} sx={{ mb: 3 }}>
         <Box>
-          <Typography variant="h4" component="h1">{activeView === "integrations" ? "Integrações de serviços" : "Fontes de dados"}</Typography>
-          <Typography variant="body2" color="text.secondary" sx={{ mt: 0.75 }}>Conecte provedores e aplicações, configure o acesso e acompanhe a validação das suas fontes.</Typography>
+          <Typography variant="h4" component="h1">{activeView === "integrations" ? "Serviços integrados" : "Origens de dados"}</Typography>
+          <Typography variant="body2" color="text.secondary" sx={{ mt: 0.75 }}>Ligue provedores e aplicações, defina o acesso e acompanhe os testes das suas origens.</Typography>
         </Box>
-        {activeView !== "integrations" && <Button variant="contained" startIcon={<Add />} onClick={() => setConnectorPickerOpen(true)}>Nova conexão</Button>}
+        {activeView !== "integrations" && <Button variant="contained" startIcon={<Add />} onClick={() => setConnectorPickerOpen(true)}>Conectar fonte</Button>}
       </Stack>
       {error && <Alert severity="error" sx={{ mb: 2 }} onClose={() => setError("")}>{dataDisplayText(error)}</Alert>}
       {activeView === "integrations" ? <IntegrationsPanel /> : (
         <Paper variant="outlined" sx={{ overflow: "hidden" }}>
           <Stack direction="row" justifyContent="space-between" alignItems="center" gap={2} sx={{ px: { xs: 2, md: 3 }, py: 2, borderBottom: 1, borderColor: "divider" }}>
-            <Box><Typography variant="h6">Conexões cadastradas</Typography><Typography variant="body2" color="text.secondary">Gerencie a origem dos dados e as credenciais de acesso.</Typography></Box>
-            <Chip variant="outlined" label={`${gridTotal} ${gridTotal === 1 ? "conexão" : "conexões"}`} />
+            <Box><Typography variant="h6">Conexões configuradas</Typography><Typography variant="body2" color="text.secondary">Controle as origens de dados e as credenciais de acesso.</Typography></Box>
+            <Chip variant="outlined" label={`${gridTotal} ${gridTotal === 1 ? "fonte" : "fontes"}`} />
           </Stack>
           <Stack direction={{ xs: "column", md: "row" }} gap={2} sx={{ p: { xs: 2, md: 3 } }}>
             <FormControl sx={{ minWidth: 220, flex: 1 }}>
-              <InputLabel id="connections-category-label">Categoria</InputLabel>
-              <Select labelId="connections-category-label" label="Categoria" value={activeCategory} onChange={e => selectCategory(e.target.value as "all" | ConnectionCategory)}>
-                <MenuItem value="all">Todas as categorias ({connectionCatalog.length})</MenuItem>
+              <InputLabel id="connections-category-label">Tipo de fonte</InputLabel>
+              <Select labelId="connections-category-label" label="Tipo de fonte" value={activeCategory} onChange={e => selectCategory(e.target.value as "all" | ConnectionCategory)}>
+                <MenuItem value="all">Todas as categorias ({visibleCatalog.length})</MenuItem>
                 {categoryTabs.map(category => <MenuItem key={category.value} value={category.value}>{category.label} ({category.count})</MenuItem>)}
               </Select>
             </FormControl>
             <FormControl sx={{ minWidth: 180, flex: 1 }}>
-              <InputLabel id="connections-provider-label">Provedor ou aplicação</InputLabel>
-              <Select labelId="connections-provider-label" label="Provedor ou aplicação" value={activeProvider} onChange={e => setActiveProvider(String(e.target.value))}>
-                <MenuItem value="all">Todos os provedores</MenuItem>
+              <InputLabel id="connections-provider-label">Nuvem ou aplicação</InputLabel>
+              <Select labelId="connections-provider-label" label="Nuvem ou aplicação" value={activeProvider} onChange={e => setActiveProvider(String(e.target.value))}>
+                <MenuItem value="all">Todas as nuvens e aplicações</MenuItem>
                 {providerTabs.map(provider => <MenuItem key={provider} value={provider}>{getProviderLabel(provider)}</MenuItem>)}
               </Select>
             </FormControl>
             <Button disabled={activeCategory === "all" && activeProvider === "all" && !search} onClick={() => { selectCategory("all"); setSearch(""); }}>Limpar filtros</Button>
           </Stack>
           <Stack direction={{ xs: "column", lg: "row" }} justifyContent="space-between" gap={2} sx={{ p: 2, bgcolor: "background.default", borderTop: 1, borderBottom: 1, borderColor: "divider" }}>
-            <TextField label="Buscar conexão" placeholder="Nome, código ou origem" value={search} onChange={event => setSearch(event.target.value)} slotProps={{ input: { startAdornment: <InputAdornment position="start"><Search fontSize="small" /></InputAdornment> } }} sx={{ width: { xs: "100%", lg: 340 }, bgcolor: "background.paper" }} />
+            <TextField label="Localizar conexão" placeholder="Nome, identificador ou origem" value={search} onChange={event => setSearch(event.target.value)} slotProps={{ input: { startAdornment: <InputAdornment position="start"><Search fontSize="small" /></InputAdornment> } }} sx={{ width: { xs: "100%", lg: 340 }, bgcolor: "background.paper" }} />
             <Stack direction="row" gap={1} flexWrap="wrap">
-              <Button variant="outlined" startIcon={<Refresh />} disabled={gridLoading} onClick={() => { void load(); void loadGrid(); }}>Atualizar lista</Button>
-              <Button variant="outlined" startIcon={<Download />} onClick={exportConnections} disabled={gridLoading || connections.length === 0}>Exportar página</Button>
+              <Button variant="outlined" startIcon={<Refresh />} disabled={gridLoading} onClick={() => { void load(); void loadGrid(); }}>Recarregar lista</Button>
+              <Button variant="outlined" startIcon={<Download />} onClick={exportConnections} disabled={gridLoading || connections.length === 0}>Baixar esta página</Button>
             </Stack>
           </Stack>
           <ConnectionsDataGrid
@@ -949,13 +969,13 @@ export default function Connections() {
       )}
 
       <Dialog open={connectorPickerOpen} onClose={() => setConnectorPickerOpen(false)} maxWidth="md" fullWidth>
-        <DialogTitle sx={{ pb: 0 }}>Nova conexão</DialogTitle>
+        <DialogTitle sx={{ pb: 0 }}>Conectar fonte</DialogTitle>
         <DialogContent sx={{ pt: "16px !important", pb: 4 }}>
           <Typography color="text.secondary" sx={{ mb: 3 }}>
             Selecione o provedor ou formato de origem para configurar uma nova conexão.
           </Typography>
           {CATEGORY_TABS.map((category) => {
-            const options = CONNECTOR_PICKER_OPTIONS.filter((option) => option.category === category.value);
+            const options = CONNECTOR_PICKER_OPTIONS.filter((option) => option.category === category.value && isPickerOptionVisible(option));
             return (
               <Box key={category.value} sx={{ mb: 2.5 }}>
                 <Typography variant="subtitle2" fontWeight={700} color="text.secondary" sx={{ mb: 1 }}>
@@ -1004,7 +1024,7 @@ export default function Connections() {
             Selecione qual tipo de dado da ferramenta você deseja extrair:
           </Typography>
           <Stack direction="column" gap={1.5}>
-            {toolSubPicker && TOOL_EXTRACTION_TYPES[toolSubPicker]?.map((type) => (
+            {toolSubPicker && TOOL_EXTRACTION_TYPES[toolSubPicker]?.filter((type) => !hiddenConnectorTypes.has(type.connectorType)).map((type) => (
               <Button
                 key={type.value}
                 variant="outlined" color="inherit" fullWidth
@@ -1031,130 +1051,130 @@ export default function Connections() {
 
 
       <Dialog open={dialogOpen} onClose={() => { if (!savingConnection) setDialogOpen(false); }} maxWidth="md" fullWidth>
-        <DialogTitle>{editing ? "Editar conexão" : "Configurar conexão"}</DialogTitle>
+        <DialogTitle>{editing ? "Alterar conexão" : "Definir parâmetros da conexão"}</DialogTitle>
         <DialogContent dividers>
           {error && <Alert severity="error" sx={{ mb: 2 }} onClose={() => setError("")}>{dataDisplayText(error)}</Alert>}
           {formTestMessage && <Alert severity={formTestMessage.severity} sx={{ mb: 2 }}>{dataDisplayText(formTestMessage.msg)}</Alert>}
           <Box sx={{ display: "grid", gridTemplateColumns: { xs: "1fr", sm: "repeat(2, minmax(0, 1fr))" }, gap: 2, mt: 1,
             "& > .MuiAlert-root, & > .MuiTypography-root, & > .MuiDivider-root, & > .MuiBox-root, & > .MuiTextField-root:has(textarea)": { gridColumn: "1 / -1" } }}>
-            <Typography variant="subtitle2">Identificação da conexão</Typography>
-            <TextField label="Nome da conexão" value={form.name} onChange={e => setForm({ ...form, name: e.target.value })} />
-            <TextField label="Código da conexão" value={form.code} disabled={form.connector_type === "azure_pricesheet"} onChange={e => setForm({ ...form, code: e.target.value })} helperText="Identificador usado nos fluxos de coleta." />
+            <Typography variant="subtitle2">Dados de identificação</Typography>
+            <TextField label="Nome da fonte" value={form.name} onChange={e => setForm({ ...form, name: e.target.value })} />
+            <TextField label="Identificador da conexão" value={form.code} disabled={form.connector_type === "azure_pricesheet"} onChange={e => setForm({ ...form, code: e.target.value })} helperText="Chave usada nos fluxos de coleta." />
             <FormControl fullWidth>
-              <InputLabel id="connection-type-label">Tipo de conexão</InputLabel>
-              <Select labelId="connection-type-label" value={form.connector_type} label="Tipo de conexão" onChange={e => { const type = e.target.value; const scope = CONNECTOR_TYPES.find(t => t.value === type)?.scope || ""; setForm({ ...form, connector_type: type, cloud_scope: scope }); }}>
+              <InputLabel id="connection-type-label">Tipo de integração</InputLabel>
+              <Select labelId="connection-type-label" value={form.connector_type} label="Tipo de integração" onChange={e => { const type = e.target.value; const scope = CONNECTOR_TYPES.find(t => t.value === type)?.scope || ""; setForm({ ...form, connector_type: type, cloud_scope: scope }); }}>
                 {CONNECTOR_TYPES.map(t => <MenuItem key={t.value} value={t.value}>{t.label}</MenuItem>)}
-                {form.connector_type === "manual_csv" && <MenuItem value="manual_csv">Importação de arquivos CSV</MenuItem>}
+                {form.connector_type === "manual_csv" && <MenuItem value="manual_csv">Carga manual de CSV</MenuItem>}
               </Select>
             </FormControl>
             <FormControl fullWidth>
-              <InputLabel id="connection-provider-label">Provedor ou aplicação</InputLabel>
-              <Select labelId="connection-provider-label" value={form.cloud_scope || "other"} label="Provedor ou aplicação" onChange={e => setForm({ ...form, cloud_scope: e.target.value })}>
+              <InputLabel id="connection-provider-label">Nuvem ou aplicação</InputLabel>
+              <Select labelId="connection-provider-label" value={form.cloud_scope || "other"} label="Nuvem ou aplicação" onChange={e => setForm({ ...form, cloud_scope: e.target.value })}>
                 {CLOUD_SCOPES.map(scope => <MenuItem key={scope.value} value={scope.value}>{scope.label}</MenuItem>)}
               </Select>
             </FormControl>
-            <TextField label="Nome da conta ou ambiente" value={form.cloud_name} onChange={e => setForm({ ...form, cloud_name: e.target.value })} />
+            <TextField label="Conta ou ambiente de faturamento" value={form.cloud_name} onChange={e => setForm({ ...form, cloud_name: e.target.value })} />
             <Divider />
-            <Typography variant="subtitle2">Acesso e configuração da origem</Typography>
+            <Typography variant="subtitle2">Acesso e parâmetros da origem</Typography>
             {form.connector_type === "azure_mca_invoice" && (
               <>
-                <Alert severity="info">Consulta valores mensais consolidados ligados a invoices. Cada Billing Account fica identificado e é particionado sem sobrescrever os demais. A credencial é write-only.</Alert>
-                <TextField label="IDs das contas de faturamento" multiline minRows={3} value={form.mca_billing_account_ids}
+                <Alert severity="info">Consulta valores mensais consolidados ligados a invoices. Cada Billing Account fica identificada e particionada sem sobrescrever as demais. A credencial é somente gravação.</Alert>
+                <TextField label="IDs das contas de cobrança" multiline minRows={3} value={form.mca_billing_account_ids}
                   onChange={(e) => setForm({ ...form, mca_billing_account_ids: e.target.value })}
                   helperText="Um ID por linha. Ex.: accountGuid:tenantGuid_2019-05-31. Os profiles são descobertos dinamicamente em cada conta." />
                 <FormControl fullWidth>
-                  <InputLabel>Método de autenticação</InputLabel>
-                  <Select value={form.mca_auth_mode} label="Método de autenticação"
+                  <InputLabel>Forma de autenticação</InputLabel>
+                  <Select value={form.mca_auth_mode} label="Forma de autenticação"
                     onChange={(e) => setForm({ ...form, mca_auth_mode: e.target.value as "bearer" | "service_principal" | "azure_cli" })}>
-                    <MenuItem value="bearer">Bearer token temporário</MenuItem>
+                    <MenuItem value="bearer">Token bearer temporário</MenuItem>
                     <MenuItem value="service_principal">Service Principal</MenuItem>
-                    <MenuItem value="azure_cli">Azure CLI com renovação automática</MenuItem>
+                    <MenuItem value="azure_cli">Azure CLI (renova o token sozinho)</MenuItem>
                   </Select>
                 </FormControl>
                 {form.mca_auth_mode === "bearer" ? (
-                  <TextField label="Bearer token" type="password" multiline minRows={2} value={form.mca_bearer_token}
+                  <TextField label="Token bearer" type="password" multiline minRows={2} value={form.mca_bearer_token}
                     onChange={(e) => setForm({ ...form, mca_bearer_token: e.target.value })}
                     helperText="Cole o token de acesso ao Azure Resource Manager." />
                 ) : form.mca_auth_mode === "service_principal" ? (
                   <>
-                    <TextField label="ID do diretório (tenant)" value={form.tenant_id} onChange={(e) => setForm({ ...form, tenant_id: e.target.value })} />
-                    <TextField label="ID da aplicação (cliente)" value={form.client_id} onChange={(e) => setForm({ ...form, client_id: e.target.value })} />
-                    <TextField label="Segredo da aplicação" type="password" value={form.client_secret} onChange={(e) => setForm({ ...form, client_secret: e.target.value })} />
+                    <TextField label="Diretório (tenant)" value={form.tenant_id} onChange={(e) => setForm({ ...form, tenant_id: e.target.value })} />
+                    <TextField label="Aplicação (client ID)" value={form.client_id} onChange={(e) => setForm({ ...form, client_id: e.target.value })} />
+                    <TextField label="Segredo de acesso" type="password" value={form.client_secret} onChange={(e) => setForm({ ...form, client_secret: e.target.value })} />
                   </>
                 ) : (
                   <>
-                    <TextField label="ID do diretório (tenant)" value={form.tenant_id || "9b03d892-fe8c-4e05-80f1-32e928a16ba2"}
+                    <TextField label="Diretório (tenant)" value={form.tenant_id || "9b03d892-fe8c-4e05-80f1-32e928a16ba2"}
                       onChange={(e) => setForm({ ...form, tenant_id: e.target.value })} />
-                    <Alert severity="info">Usa a sessão Azure CLI deste servidor e renova o access token automaticamente. Faça login com az login no mesmo usuário que executa a API.</Alert>
+                    <Alert severity="info">Usa a sessão do Azure CLI deste servidor e renova o access token automaticamente. Faça login com az login no mesmo usuário que executa a API.</Alert>
                   </>
                 )}
-                <Typography variant="body2" color="text.secondary">Fonte de contratos · Faturas agrupadas por conta de cobrança · desde abril de 2025.</Typography>
+                <Typography variant="body2" color="text.secondary">Origem de contratos · Faturas agrupadas por conta de cobrança · a partir de abril de 2025.</Typography>
                 <Divider />
-                <Alert severity="info">Salve a credencial primeiro. A validação e a extração abaixo usam o token já salvo, consultam os Billing Accounts configurados e nunca mostram o segredo.</Alert>
+                <Alert severity="info">Grave a credencial primeiro. O teste e a extração abaixo usam o token já salvo, consultam os Billing Accounts configurados e nunca exibem o segredo.</Alert>
                 <Stack direction={{ xs: "column", sm: "row" }} spacing={2}>
-                  <TextField label="Extrair desde" type="month" value={form.mca_start_period} onChange={(e) => setForm({ ...form, mca_start_period: e.target.value })} InputLabelProps={{ shrink: true }} fullWidth />
-                  <TextField label="Extrair até" type="month" value={form.mca_end_period} onChange={(e) => setForm({ ...form, mca_end_period: e.target.value })} InputLabelProps={{ shrink: true }} fullWidth />
+                  <TextField label="Período inicial" type="month" value={form.mca_start_period} onChange={(e) => setForm({ ...form, mca_start_period: e.target.value })} InputLabelProps={{ shrink: true }} fullWidth />
+                  <TextField label="Período final" type="month" value={form.mca_end_period} onChange={(e) => setForm({ ...form, mca_end_period: e.target.value })} InputLabelProps={{ shrink: true }} fullWidth />
                 </Stack>
                 <Button variant="outlined" startIcon={testingForm ? <CircularProgress size={16} /> : <Storage />} onClick={() => void extractMcaData()} disabled={testingForm || !form.mca_billing_account_ids.trim()}>
-                  {testingForm ? "Consultando Azure…" : "Extrair invoices para base de origem"}
+                  {testingForm ? "Buscando dados no Azure…" : "Carregar invoices na base de origem"}
                 </Button>
               </>
             )}
 
             {form.connector_type === "azure_openai_ptu" && (
               <>
-                <Typography variant="subtitle2" sx={{ mt: 1, color: "text.primary" }}>Credenciais de acesso</Typography>
-                <Alert severity="info">A coleta usa somente recursos e métricas já existentes. Nenhum recurso Azure será criado. O secret nunca é devolvido pela API.</Alert>
-                <TextField label="Perfil de credencial" value={form.credential_profile || "azure-4p"}
+                <Typography variant="subtitle2" sx={{ mt: 1, color: "text.primary" }}>Credenciais</Typography>
+                <Alert severity="info">A coleta usa apenas recursos e métricas já existentes. Nenhum recurso Azure será criado. O secret nunca é devolvido pela API.</Alert>
+                <TextField label="Conjunto de credenciais" value={form.credential_profile || "azure-4p"}
                   onChange={(e) => setForm({ ...form, credential_profile: e.target.value })}
-                  helperText="Perfil runtime (recomendado: azure-4p)" />
-                <TextField label="ID do diretório (tenant)" value={form.tenant_id}
+                  helperText="Perfil de execução (recomendado: azure-4p)" />
+                <TextField label="Diretório (tenant)" value={form.tenant_id}
                   onChange={(e) => setForm({ ...form, tenant_id: e.target.value })} />
-                <TextField label="ID da aplicação (cliente)" value={form.client_id}
+                <TextField label="Aplicação (client ID)" value={form.client_id}
                   onChange={(e) => setForm({ ...form, client_id: e.target.value })} />
-                <TextField label="Segredo da aplicação (para substituir)" type="password" value={form.client_secret}
+                <TextField label="Segredo de acesso (para substituir)" type="password" value={form.client_secret}
                   onChange={(e) => setForm({ ...form, client_secret: e.target.value })}
-                  helperText="Deixe vazio para manter o segredo já configurado." />
-                <Typography variant="subtitle2" sx={{ mt: 1 }}>Escopo da coleta</Typography>
-                <Alert severity="warning">Use Validar conexão para descobrir assinaturas, contas OpenAI e deployments PTU sem persistir métricas.</Alert>
-                <Typography variant="subtitle2" sx={{ mt: 1 }}>Execução da coleta</Typography>
-                <Typography variant="body2" color="text.secondary">PT1M → persistência horária UTC, atraso 10 min, lookback 3h, backfill 93 dias. Exibição America/Sao_Paulo.</Typography>
-                <Typography variant="subtitle2" sx={{ mt: 1 }}>4. Mapeamento de projeto</Typography>
-                <Typography variant="body2" color="text.secondary">Após salvar, cadastre projetos em Azure PTU (reservation/ondemand, global/regional, vigência).</Typography>
-                <Typography variant="subtitle2" sx={{ mt: 1 }}>5. Telemetria de subprojetos (Event Hub)</Typography>
-                <TextField label="Event Hub namespace" value={form.eventhub_namespace}
+                  helperText="Deixe em branco para manter o segredo já configurado." />
+                <Typography variant="subtitle2" sx={{ mt: 1 }}>Abrangência da coleta</Typography>
+                <Alert severity="warning">Use Testar conexão para descobrir assinaturas, contas OpenAI e deployments PTU sem gravar métricas.</Alert>
+                <Typography variant="subtitle2" sx={{ mt: 1 }}>Agendamento da coleta</Typography>
+                <Typography variant="body2" color="text.secondary">Granularidade de 1 min, gravação horária em UTC, defasagem de 10 min, janela de 3 h e reprocessamento de 93 dias. Exibição no fuso America/Sao_Paulo.</Typography>
+                <Typography variant="subtitle2" sx={{ mt: 1 }}>4. Vínculo com projetos</Typography>
+                <Typography variant="body2" color="text.secondary">Depois de salvar, vincule os projetos no Azure PTU (reservation/ondemand, global/regional, vigência).</Typography>
+                <Typography variant="subtitle2" sx={{ mt: 1 }}>5. Monitoramento de subprojetos (Event Hub)</Typography>
+                <TextField label="Namespace do Event Hub" value={form.eventhub_namespace}
                   onChange={(e) => setForm({ ...form, eventhub_namespace: e.target.value })} />
-                <TextField label="Event Hub name" value={form.eventhub_name}
+                <TextField label="Nome do Event Hub" value={form.eventhub_name}
                   onChange={(e) => setForm({ ...form, eventhub_name: e.target.value })} />
-                <TextField label="Consumer group" value={form.eventhub_consumer_group}
+                <TextField label="Grupo de consumidores" value={form.eventhub_consumer_group}
                   onChange={(e) => setForm({ ...form, eventhub_consumer_group: e.target.value })}
-                  helperText="Padrão: openfinops-azure-ptu. Teste de partições via Testar conexão." />
+                  helperText="Padrão: openfinops-azure-ptu. Teste de partições pelo botão Testar conexão." />
               </>
             )}
 
             {form.connector_type === "azure_automation_jobs" && (
               <>
-                <Typography variant="subtitle2" sx={{ mt: 1, color: "text.primary" }}>Credenciais de acesso</Typography>
-                <Alert severity="info">A coleta lê jobs e schedules das Automation Accounts via ARM API. Nenhum recurso é criado. O secret nunca é devolvido pela API.</Alert>
-                <TextField label="Perfil de credencial" value={form.credential_profile || ""}
+                <Typography variant="subtitle2" sx={{ mt: 1, color: "text.primary" }}>Credenciais</Typography>
+                <Alert severity="info">A coleta lê jobs e agendamentos das Automation Accounts pela API ARM. Nenhum recurso é criado. O secret nunca é devolvido pela API.</Alert>
+                <TextField label="Conjunto de credenciais" value={form.credential_profile || ""}
                   onChange={(e) => setForm({ ...form, credential_profile: e.target.value })}
-                  helperText="Ex: azure-4p ou azure-ti (usa .env). Vazio = usar campos abaixo." />
-                <TextField label="ID do diretório (tenant)" value={form.tenant_id}
+                  helperText="Ex.: azure-4p ou azure-ti (usa o .env). Em branco = usar os campos abaixo." />
+                <TextField label="Diretório (tenant)" value={form.tenant_id}
                   onChange={(e) => setForm({ ...form, tenant_id: e.target.value })} />
-                <TextField label="ID da aplicação (cliente)" value={form.client_id}
+                <TextField label="Aplicação (client ID)" value={form.client_id}
                   onChange={(e) => setForm({ ...form, client_id: e.target.value })} />
-                <TextField label="Segredo da aplicação (para substituir)" type="password" value={form.client_secret}
+                <TextField label="Segredo de acesso (para substituir)" type="password" value={form.client_secret}
                   onChange={(e) => setForm({ ...form, client_secret: e.target.value })}
-                  helperText="Deixe vazio para manter o segredo já configurado." />
-                <Typography variant="subtitle2" sx={{ mt: 1 }}>Escopo da coleta</Typography>
-                <TextField label="IDs das assinaturas (um por linha)" multiline rows={3}
+                  helperText="Deixe em branco para manter o segredo já configurado." />
+                <Typography variant="subtitle2" sx={{ mt: 1 }}>Abrangência da coleta</Typography>
+                <TextField label="IDs das assinaturas (uma por linha)" multiline rows={3}
                   value={form.automation_subscription_ids}
                   onChange={(e) => setForm({ ...form, automation_subscription_ids: e.target.value })}
-                  helperText="Vazio = todas as subscriptions acessíveis pela credencial." />
-                <TextField label="Histórico de coleta (dias)" type="number" value={form.automation_backfill_days}
+                  helperText="Em branco = todas as subscriptions que a credencial acessa." />
+                <TextField label="Janela de histórico (dias)" type="number" value={form.automation_backfill_days}
                   onChange={(e) => setForm({ ...form, automation_backfill_days: Number(e.target.value) || 93 })}
-                  helperText="Quantos dias de histórico de jobs coletar (padrão 93)." />
-                <Typography variant="subtitle2" sx={{ mt: 1 }}>Execução da coleta</Typography>
+                  helperText="Quantidade de dias de histórico de jobs a coletar (padrão: 93)." />
+                <Typography variant="subtitle2" sx={{ mt: 1 }}>Agendamento da coleta</Typography>
                 <Typography variant="body2" color="text.secondary">
                   Scan descobre as Automation Accounts; a extração coleta jobs (últimos N dias) e
                   schedules atuais, persiste na base de origem e permite reprocessar para a base consolidada
@@ -1165,29 +1185,29 @@ export default function Connections() {
 
             {form.connector_type === "azure_resource_graph" && (
               <>
-                <Typography variant="subtitle2" sx={{ mt: 1, color: "text.primary" }}>Credenciais de acesso</Typography>
-                <Alert severity="info">A coleta consulta o Azure Resource Graph (inventário + recursos órfãos). Nenhum recurso é criado. O secret nunca é devolvido pela API.</Alert>
-                <TextField label="Perfil de credencial" value={form.credential_profile || ""}
+                <Typography variant="subtitle2" sx={{ mt: 1, color: "text.primary" }}>Credenciais</Typography>
+                <Alert severity="info">A coleta consulta o Azure Resource Graph (inventário) (inventário e recursos ociosos). Nenhum recurso é criado. O secret nunca é devolvido pela API.</Alert>
+                <TextField label="Conjunto de credenciais" value={form.credential_profile || ""}
                   onChange={(e) => setForm({ ...form, credential_profile: e.target.value })}
-                  helperText="Ex: azure-4p ou azure-ti (usa .env). Vazio = usar campos abaixo." />
-                <TextField label="ID do diretório (tenant)" value={form.tenant_id}
+                  helperText="Ex.: azure-4p ou azure-ti (usa o .env). Em branco = usar os campos abaixo." />
+                <TextField label="Diretório (tenant)" value={form.tenant_id}
                   onChange={(e) => setForm({ ...form, tenant_id: e.target.value })} />
-                <TextField label="ID da aplicação (cliente)" value={form.client_id}
+                <TextField label="Aplicação (client ID)" value={form.client_id}
                   onChange={(e) => setForm({ ...form, client_id: e.target.value })} />
-                <TextField label="Segredo da aplicação (para substituir)" type="password" value={form.client_secret}
+                <TextField label="Segredo de acesso (para substituir)" type="password" value={form.client_secret}
                   onChange={(e) => setForm({ ...form, client_secret: e.target.value })}
-                  helperText="Deixe vazio para manter o segredo já configurado." />
-                <Typography variant="subtitle2" sx={{ mt: 1 }}>Escopo da coleta</Typography>
-                <TextField label="IDs das assinaturas (um por linha)" multiline rows={3}
+                  helperText="Deixe em branco para manter o segredo já configurado." />
+                <Typography variant="subtitle2" sx={{ mt: 1 }}>Abrangência da coleta</Typography>
+                <TextField label="IDs das assinaturas (uma por linha)" multiline rows={3}
                   value={form.arg_subscription_ids}
                   onChange={(e) => setForm({ ...form, arg_subscription_ids: e.target.value })}
-                  helperText="Vazio = todas as subscriptions acessíveis pela credencial. Recomendado preencher (limite de 10k linhas por query do ARG)." />
-                <Typography variant="subtitle2" sx={{ mt: 1 }}>Regras de recursos sem uso (opcional)</Typography>
-                <TextField label="Regras KQL customizadas (regra: KQL por linha)" multiline rows={4}
+                  helperText="Em branco = todas as subscriptions acessíveis. Recomendado preencher (limite de 10 mil linhas por query do ARG)." />
+                <Typography variant="subtitle2" sx={{ mt: 1 }}>Regras de recursos ociosos (opcional)</Typography>
+                <TextField label="Regras KQL personalizadas (nome: KQL por linha)" multiline rows={4}
                   value={form.arg_orphan_rules}
                   onChange={(e) => setForm({ ...form, arg_orphan_rules: e.target.value })}
-                  helperText="Override das regras padrão (disk_unattached, vm_deallocated, public_ip_idle, snapshot_orphan, lb_idle). Ex: vm_deallocated: resources | where ..." />
-                <Typography variant="subtitle2" sx={{ mt: 1 }}>Execução da coleta</Typography>
+                  helperText="Substituem as regras padrão (disk_unattached, vm_deallocated, public_ip_idle, snapshot_orphan, lb_idle). Ex.: vm_deallocated: resources | where ..." />
+                <Typography variant="subtitle2" sx={{ mt: 1 }}>Agendamento da coleta</Typography>
                 <Typography variant="body2" color="text.secondary">
                   Scan lista as subscriptions acessíveis; a extração coleta o inventário completo e
                   os órfãos por snapshot diário, persiste na base de origem e permite reprocessar para a base consolidada
@@ -1200,106 +1220,106 @@ export default function Connections() {
               <>
                 {form.connector_type === "azure_pricesheet" && (
                   <Alert severity="info">
-                    Conexão independente do Azure 4P Cost Management. As credenciais são gravadas nesta conexão;
-                    o snapshot vai para base de origem <code>raw_azure_pricesheet</code> pelo prefixo próprio.
+                    Conexão independente do Azure 4P Cost Management. As credenciais ficam gravadas nesta conexão;
+                    o snapshot vai para a base de origem <code>raw_azure_pricesheet</code> pelo prefixo próprio.
                   </Alert>
                 )}
-                <Typography variant="subtitle2" sx={{ mt: 1, color: "text.primary" }}>Credenciais Azure</Typography>
-                <TextField label="ID do diretório (tenant)" value={form.tenant_id}
+                <Typography variant="subtitle2" sx={{ mt: 1, color: "text.primary" }}>Credenciais do Azure</Typography>
+                <TextField label="Diretório (tenant)" value={form.tenant_id}
                   onChange={(e) => setForm({ ...form, tenant_id: e.target.value })}
                   helperText="Identificador do diretório no Microsoft Entra ID." />
-                <TextField label="ID da aplicação (cliente)" value={form.client_id}
+                <TextField label="Aplicação (client ID)" value={form.client_id}
                   onChange={(e) => setForm({ ...form, client_id: e.target.value })}
-                  helperText="Identificador da aplicação registrada no provedor." />
-                <TextField label="Segredo da aplicação" type="password" value={form.client_secret}
+                  helperText="Código da aplicação registrada no provedor." />
+                <TextField label="Segredo de acesso" type="password" value={form.client_secret}
                   onChange={(e) => setForm({ ...form, client_secret: e.target.value })}
-                  helperText="Valor do segredo da aplicação. Deixe vazio ao editar para manter o atual." />
-                <TextField label="Conta de armazenamento" value={form.storage_account}
+                  helperText="Valor do segredo da aplicação. Deixe em branco ao editar para manter o atual." />
+                <TextField label="Conta de storage" value={form.storage_account}
                   onChange={(e) => setForm({ ...form, storage_account: e.target.value })} />
-                <TextField label="Contêiner de armazenamento" value={form.container_name}
+                <TextField label="Container de storage" value={form.container_name}
                   onChange={(e) => setForm({ ...form, container_name: e.target.value })} />
                 {form.connector_type === "azure_blob" ? (
-                  <TextField label="Relatórios do Blob (tipo: caminho, um por linha)" multiline rows={4}
+                  <TextField label="Caminhos do Blob (tipo: pasta, uma por linha)" multiline rows={4}
                     value={form.blob_prefixes}
                     onChange={(e) => setForm({ ...form, blob_prefixes: e.target.value })}
                     helperText={
-                      "O tipo decide qual coletor usa o caminho — não é chumbado no código.\n"
+                      "O tipo define qual coletor usa o caminho; nada fica fixo no código.\n"
                       + "Ex.:\nactual_cost: reports/Report4P-actual-cost/\n"
                       + "amortized_cost: reports/Report4P-amortized-cost/"
                     } />
                 ) : (
-                  <TextField label="Caminho dos preços contratados" value="reports/report_-pricesheet/" disabled />
+                  <TextField label="Pasta dos preços contratados" value="reports/report_-pricesheet/" disabled />
                 )}
               </>
             )}
 
             {form.connector_type === "gcp_bigquery" && (
               <>
-                <Typography variant="subtitle2" sx={{ mt: 1, color: "text.primary" }}>Configuração Google Cloud</Typography>
-                <TextField label="ID do projeto" value={form.tenant_id}
+                <Typography variant="subtitle2" sx={{ mt: 1, color: "text.primary" }}>Configuração do Google Cloud</Typography>
+                <TextField label="Identificador do projeto" value={form.tenant_id}
                   onChange={(e) => setForm({ ...form, tenant_id: e.target.value })}
-                  helperText="ID do projeto GCP (ex: billing-344820)" />
-                <TextField label="ID do conjunto de dados" value={form.client_id}
+                  helperText="Identificador do projeto GCP (ex: billing-344820)" />
+                <TextField label="Conjunto de dados (dataset)" value={form.client_id}
                   onChange={(e) => setForm({ ...form, client_id: e.target.value })}
                   helperText="Dataset do BigQuery (ex: billingVivo)" />
-                <TextField label="Tabela de origem" value={form.table_name}
+                <TextField label="Tabela-fonte" value={form.table_name}
                   onChange={(e) => setForm({ ...form, table_name: e.target.value })}
                   helperText="Nome completo da tabela (ex: gcp_billing_export_resource_v1_...)" />
-                <TextField label="Credenciais da conta de serviço (JSON)" multiline rows={6}
+                <TextField label="Chave da conta de serviço (JSON)" multiline rows={6}
                   value={form.gcp_token}
                   onChange={(e) => setForm({ ...form, gcp_token: e.target.value })}
-                  helperText="Cole o conteúdo completo das credenciais JSON da conta de serviço." />
+                  helperText="Cole o conteúdo completo do JSON da conta de serviço." />
               </>
             )}
 
             {form.connector_type === "oci" && (
               <>
-                <Typography variant="subtitle2" sx={{ mt: 1, color: "text.primary" }}>Configuração Oracle Cloud</Typography>
-                <TextField label="ID da conta (OCID)" value={form.tenant_id}
+                <Typography variant="subtitle2" sx={{ mt: 1, color: "text.primary" }}>Configuração da Oracle Cloud</Typography>
+                <TextField label="Tenancy (OCID)" value={form.tenant_id}
                   onChange={(e) => setForm({ ...form, tenant_id: e.target.value })}
                   helperText="OCID da Tenancy (ex: ocid1.tenancy.oc1..aaaa...)" />
-                <TextField label="ID do usuário (OCID)" value={form.client_id}
+                <TextField label="Usuário (OCID)" value={form.client_id}
                   onChange={(e) => setForm({ ...form, client_id: e.target.value })}
                   helperText="OCID do usuário OCI (ex: ocid1.user.oc1..aaaa...)" />
-                <TextField label="Impressão digital da chave" value={form.oci_fingerprint}
+                <TextField label="Fingerprint da chave" value={form.oci_fingerprint}
                   onChange={(e) => setForm({ ...form, oci_fingerprint: e.target.value })}
-                  helperText="Fingerprint da API Key cadastrada na OCI" />
-                <TextField label="Região" value={form.oci_region}
+                  helperText="Fingerprint da API Key registrada na OCI" />
+                <TextField label="Região da nuvem" value={form.oci_region}
                   onChange={(e) => setForm({ ...form, oci_region: e.target.value })}
                   helperText="Região principal da OCI (ex: sa-saopaulo-1, sa-vinhedo-1, us-ashburn-1)" />
-                <TextField label="Chave privada (PEM)" multiline rows={5}
+                <TextField label="Arquivo PEM da chave privada" multiline rows={5}
                   value={form.oci_private_key}
                   onChange={(e) => setForm({ ...form, oci_private_key: e.target.value })}
-                  helperText="Cole o conteúdo completo da chave privada (.pem)." />
-                <TextField label="Relatórios do Blob (tipo: caminho, um por linha)" multiline rows={2}
+                  helperText="Cole o conteúdo completo do arquivo de chave privada (.pem)." />
+                <TextField label="Caminhos do Blob (tipo: pasta, uma por linha)" multiline rows={2}
                   value={form.blob_prefixes}
                   onChange={(e) => setForm({ ...form, blob_prefixes: e.target.value })}
-                  helperText="Padrão: reports/cost-csv (relatórios de custo financeiro)" />
-                <TextField label="Compartments OCI Generative AI / GPU (um OCID por linha)" multiline rows={3}
+                  helperText="Padrão: reports/cost-csv (relatórios de custo)" />
+                <TextField label="Compartments OCI de IA generativa e GPU (um OCID por linha)" multiline rows={3}
                   value={form.oci_genai_compartments}
                   onChange={(e) => setForm({ ...form, oci_genai_compartments: e.target.value })}
-                  helperText="Escopo da fonte OCI Generative AI & GPU Monitoring; necessário para coletar inventário, tokens e tendências." />
+                  helperText="Abrangência da fonte OCI Generative AI e GPU Monitoring; necessária para coletar inventário, tokens e tendências." />
                 <Alert severity="info" sx={{ mt: 1, fontSize: "0.8rem" }}>
-                  <strong>Consolidação Diária OCI:</strong> Os dados são automaticamente agrupados por dia, recurso e tags durante a ingestão para otimização de performance, preservando 100% dos valores financeiros em R$ e dimensões.
+                  <strong>Consolidação diária OCI:</strong> Os dados são automaticamente agrupados por dia, recurso e tags durante a ingestão para otimização de performance, preservando 100% dos valores financeiros em R$ e dimensões.
                 </Alert>
               </>
             )}
 
             {form.connector_type === "mongodb_atlas" && (
               <>
-                <Typography variant="subtitle2" sx={{ mt: 1, color: "text.primary" }}>Configuração MongoDB Atlas</Typography>
-                <TextField label="Endereço do serviço" value={form.tenant_id}
+                <Typography variant="subtitle2" sx={{ mt: 1, color: "text.primary" }}>Configuração do Atlas (MongoDB)</Typography>
+                <TextField label="URL da API" value={form.tenant_id}
                   onChange={(e) => setForm({ ...form, tenant_id: e.target.value })}
                   helperText="Ex: https://cloud.mongodb.com/api/atlas/v1.0" />
                 <TextField label="Chave pública" value={form.client_id}
                   onChange={(e) => setForm({ ...form, client_id: e.target.value })} />
                 <TextField label="Chave privada" type="password" value={form.client_secret}
                   onChange={(e) => setForm({ ...form, client_secret: e.target.value })} />
-                <TextField label="ID do grupo" value={form.mongo_group_id}
+                <TextField label="Identificador do grupo" value={form.mongo_group_id}
                   onChange={(e) => setForm({ ...form, mongo_group_id: e.target.value })} />
-                <TextField label="Tipo de contrato" value={form.mongo_contract_type}
+                <TextField label="Modalidade de contrato" value={form.mongo_contract_type}
                   onChange={(e) => setForm({ ...form, mongo_contract_type: e.target.value })}
-                  helperText="pro ou enterprise" />
+                  helperText="plano pro ou enterprise" />
                 <FormControlLabel
                   control={
                     <Checkbox
@@ -1307,19 +1327,19 @@ export default function Connections() {
                       onChange={(e) => setForm({ ...form, marketplace: e.target.checked })}
                     />
                   }
-                  label="Marketplace"
+                  label="Oferta no marketplace"
                 />
               </>
             )}
 
             {(form.connector_type === "github_billing" || form.connector_type === "github_license" || form.connector_type === "github_token") && (
               <>
-                <Typography variant="subtitle2" sx={{ mt: 1, color: "text.primary" }}>Configuração GitHub Enterprise</Typography>
+                <Typography variant="subtitle2" sx={{ mt: 1, color: "text.primary" }}>Configuração do GitHub Enterprise</Typography>
                 <FormControl fullWidth>
-                  <InputLabel>Tipo de dado</InputLabel>
+                  <InputLabel>Conteúdo</InputLabel>
                   <Select
                     value={form.github_extraction_type || (form.connector_type === "github_billing" ? "billing" : form.connector_type === "github_license" ? "license" : "token")}
-                    label="Tipo de dado"
+                    label="Conteúdo"
                     onChange={(e) => {
                       const t = e.target.value as "billing" | "license" | "token";
                       const connectorType = t === "billing" ? "github_billing" : t === "license" ? "github_license" : "github_token";
@@ -1327,28 +1347,28 @@ export default function Connections() {
                       setForm({ ...form, github_extraction_type: t, connector_type: connectorType, cloud_name: cloudName });
                     }}
                   >
-                    <MenuItem value="billing">Billing — Relatórios de custo (Copilot / Actions / Packages)</MenuItem>
-                    <MenuItem value="token">Tokens — Consumo de tokens/mês</MenuItem>
-                    <MenuItem value="license">Licenças — Usuários criados</MenuItem>
+                    <MenuItem value="billing">Faturamento: relatórios de custo (Copilot / Actions / Packages)</MenuItem>
+                    <MenuItem value="token">Tokens: consumo por mês</MenuItem>
+                    <MenuItem value="license">Licenças: usuários criados</MenuItem>
                   </Select>
                 </FormControl>
-                <TextField label="Identificador da organização" value={form.tenant_id}
+                <TextField label="Organização (identificador)" value={form.tenant_id}
                   onChange={(e) => setForm({ ...form, tenant_id: e.target.value })}
-                  helperText="Identificador da organização no GitHub Enterprise." />
-                <TextField label="Token de acesso pessoal (PAT)" type="password" value={form.client_secret}
+                  helperText="Organização (identificador) no GitHub Enterprise." />
+                <TextField label="PAT (token de acesso pessoal)" type="password" value={form.client_secret}
                   onChange={(e) => setForm({ ...form, client_secret: e.target.value })}
-                  helperText="Token com escopo manage_billing:enterprise" />
+                  helperText="Token com o escopo manage_billing:enterprise" />
               </>
             )}
 
             {(form.connector_type === "notebooklm_license" || form.connector_type === "notebooklm_token") && (
               <>
-                <Typography variant="subtitle2" sx={{ mt: 1, color: "text.primary" }}>Configuração Google Gemini (NotebookLM)</Typography>
+                <Typography variant="subtitle2" sx={{ mt: 1, color: "text.primary" }}>Configuração do Google Gemini (NotebookLM)</Typography>
                 <FormControl fullWidth>
-                  <InputLabel>Tipo de dado</InputLabel>
+                  <InputLabel>Conteúdo</InputLabel>
                   <Select
                     value={form.gemini_extraction_type || (form.connector_type === "notebooklm_license" ? "license" : "token")}
-                    label="Tipo de dado"
+                    label="Conteúdo"
                     onChange={(e) => {
                       const t = e.target.value as "license" | "token";
                       const connectorType = t === "license" ? "notebooklm_license" : "notebooklm_token";
@@ -1356,36 +1376,36 @@ export default function Connections() {
                       setForm({ ...form, gemini_extraction_type: t, connector_type: connectorType, cloud_name: cloudName });
                     }}
                   >
-                    <MenuItem value="token">Tokens — Consumo de tokens/mês</MenuItem>
-                    <MenuItem value="license">Licenças — Usuários com licenças ativas</MenuItem>
+                    <MenuItem value="token">Tokens: consumo por mês</MenuItem>
+                    <MenuItem value="license">Licenças: usuários com licença ativa</MenuItem>
                   </Select>
                 </FormControl>
-                <TextField label="ID do projeto Google Cloud" value={form.tenant_id}
+                <TextField label="Identificador do projeto Google Cloud" value={form.tenant_id}
                   onChange={(e) => setForm({ ...form, tenant_id: e.target.value })}
                   helperText="Project ID no GCP (ex: telefonica-notebook-lm)" />
-                <TextField label="Número do projeto" value={form.client_id}
+                <TextField label="Número do projeto (Google)" value={form.client_id}
                   onChange={(e) => setForm({ ...form, client_id: e.target.value })}
-                  helperText="Número do projeto no Google Cloud." />
-                <TextField label="E-mail do administrador do Workspace" value={form.admin_email}
+                  helperText="Número do projeto (Google) no Google Cloud." />
+                <TextField label="E-mail do admin do Workspace" value={form.admin_email}
                   onChange={(e) => setForm({ ...form, admin_email: e.target.value })}
-                  helperText="Super admin para domain-wide delegation (ex: admin@empresa.com)" />
-                <TextField label="Credenciais da conta de serviço (JSON)" value={form.gcp_token} multiline minRows={4}
+                  helperText="Super admin para delegação em todo o domínio (ex.: admin@empresa.com)" />
+                <TextField label="Chave da conta de serviço (JSON)" value={form.gcp_token} multiline minRows={4}
                   onChange={(e) => setForm({ ...form, gcp_token: e.target.value })}
-                  helperText="Cole o JSON completo da service account (type=service_account). Chave AIza não lista usuários." />
-                <TextField label="Chave de API (opcional)" type="password" value={form.client_secret}
+                  helperText="Cole o JSON completo da conta de serviço (type=service_account). Chave AIza não lista usuários." />
+                <TextField label="Chave de API (se houver)" type="password" value={form.client_secret}
                   onChange={(e) => setForm({ ...form, client_secret: e.target.value })}
-                  helperText="Não substitui a service account para licenças e Reports API" />
+                  helperText="Não substitui a conta de serviço para licenças e Reports API" />
               </>
             )}
 
             {(form.connector_type === "gemini_license" || form.connector_type === "gemini_token") && (
               <>
-                <Typography variant="subtitle2" sx={{ mt: 1, color: "text.primary" }}>Configuração Google Gemini</Typography>
+                <Typography variant="subtitle2" sx={{ mt: 1, color: "text.primary" }}>Configuração do Google Gemini</Typography>
                 <FormControl fullWidth>
-                  <InputLabel>Tipo de dado</InputLabel>
+                  <InputLabel>Conteúdo</InputLabel>
                   <Select
                     value={form.gemini_extraction_type || (form.connector_type === "gemini_license" ? "license" : "token")}
-                    label="Tipo de dado"
+                    label="Conteúdo"
                     onChange={(e) => {
                       const t = e.target.value as "license" | "token";
                       const connectorType = t === "license" ? "gemini_license" : "gemini_token";
@@ -1393,36 +1413,36 @@ export default function Connections() {
                       setForm({ ...form, gemini_extraction_type: t, connector_type: connectorType, cloud_name: cloudName });
                     }}
                   >
-                    <MenuItem value="token">Tokens — Consumo de tokens/mês</MenuItem>
-                    <MenuItem value="license">Licenças — Usuários com licenças ativas</MenuItem>
+                    <MenuItem value="token">Tokens: consumo por mês</MenuItem>
+                    <MenuItem value="license">Licenças: usuários com licença ativa</MenuItem>
                   </Select>
                 </FormControl>
-                <TextField label="ID do projeto Google Cloud" value={form.tenant_id}
+                <TextField label="Identificador do projeto Google Cloud" value={form.tenant_id}
                   onChange={(e) => setForm({ ...form, tenant_id: e.target.value })}
                   helperText="Project ID no GCP (ex: telefonica-notebook-lm)" />
-                <TextField label="Número do projeto" value={form.client_id}
+                <TextField label="Número do projeto (Google)" value={form.client_id}
                   onChange={(e) => setForm({ ...form, client_id: e.target.value })}
-                  helperText="Número do projeto no Google Cloud." />
-                <TextField label="E-mail do administrador do Workspace" value={form.admin_email}
+                  helperText="Número do projeto (Google) no Google Cloud." />
+                <TextField label="E-mail do admin do Workspace" value={form.admin_email}
                   onChange={(e) => setForm({ ...form, admin_email: e.target.value })}
-                  helperText="Super admin para domain-wide delegation (ex: admin@empresa.com)" />
-                <TextField label="Credenciais da conta de serviço (JSON)" value={form.gcp_token} multiline minRows={4}
+                  helperText="Super admin para delegação em todo o domínio (ex.: admin@empresa.com)" />
+                <TextField label="Chave da conta de serviço (JSON)" value={form.gcp_token} multiline minRows={4}
                   onChange={(e) => setForm({ ...form, gcp_token: e.target.value })}
-                  helperText="Cole o JSON completo da service account (type=service_account). Chave AIza não lista usuários." />
-                <TextField label="Chave de API (opcional)" type="password" value={form.client_secret}
+                  helperText="Cole o JSON completo da conta de serviço (type=service_account). Chave AIza não lista usuários." />
+                <TextField label="Chave de API (se houver)" type="password" value={form.client_secret}
                   onChange={(e) => setForm({ ...form, client_secret: e.target.value })}
-                  helperText="Não substitui a service account para licenças e Reports API" />
+                  helperText="Não substitui a conta de serviço para licenças e Reports API" />
               </>
             )}
 
             {(form.connector_type === "claude_license" || form.connector_type === "claude_token") && (
               <>
-                <Typography variant="subtitle2" sx={{ mt: 1, color: "text.primary" }}>Configuração Claude Enterprise (Anthropic)</Typography>
+                <Typography variant="subtitle2" sx={{ mt: 1, color: "text.primary" }}>Configuração do Claude Enterprise (Anthropic)</Typography>
                 <FormControl fullWidth>
-                  <InputLabel>Tipo de dado</InputLabel>
+                  <InputLabel>Conteúdo</InputLabel>
                   <Select
                     value={form.connector_type === "claude_license" ? "license" : "token"}
-                    label="Tipo de dado"
+                    label="Conteúdo"
                     onChange={(e) => {
                       const t = e.target.value as "license" | "token";
                       const connectorType = t === "license" ? "claude_license" : "claude_token";
@@ -1430,40 +1450,40 @@ export default function Connections() {
                       setForm({ ...form, connector_type: connectorType, cloud_name: cloudName });
                     }}
                   >
-                    <MenuItem value="token">Tokens — Consumo de tokens / atividades por mês</MenuItem>
-                    <MenuItem value="license">Licenças — Colaboradores com licenças ativas</MenuItem>
+                    <MenuItem value="token">Tokens: consumo de tokens e atividades por mês</MenuItem>
+                    <MenuItem value="license">Licenças: colaboradores com licença ativa</MenuItem>
                   </Select>
                 </FormControl>
-                <TextField label="Identificador da organização" value={form.tenant_id}
+                <TextField label="Organização (identificador)" value={form.tenant_id}
                   onChange={(e) => setForm({ ...form, tenant_id: e.target.value })}
-                  helperText="Identificador da organização (ex: telefonica)" />
-                <TextField label="Chave de API administrativa" type="password" value={form.client_secret}
+                  helperText="Organização (identificador) (ex: telefonica)" />
+                <TextField label="Chave de API de administrador" type="password" value={form.client_secret}
                   onChange={(e) => setForm({ ...form, client_secret: e.target.value })}
-                  helperText="Admin API Key com read:members (licenças) e api:admin (consumo/tokens). Sem api:admin a licença funciona e o token falha. O arquivo .env-cloude local não alimenta a conexão — cole aqui e salve." />
+                  helperText="Chave de API de admin com read:members (licenças) e api:admin (consumo/tokens). Sem api:admin a licença funciona e o token falha. O arquivo .env-cloude local não alimenta a conexão — cole aqui e salve." />
               </>
             )}
 
             {form.connector_type === "databricks" && (
               <>
-                <Typography variant="subtitle2" sx={{ mt: 1, color: "text.primary" }}>Configuração Databricks</Typography>
-                <TextField label="Endereço do servidor" value={form.databricks_server_hostname}
+                <Typography variant="subtitle2" sx={{ mt: 1, color: "text.primary" }}>Configuração do Databricks</Typography>
+                <TextField label="Host do servidor" value={form.databricks_server_hostname}
                   onChange={(e) => setForm({ ...form, databricks_server_hostname: e.target.value })}
-                  helperText="Endereço do workspace (NÃO é o token). Ex: adb-7405612109211710.10.azuredatabricks.net" />
-                <TextField label="Caminho HTTP" value={form.databricks_http_path}
+                  helperText="Host do workspace (NÃO é o token). Ex.: adb-7405612109211710.10.azuredatabricks.net" />
+                <TextField label="Caminho HTTP do warehouse" value={form.databricks_http_path}
                   onChange={(e) => setForm({ ...form, databricks_http_path: e.target.value })}
-                  helperText="Ex: /sql/1.0/warehouses/26efc2a4526c691f" />
-                <TextField label="Token de acesso (opcional)" type="password" value={form.databricks_token}
+                  helperText="Exemplo: /sql/1.0/warehouses/26efc2a4526c691f" />
+                <TextField label="Token (opcional)" type="password" value={form.databricks_token}
                   onChange={(e) => setForm({ ...form, databricks_token: e.target.value })}
-                  helperText="Preencha para usar uma credencial exclusiva desta conexão. Vazio mantém a credencial configurada no ambiente." />
-                <TextField label="Tabela ou nome da origem" value={form.databricks_table_name}
+                  helperText="Preencha para usar uma credencial exclusiva desta conexão. Em branco mantém a credencial do ambiente." />
+                <TextField label="Tabela ou nome da fonte" value={form.databricks_table_name}
                   onChange={(e) => setForm({ ...form, databricks_table_name: e.target.value })}
-                  helperText="Identifica a origem dos registros coletados (ex.: system.billing.usage)." />
+                  helperText="Identifica a fonte dos registros coletados (ex.: system.billing.usage)." />
                 <TextField label="Consulta de consumo" multiline rows={4} value={form.databricks_query}
                   onChange={(e) => setForm({ ...form, databricks_query: e.target.value })}
-                  helperText="SQL do consumo do Workspace. Padrão: SELECT * FROM system.billing.usage. Pode apontar para outra tabela/visão (ex: system.billing.list_purchases)." />
-                <TextField label="Coluna de data (mês)" value={form.databricks_month_column}
+                  helperText="SQL do consumo do workspace. Padrão: SELECT * FROM system.billing.usage. Pode apontar para outra tabela ou view (ex.: system.billing.list_purchases)." />
+                <TextField label="Coluna de data (mês de faturamento)" value={form.databricks_month_column}
                   onChange={(e) => setForm({ ...form, databricks_month_column: e.target.value })}
-                  helperText="Coluna usada para derivar o billing period (padrão: usage_date)" />
+                  helperText="Coluna usada para derivar o período de faturamento (padrão: usage_date)" />
               </>
             )}
 
@@ -1481,14 +1501,14 @@ export default function Connections() {
         <DialogActions>
           <Button disabled={savingConnection} onClick={() => setDialogOpen(false)}>Cancelar</Button>
           <Button variant="outlined" startIcon={testingForm ? <CircularProgress size={20} /> : <Validate />} onClick={() => void testFormConnection()} disabled={testingForm || savingConnection}>
-            {testingForm ? "Validando…" : form.connector_type === "azure_mca_invoice" ? "Validar acesso e contas" : "Validar conexão"}
+            {testingForm ? "Testando…" : form.connector_type === "azure_mca_invoice" ? "Testar acesso e contas" : "Testar conexão"}
           </Button>
-          <Button startIcon={<Save />} onClick={() => void save()} variant="contained" disabled={testingForm || savingConnection}>{savingConnection ? "Salvando…" : "Salvar conexão"}</Button>
+          <Button startIcon={<Save />} onClick={() => void save()} variant="contained" disabled={testingForm || savingConnection}>{savingConnection ? "Salvando…" : "Salvar fonte"}</Button>
         </DialogActions>
       </Dialog>
 
       <Dialog open={Boolean(connectionPendingDeletion)} onClose={() => { if (!deleting) { setConnectionPendingDeletion(null); setDeleteError(""); } }} maxWidth="xs" fullWidth>
-        <DialogTitle>Excluir conexão?</DialogTitle>
+        <DialogTitle>Remover conexão?</DialogTitle>
         <DialogContent>
           {deleteError ? (
             <Alert severity="error" sx={{ mb: 2 }}>
@@ -1496,7 +1516,7 @@ export default function Connections() {
             </Alert>
           ) : (
             <Typography>
-              Você está prestes a excluir a conexão <strong>{connectionPendingDeletion?.name}</strong>.
+              Você está prestes a remover a conexão <strong>{connectionPendingDeletion?.name}</strong>.
               A tabela de origem associada também será removida. Esta ação não pode ser desfeita.
             </Typography>
           )}
@@ -1504,7 +1524,7 @@ export default function Connections() {
         <DialogActions sx={{ px: 3, pb: 2 }}>
           <Button disabled={deleting} onClick={() => { setConnectionPendingDeletion(null); setDeleteError(""); }}>Cancelar</Button>
           <Button variant="contained" color="error" disabled={deleting || !!deleteError} onClick={() => void remove()}>
-            {deleting ? "Excluindo…" : "Excluir conexão"}
+            {deleting ? "Removendo…" : "Remover conexão"}
           </Button>
         </DialogActions>
       </Dialog>
@@ -1515,9 +1535,9 @@ export default function Connections() {
       </Snackbar>
 
       <Dialog open={historyConn !== null} onClose={() => setHistoryConn(null)} maxWidth="md" fullWidth>
-        <DialogTitle>Histórico da conexão<Typography variant="body2" color="text.secondary">{historyConn?.name ?? ""}</Typography></DialogTitle>
+        <DialogTitle>Log da conexão<Typography variant="body2" color="text.secondary">{historyConn?.name ?? ""}</Typography></DialogTitle>
         <DialogContent>
-          {historyConn && <RecordHistory module="connections" entityType="connection" entityId={historyConn.id} />}
+          {historyConn && <VersionHistorySection><RecordHistory module="connections" entityType="connection" entityId={historyConn.id} /></VersionHistorySection>}
         </DialogContent>
         <DialogActions><Button onClick={() => setHistoryConn(null)}>Fechar histórico</Button></DialogActions>
       </Dialog>

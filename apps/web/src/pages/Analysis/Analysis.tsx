@@ -12,12 +12,7 @@ import {
   TablePagination, TableSortLabel,
   Accordion, AccordionSummary, AccordionDetails,
 } from "@mui/material";
-import {
-  PlayArrow, Refresh, Delete,
-  Schema as SchemaIcon, BarChart, Search as SearchIcon, TableChart,
-  ExpandMore,
-  Add, Remove,
-} from "@mui/icons-material";
+import { PlayArrowOutlined, RefreshOutlined, DeleteOutlined, SchemaOutlined as SchemaIcon, BarChartOutlined, SearchOutlined as SearchIcon, TableChartOutlined, ExpandMoreOutlined, AddOutlined, RemoveOutlined } from "@mui/icons-material";
 import axios from "axios";
 import * as XLSX from "xlsx";
 import {
@@ -89,12 +84,12 @@ const PREBUILT: Record<string, { label: string; sql: string }[]> = {
   bronze: [],
   silver: [],
   gold: [
-    { label: "Top 10 serviços por custo", sql: 'SELECT "ServiceName", SUM("BilledCost") AS total_billed, COUNT(*) AS rows FROM iceberg.gold.dest_modelo_focus GROUP BY "ServiceName" ORDER BY total_billed DESC LIMIT 10' },
-    { label: "Custo por departamento", sql: 'SELECT "organograma", SUM("BilledCost") AS total_billed, SUM("EffectiveCost") AS total_effective, COUNT(*) AS rows FROM iceberg.gold.dest_modelo_focus GROUP BY "organograma" ORDER BY total_billed DESC LIMIT 20' },
-    { label: "Custo por período", sql: 'SELECT "_billing_period", SUM("BilledCost") AS total_billed, SUM("EffectiveCost") AS total_effective, COUNT(*) AS rows FROM iceberg.gold.dest_modelo_focus GROUP BY "_billing_period" ORDER BY "_billing_period" DESC' },
-    { label: "Custo por região", sql: 'SELECT "RegionName", SUM("BilledCost") AS total_billed, COUNT(*) AS rows FROM iceberg.gold.dest_modelo_focus GROUP BY "RegionName" ORDER BY total_billed DESC LIMIT 20' },
-    { label: "Custo por origem e mês", sql: 'SELECT "cloud_origem", "_billing_period", SUM("BilledCost") AS total_billed, COUNT(*) AS rows FROM iceberg.gold.dest_modelo_focus GROUP BY "cloud_origem", "_billing_period" ORDER BY "_billing_period" DESC, total_billed DESC' },
-    { label: "Departamento / origem por mês", sql: 'SELECT "organograma", "cloud_origem", "_billing_period", SUM("BilledCost") AS total_billed, SUM("EffectiveCost") AS total_effective, COUNT(*) AS rows FROM iceberg.gold.dest_modelo_focus GROUP BY "organograma", "cloud_origem", "_billing_period" ORDER BY "_billing_period" DESC, total_billed DESC LIMIT 500' },
+    { label: "Top 10 serviços por custo faturado", sql: 'SELECT "ServiceName", SUM("BilledCost") AS total_billed, COUNT(*) AS rows FROM iceberg.gold.dest_modelo_focus GROUP BY "ServiceName" ORDER BY total_billed DESC LIMIT 10' },
+    { label: "Custo por unidade", sql: 'SELECT "organograma", SUM("BilledCost") AS total_billed, SUM("EffectiveCost") AS total_effective, COUNT(*) AS rows FROM iceberg.gold.dest_modelo_focus GROUP BY "organograma" ORDER BY total_billed DESC LIMIT 20' },
+    { label: "Custo por competência", sql: 'SELECT "_billing_period", SUM("BilledCost") AS total_billed, SUM("EffectiveCost") AS total_effective, COUNT(*) AS rows FROM iceberg.gold.dest_modelo_focus GROUP BY "_billing_period" ORDER BY "_billing_period" DESC' },
+    { label: "Custo por localização", sql: 'SELECT "RegionName", SUM("BilledCost") AS total_billed, COUNT(*) AS rows FROM iceberg.gold.dest_modelo_focus GROUP BY "RegionName" ORDER BY total_billed DESC LIMIT 20' },
+    { label: "Custo por fonte e mês", sql: 'SELECT "cloud_origem", "_billing_period", SUM("BilledCost") AS total_billed, COUNT(*) AS rows FROM iceberg.gold.dest_modelo_focus GROUP BY "cloud_origem", "_billing_period" ORDER BY "_billing_period" DESC, total_billed DESC' },
+    { label: "Unidade / fonte por mês", sql: 'SELECT "organograma", "cloud_origem", "_billing_period", SUM("BilledCost") AS total_billed, SUM("EffectiveCost") AS total_effective, COUNT(*) AS rows FROM iceberg.gold.dest_modelo_focus GROUP BY "organograma", "cloud_origem", "_billing_period" ORDER BY "_billing_period" DESC, total_billed DESC LIMIT 500' },
   ],
 };
 
@@ -186,16 +181,16 @@ export default function Analysis() {
       setTables(nextTables);
       setStagingTables(nextStaging);
     } catch (e: unknown) {
-      setError(formatApiError(e, "Falha ao atualizar a Central de dados"));
+      setError(formatApiError(e, "Não foi possível atualizar a central de dados"));
     }
   };
 
   const removeStagingTable = async (item: AnalysisStagingTable) => {
     if (item.protected) return;
     if (!(await confirm(
-      `Excluir permanentemente a área temporária ${item.table_name}?\n\n` +
+      `Excluir de vez a área temporária ${item.table_name}?\n\n` +
       "A ação remove somente a tabela temporária; a base consolidada publicada não será alterada."
-    , { title: "Confirmar exclusão", confirmLabel: "Excluir", danger: true }))) return;
+    , { title: "Excluir área temporária", confirmLabel: "Excluir", danger: true }))) return;
     setStagingLoading(true); setError("");
     try {
       await deleteAnalysisStagingTable(item.table_name);
@@ -205,14 +200,14 @@ export default function Analysis() {
       setStagingTables(nextStaging);
       setTables(nextTables);
     } catch (e: unknown) {
-      setError(formatApiError(e, "Não foi possível excluir a tabela temporária"));
+      setError(formatApiError(e, "Não foi possível remover a tabela temporária"));
     } finally {
       setStagingLoading(false);
     }
   };
 
   const removeGoldTable = async (t: string) => {
-    if (!(await confirm('Excluir a tabela ' + t + "? A regra de consolidação associada (se houver) e a tabela armazenada serão removidas.", { title: "Confirmar exclusão", confirmLabel: "Excluir", danger: true }))) return;
+    if (!(await confirm('Excluir a tabela ' + t + "? A regra de consolidação associada (se houver) e a tabela armazenada serão removidas.", { title: "Excluir área temporária", confirmLabel: "Excluir", danger: true }))) return;
     setError("");
     try {
       await deleteGoldTable(t);
@@ -231,7 +226,7 @@ export default function Analysis() {
       setSrcData(d);
       setSrcPage(0);
     } catch (e: unknown) {
-      setError(formatApiError(e, "Query failed"));
+      setError(formatApiError(e, "Não foi possível executar a consulta"));
     } finally { setLoading(false); }
   };
 
@@ -249,7 +244,7 @@ export default function Analysis() {
       setDestData(d);
       setDestPage(0);
     } catch (e: unknown) {
-      setError(formatApiError(e, "Query failed"));
+      setError(formatApiError(e, "Não foi possível executar a consulta"));
     } finally { setLoading(false); }
   };
 
@@ -270,7 +265,7 @@ export default function Analysis() {
       setExecutedSql(q);
       setPage(0);
     } catch (e: unknown) {
-      setError(formatApiError(e, "Query failed"));
+      setError(formatApiError(e, "Não foi possível executar a consulta"));
     } finally { setLoading(false); }
   };
 
@@ -289,7 +284,7 @@ export default function Analysis() {
         getAnalysisTables().then(setTables).catch(() => {});
         return;
       }
-      setError(formatApiError(e, "Não foi possível carregar as partições"));
+      setError(formatApiError(e, "Não foi possível listar as partições"));
     } finally { setPartitionsLoading(false); }
   };
 
@@ -304,7 +299,7 @@ export default function Analysis() {
         getAnalysisTables().then(setTables).catch(() => {});
         return;
       }
-      setError(formatApiError(e, `Não foi possível carregar partições de ${tableName}`));
+      setError(formatApiError(e, `Não foi possível listar as partições de ${tableName}`));
     } finally {
       setPartitionDetailsLoading(current => {
         const next = new Set(current);
@@ -368,14 +363,14 @@ export default function Analysis() {
       <Box sx={{ display: "flex", alignItems: "center", gap: 1, pl: depth * 2, py: 0.25 }}>
         {nodeKey ? (
           <Button size="small" variant="outlined" onClick={() => togglePartitionNode(nodeKey)} sx={{ minWidth: 28, width: 28, height: 28, p: 0 }} aria-label={openPartitionNodes.has(nodeKey) ? "Recolher" : "Expandir"}>
-            {openPartitionNodes.has(nodeKey) ? <Remove fontSize="small" /> : <Add fontSize="small" />}
+            {openPartitionNodes.has(nodeKey) ? <RemoveOutlined fontSize="small" /> : <AddOutlined fontSize="small" />}
           </Button>
         ) : <Box sx={{ width: 28 }} />}
         <Typography variant="body2" sx={{ flex: 1, overflowWrap: "anywhere" }}>{label}</Typography>
         <Typography variant="caption" color="text.secondary" sx={{ whiteSpace: "nowrap" }}>{meta}</Typography>
         <Typography variant="caption" sx={{ minWidth: 72, textAlign: "right" }}>{records.toLocaleString()} reg.</Typography>
         <Typography variant="caption" color="text.secondary" sx={{ minWidth: 56, textAlign: "right" }}>{files.toLocaleString()} arq.</Typography>
-        <Button size="small" onClick={onUse}>Usar</Button>
+        <Button size="small" onClick={onUse}>Selecionar</Button>
       </Box>
     );
 
@@ -388,7 +383,7 @@ export default function Analysis() {
           const periodTotals = totals(periodRows);
           const bySource = new Map<string, AnalysisPartition[]>();
           periodRows.forEach((row) => {
-            const sourceKey = row.source_label || (row.source_connection_id != null ? `conexão ${row.source_connection_id}` : "sem fonte");
+            const sourceKey = row.source_label || (row.source_connection_id != null ? `conexão nº ${row.source_connection_id}` : "sem fonte");
             const bucket = bySource.get(sourceKey) || [];
             bucket.push(row);
             bySource.set(sourceKey, bucket);
@@ -433,17 +428,17 @@ export default function Analysis() {
           <Typography variant="caption" sx={{ flex: 1, minWidth: 220, overflowWrap: "anywhere", fontFamily: "monospace" }}>
             {member.period ? `${member.period} · ${member.dimension} · ID ${member.scopeId}` : member.tableName}
           </Typography>
-          <Button size="small" onClick={() => useDataSlice(member.tableName)}>Usar tabela</Button>
+          <Button size="small" onClick={() => useDataSlice(member.tableName)}>Usar esta tabela</Button>
         </Box>
         <Box sx={{ mt: 1 }}>
           {!detail && partitionDetailsLoading.has(member.tableName) ? <CircularProgress size={18} /> : detail?.partitioned ? (
-            detail.partitions.length ? renderPartitionTree(member.tableName, detail.partitions) : <Typography variant="caption" color="text.secondary">Nenhuma divisão de dados encontrada.</Typography>
+            detail.partitions.length ? renderPartitionTree(member.tableName, detail.partitions) : <Typography variant="caption" color="text.secondary">Nenhuma partição de dados encontrada.</Typography>
           ) : detail ? (
             <Alert severity="info" sx={{ py: 0 }}>Esta tabela não possui divisões internas de dados. {member.period ? `O período ${member.period} e o escopo estão codificados no nome; ` : ""}{detail.record_count?.toLocaleString() ?? 0} registros em {detail.file_count ?? 0} arquivo(s).
-              <Button size="small" sx={{ ml: 1 }} onClick={() => useDataSlice(member.tableName)}>Usar tabela</Button>
+              <Button size="small" sx={{ ml: 1 }} onClick={() => useDataSlice(member.tableName)}>Usar esta tabela</Button>
             </Alert>
           ) : !partitionDetailsLoading.has(member.tableName) ? (
-            <Alert severity="error" sx={{ py: 0 }}>Não foi possível carregar as partições. Recolha e expanda de novo.</Alert>
+            <Alert severity="error" sx={{ py: 0 }}>Não foi possível listar as partições. Recolha e expanda novamente.</Alert>
           ) : null}
         </Box>
       </Paper>
@@ -504,11 +499,11 @@ export default function Analysis() {
     }));
 
     const querySheet = XLSX.utils.aoa_to_sheet([
-      ["SQL executado"],
+      ["Consulta executada"],
       [executedSql],
       [],
-      ["Exportado em", new Date().toLocaleString("pt-BR")],
-      ["Registros exportados", filteredRows.length],
+      ["Baixado em", new Date().toLocaleString("pt-BR")],
+      ["Linhas exportadas", filteredRows.length],
     ]);
     querySheet["!cols"] = [{ wch: 24 }, { wch: 24 }];
 
@@ -544,38 +539,34 @@ export default function Analysis() {
   }, [destData, destPage]);
 
   return (
-    <Box sx={{ mx: -3, mt: -3, pb: 3, minHeight: "calc(100vh - 64px)", bgcolor: "#FAFBFD" }}>
-      {/* Faixa de contexto branca */}
-      <Box sx={{ px: 3, pt: 3, bgcolor: "background.paper", borderBottom: "1px solid", borderColor: "divider" }}>
-        <Box sx={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 2, mb: 2 }}>
-          <Box>
-            <Typography variant="h4">Central de dados</Typography>
-            <Typography color="text.secondary" sx={{ mt: 0.5 }}>
-              Explore os dados importados, classificados e aplicados com regras de negócio.
-            </Typography>
-          </Box>
-          <Button size="small" variant="outlined" startIcon={<Refresh />} onClick={refreshDataCatalog} sx={{ flexShrink: 0 }}>
-            Atualizar
-          </Button>
+    <Box>
+      <Box sx={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 2, mb: 2 }}>
+        <Box>
+          <Typography variant="h6">Explorador de bases</Typography>
+          <Typography variant="body2" color="text.secondary">
+            Explore os dados importados, classificados e aplicados com regras de negócio.
+          </Typography>
         </Box>
+        <Button size="small" variant="outlined" startIcon={<RefreshOutlined />} onClick={refreshDataCatalog} sx={{ flexShrink: 0 }}>
+          Atualizar
+        </Button>
       </Box>
 
       {/* Área de trabalho com campos simples de 40px */}
       <Box sx={{
-        p: 3,
         "& .MuiOutlinedInput-root:not(.MuiInputBase-multiline)": { height: 40 },
         "& .MuiInputLabel-root:not(.MuiInputLabel-shrink)": { transform: "translate(14px, 11px) scale(1)" },
       }}>
         {/* Health status */}
         <Box sx={{ display: "flex", gap: 1, mb: 2, flexWrap: "wrap" }}>
           {Object.entries(health).map(([k, v]) => (
-            <Chip key={k} label={`${DATA_SERVICE_LABELS[k] || dataDisplayText(k)}: ${v === "ok" ? "Disponível" : "Indisponível"}`} size="small" color={v === "ok" ? "success" : "warning"} variant="outlined" />
+            <Chip key={k} label={`${DATA_SERVICE_LABELS[k] || dataDisplayText(k)}: ${v === "ok" ? "Operacional" : "Fora do ar"}`} size="small" color={v === "ok" ? "success" : "warning"} variant="outlined" />
           ))}
         </Box>
 
         {error && <Alert severity="error" sx={{ mb: 2 }} onClose={() => setError("")}>{dataDisplayText(error)}</Alert>}
 
-      <Paper elevation={0} sx={{ p: { xs: 1.5, md: 2 }, borderRadius: 2, bgcolor: "background.paper", border: "1px solid", borderColor: "divider" }}>
+      <Paper variant="outlined" sx={{ p: { xs: 1.5, md: 2 } }}>
 
 
       {/* ================================================================ */}
@@ -585,8 +576,8 @@ export default function Analysis() {
         <>
           <Box sx={{ display: "flex", gap: 2, mb: 2, alignItems: "center", flexWrap: "wrap" }}>
             <FormControl sx={{ minWidth: 260 }} size="small">
-              <InputLabel>Tabela Destino</InputLabel>
-              <Select value={selectedDestId} label="Tabela Destino" onChange={(e) => handleDestChange(e.target.value as number | "")}>
+              <InputLabel>Tabela de destino</InputLabel>
+              <Select value={selectedDestId} label="Tabela de destino" onChange={(e) => handleDestChange(e.target.value as number | "")}>
                 {destinations.map((d) => (
                   <MenuItem key={d.id} value={d.id}>
                     {d.name} ({d.row_count.toLocaleString()} linhas)
@@ -603,11 +594,11 @@ export default function Analysis() {
           {loading && <CircularProgress sx={{ display: "block", mx: "auto", mt: 4 }} />}
 
           {!loading && !selectedDestId && (
-            <EmptyState message="Selecione uma Tabela Destino acima para visualizar os dados classificados e com regras de negócio aplicadas." />
+            <EmptyState message="Escolha uma tabela de destino acima para visualizar os dados classificados e com ajustes de custo aplicados." />
           )}
 
           {!loading && destData && destData.rows.length === 0 && (
-            <Alert severity="info">Nenhum dado na tabela destino ainda. Execute a coleta para preencher os dados.</Alert>
+            <Alert severity="info">Nenhum dado na tabela de destino ainda. Execute a coleta para preencher os dados.</Alert>
           )}
 
           {!loading && destData && destData.rows.length > 0 && (
@@ -656,8 +647,8 @@ export default function Analysis() {
         <>
           <Box sx={{ display: "flex", gap: 2, mb: 2, alignItems: "center", flexWrap: "wrap" }}>
             <FormControl sx={{ minWidth: 300 }} size="small">
-              <InputLabel>Fonte de Dados</InputLabel>
-              <Select value={selectedSrcId} label="Fonte de Dados" onChange={(e) => handleSrcChange(e.target.value as number | "")}>
+              <InputLabel>Fonte de dados</InputLabel>
+              <Select value={selectedSrcId} label="Fonte de dados" onChange={(e) => handleSrcChange(e.target.value as number | "")}>
                 {sources.map((s) => (
                   <MenuItem key={s.id} value={s.id}>
                     {s.name} ({s.code}) — {s.row_count.toLocaleString()} linhas
@@ -670,9 +661,9 @@ export default function Analysis() {
               <>
                 <Chip label={`${srcData.total.toLocaleString()} registros`} color="info" size="small" />
                 <FormControl sx={{ minWidth: 150 }} size="small">
-                  <InputLabel>Período</InputLabel>
-                  <Select value="" label="Período" onChange={() => {}}>
-                    <MenuItem value="">Todos</MenuItem>
+                  <InputLabel>Competência</InputLabel>
+                  <Select value="" label="Competência" onChange={() => {}}>
+                    <MenuItem value="">Todas as competências</MenuItem>
                     {srcData.periods.map((p) => (
                       <MenuItem key={p.period} value={p.period}>{p.period} ({p.count.toLocaleString()})</MenuItem>
                     ))}
@@ -697,7 +688,7 @@ export default function Analysis() {
                   <Typography variant="h5" sx={{ mt: 1, fontWeight: 700, color: "primary.main" }}>
                     {s.row_count.toLocaleString()}
                   </Typography>
-                  <Typography variant="caption" color="text.secondary">linhas ingeridas</Typography>
+                  <Typography variant="caption" color="text.secondary">linhas carregadas</Typography>
                 </Paper>
               ))}
             </Box>
@@ -706,7 +697,7 @@ export default function Analysis() {
           {loading && <CircularProgress sx={{ display: "block", mx: "auto", mt: 4 }} />}
 
           {!loading && !selectedSrcId && sources.every(s => s.row_count === 0) && (
-            <EmptyState message="Nenhuma fonte possui dados ingeridos. Execute a coleta em Dados e operação → Extrações." />
+            <EmptyState message="Nenhuma fonte possui dados carregados. Execute a coleta em Dados e operação → Extrações." />
           )}
 
           {!loading && srcData && srcData.rows.length > 0 && (
@@ -765,23 +756,23 @@ export default function Analysis() {
             <>
               <Box sx={{ display: "flex", alignItems: "center", gap: 1, mb: 1.5, flexWrap: "wrap" }}>
                 <SchemaIcon color="primary" fontSize="small" />
-                <Typography variant="subtitle2" sx={{ fontWeight: 700 }}>Bases consolidadas — tabelas pré-agregadas</Typography>
+                <Typography variant="subtitle2" sx={{ fontWeight: 700 }}>Bases consolidadas — tabelas pré-calculadas</Typography>
                 <Chip label={`${goldTablesCount} tabela(s)`} size="small" color="primary" variant="outlined" />
               </Box>
               {goldTablesCount === 0 ? (
-                <Alert severity="info" sx={{ mb: 2 }}>Nenhuma base consolidada gerada ainda. Ela é criada automaticamente ao final do reprocess do destino MODELO FOCUS.</Alert>
+                <Alert severity="info" sx={{ mb: 2 }}>Nenhuma base consolidada gerada ainda. Ela é criada automaticamente ao final do reprocessamento do destino MODELO FOCUS (padrão).</Alert>
               ) : (
                 <Box sx={{ display: "flex", gap: 1, mb: 2, flexWrap: "wrap" }}>
                   {(tables.gold || []).map((t) => (
                     <Chip key={t} label={t} size="small" icon={<SchemaIcon />} variant={selectedDataTable === t ? "filled" : "outlined"}
                       color={selectedDataTable === t ? "primary" : "default"}
                       onClick={() => void selectDataTable(t)} sx={{ cursor: "pointer" }}
-                      onDelete={() => void removeGoldTable(t)} deleteIcon={<Delete fontSize="small" />} />
+                      onDelete={() => void removeGoldTable(t)} deleteIcon={<DeleteOutlined fontSize="small" />} />
                   ))}
                 </Box>
               )}
               <Typography variant="caption" color="text.secondary" sx={{ display: "block", mb: 1 }}>
-                Clique em uma tabela para montar a query e depois em <b>Executar</b> para executar a consulta. Os cubos analíticos agrupam os dados por mês com medidas <b>quantity</b>, <b>realizado</b> e <b>billedcost</b>.
+                Clique em uma tabela para montar a query e depois em <b>Executar</b> para executar a consulta. Os modelos analíticos agrupam os dados por mês com medidas <b>quantity</b>, <b>efetivado</b> e <b>billedcost</b>.
               </Typography>
             </>
           )}
@@ -810,10 +801,10 @@ export default function Analysis() {
                     <Paper key={group.name} variant="outlined" sx={{ borderRadius: 1.5, overflow: "hidden" }}>
                       <Box sx={{ display: "flex", alignItems: "center", gap: 1, px: 1.25, py: 0.75 }}>
                         <Button size="small" variant="outlined" onClick={toggleGroup} sx={{ minWidth: 34, width: 34, height: 32, p: 0 }} aria-label={`${expanded ? "Recolher" : "Expandir"} ${group.name}`}>
-                          {expanded ? <Remove fontSize="small" /> : <Add fontSize="small" />}
+                          {expanded ? <RemoveOutlined fontSize="small" /> : <AddOutlined fontSize="small" />}
                         </Button>
                         <Typography variant="body2" sx={{ fontWeight: 600, flex: 1, overflowWrap: "anywhere" }}>{group.name}</Typography>
-                        <Chip size="small" variant="outlined" label={isFamily ? `${group.members.length} tabelas · períodos no nome` : "1 tabela"} />
+                        <Chip size="small" variant="outlined" label={isFamily ? `${group.members.length} tabelas · períodos no nome` : "1 tabela (fonte)"} />
                       </Box>
                       {expanded && (
                         <Stack spacing={0.5} sx={{ px: 2, pb: 1.25, pt: 0.25 }}>
@@ -824,7 +815,7 @@ export default function Analysis() {
                                 return byPeriod;
                               }, {})).sort(([a], [b]) => b.localeCompare(a)).map(([period, members]) => (
                                 <Accordion key={period} disableGutters variant="outlined" sx={{ borderRadius: 1.5 }}>
-                                  <AccordionSummary expandIcon={<ExpandMore />}>
+                                  <AccordionSummary expandIcon={<ExpandMoreOutlined />}>
                                     <Typography variant="body2" sx={{ fontWeight: 600 }}>{period} <Typography component="span" variant="caption" color="text.secondary">· {members.length} tabela(s)</Typography></Typography>
                                   </AccordionSummary>
                                   <AccordionDetails><Stack spacing={0.5}>{members.map(renderDataMember)}</Stack></AccordionDetails>
@@ -841,12 +832,12 @@ export default function Analysis() {
           )}
           {layer === "gold" && selectedDataTable && (
             <Accordion disableGutters sx={{ mb: 2, border: "1px solid", borderColor: "divider", borderRadius: "8px !important" }}>
-              <AccordionSummary expandIcon={<ExpandMore />}><Typography variant="body2" sx={{ fontWeight: 600 }}>Partições de {selectedDataTable}</Typography></AccordionSummary>
+              <AccordionSummary expandIcon={<ExpandMoreOutlined />}><Typography variant="body2" sx={{ fontWeight: 600 }}>Partições de {selectedDataTable}</Typography></AccordionSummary>
               <AccordionDetails>
                 {partitionsLoading ? <CircularProgress size={20} /> : partitionRows.length ? (
-                  <Table size="small"><TableHead><TableRow><TableCell>Dia / período (UTC quando diário)</TableCell><TableCell>Tipo</TableCell><TableCell align="right">Registros</TableCell><TableCell align="right">Arquivos</TableCell></TableRow></TableHead>
+                  <Table size="small"><TableHead><TableRow><TableCell>Dia / competência (UTC quando diário)</TableCell><TableCell>Tipo</TableCell><TableCell align="right">Linhas</TableCell><TableCell align="right">Arquivos</TableCell></TableRow></TableHead>
                     <TableBody>{partitionRows.map((p) => <TableRow key={`${p.period}-${p.period_kind}`}><TableCell>{p.period || "—"}</TableCell><TableCell>{p.period_kind}</TableCell><TableCell align="right">{p.record_count.toLocaleString()}</TableCell><TableCell align="right">{p.file_count.toLocaleString()}</TableCell></TableRow>)}</TableBody></Table>
-                ) : <Typography variant="body2" color="text.secondary">Nenhuma partição registrada.</Typography>}
+                ) : <Typography variant="body2" color="text.secondary">Nenhuma partição cadastrada.</Typography>}
               </AccordionDetails>
             </Accordion>
           )}
@@ -855,8 +846,8 @@ export default function Analysis() {
             <Box sx={{ display: "flex", gap: 1, mb: 1, flexWrap: "wrap" }}>
               {((layer === "bronze" || layer === "silver")
                 ? (selectedDataTable ? [
-                    { label: "Amostra da tabela selecionada", sql: `SELECT * FROM iceberg.${layer}.${selectedDataTable} LIMIT 10` },
-                    { label: "Contagem por período", sql: `SELECT _billing_period, COUNT(*) AS rows FROM iceberg.${layer}.${selectedDataTable} GROUP BY _billing_period ORDER BY _billing_period DESC` },
+                    { label: "Amostra da tabela escolhida", sql: `SELECT * FROM iceberg.${layer}.${selectedDataTable} LIMIT 10` },
+                    { label: "Contagem por competência", sql: `SELECT _billing_period, COUNT(*) AS rows FROM iceberg.${layer}.${selectedDataTable} GROUP BY _billing_period ORDER BY _billing_period DESC` },
                   ] : [])
                 : layer === "gold"
                   ? (selectedDataTable ? (PREBUILT.gold || []).map(q => ({
@@ -873,11 +864,11 @@ export default function Analysis() {
                 value={sql} onChange={(e) => setSql(e.target.value)}
                 onKeyDown={(e) => e.key === "Enter" && e.metaKey && executeSql()}
                 sx={{ fontFamily: "monospace", "& textarea": { fontSize: "0.85rem" } }} />
-              <Button variant="contained" startIcon={<PlayArrow />} onClick={() => executeSql()}
+              <Button variant="contained" startIcon={<PlayArrowOutlined />} onClick={() => executeSql()}
                 disabled={loading || !sql.trim()} sx={{ minWidth: 100 }}>Run</Button>
               <Button
                 variant="outlined"
-                startIcon={<TableChart />}
+                startIcon={<TableChartOutlined />}
                 onClick={exportQueryResult}
                 disabled={!result || filteredRows.length === 0}
                 sx={{ minWidth: 160 }}
@@ -890,16 +881,16 @@ export default function Analysis() {
           {loading && <CircularProgress sx={{ display: "block", mx: "auto", mt: 4 }} />}
 
           {!loading && !result && (
-            <EmptyState message="Execute uma consulta acima. O serviço de consultas precisa estar disponível; a navegação das bases continua disponível pela leitura local." />
+            <EmptyState message="Execute uma consulta acima. O serviço de consultas precisa estar operacional; a navegação das bases continua disponível pela leitura local." />
           )}
 
           {!loading && result && (
             <>
               <Box sx={{ display: "flex", alignItems: "center", gap: 2, mb: 2, flexWrap: "wrap" }}>
-                <BarChart color="action" />
+                <BarChartOutlined color="action" />
                 <Typography variant="h6">{result.row_count.toLocaleString()} registros</Typography>
                 <Chip label={`${result.columns.length} colunas`} size="small" variant="outlined" />
-                <TextField size="small" placeholder="Filtrar..." value={search}
+                <TextField size="small" placeholder="Refinar..." value={search}
                   onChange={(e) => { setSearch(e.target.value); setPage(0); }}
                   InputProps={{ startAdornment: <SearchIcon sx={{ mr: 0.5, color: "text.secondary", fontSize: 18 }} /> }}
                   sx={{ minWidth: 200, ml: "auto" }} />
@@ -946,7 +937,7 @@ export default function Analysis() {
         <>
           <Box sx={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 2, mb: 2, flexWrap: "wrap" }}>
             <Box>
-              <Typography variant="h6">Tabelas temporárias de reprocessamento</Typography>
+              <Typography variant="h6">Áreas temporárias de reprocessamento</Typography>
               <Typography variant="body2" color="text.secondary">
                 Tabelas temporárias órfãs podem ser removidas sem alterar a base consolidada publicada. Tabelas de destinos com reprocessamento ativo ficam protegidas.
               </Typography>
@@ -954,12 +945,12 @@ export default function Analysis() {
             <Button
               size="small"
               variant="outlined"
-              startIcon={stagingLoading ? <CircularProgress size={16} /> : <Refresh />}
+              startIcon={stagingLoading ? <CircularProgress size={16} /> : <RefreshOutlined />}
               disabled={stagingLoading}
               onClick={async () => {
                 setStagingLoading(true); setError("");
                 try { setStagingTables(await getAnalysisStagingTables()); }
-                catch (e: unknown) { setError(formatApiError(e, "Falha ao listar tabelas temporárias")); }
+                catch (e: unknown) { setError(formatApiError(e, "Não foi possível listar as tabelas temporárias")); }
                 finally { setStagingLoading(false); }
               }}
             >
@@ -968,18 +959,18 @@ export default function Analysis() {
           </Box>
 
           {stagingTables.length === 0 ? (
-            <Alert severity="success">Nenhuma tabela temporária pendente de limpeza.</Alert>
+            <Alert severity="success">Nenhuma área temporária pendente de limpeza.</Alert>
           ) : (
             <TableContainer component={Paper} variant="outlined">
               <Table size="small">
                 <TableHead>
                   <TableRow>
                     <TableCell>Tabela</TableCell>
-                    <TableCell>Destino</TableCell>
-                    <TableCell>Criada em</TableCell>
+                    <TableCell>Destino final</TableCell>
+                    <TableCell>Gerada em</TableCell>
                     <TableCell align="right">Linhas</TableCell>
-                    <TableCell>Status</TableCell>
-                    <TableCell align="right">Ação</TableCell>
+                    <TableCell>Situação</TableCell>
+                    <TableCell align="right">Opções</TableCell>
                   </TableRow>
                 </TableHead>
                 <TableBody>
@@ -992,7 +983,7 @@ export default function Analysis() {
                       <TableCell>
                         <Chip
                           size="small"
-                          label={item.protected ? "Reprocessamento ativo" : "Órfã"}
+                          label={item.protected ? "Reprocessamento em curso" : "Abandonada"}
                           color={item.protected ? "warning" : "default"}
                           variant="outlined"
                         />
@@ -1001,7 +992,7 @@ export default function Analysis() {
                         <Button
                           size="small"
                           color="error"
-                          startIcon={<Delete />}
+                          startIcon={<DeleteOutlined />}
                           disabled={stagingLoading || item.protected}
                           onClick={() => void removeStagingTable(item)}
                         >
@@ -1024,18 +1015,18 @@ export default function Analysis() {
         destinations.length > 0
           ? <PivotAnalysis
               destinations={destinations}
-              initialTableId={destinations.find(d => d.id > 0 && d.name.toUpperCase() === "MODELO FOCUS")?.id || destinations.find(d => d.id > 0)?.id}
+              initialTableId={destinations.find(d => d.id > 0 && d.name.toUpperCase() === "MODELO FOCUS (padrão)")?.id || destinations.find(d => d.id > 0)?.id}
               initialMeasure={searchParams.get("measure") || "realizado"}
               initialFilters={filtersFromSearch(searchParams)}
               autoRun={searchParams.get("tab") === "pivot"}
               showSearch
               onOpenQuery={openQuery}
             />
-          : <EmptyState message="Nenhuma base consolidada ativa disponível para análise pivot." />
+          : <EmptyState message="Nenhuma base consolidada ativa disponível para tabela dinâmica." />
       )}
       {tab === "busca" && (
         destinations.length > 0
-          ? <SourceSearch destinations={destinations} initialTableId={destinations.find(d => d.name.toUpperCase() === "MODELO FOCUS")?.id} />
+          ? <SourceSearch destinations={destinations} initialTableId={destinations.find(d => d.name.toUpperCase() === "MODELO FOCUS (padrão)")?.id} />
           : <EmptyState message="Nenhuma base consolidada ativa disponível para busca." />
       )}
       </Paper>

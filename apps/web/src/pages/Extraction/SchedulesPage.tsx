@@ -12,12 +12,12 @@ export default function SchedulesPage() {
   useEffect(() => {
     getConnections()
       .then(setConnections)
-      .catch((e) => setError(formatApiError(e, "Falha ao carregar conexões")));
+      .catch((e) => setError(formatApiError(e, "Não foi possível carregar as conexões")));
   }, []);
 
   return (
     <Box>
-      <Typography variant="h4" sx={{ mb: 2 }}>Agendamentos</Typography>
+      <Typography variant="h4" sx={{ mb: 2 }}>Programações de coleta</Typography>
       <Typography variant="body2" color="text.secondary" sx={{ mb: 3 }}>
         Coleta automática diária de dados de cloud e ferramentas. Cada agendamento pode cobrir várias
         conexões e dispara a extração na fila do worker.

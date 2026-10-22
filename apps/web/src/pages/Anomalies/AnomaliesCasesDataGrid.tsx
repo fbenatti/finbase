@@ -26,10 +26,10 @@ const CLOUD_LABEL: Record<string, string> = {
 const STATE_LABEL: Record<string, string> = {
   NEW: "Novo",
   ASSIGNED: "Atribuído",
-  INVESTIGATING: "Em investigação",
+  INVESTIGATING: "Em apuração",
   DECIDED: "Decidido",
-  IN_REMEDIATION: "Em remediação",
-  VERIFYING: "Em verificação",
+  IN_REMEDIATION: "Em correção",
+  VERIFYING: "Em conferência",
   RETROSPECTIVE: "Retrospectiva",
   CLOSED: "Encerrado",
 };
@@ -91,20 +91,20 @@ export default function AnomaliesCasesDataGrid({ cases, currency, onOpen }: Prop
         return CLOUD_LABEL[provider.toLowerCase()] ?? provider;
       },
     },
-    { field: "subaccount_name", headerName: "Subaccount", flex: 1, minWidth: 140 },
+    { field: "subaccount_name", headerName: "Subconta", flex: 1, minWidth: 140 },
     {
       field: "anomalous_cost_cloud",
-      headerName: "Custo anômalo",
+      headerName: "Gasto anômalo",
       width: 130,
       valueFormatter: (v) => money(Number(v), currency),
     },
     {
       field: "projected_month_impact",
-      headerName: "Proj. mês",
+      headerName: "Projeção do mês",
       width: 120,
       valueFormatter: (v) => money(v == null ? null : Number(v), currency),
     },
-    { field: "event_date", headerName: "Data", width: 110 },
+    { field: "event_date", headerName: "Data do evento", width: 110 },
   ];
 
   return (
@@ -114,8 +114,8 @@ export default function AnomaliesCasesDataGrid({ cases, currency, onOpen }: Prop
       columns={columns}
       disableRowSelectionOnClick
       onRowClick={(params) => onOpen(Number(params.id))}
-      pageSizeOptions={[25, 50]}
-      initialState={{ pagination: { paginationModel: { pageSize: 25 } } }}
+      pageSizeOptions={[50, 100, 500, 1000]}
+      initialState={{ pagination: { paginationModel: { pageSize: 50 } } }}
       sx={{ border: 0, "& .MuiDataGrid-row": { cursor: "pointer" } }}
     />
   );

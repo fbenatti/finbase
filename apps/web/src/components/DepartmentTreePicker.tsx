@@ -1,8 +1,8 @@
 import { useMemo, useState, type ReactElement } from "react";
 import {
-  Box, Button, Checkbox, Typography, Menu, List, ListItemButton, ListItemText, Collapse, IconButton, TextField,
+  Box, Button, Checkbox, Typography, Menu, List, ListItemButton, ListItemText, Collapse, IconButton, InputAdornment, TextField,
 } from "@mui/material";
-import { ChevronRight, ExpandMore } from "@mui/icons-material";
+import { ChevronRightOutlined, ExpandMoreOutlined } from "@mui/icons-material";
 import type { Department } from "../services/api";
 import { ORG } from "../constants/orgLabels";
 
@@ -70,7 +70,7 @@ export default function DepartmentTreePicker({
   allowClear = false,
   clearLabel = "Nenhum",
   blockedIds = new Set<number>(),
-  menuHint = "Selecione o nível na hierarquia. O caminho completo aparece no botão.",
+  menuHint = "Selecione o nó na hierarquia. O caminho completo aparece no campo.",
   startIcon,
 }: DepartmentTreePickerProps) {
   const [anchor, setAnchor] = useState<HTMLElement | null>(null);
@@ -84,9 +84,9 @@ export default function DepartmentTreePicker({
     return flatDepartments.find((d) => d.id === value)?.path || placeholder;
   }, [flatDepartments, placeholder, value]);
 
-  const openMenu = (event: React.MouseEvent<HTMLElement>) => {
+  const openMenu = (target: HTMLElement) => {
     setExpanded(ancestorIdsFromFlat(flatDepartments, value));
-    setAnchor(event.currentTarget);
+    setAnchor(target);
   };
 
   const toggleNode = (id: number) => {
@@ -150,7 +150,7 @@ export default function DepartmentTreePicker({
                   toggleNode(department.id);
                 }}
               >
-                {isExpanded ? <ExpandMore fontSize="small" /> : <ChevronRight fontSize="small" />}
+                {isExpanded ? <ExpandMoreOutlined fontSize="small" /> : <ChevronRightOutlined fontSize="small" />}
               </IconButton>
             )}
           </Box>
@@ -173,16 +173,31 @@ export default function DepartmentTreePicker({
 
   return (
     <Box>
-      <Typography variant="caption" color="text.secondary">{label}</Typography>
-      <Button
-        variant="outlined"
+      <TextField
         fullWidth
-        startIcon={startIcon}
-        onClick={openMenu}
-        sx={{ mt: 0.5, justifyContent: "flex-start", textTransform: "none", textAlign: "left" }}
-      >
-        {selectedPath}
-      </Button>
+        label={label}
+        value={selectedPath === placeholder ? "" : selectedPath}
+        placeholder={placeholder}
+        onClick={(event) => openMenu(event.currentTarget)}
+        onKeyDown={(event) => {
+          if (event.key !== "Enter" && event.key !== " ") return;
+          event.preventDefault();
+          openMenu(event.currentTarget);
+        }}
+        slotProps={{
+          inputLabel: { shrink: true },
+          input: {
+            readOnly: true,
+            startAdornment: startIcon ? <InputAdornment position="start">{startIcon}</InputAdornment> : undefined,
+            endAdornment: (
+              <InputAdornment position="end">
+                <ExpandMoreOutlined fontSize="small" />
+              </InputAdornment>
+            ),
+            sx: { cursor: "pointer" },
+          },
+        }}
+      />
       <Menu
         anchorEl={anchor}
         open={Boolean(anchor)}
@@ -290,7 +305,7 @@ export function DepartmentTreeMultiPicker({
     return <Box key={department.id}>
       <ListItemButton selected={selected.has(department.id)} onClick={() => toggleSelection(department)} sx={{ pl: 1 + depth * 2, py: 0.25 }}>
         <Box sx={{ width: 28, display: "flex", justifyContent: "center" }}>
-          {children.length > 0 && <IconButton size="small" tabIndex={-1} onClick={(event) => { event.stopPropagation(); toggleExpanded(department.id); }}>{isExpanded ? <ExpandMore fontSize="small" /> : <ChevronRight fontSize="small" />}</IconButton>}
+          {children.length > 0 && <IconButton size="small" tabIndex={-1} onClick={(event) => { event.stopPropagation(); toggleExpanded(department.id); }}>{isExpanded ? <ExpandMoreOutlined fontSize="small" /> : <ChevronRightOutlined fontSize="small" />}</IconButton>}
         </Box>
         <Checkbox size="small" checked={selected.has(department.id)} tabIndex={-1} sx={{ p: .5, mr: .5 }} />
         <ListItemText primary={department.name} primaryTypographyProps={{ variant: "body2", fontWeight: depth < 3 ? 700 : 400 }} />
@@ -298,18 +313,17 @@ export function DepartmentTreeMultiPicker({
       <Collapse in={isExpanded} timeout="auto" unmountOnExit>{children.map((child) => renderNode(child, depth + 1))}</Collapse>
     </Box>;
   };
-  const display = selectedPaths.length ? `${selectedPaths.length} nível(is) selecionado(s)` : placeholder;
+  const display = selectedPaths.length ? `${selectedPaths.length} nível(is) selecionado(s)` : "";
   return <Box>
-    <Typography variant="caption" color="text.secondary">{label}</Typography>
-    <Button variant="outlined" fullWidth onClick={(event) => { setExpanded(expandedBySelection()); setAnchor(event.currentTarget); }} sx={{ mt: .5, minHeight: 40, justifyContent: "flex-start", textTransform: "none", textAlign: "left", borderRadius: "12px", color: "#111b4e", borderColor: "#dce2ee" }}>{display}</Button>
-    <Menu anchorEl={anchor} open={Boolean(anchor)} onClose={() => { setAnchor(null); setSearch(""); }} PaperProps={{ sx: { width: "min(460px, calc(100vw - 32px))", maxHeight: "calc(100dvh - 32px)", borderRadius: "14px", border: "1px solid #E2E5EE", boxShadow: "0 16px 44px rgba(24,39,75,.16)" } }}>
+    <TextField fullWidth label={label} value={display} placeholder={placeholder} onClick={(event) => { setExpanded(expandedBySelection()); setAnchor(event.currentTarget); }} slotProps={{ inputLabel: { shrink: true }, input: { readOnly: true, endAdornment: <InputAdornment position="end"><ExpandMoreOutlined fontSize="small" /></InputAdornment>, sx: { cursor: "pointer" } } }} />
+    <Menu anchorEl={anchor} open={Boolean(anchor)} onClose={() => { setAnchor(null); setSearch(""); }} PaperProps={{ sx: { width: "min(460px, calc(100vw - 32px))", maxHeight: "calc(100dvh - 32px)", borderRadius: "14px", border: "1px solid #E1E8F0", boxShadow: "0 16px 44px rgba(24,39,75,.16)" } }}>
       <Typography variant="caption" color="text.secondary" sx={{ display: "block", px: 2, pt: 1 }}>{allowMixedLevels ? "Navegue pela hierarquia e marque destinos em qualquer nível. O rateio fica no próprio nó selecionado." : "Navegue pela hierarquia e marque um ou mais níveis. Marcar um nível pai inclui seus descendentes."}</Typography>
       <Box sx={{ px: 1.5, pt: 1 }}><TextField autoFocus fullWidth size="small" value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Buscar por nome ou caminho completo" /></Box>
       <List dense disablePadding sx={{ maxHeight: "min(390px, calc(100dvh - 230px))", overflow: "auto", mt: .5 }}>
         {term ? matches.map((item) => <ListItemButton key={item.id} selected={selected.has(item.id)} onClick={() => toggleSelection(item)} sx={{ py: .5 }}><Checkbox size="small" checked={selected.has(item.id)} tabIndex={-1} sx={{ p: .5, mr: .75 }} /><ListItemText primary={item.name} secondary={item.path} primaryTypographyProps={{ variant: "body2", fontWeight: 600 }} secondaryTypographyProps={{ variant: "caption", noWrap: true }} /></ListItemButton>) : departments.filter((item) => item.active).map((item) => renderNode(item))}
         {term && matches.length === 0 && <Typography variant="body2" color="text.secondary" sx={{ px: 2, py: 1.5 }}>Nenhum nível encontrado.</Typography>}
       </List>
-      <Box sx={{ display: "flex", justifyContent: "space-between", alignItems: "center", px: 1.5, py: 1, borderTop: "1px solid #EEF0F7" }}><Button size="small" color="inherit" onClick={() => onChange([])}>Limpar seleção</Button><Button size="small" variant="contained" onClick={() => { setAnchor(null); setSearch(""); }} sx={{ bgcolor: "#6416dc", "&:hover": { bgcolor: "#5311b8" } }}>Concluir · {values.length}</Button></Box>
+      <Box sx={{ display: "flex", justifyContent: "space-between", alignItems: "center", px: 1.5, py: 1, borderTop: "1px solid #EEF3F8" }}><Button size="small" color="inherit" onClick={() => onChange([])}>Limpar seleção</Button><Button size="small" variant="contained" onClick={() => { setAnchor(null); setSearch(""); }} sx={{ bgcolor: "#0B3FA8", "&:hover": { bgcolor: "#0B3FA8" } }}>Concluir · {values.length}</Button></Box>
     </Menu>
   </Box>;
 }

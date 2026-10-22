@@ -89,6 +89,14 @@ class DatabricksExtractor:
         if not value:
             raise ValueError("config_json.server_hostname e obrigatorio (ex: adb-....azuredatabricks.net)")
         value = str(value).strip()
+        # Credenciais são enviadas a este host: só workspaces Databricks conhecidos.
+        from app.core.outbound import DATABRICKS_HOSTS, ensure_allowed_host
+
+        try:
+            ensure_allowed_host(value, DATABRICKS_HOSTS)
+        except ValueError as exc:
+            if not value.lower().startswith("dapi"):
+                raise ValueError(f"server_hostname inválido: {exc}") from exc
         if value.lower().startswith("dapi"):
             raise ValueError(
                 "Parece que o token foi preenchido no campo Server Hostname. "

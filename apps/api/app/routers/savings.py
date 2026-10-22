@@ -12,7 +12,7 @@ from app.services.trino_service import execute as trino_execute
 from app.services.saving_service import refresh_actions
 from app.services import lakehouse_layers as layers
 
-router = APIRouter(prefix="/savings", tags=["savings"])
+router = APIRouter(prefix="/otimizacao", tags=["savings"])
 
 
 def _period(value: str, field: str) -> str:
@@ -27,7 +27,7 @@ def _commitment_source_filter(source: str) -> str:
  return "" if source == "all" else f"AND source = '{source}'"
 
 
-@router.get("/commitments-dashboard")
+@router.get("/painel-compromissos")
 async def commitments_dashboard(
  start_period: str | None = Query(default=None),
  end_period: str | None = Query(default=None),
@@ -187,44 +187,44 @@ async def commitments_dashboard(
 class ActionIn(BaseModel):
  name: str = Field(min_length=2); description: str|None=None; category: str|None=None; owner: str|None=None; destination_table_id:int; date_column:str; cost_column:str; currency_column:str|None=None; filters:list[dict[str,Any]]=[]; start_date:str; duration_days:int=Field(ge=1,le=3660); baseline_monthly:float; projected_monthly:float
 def out(a): return {c.name:getattr(a,c.name) for c in a.__table__.columns}
-@router.get("/metadata/{table_id}")
+@router.get("/metadados/{table_id}")
 async def metadata(table_id:int, db:AsyncSession=Depends(get_db)):
  d=await db.get(DestinationTable,table_id)
  if not d: raise HTTPException(404,"Tabela não encontrada")
  rows=await trino_execute(f"DESCRIBE iceberg.{layers.detail_layer()}.{d.physical_name.replace('-', '_').replace('.', '_')}")
  return {"columns":[{"name":str(x.get('Column') or x.get('column_name')),"type":str(x.get('Type') or x.get('data_type') or '')} for x in rows]}
-@router.get("/actions")
+@router.get("/acoes")
 async def actions(db:AsyncSession=Depends(get_db)):
  rows=(await db.execute(select(SavingAction).order_by(SavingAction.created_at.desc()))).scalars().all(); return [out(x) for x in rows]
-@router.post("/actions",status_code=201)
+@router.post("/acoes",status_code=201)
 async def create(body:ActionIn,db:AsyncSession=Depends(get_db)):
  if not await db.get(DestinationTable,body.destination_table_id): raise HTTPException(404,"Tabela GOLD não encontrada")
  try: date.fromisoformat(body.start_date)
  except ValueError: raise HTTPException(422,"Data de início inválida")
  status="EM_FILA" if date.fromisoformat(body.start_date)>date.today() else "EM_ANALISE"
  row=SavingAction(**body.model_dump(),status=status); db.add(row); await db.commit(); await db.refresh(row); return out(row)
-@router.put("/actions/{action_id}")
+@router.put("/acoes/{action_id}")
 async def update(action_id:int,body:ActionIn,db:AsyncSession=Depends(get_db)):
  row=await db.get(SavingAction,action_id)
  if not row: raise HTTPException(404,"Ação não encontrada")
  for k,v in body.model_dump().items(): setattr(row,k,v)
  if row.status in ("ERRO","CANCELADA"): row.status="EM_FILA" if date.fromisoformat(row.start_date)>date.today() else "EM_ANALISE"; row.error_message=None
  await db.commit(); await db.refresh(row); return out(row)
-@router.post("/actions/{action_id}/cancel")
+@router.post("/acoes/{action_id}/cancelar")
 async def cancel(action_id:int,db:AsyncSession=Depends(get_db)):
  row=await db.get(SavingAction,action_id)
  if not row: raise HTTPException(404,"Ação não encontrada")
  row.status="CANCELADA"; row.completed_at=datetime.now(timezone.utc); await db.commit(); return out(row)
-@router.post("/actions/{action_id}/refresh")
+@router.post("/acoes/{action_id}/atualizar")
 async def refresh(action_id:int,db:AsyncSession=Depends(get_db)):
  # service needs sync session; explicit endpoint uses its own unit of work in a thread-safe sync engine
  from app.database import SyncSession
  s=SyncSession(); refresh_actions(s); s.close()
  row=await db.get(SavingAction,action_id); return out(row)
-@router.get("/actions/{action_id}/measurements")
+@router.get("/acoes/{action_id}/medicoes")
 async def measurements(action_id:int,db:AsyncSession=Depends(get_db)):
  rows=(await db.execute(select(SavingMeasurement).where(SavingMeasurement.action_id==action_id).order_by(SavingMeasurement.measured_date))).scalars().all(); return [out(x) for x in rows]
-@router.get("/dashboard")
+@router.get("/painel")
 async def dashboard(year:int|None=None,db:AsyncSession=Depends(get_db)):
  acts=(await db.execute(select(SavingAction))).scalars().all(); ms=(await db.execute(select(SavingMeasurement).order_by(SavingMeasurement.measured_date))).scalars().all()
  def calc(items):

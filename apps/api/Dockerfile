@@ -22,4 +22,7 @@ COPY apps/api/alembic ./alembic
 
 # The worker is a separate service. Keep one API process so the scheduler
 # lifecycle is not duplicated, and never enable the development file reloader.
-CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--proxy-headers", "--forwarded-allow-ips=*"]
+# Trust X-Forwarded-For only from the reverse proxy. Set FORWARDED_ALLOW_IPS to
+# the proxy address; "*" lets any client spoof its IP and bypass the per-IP
+# login rate limit.
+CMD ["sh", "-c", "exec uvicorn app.main:app --host 0.0.0.0 --port 8000 --proxy-headers --forwarded-allow-ips=${FORWARDED_ALLOW_IPS:-172.16.0.0/12}"]

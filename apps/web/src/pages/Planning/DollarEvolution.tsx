@@ -2,7 +2,7 @@ import { dataDisplayText } from "../../utils/dataPresentation";
 import { useEffect, useMemo, useState } from "react";
 import { Alert, Box, Card, CardContent, CircularProgress, Grid, Paper, Stack, Table, TableBody, TableCell, TableHead, TableRow, Typography } from "@mui/material";
 import Button from "@mui/material/Button";
-import PictureAsPdfIcon from "@mui/icons-material/PictureAsPdf";
+import PictureAsPdfIcon from "@mui/icons-material/PictureAsPdfOutlined";
 import { queryDimonTable } from "../../services/api";
 import { exportDashboardPdf } from "../../utils/pdfExport";
 
@@ -74,14 +74,14 @@ export default function DollarEvolution() {
 
   return <Box className="finops-export-root">
     <Stack direction="row" justifyContent="space-between" alignItems="center" mb={2}>
-      <Typography variant="h5" fontWeight={750}>Evolução do dólar</Typography>
-      <Button data-print-hide size="small" variant="contained" startIcon={<PictureAsPdfIcon />} onClick={() => exportDashboardPdf("evolucao-dolar")}>Exportar PDF</Button>
+      <Typography variant="h5" fontWeight={750}>Evolução do câmbio</Typography>
+      <Button data-print-hide size="small" variant="contained" startIcon={<PictureAsPdfIcon />} onClick={() => exportDashboardPdf("evolucao-dolar")}>Baixar PDF</Button>
     </Stack>
     {error && <Alert severity="error" sx={{ mb: 2 }}>{dataDisplayText(error)}</Alert>}
-    {loading ? <Box display="flex" justifyContent="center" p={5}><CircularProgress /></Box> : error ? null : rows.length === 0 ? <Alert severity="warning">O cubo está disponível, mas não retornou taxas mensais para Azure.</Alert> : <>
+    {loading ? <Box display="flex" justifyContent="center" p={5}><CircularProgress /></Box> : error ? null : rows.length === 0 ? <Alert severity="warning">A base está disponível, mas não trouxe taxas mensais para o Azure.</Alert> : <>
       <Grid container spacing={2} mb={2}>
-        <Grid item xs={12} md={6}><Card variant="outlined"><CardContent><Typography color="text.secondary" variant="body2">Dólar médio</Typography><Typography variant="h5" fontWeight={750}>{periodAverages.rate === null ? "—" : rateLabel(periodAverages.rate)}</Typography><Typography color="text.secondary" variant="caption">{periodRange}</Typography></CardContent></Card></Grid>
-        <Grid item xs={12} md={6}><Card variant="outlined"><CardContent><Typography color="text.secondary" variant="body2">Variação mensal média</Typography><Typography variant="h5" fontWeight={750}>{periodAverages.deltaPct === null ? "—" : pct.format(periodAverages.deltaPct)}</Typography><Typography color="text.secondary" variant="caption">{periodRange}</Typography></CardContent></Card></Grid>
+        <Grid item xs={12} md={6}><Card variant="outlined"><CardContent><Typography color="text.secondary" variant="body2">Câmbio médio</Typography><Typography variant="h5" fontWeight={750}>{periodAverages.rate === null ? "—" : rateLabel(periodAverages.rate)}</Typography><Typography color="text.secondary" variant="caption">{periodRange}</Typography></CardContent></Card></Grid>
+        <Grid item xs={12} md={6}><Card variant="outlined"><CardContent><Typography color="text.secondary" variant="body2">Variação média por mês</Typography><Typography variant="h5" fontWeight={750}>{periodAverages.deltaPct === null ? "—" : pct.format(periodAverages.deltaPct)}</Typography><Typography color="text.secondary" variant="caption">{periodRange}</Typography></CardContent></Card></Grid>
       </Grid>
       <Paper variant="outlined" sx={{ p: 2, mb: 2 }}>
         <Typography variant="subtitle1" fontWeight={700} mb={2}>Taxa mensal BRL/USD</Typography>
@@ -91,7 +91,7 @@ export default function DollarEvolution() {
           <Typography variant="caption" sx={{ whiteSpace: "nowrap", fontWeight: 650 }}>{rateLabel(row.rate)}</Typography>
         </Stack>)}</Stack>
       </Paper>
-      <Paper variant="outlined" sx={{ overflow: "auto" }}><Table size="small"><TableHead><TableRow><TableCell>Mês</TableCell><TableCell align="right">Dólar (BRL/USD)</TableCell><TableCell align="right">Variação mensal</TableCell></TableRow></TableHead><TableBody>{[...rows].reverse().map(row => <TableRow key={row.period} hover><TableCell>{monthName(row.period)}</TableCell><TableCell align="right">{rateLabel(row.rate)}</TableCell><TableCell align="right">{row.deltaPct === null ? "—" : pct.format(row.deltaPct)}</TableCell></TableRow>)}</TableBody></Table></Paper>
+      <Paper variant="outlined" sx={{ overflow: "auto" }}><Table size="small"><TableHead><TableRow><TableCell>Mês</TableCell><TableCell align="right">Dólar (BRL/USD)</TableCell><TableCell align="right">Variação por mês</TableCell></TableRow></TableHead><TableBody>{[...rows].reverse().map(row => <TableRow key={row.period} hover><TableCell>{monthName(row.period)}</TableCell><TableCell align="right">{rateLabel(row.rate)}</TableCell><TableCell align="right">{row.deltaPct === null ? "—" : pct.format(row.deltaPct)}</TableCell></TableRow>)}</TableBody></Table></Paper>
     </>}
   </Box>;
 }

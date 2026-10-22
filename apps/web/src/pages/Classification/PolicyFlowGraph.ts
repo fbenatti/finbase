@@ -6,7 +6,7 @@ export type FlowPolicy = AzurePolicyPlanItem & { kind: FlowPolicyKind };
 export function targetOf(policy: FlowPolicy, subscriptionName?: string): string {
   if (policy.observed.resource_group_name) return policy.observed.resource_group_name;
   if (policy.observed.resource_id) return policy.observed.resource_id;
-  return subscriptionName || "Subscription completa";
+  return subscriptionName || "Assinatura completa";
 }
 
 export function assignmentScopePath(subscription: string, policy: FlowPolicy): string {
@@ -17,12 +17,12 @@ export function assignmentScopePath(subscription: string, policy: FlowPolicy): s
 }
 
 export function targetLabel(policy: FlowPolicy, subscriptionName?: string): string {
-  if (policy.observed.resource_id) return "ResourceId específico";
+  if (policy.observed.resource_id) return "ResourceId informado";
   if (policy.observed.resource_group_name) {
-    return policy.kind === "resource_groups" ? "Resource Group" : "Recursos dentro do RG";
+    return policy.kind === "resource_groups" ? "Grupo de recursos" : "Recursos dentro do grupo";
   }
   return policy.kind === "resource_groups"
-    ? `Resource Groups · ${subscriptionName || "subscription"}`
+    ? `Grupo de recursoss · ${subscriptionName || "subscription"}`
     : `Recursos · ${subscriptionName || "subscription"}`;
 }
 
@@ -142,7 +142,7 @@ export function tagsPreview(tags: Record<string, string> | undefined): string {
 
 export function scopeModesLabel(policies: FlowPolicy[]): string {
   const modes = policies.map((policy) => (
-    policy.kind === "resource_groups" ? "All (Resource Group)" : "Indexed (recursos)"
+    policy.kind === "resource_groups" ? "All (Grupo de recursos)" : "Indexed (recursos)"
   ));
   return [...new Set(modes)].join(" + ");
 }

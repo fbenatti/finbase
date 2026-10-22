@@ -4,7 +4,7 @@ import {
   Alert, Box, Button, Chip, FormControl, FormHelperText, InputLabel,
   MenuItem, Paper, Select, TextField, Typography,
 } from "@mui/material";
-import { Save } from "@mui/icons-material";
+import { SaveOutlined } from "@mui/icons-material";
 import {
   DestinationPartitionSpec,
   DestinationPartitionExtra,
@@ -79,7 +79,7 @@ export default function DestinationPartitionSettings({
         if (!cancelled) setSpec(normalizeSpec(detail.partition_spec_json));
       })
       .catch((e: unknown) => {
-        if (!cancelled) setError(e instanceof Error ? e.message : "Falha ao carregar partição");
+        if (!cancelled) setError(e instanceof Error ? e.message : "Não foi possível carregar a partição");
       })
       .finally(() => { if (!cancelled) setLoading(false); });
     return () => { cancelled = true; };
@@ -130,10 +130,10 @@ export default function DestinationPartitionSettings({
           extra_partitions: spec.extra_partitions,
         },
       });
-      setSuccess("Configuração de partição salva.");
+      setSuccess("Partição salva.");
       onSaved?.();
     } catch (e: unknown) {
-      setError(e instanceof Error ? e.message : "Falha ao salvar");
+      setError(e instanceof Error ? e.message : "Não foi possível salvar");
     } finally {
       setSaving(false);
     }
@@ -142,7 +142,7 @@ export default function DestinationPartitionSettings({
   if (loading) {
     return (
       <Paper variant="outlined" sx={{ p: 2, mb: 2 }}>
-        <Typography variant="body2" color="text.secondary">Carregando partição do destino…</Typography>
+        <Typography variant="body2" color="text.secondary">Buscando partição do destino…</Typography>
       </Paper>
     );
   }
@@ -168,7 +168,7 @@ export default function DestinationPartitionSettings({
       </Typography>
       <Typography variant="caption" color="text.secondary" sx={{ display: "block", mb: 1 }}>
         A substituição de registros para evitar duplicatas considera sempre período + conexão de origem.
-        Extra de identidade em <strong>SubAccountId</strong> entra na partição física (Azure: SubscriptionId;
+        Campo de identidade extra em <strong>SubAccountId</strong> entra na partição física (Azure: SubscriptionId;
         GCP: id do projeto). Valor vazio vira <code>__UNSET__</code>. SubAccountName não entra no caminho.
       </Typography>
 
@@ -198,25 +198,25 @@ export default function DestinationPartitionSettings({
 
       <Box sx={{ display: "flex", flexWrap: "wrap", gap: 2, alignItems: "flex-start" }}>
         <FormControl size="small" sx={{ minWidth: 200 }}>
-          <InputLabel>Grão da fatia</InputLabel>
+          <InputLabel>Granularidade da fatia</InputLabel>
           <Select
-            label="Grão da fatia"
+            label="Granularidade da fatia"
             value={spec.grain}
             onChange={(e) => setSpec({
               ...spec,
               grain: e.target.value as PartitionSpecState["grain"],
             })}
           >
-            <MenuItem value="billing_period">Mês (_billing_period)</MenuItem>
-            <MenuItem value="snapshot_date">Dia (snapshot)</MenuItem>
+            <MenuItem value="billing_period">Mês de faturamento (_billing_period)</MenuItem>
+            <MenuItem value="snapshot_date">Dia da captura (snapshot)</MenuItem>
           </Select>
-          <FormHelperText>Obrigatório na publicação base preparada</FormHelperText>
+          <FormHelperText>Obrigatório na publicação da base preparada</FormHelperText>
         </FormControl>
 
         {spec.grain === "snapshot_date" && (
           <TextField
             size="small"
-            label="Coluna do snapshot"
+            label="Coluna da captura"
             value={spec.snapshot_column || "snapshot_date"}
             onChange={(e) => setSpec({ ...spec, snapshot_column: e.target.value })}
             sx={{ minWidth: 200 }}
@@ -224,9 +224,9 @@ export default function DestinationPartitionSettings({
         )}
 
         <FormControl size="small" sx={{ minWidth: 220 }} disabled={!availableForExtra.length}>
-          <InputLabel>Extra de partição</InputLabel>
+          <InputLabel>Campo extra de partição</InputLabel>
           <Select
-            label="Extra de partição"
+            label="Campo extra de partição"
             value=""
             displayEmpty
             onChange={(e) => {
@@ -237,13 +237,13 @@ export default function DestinationPartitionSettings({
             <MenuItem value="" disabled>
               {spec.extra_partitions.length >= MAX_EXTRAS
                 ? `Máximo ${MAX_EXTRAS} extras`
-                : "Adicionar coluna…"}
+                : "Incluir coluna…"}
             </MenuItem>
             {availableForExtra.map((name) => (
               <MenuItem key={name} value={name}>{name}</MenuItem>
             ))}
           </Select>
-          <FormHelperText>Até {MAX_EXTRAS} colunas do destino</FormHelperText>
+          <FormHelperText>Limite de {MAX_EXTRAS} colunas do destino</FormHelperText>
         </FormControl>
 
         {subAccountCol && !hasSubAccountExtra && (
@@ -255,12 +255,12 @@ export default function DestinationPartitionSettings({
         <Button
           variant="contained"
           size="small"
-          startIcon={<Save />}
+          startIcon={<SaveOutlined />}
           onClick={save}
           disabled={saving}
           sx={{ mt: 0.5 }}
         >
-          {saving ? "Salvando…" : "Salvar partição"}
+          {saving ? "Salvando…" : "Gravar partição"}
         </Button>
       </Box>
 
@@ -278,28 +278,28 @@ export default function DestinationPartitionSettings({
               key={`${extra.column}-${index}`}
               sx={{
                 display: "flex", flexWrap: "wrap", gap: 1, alignItems: "center",
-                p: 1, borderRadius: 1, bgcolor: "#fff", border: "1px solid #E2E5EE",
+                p: 1, borderRadius: 1, bgcolor: "#fff", border: "1px solid #E1E8F0",
               }}
             >
               <Chip label={extra.column} size="small" color="primary" variant="outlined" />
               <FormControl size="small" sx={{ minWidth: 140 }}>
-                <InputLabel>Transform</InputLabel>
+                <InputLabel>Transformação</InputLabel>
                 <Select
-                  label="Transform"
+                  label="Transformação"
                   value={extra.transform}
                   onChange={(e) => updateExtra(index, {
                     transform: e.target.value as "identity" | "bucket",
                   })}
                 >
-                  <MenuItem value="identity">Identity (baixa cardinalidade)</MenuItem>
-                  <MenuItem value="bucket">Distribuição por grupos (muitos valores)</MenuItem>
+                  <MenuItem value="identity">Identidade (baixa cardinalidade)</MenuItem>
+                  <MenuItem value="bucket">Agrupamento em buckets (muitos valores)</MenuItem>
                 </Select>
               </FormControl>
               {extra.transform === "bucket" && (
                 <TextField
                   size="small"
                   type="number"
-                  label="Buckets"
+                  label="Quantidade de buckets"
                   value={extra.bucket_count ?? 16}
                   inputProps={{ min: 2, max: 128 }}
                   onChange={(e) => updateExtra(index, {

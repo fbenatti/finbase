@@ -32,7 +32,7 @@ Duas camadas distintas:
 | `etl_mapping` | Mapeamento legado por conexão (`source_column → target_column`, transform_type) |
 | `business_rule` | Regra de negócio: `target_column`, `rule_type` (EXPRESSION, CONDITIONAL, PTAX_BRL, TAX_BASE, TAX_MARKETPLACE, MARKUP), `config_json`, `conditions` (JSON), `expression`, `priority`, vigência `valid_from`/`valid_until` (YYYYMM), escopo por `cloud_scope` (`azure`, `gcp`, `atlas`, nulo = todas) e/ou `destination_table_id` |
 | `classification_rule` | Regra de classificação: `source_field`, `pattern`, `pattern_type` (regex/contains/exact/multi_condition), `conditions` (JSON multi-condição), `match_value`, `target_field`, `department_id`, `project_id`, `priority`, `cloud_scope`. Índices por (department, priority) e (destination, priority) |
-| `department` | Árvore hierárquica (até 5 níveis): `parent_id`, `name`, `centro_custo`, `ambiente`, `cloud_filter`, `custom_fields` (JSON) |
+| `department` | Árvore hierárquica (até 5 níveis): `parent_id`, `name`, `centro_custo`, `ambiente`, `custom_fields` (JSON). A cloud de um nó é derivada do ramo do provedor na hierarquia (o antigo `cloud_filter` foi removido) |
 | `project` | Projeto de um departamento: `projeto_name`, `cloud`, `subscription_rg` (mapeamento subscription/resource-group) |
 
 ### Clone engine (`models/clone_rule.py`)

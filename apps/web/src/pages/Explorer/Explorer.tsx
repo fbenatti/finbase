@@ -4,9 +4,9 @@ import { useParams, useNavigate } from "react-router-dom";
 import {
   Box, Typography, Button, Table, TableBody, TableCell,
   TableContainer, TableHead, TableRow, Paper, Chip, Alert,
-  CircularProgress, LinearProgress,
+  CircularProgress, LinearProgress, Stack,
 } from "@mui/material";
-import { Refresh, PlayArrow } from "@mui/icons-material";
+import { RefreshOutlined, PlayArrowOutlined } from "@mui/icons-material";
 import {
   scanBlobs, BlobScanResult, BlobScanItem, getConnection, SourceConnection,
 } from "../../services/api";
@@ -37,59 +37,63 @@ export default function Explorer() {
     try {
       setScanResult(await scanBlobs(id));
     } catch (e: unknown) {
-      setError(e instanceof Error ? e.message : "Scan failed");
+      setError(e instanceof Error ? e.message : "Não foi possível varrer a fonte");
     } finally {
       setLoading(false);
     }
   };
 
   return (
-    <Box>
-      <Box sx={{ display: "flex", justifyContent: "space-between", mb: 3 }}>
-        <Box>
-          <Typography variant="h4">Blob Explorer</Typography>
-          {conn && (
-            <Typography variant="body1" color="text.secondary">
-              {conn.name} ({conn.code})
-            </Typography>
-          )}
-        </Box>
-        <Box sx={{ display: "flex", gap: 1 }}>
-          <Button variant="outlined" startIcon={<Refresh />} onClick={doScan} disabled={loading}>
-            Escanear
-          </Button>
-          <Button variant="contained" startIcon={<PlayArrow />} onClick={() => navigate("/operacoes/extracoes")}>
-            Ir para Extração
-          </Button>
-        </Box>
+    <Stack spacing={2}>
+      <Box>
+        <Typography variant="h6">Fonte de dados</Typography>
+        <Typography variant="body2" color="text.secondary">
+          {conn ? `${conn.name} (${conn.code})` : "Arquivos encontrados na fonte desta conexão, com o status de cada um."}
+        </Typography>
       </Box>
 
-      {error && <Alert severity="error" sx={{ mb: 2 }} onClose={() => setError("")}>{dataDisplayText(error)}</Alert>}
+      <Paper variant="outlined" sx={{ p: 2 }}>
+        <Stack direction={{ xs: "column", sm: "row" }} spacing={1.5} justifyContent="space-between" alignItems={{ sm: "center" }}>
+          <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap>
+            {scanResult ? (
+              <>
+                <Box sx={{ pr: 3 }}><Typography variant="caption" color="text.secondary">Total</Typography><Typography variant="h6">{scanResult.total}</Typography></Box>
+                <Box sx={{ pr: 3 }}><Typography variant="caption" color="text.secondary">Inéditos</Typography><Typography variant="h6" color="success.main">{scanResult.new}</Typography></Box>
+                <Box sx={{ pr: 3 }}><Typography variant="caption" color="text.secondary">Modificados</Typography><Typography variant="h6" color="warning.main">{scanResult.changed}</Typography></Box>
+                <Box><Typography variant="caption" color="text.secondary">Sem mudança</Typography><Typography variant="h6">{scanResult.unchanged}</Typography></Box>
+              </>
+            ) : (
+              <Typography variant="body2" color="text.secondary">Execute a varredura para listar os arquivos disponíveis.</Typography>
+            )}
+          </Stack>
+          <Stack direction="row" spacing={1}>
+            <Button variant="outlined" startIcon={loading ? <CircularProgress size={16} /> : <RefreshOutlined />} onClick={doScan} disabled={loading}>
+              Varrer fonte
+            </Button>
+            <Button variant="contained" startIcon={<PlayArrowOutlined />} onClick={() => navigate("/operacoes/extracoes")}>
+              Ir para extração
+            </Button>
+          </Stack>
+        </Stack>
+      </Paper>
 
-      {loading && <LinearProgress sx={{ mb: 2 }} />}
+      {error && <Alert severity="error" onClose={() => setError("")}>{dataDisplayText(error)}</Alert>}
 
-      {scanResult && (
-        <Box sx={{ mb: 2, display: "flex", gap: 2, flexWrap: "wrap" }}>
-          <Chip label={`Total: ${scanResult.total}`} color="primary" />
-          <Chip label={`Novos: ${scanResult.new}`} color="success" />
-          <Chip label={`Alterados: ${scanResult.changed}`} color="warning" />
-          <Chip label={`Inalterados: ${scanResult.unchanged}`} />
-        </Box>
-      )}
+      {loading && <LinearProgress />}
 
       {!scanResult && !loading && (
-        <Alert severity="info">Clique em "Escanear" para listar os blobs disponiveis.</Alert>
+        <Alert severity="info">Clique em "Varrer fonte" para listar os arquivos disponíveis na fonte.</Alert>
       )}
 
       {scanResult && (
-        <TableContainer component={Paper}>
+        <TableContainer component={Paper} variant="outlined">
           <Table size="small">
             <TableHead>
               <TableRow>
-                <TableCell sx={{ fontWeight: 600 }}>Status</TableCell>
-                <TableCell sx={{ fontWeight: 600 }}>Blob Path</TableCell>
-                <TableCell sx={{ fontWeight: 600 }}>Período</TableCell>
-                <TableCell sx={{ fontWeight: 600 }}>Ultima Modificacao</TableCell>
+                <TableCell sx={{ fontWeight: 600 }}>Situação</TableCell>
+                <TableCell sx={{ fontWeight: 600 }}>Caminho do arquivo</TableCell>
+                <TableCell sx={{ fontWeight: 600 }}>Competência</TableCell>
+                <TableCell sx={{ fontWeight: 600 }}>Modificado em</TableCell>
                 <TableCell sx={{ fontWeight: 600 }}>Tamanho</TableCell>
               </TableRow>
             </TableHead>
@@ -97,15 +101,9 @@ export default function Explorer() {
               {scanResult.items.map((item: BlobScanItem, i: number) => (
                 <TableRow key={i} hover>
                   <TableCell>
-                    <Chip
-                      label={item.status}
-                      size="small"
-                      color={STATUS_COLORS[item.status] || "default"}
-                    />
+                    <Chip label={item.status} size="small" variant="outlined" color={STATUS_COLORS[item.status] || "default"} />
                   </TableCell>
-                  <TableCell sx={{ maxWidth: 400, overflow: "hidden", textOverflow: "ellipsis" }}>
-                    {item.blob_path}
-                  </TableCell>
+                  <TableCell sx={{ maxWidth: 400, overflow: "hidden", textOverflow: "ellipsis" }}>{item.blob_path}</TableCell>
                   <TableCell>{item.billing_period || "-"}</TableCell>
                   <TableCell>{new Date(item.last_modified).toLocaleString()}</TableCell>
                   <TableCell>{item.content_length ? `${(item.content_length / 1024).toFixed(1)} KB` : "-"}</TableCell>
@@ -115,6 +113,6 @@ export default function Explorer() {
           </Table>
         </TableContainer>
       )}
-    </Box>
+    </Stack>
   );
 }

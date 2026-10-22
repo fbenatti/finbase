@@ -1,4 +1,4 @@
-fastapi[standard]==0.115.6
+fastapi[standard]>=0.121.0
 uvicorn[standard]==0.34.0
 sqlalchemy[asyncio]==2.0.36
 asyncpg==0.30.0
@@ -6,14 +6,14 @@ psycopg2-binary==2.9.10
 apscheduler==3.11.0
 croniter==6.0.0
 alembic==1.14.1
-pyjwt==2.12.1
+pyjwt==2.15.0
 bcrypt==4.2.1
-python-multipart==0.0.20
+python-multipart==0.0.31
 authlib==1.8.0
 python3-saml==1.16.0
 pydantic==2.10.4
 pydantic-settings==2.7.1
-python-dotenv==1.0.1
+python-dotenv==1.2.2
 psutil==6.1.1
 httpx==0.28.1
 azure-identity==1.19.0
@@ -25,13 +25,14 @@ openpyxl==3.1.5
 pyiceberg>=0.8.0
 # Keep the AWS SDK family compatible and deterministic. Unbounded versions
 # make pip explore hundreds of s3fs/aiobotocore/boto3 combinations at build.
-s3fs==2024.10.0
-aiobotocore==2.15.2
-botocore==1.35.36
-boto3==1.35.36
+s3fs==2026.6.0
+aiobotocore==2.19.0
+botocore==1.36.3
+boto3==1.36.3
 google-cloud-bigquery>=3.27.0
 google-cloud-bigquery-storage>=2.27.0
 google-auth>=2.36.0
 db-dtypes>=1.3.0
 oci>=2.184.0
 databricks-sql-connector>=3.3.0
+fsspec==2026.6.0

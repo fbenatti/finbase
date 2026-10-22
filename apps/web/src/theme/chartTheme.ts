@@ -6,10 +6,10 @@ export const CHART_PALETTE = [...chartSeries];
 export interface ChartTokens { family: string; text: string; muted: string; border: string; paper: string; primary: string }
 export const chartTokens = (theme: Theme): ChartTokens => ({ family: theme.typography.fontFamily!, text: theme.palette.text.primary, muted: theme.palette.text.secondary, border: theme.palette.divider, paper: theme.palette.background.paper, primary: theme.palette.primary.main });
 const normalized = (value: string) => value.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase();
-const SEQUENTIAL_SCALE = [[0, colors.brandTint], [0.3, "#A5B4FC"], [0.65, colors.brandLight], [1, colors.brandDark]];
+const SEQUENTIAL_SCALE = [[0, colors.brandTint], [0.3, "#A9C8FF"], [0.65, colors.brandLight], [1, colors.brandDark]];
 export function chartColor(value: string, tokens: ChartTokens): string {
   const lower = value.toLowerCase();
-  if (["#5A6378", "#5A6378", "#6b7280", "#8A93A8", "#9ca3af", colors.textMuted.toLowerCase()].includes(lower)) return tokens.muted;
+  if (["#526777", "#526777", "#6b7280", "#8497A8", "#9ca3af", colors.textMuted.toLowerCase()].includes(lower)) return tokens.muted;
   if (lower === "red") return chartSemantic.negative;
   if (lower === "green") return chartSemantic.positive;
   return value;

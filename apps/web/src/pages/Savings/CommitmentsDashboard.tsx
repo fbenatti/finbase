@@ -68,7 +68,7 @@ export default function CommitmentsDashboard() {
   useEffect(() => {
     let active = true;
     if (!startMonth || !endMonth || startMonth > endMonth) {
-      setError("O período inicial deve ser anterior ou igual ao período final.");
+      setError("A data inicial precisa ser igual ou anterior à data final.");
       setData(null);
       return () => { active = false; };
     }
@@ -88,13 +88,13 @@ export default function CommitmentsDashboard() {
   }, [startMonth, endMonth, source]);
 
   const projectColumns: GridColDef<CommitmentDashboardRow>[] = [
-    { field: "project", headerName: "Projeto", minWidth: 220, flex: 1 },
-    { field: "source", headerName: "Origem", width: 120 },
-    { field: "ondemand_baseline", headerName: "Base OnDemand", width: 170, valueFormatter: (value) => money(value) },
-    { field: "purchase_allocated", headerName: "Compra atribuída", width: 165, valueFormatter: (value) => money(value) },
-    { field: "estimated_saving", headerName: "Saving realizado", width: 170, valueFormatter: (value) => money(value) },
-    { field: "purchase_pct_of_ondemand", headerName: "Compra / OnDemand", width: 155, valueGetter: (_value, row) => row.ondemand_baseline ? Number(row.purchase_allocated || 0) / Number(row.ondemand_baseline) * 100 : 0, valueFormatter: (value) => percentage(value) },
-    { field: "saving_pct_of_ondemand", headerName: "Saving / OnDemand", width: 155, valueGetter: (_value, row) => row.ondemand_baseline ? Number(row.estimated_saving || 0) / Number(row.ondemand_baseline) * 100 : 0, valueFormatter: (value) => percentage(value) },
+    { field: "project", headerName: "Projeto alocado", minWidth: 220, flex: 1 },
+    { field: "source", headerName: "Fonte", width: 120 },
+    { field: "ondemand_baseline", headerName: "Base sob demanda", width: 170, valueFormatter: (value) => money(value) },
+    { field: "purchase_allocated", headerName: "Compra alocada", width: 165, valueFormatter: (value) => money(value) },
+    { field: "estimated_saving", headerName: "Saving efetivado", width: 170, valueFormatter: (value) => money(value) },
+    { field: "purchase_pct_of_ondemand", headerName: "Compra / sob demanda", width: 155, valueGetter: (_value, row) => row.ondemand_baseline ? Number(row.purchase_allocated || 0) / Number(row.ondemand_baseline) * 100 : 0, valueFormatter: (value) => percentage(value) },
+    { field: "saving_pct_of_ondemand", headerName: "Saving / sob demanda", width: 155, valueGetter: (_value, row) => row.ondemand_baseline ? Number(row.estimated_saving || 0) / Number(row.ondemand_baseline) * 100 : 0, valueFormatter: (value) => percentage(value) },
   ];
 
   const monthly = data?.monthly || [];
@@ -115,24 +115,24 @@ export default function CommitmentsDashboard() {
   const totalSaving = Number(selected.ri_saving || 0) + Number(selected.savingplan_saving || 0);
   const totalSavingPct = totalBaseline ? totalSaving / totalBaseline * 100 : 0;
   const currencyAxis = { tickprefix: "R$ ", separatethousands: true, automargin: true };
-  const chartLayout = { height: 290, margin: { l: 76, r: 20, t: 12, b: 48 }, paper_bgcolor: "white", plot_bgcolor: "white", yaxis: { ...currencyAxis, zerolinecolor: "#CDD2DF", gridcolor: "#E2E5EE" }, xaxis: { gridcolor: "#EEF0F7" }, showlegend: false };
+  const chartLayout = { height: 290, margin: { l: 76, r: 20, t: 12, b: 48 }, paper_bgcolor: "white", plot_bgcolor: "white", yaxis: { ...currencyAxis, zerolinecolor: "#C5D2DE", gridcolor: "#E1E8F0" }, xaxis: { gridcolor: "#EEF3F8" }, showlegend: false };
 
   return (
     <Box sx={{ p: 3, bgcolor: "#FAFBFD", minHeight: "calc(100vh - 180px)" }}>
       <Stack direction={{ xs: "column", md: "row" }} justifyContent="space-between" alignItems={{ md: "center" }} gap={2} mb={2}>
         <Box>
-          <Typography variant="h5">Compra de RIs e SavingPlan</Typography>
+          <Typography variant="h5">Compra de RIs e Savings Plans</Typography>
           <Typography color="text.secondary" sx={{ mt: 0.5 }}>
-            Compra, referência OnDemand e saving realizado por compromisso e projeto.
+            Compra, base sob demanda (sob demanda) e saving efetivado por compromisso e por projeto.
           </Typography>
         </Box>
         <Stack direction={{ xs: "column", sm: "row" }} gap={1.5}>
-          <TextField label="De" type="month" size="small" value={startMonth} onChange={(event) => setStartMonth(event.target.value)} InputLabelProps={{ shrink: true }} />
-          <TextField label="Até" type="month" size="small" value={endMonth} onChange={(event) => setEndMonth(event.target.value)} InputLabelProps={{ shrink: true }} />
+          <TextField label="Início" type="month" size="small" value={startMonth} onChange={(event) => setStartMonth(event.target.value)} InputLabelProps={{ shrink: true }} />
+          <TextField label="Fim" type="month" size="small" value={endMonth} onChange={(event) => setEndMonth(event.target.value)} InputLabelProps={{ shrink: true }} />
           <FormControl size="small" sx={{ minWidth: 150 }}>
-            <InputLabel>Origem</InputLabel>
-            <Select label="Origem" value={source} onChange={(event) => setSource(event.target.value as typeof source)}>
-              <MenuItem value="all">Todas</MenuItem>
+            <InputLabel>Fonte</InputLabel>
+            <Select label="Fonte" value={source} onChange={(event) => setSource(event.target.value as typeof source)}>
+              <MenuItem value="all">Todas as fontes</MenuItem>
               <MenuItem value="azure-ti">Azure TI</MenuItem>
               <MenuItem value="azure-4p">Azure 4P</MenuItem>
             </Select>
@@ -142,66 +142,66 @@ export default function CommitmentsDashboard() {
 
       {error && <Alert severity="error" sx={{ mb: 2 }}>{dataDisplayText(error)}</Alert>}
       {loading && !data && <Stack alignItems="center" sx={{ py: 5 }}><CircularProgress /></Stack>}
-      {loading && data && <Typography variant="caption" color="text.secondary" sx={{ display: "block", mb: 1 }}>Atualizando o período…</Typography>}
+      {loading && data && <Typography variant="caption" color="text.secondary" sx={{ display: "block", mb: 1 }}>Recalculando o período…</Typography>}
       {data && <>
-        <Typography variant="subtitle1" fontWeight={700} mb={0.5}>Consolidado do período</Typography>
-        <Typography variant="body2" color="text.secondary" mb={1}>De {rangeLabel} · valores realizados, exceto as séries identificadas como forecast.</Typography>
+        <Typography variant="subtitle1" fontWeight={700} mb={0.5}>Visão consolidada do período</Typography>
+        <Typography variant="body2" color="text.secondary" mb={1}>De {rangeLabel} · valores efetivados, exceto as séries identificadas como previsão.</Typography>
         <Stack direction="row" gap={2} flexWrap="wrap" mb={2}>
-          <MetricCard title="Saving total realizado" value={totalSaving} detail="Base OnDemand menos compra" />
-          <MetricCard title="Saving / base OnDemand" value={totalSavingPct} detail="Percentual consolidado do período" isPercent />
-          <MetricCard title="Base OnDemand média / mês" value={(Number(selected.ri_ondemand || 0) + Number(selected.savingplan_ondemand || 0)) / monthCount} detail="RI + SavingPlan" />
+          <MetricCard title="Saving total efetivado" value={totalSaving} detail="Base sob demanda menos compra" />
+          <MetricCard title="Saving / base sob demanda" value={totalSavingPct} detail="Índice consolidado do período" isPercent />
+          <MetricCard title="Base sob demanda média / mês" value={(Number(selected.ri_ondemand || 0) + Number(selected.savingplan_ondemand || 0)) / monthCount} detail="RI + Savings Plan" />
         </Stack>
 
-        <Typography variant="subtitle1" fontWeight={700} mb={1}>Reserva (RI)</Typography>
+        <Typography variant="subtitle1" fontWeight={700} mb={1}>Reserva de instância (RI)</Typography>
         <Stack direction="row" gap={2} flexWrap="wrap" mb={2}>
-          <MetricCard title="Compra de RI" value={Number(selected.ri_purchase || 0)} detail={rangeLabel} />
-          <MetricCard title="Base OnDemand média / mês" value={riMonthlyBaseline} detail={rangeLabel} />
-          <MetricCard title="Saving RI realizado" value={Number(selected.ri_saving || 0)} detail="Sem forecast" />
-          <MetricCard title="Compra / OnDemand" value={riPurchasePct} detail="Percentual da referência" isPercent />
-          <MetricCard title="Saving / OnDemand" value={riSavingPct} detail="Percentual da referência" isPercent />
+          <MetricCard title="Investimento em RI" value={Number(selected.ri_purchase || 0)} detail={rangeLabel} />
+          <MetricCard title="Base sob demanda média / mês" value={riMonthlyBaseline} detail={rangeLabel} />
+          <MetricCard title="Saving RI efetivado" value={Number(selected.ri_saving || 0)} detail="Sem forecast" />
+          <MetricCard title="Compra / sob demanda" value={riPurchasePct} detail="Percentual da base de referência" isPercent />
+          <MetricCard title="Saving / sob demanda" value={riSavingPct} detail="Percentual da base de referência" isPercent />
         </Stack>
 
-        <Typography variant="subtitle1" fontWeight={700} mb={1}>SavingPlan</Typography>
+        <Typography variant="subtitle1" fontWeight={700} mb={1}>Savings Plan</Typography>
         <Stack direction="row" gap={2} flexWrap="wrap" mb={2}>
-          <MetricCard title="Compra de SavingPlan" value={Number(selected.savingplan_purchase || 0)} detail={rangeLabel} />
-          <MetricCard title="Base OnDemand média / mês" value={savingplanMonthlyBaseline} detail={rangeLabel} />
-          <MetricCard title="Saving SavingPlan realizado" value={Number(selected.savingplan_saving || 0)} detail="Sem forecast" />
-          <MetricCard title="Compra / OnDemand" value={savingplanPurchasePct} detail="Percentual da referência" isPercent />
-          <MetricCard title="Saving / OnDemand" value={savingplanSavingPct} detail="Percentual da referência" isPercent />
+          <MetricCard title="Investimento em Savings Plan" value={Number(selected.savingplan_purchase || 0)} detail={rangeLabel} />
+          <MetricCard title="Base sob demanda média / mês" value={savingplanMonthlyBaseline} detail={rangeLabel} />
+          <MetricCard title="Saving SavingPlan efetivado" value={Number(selected.savingplan_saving || 0)} detail="Sem forecast" />
+          <MetricCard title="Compra / sob demanda" value={savingplanPurchasePct} detail="Percentual da base de referência" isPercent />
+          <MetricCard title="Saving / sob demanda" value={savingplanSavingPct} detail="Percentual da base de referência" isPercent />
         </Stack>
 
         <Suspense fallback={<Stack alignItems="center" sx={{ py: 3 }}><CircularProgress size={24} /></Stack>}>
         <Card sx={{ mb: 2 }}><CardContent>
-          <Typography variant="subtitle1" fontWeight={600}>Compras mensais</Typography>
-          <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>A barra empilha apenas a compra realizada e o forecast de compra. Saving e base OnDemand não entram na barra.</Typography>
+          <Typography variant="subtitle1" fontWeight={600}>Compras por mês</Typography>
+          <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>As barras empilham apenas a compra efetivada e a previsão de compra. Saving e base sob demanda não entram nas barras.</Typography>
           <Stack direction={{ xs: "column", lg: "row" }} spacing={2}>
             <Box sx={{ flex: 1, minWidth: 0 }}>
               <Typography variant="subtitle2" fontWeight={600}>RI</Typography>
               <Plot data={[
-                { x: chartPeriods.map(monthLabel), y: chartPeriods.map((period) => Number(monthlyByPeriod.get(period)?.ri_purchase || 0)), type: "bar", name: "Compra realizada", offsetgroup: "purchase", legendgroup: "purchase", marker: { color: "#1565c0" }, hovertemplate: "%{x}<br>R$ %{y:,.2f}<extra>RI — compra realizada</extra>" },
-                { x: chartPeriods.map(monthLabel), y: chartPeriods.map((period) => Number(forecastByPeriod.get(period)?.ri_forecast_purchase || 0)), type: "bar", name: "Forecast de compra", offsetgroup: "purchase", legendgroup: "purchase", marker: { color: "#60a5fa" }, hovertemplate: "%{x}<br>R$ %{y:,.2f}<extra>RI — forecast de compra</extra>" },
-                { x: chartPeriods.map(monthLabel), y: chartPeriods.map((period) => Number(monthlyByPeriod.get(period)?.ri_ondemand || 0)), type: "scatter", mode: "lines+markers", name: "Base OnDemand", line: { color: "#0284c7", width: 3 }, marker: { size: 6 }, hovertemplate: "%{x}<br>R$ %{y:,.2f}<extra>RI — base OnDemand</extra>" },
+                { x: chartPeriods.map(monthLabel), y: chartPeriods.map((period) => Number(monthlyByPeriod.get(period)?.ri_purchase || 0)), type: "bar", name: "Compra efetivada", offsetgroup: "purchase", legendgroup: "purchase", marker: { color: "#0EA5C6" }, hovertemplate: "%{x}<br>R$ %{y:,.2f}<extra>RI — compra efetivada</extra>" },
+                { x: chartPeriods.map(monthLabel), y: chartPeriods.map((period) => Number(forecastByPeriod.get(period)?.ri_forecast_purchase || 0)), type: "bar", name: "Previsão de compra", offsetgroup: "purchase", legendgroup: "purchase", marker: { color: "#7DB4FF" }, hovertemplate: "%{x}<br>R$ %{y:,.2f}<extra>RI — previsão de compra</extra>" },
+                { x: chartPeriods.map(monthLabel), y: chartPeriods.map((period) => Number(monthlyByPeriod.get(period)?.ri_ondemand || 0)), type: "scatter", mode: "lines+markers", name: "Base sob demanda", line: { color: "#0EA5C6", width: 3 }, marker: { size: 6 }, hovertemplate: "%{x}<br>R$ %{y:,.2f}<extra>RI — base sob demanda</extra>" },
               ]} layout={{ ...chartLayout, height: 340, barmode: "stack", showlegend: true, legend: { orientation: "h", y: -0.24 } }} config={{ displayModeBar: false, responsive: true }} />
             </Box>
             <Box sx={{ flex: 1, minWidth: 0 }}>
-              <Typography variant="subtitle2" fontWeight={600}>SavingPlan</Typography>
+              <Typography variant="subtitle2" fontWeight={600}>Savings Plan</Typography>
               <Plot data={[
-                { x: chartPeriods.map(monthLabel), y: chartPeriods.map((period) => Number(monthlyByPeriod.get(period)?.savingplan_purchase || 0)), type: "bar", name: "Compra realizada", offsetgroup: "purchase", legendgroup: "purchase", marker: { color: "#7b1fa2" }, hovertemplate: "%{x}<br>R$ %{y:,.2f}<extra>SavingPlan — compra realizada</extra>" },
-                { x: chartPeriods.map(monthLabel), y: chartPeriods.map((period) => Number(forecastByPeriod.get(period)?.savingplan_forecast_purchase || 0)), type: "bar", name: "Forecast de compra", offsetgroup: "purchase", legendgroup: "purchase", marker: { color: "#c084fc" }, hovertemplate: "%{x}<br>R$ %{y:,.2f}<extra>SavingPlan — forecast de compra</extra>" },
-                { x: chartPeriods.map(monthLabel), y: chartPeriods.map((period) => Number(monthlyByPeriod.get(period)?.savingplan_ondemand || 0)), type: "scatter", mode: "lines+markers", name: "Base OnDemand", line: { color: "#c084fc", width: 3 }, marker: { size: 6 }, hovertemplate: "%{x}<br>R$ %{y:,.2f}<extra>SavingPlan — base OnDemand</extra>" },
+                { x: chartPeriods.map(monthLabel), y: chartPeriods.map((period) => Number(monthlyByPeriod.get(period)?.savingplan_purchase || 0)), type: "bar", name: "Compra efetivada", offsetgroup: "purchase", legendgroup: "purchase", marker: { color: "#0B3FA8" }, hovertemplate: "%{x}<br>R$ %{y:,.2f}<extra>SavingPlan — compra efetivada</extra>" },
+                { x: chartPeriods.map(monthLabel), y: chartPeriods.map((period) => Number(forecastByPeriod.get(period)?.savingplan_forecast_purchase || 0)), type: "bar", name: "Previsão de compra", offsetgroup: "purchase", legendgroup: "purchase", marker: { color: "#7DB4FF" }, hovertemplate: "%{x}<br>R$ %{y:,.2f}<extra>SavingPlan — previsão de compra</extra>" },
+                { x: chartPeriods.map(monthLabel), y: chartPeriods.map((period) => Number(monthlyByPeriod.get(period)?.savingplan_ondemand || 0)), type: "scatter", mode: "lines+markers", name: "Base sob demanda", line: { color: "#7DB4FF", width: 3 }, marker: { size: 6 }, hovertemplate: "%{x}<br>R$ %{y:,.2f}<extra>SavingPlan — base sob demanda</extra>" },
               ]} layout={{ ...chartLayout, height: 340, barmode: "stack", showlegend: true, legend: { orientation: "h", y: -0.24 } }} config={{ displayModeBar: false, responsive: true }} />
             </Box>
           </Stack>
         </CardContent></Card>
 
         <Card sx={{ mb: 2 }}><CardContent>
-          <Typography variant="subtitle1" fontWeight={600}>OnDemand x custo com compromisso por projeto</Typography>
-          <Typography variant="body2" color="text.secondary" mb={2}>Top 8 projetos por base OnDemand no período. A economia é a diferença entre o OnDemand e o custo do compromisso, informada ao passar o cursor.</Typography>
+          <Typography variant="subtitle1" fontWeight={600}>Sob demanda x custo com compromisso por projeto</Typography>
+          <Typography variant="body2" color="text.secondary" mb={2}>Os 8 projetos com maior base sob demanda no período. A economia é a diferença entre o preço sob demanda e o custo do compromisso, exibida ao passar o cursor.</Typography>
           <Stack direction={{ xs: "column", lg: "row" }} spacing={2}>
             {(["RI", "SavingPlan"] as const).map((type) => {
               const totals = new Map<string, { project: string; baseline: number; commitmentCost: number; saving: number }>();
               for (const row of data.projects.filter((item) => item.commitment_type === type)) {
-                const project = row.project || "Sem projeto";
+                const project = row.project || "Sem projeto alocado";
                 const total = totals.get(project) || { project, baseline: 0, commitmentCost: 0, saving: 0 };
                 total.baseline += Number(row.ondemand_baseline || 0);
                 total.commitmentCost += Number(row.purchase_allocated || 0);
@@ -215,8 +215,8 @@ export default function CommitmentsDashboard() {
               return <Box key={type} sx={{ flex: 1, minWidth: 0 }}>
                 <Typography variant="subtitle2" fontWeight={600}>{type}</Typography>
                 <Plot data={[
-                  { x: names, y: topProjects.map((row) => row.baseline), type: "bar", name: "Base OnDemand", marker: { color: type === "RI" ? "#93c5fd" : "#d8b4fe" }, hovertemplate: "%{x}<br>R$ %{y:,.2f}<extra>Base OnDemand</extra>" },
-                  { x: names, y: topProjects.map((row) => row.commitmentCost), type: "bar", name: "Custo com compromisso", customdata: topProjects.map((row) => [row.saving]), marker: { color: type === "RI" ? "#1565c0" : "#7b1fa2" }, hovertemplate: "%{x}<br>Custo: R$ %{y:,.2f}<br>Economia (OnDemand − custo): R$ %{customdata[0]:,.2f}<extra>Custo com compromisso</extra>" },
+                  { x: names, y: topProjects.map((row) => row.baseline), type: "bar", name: "Base sob demanda", marker: { color: type === "RI" ? "#A9C8FF" : "#A9C8FF" }, hovertemplate: "%{x}<br>R$ %{y:,.2f}<extra>Base sob demanda</extra>" },
+                  { x: names, y: topProjects.map((row) => row.commitmentCost), type: "bar", name: "Custo com compromisso", customdata: topProjects.map((row) => [row.saving]), marker: { color: type === "RI" ? "#0EA5C6" : "#0B3FA8" }, hovertemplate: "%{x}<br>Custo: R$ %{y:,.2f}<br>Economia (sob demanda − custo): R$ %{customdata[0]:,.2f}<extra>Custo com compromisso</extra>" },
                 ]} layout={{ ...chartLayout, height: 380, margin: { l: 76, r: 20, t: 12, b: 100 }, barmode: "group", showlegend: true, legend: { orientation: "h", y: -0.32 }, xaxis: { ...chartLayout.xaxis, tickangle: -35, automargin: true } }} config={{ displayModeBar: false, responsive: true }} />
               </Box>;
             })}
@@ -230,7 +230,7 @@ export default function CommitmentsDashboard() {
             const rows = data.projects.filter((row) => row.commitment_type === type);
             const visibleRows = showAllProjects[type] ? rows : rows.slice(0, 10);
             return <Card key={type} sx={{ flex: 1, minWidth: 0 }}><CardContent>
-              <Typography variant="subtitle1" fontWeight={600} mb={1}>Detalhamento — {type}</Typography>
+              <Typography variant="subtitle1" fontWeight={600} mb={1}>Detalhe por projeto — {type}</Typography>
               <Box sx={{ width: "100%" }}>
                 <DataGrid
                   rows={visibleRows}
@@ -243,7 +243,7 @@ export default function CommitmentsDashboard() {
                 />
               </Box>
               <Button size="small" sx={{ mt: 1, px: 0 }} onClick={() => setShowAllProjects((current) => ({ ...current, [type]: !current[type] }))}>
-                {showAllProjects[type] ? "Ver Top 10" : "Ver tudo"}
+                {showAllProjects[type] ? "Ver top 10" : "Mostrar todos"}
               </Button>
             </CardContent></Card>;
           })}

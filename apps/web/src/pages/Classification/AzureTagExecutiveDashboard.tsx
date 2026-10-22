@@ -5,7 +5,7 @@ import {
   FormControl, IconButton, InputLabel, LinearProgress, MenuItem, Select,
   Stack, Table, TableBody, TableCell, TableHead, TableRow, Typography,
 } from "@mui/material";
-import { ExpandLess, ExpandMore, History, PictureAsPdfOutlined, Refresh } from "@mui/icons-material";
+import { ExpandLessOutlined, ExpandMoreOutlined, HistoryOutlined, PictureAsPdfOutlined, RefreshOutlined } from "@mui/icons-material";
 import html2canvas from "html2canvas";
 import jsPDF from "jspdf";
 import {
@@ -23,18 +23,18 @@ import {
 
 const fmt = (value: number) => new Intl.NumberFormat("pt-BR").format(value);
 const adherenceLevel = (value: number | null) => {
-  if (value === null) return { label: "Sem dado", color: "#8A93A8", background: "#EEF0F7" };
+  if (value === null) return { label: "Sem dados coletados", color: "#8497A8", background: "#EEF3F8" };
   if (value < 25) return { label: "0–24%", color: "#dc2626", background: "#fef2f2" };
   if (value < 50) return { label: "25–49%", color: "#ea580c", background: "#fff7ed" };
   if (value < 75) return { label: "50–74%", color: "#ca8a04", background: "#fefce8" };
   return { label: "75–100%", color: "#16a34a", background: "#f0fdf4" };
 };
 const statusLabel = (resource: AzureTagExecutiveResource) => {
-  if (resource.taggable === false) return "Não tageável";
-  if (resource.taggable === null) return "Não classificado";
+  if (resource.taggable === false) return "Sem suporte a tags";
+  if (resource.taggable === null) return "Sem classificação";
   if (resource.tag_status === "complete") return "Completo";
   if (resource.tag_status === "partial") return "Parcial";
-  return "Sem tags";
+  return "Nenhuma tag aplicada";
 };
 
 export default function AzureTagExecutiveDashboard() {
@@ -61,7 +61,7 @@ export default function AzureTagExecutiveDashboard() {
       setTenants(items);
       const preferred = items.find((item) => item.code === "azure-ti") ?? items[0];
       if (preferred) setConnectionId(preferred.connection_id);
-    }).catch((cause) => setError(cause?.response?.data?.detail || "Não foi possível carregar conexões Azure."));
+    }).catch((cause) => setError(cause?.response?.data?.detail || "Não foi possível carregar as conexões Azure."));
   }, []);
 
   const loadDashboard = useCallback(async () => {
@@ -77,7 +77,7 @@ export default function AzureTagExecutiveDashboard() {
       return result;
     } catch (cause: any) {
       setData(null);
-      setError(cause?.response?.data?.detail || "Falha ao consultar o inventário atual do Azure.");
+      setError(cause?.response?.data?.detail || "Não foi possível consultar o inventário atual do Azure.");
       return null;
     } finally {
       setLoading(false);
@@ -93,7 +93,7 @@ export default function AzureTagExecutiveDashboard() {
       const result = await getAzureTagPolicyTimeline(connectionId);
       setTimeline(result);
     } catch (cause: any) {
-      setError(cause?.response?.data?.detail || "Não foi possível carregar o histórico de tags e policies.");
+      setError(cause?.response?.data?.detail || "Não foi possível carregar o histórico de tags e políticas.");
     } finally {
       setTimelineLoading(false);
     }
@@ -140,7 +140,7 @@ export default function AzureTagExecutiveDashboard() {
   const lastTimelineValue = lastTimelinePoint?.value ?? null;
   const timelineDelta = firstTimelineValue !== null && lastTimelineValue !== null ? lastTimelineValue - firstTimelineValue : null;
   const timelineSubscriptionName = timeline?.subscriptions.find((item) => item.subscription_id === timelineSubscription)?.name;
-  const timelineMetricLabel = timelineSubscriptionName ? `Aderência mais recente · ${timelineSubscriptionName}` : "Aderência mais recente · global";
+  const timelineMetricLabel = timelineSubscriptionName ? `Aderência mais recente · ${timelineSubscriptionName}` : "Aderência atual · global";
 
   const exportPdf = async () => {
     if (!exportRootRef.current || exporting) return;
@@ -165,7 +165,7 @@ export default function AzureTagExecutiveDashboard() {
       const imageHeight = canvas.height * imageWidth / canvas.width;
       const pageCanvas = document.createElement("canvas");
       const pageContext = pageCanvas.getContext("2d");
-      if (!pageContext) throw new Error("Não foi possível preparar as páginas do PDF.");
+      if (!pageContext) throw new Error("Não foi possível montar as páginas do PDF.");
       const pagePixelHeight = Math.floor(canvas.width * (pageHeight - margin * 2) / imageWidth);
       pageCanvas.width = canvas.width;
       pageCanvas.height = pagePixelHeight;
@@ -209,7 +209,7 @@ export default function AzureTagExecutiveDashboard() {
     if (connectionId === "") return;
     setRefreshing(true);
     setError("");
-    setRefreshMessage("Enfileirando coleta de inventário para atualizar a base de origem…");
+    setRefreshMessage("Enviando coleta de inventário para atualizar a base de origem…");
     try {
       const queued = await queueAzureTagExecutiveRefresh(connectionId);
       const terminal = new Set(["COMPLETED", "COMPLETED_WITH_ERRORS", "FAILED", "CANCELLED"]);
@@ -220,16 +220,16 @@ export default function AzureTagExecutiveDashboard() {
         task = await getTaskStatus(queued.task_id);
       }
       if (task.status === "COMPLETED") {
-        setRefreshMessage("Coleta concluída. Lendo o inventário mais recente…");
+        setRefreshMessage("Coleta concluída. Carregando o inventário mais recente…");
         const updated = await loadDashboard();
-        setRefreshMessage(`Inventário atualizado${updated?.snapshot_date ? ` (${updated.snapshot_date})` : ""}.`);
+        setRefreshMessage(`Inventário recarregado${updated?.snapshot_date ? ` (${updated.snapshot_date})` : ""}.`);
       } else if (terminal.has(task.status)) {
         throw new Error(task.errors?.join("; ") || task.phase || `A coleta terminou com status ${task.status}.`);
       } else {
-        throw new Error(`A coleta continua em andamento (task ${queued.task_id}). Consulte o histórico de extrações para acompanhar.`);
+        throw new Error(`A coleta continua em andamento (task ${queued.task_id}). Consulte o histórico de coletas para acompanhar.`);
       }
     } catch (cause: any) {
-      setError(cause?.response?.data?.detail || cause?.message || "Não foi possível atualizar o inventário Azure.");
+      setError(cause?.response?.data?.detail || cause?.message || "Não foi possível recarregar o inventário Azure.");
       setRefreshMessage("");
     } finally {
       setRefreshing(false);
@@ -239,19 +239,19 @@ export default function AzureTagExecutiveDashboard() {
   return <Box ref={exportRootRef}>
     <Stack direction={{ xs: "column", md: "row" }} justifyContent="space-between" alignItems={{ xs: "stretch", md: "center" }} spacing={2} sx={{ mb: 2 }}>
       <Box>
-        <Typography variant="h5" fontWeight={700}>Dashboard Executivo de Tags</Typography>
-        <Typography variant="body2" color="text.secondary">Aderência calculada pelas tags do último inventário coletado.</Typography>
+        <Typography variant="h5" fontWeight={700}>Visão executiva de tags</Typography>
+        <Typography variant="body2" color="text.secondary">Aderência medida pelas tags do último inventário coletado.</Typography>
       </Box>
       <Stack direction="row" spacing={1}>
         <FormControl data-pdf-hide size="small" sx={{ minWidth: 250 }}>
-          <InputLabel>Conexão Azure</InputLabel>
-          <Select label="Conexão Azure" value={connectionId} onChange={(event) => setConnectionId(event.target.value as number)}>
+          <InputLabel>Fonte Azure</InputLabel>
+          <Select label="Fonte Azure" value={connectionId} onChange={(event) => setConnectionId(event.target.value as number)}>
             {tenants.map((tenant) => <MenuItem key={tenant.connection_id} value={tenant.connection_id}>{tenant.name} ({tenant.code})</MenuItem>)}
           </Select>
         </FormControl>
-        <Button data-pdf-hide variant="outlined" startIcon={<PictureAsPdfOutlined />} onClick={() => void exportPdf()} disabled={exporting || loading || !data}>{exporting ? "Gerando PDF…" : "Exportar PDF"}</Button>
-        <Button data-pdf-hide variant="contained" startIcon={refreshing ? <CircularProgress size={16} color="inherit" /> : <Refresh />} onClick={() => void refreshInventory()} disabled={loading || refreshing || connectionId === ""}>
-          {refreshing ? "Coletando…" : "Atualizar inventário Azure"}
+        <Button data-pdf-hide variant="outlined" startIcon={<PictureAsPdfOutlined />} onClick={() => void exportPdf()} disabled={exporting || loading || !data}>{exporting ? "Montando PDF…" : "Baixar PDF"}</Button>
+        <Button data-pdf-hide variant="contained" startIcon={refreshing ? <CircularProgress size={16} color="inherit" /> : <RefreshOutlined />} onClick={() => void refreshInventory()} disabled={loading || refreshing || connectionId === ""}>
+          {refreshing ? "Coleta em andamento…" : "Recarregar inventário Azure"}
         </Button>
       </Stack>
     </Stack>
@@ -262,48 +262,48 @@ export default function AzureTagExecutiveDashboard() {
     {data && <>
       <Box sx={{ display: "grid", gridTemplateColumns: { xs: "repeat(2,minmax(0,1fr))", sm: "repeat(3,minmax(0,1fr))", lg: "repeat(6,minmax(0,1fr))" }, gap: 1.5, mb: 1.5 }}>
         {[
-          ["Aderência global", globalAdherence === null ? "—" : `${globalAdherence.toLocaleString("pt-BR", { minimumFractionDigits: 1, maximumFractionDigits: 1 })}%`],
-          ["Subscriptions", data.subscriptions.length], ["Recursos", totals.resources], ["Resource Groups", totals.groups],
-          ["Tageáveis", totals.taggable], ["Não tageáveis", totals.nonTaggable],
-        ].map(([label, value]) => label === "Aderência global" ? <Card
+          ["Aderência consolidada", globalAdherence === null ? "—" : `${globalAdherence.toLocaleString("pt-BR", { minimumFractionDigits: 1, maximumFractionDigits: 1 })}%`],
+          ["Subscriptions", data.subscriptions.length], ["Recursos", totals.resources], ["Grupos de recursos", totals.groups],
+          ["Com suporte a tags", totals.taggable], ["Sem suporte a tags", totals.nonTaggable],
+        ].map(([label, value]) => label === "Aderência consolidada" ? <Card
           key="global-adherence"
           variant="outlined"
           role="button"
           tabIndex={0}
           aria-expanded={timelineOpen}
-          aria-label={`${timelineOpen ? "Ocultar" : "Ver"} timeline de aderência global`}
+          aria-label={`${timelineOpen ? "Ocultar" : "Ver"} linha do tempo de aderência consolidada`}
           onClick={() => setTimelineOpen((open) => !open)}
           onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); setTimelineOpen((open) => !open); } }}
           sx={{ minWidth: 0, cursor: "pointer", borderLeft: "4px solid", borderLeftColor: globalCardColor, bgcolor: timelineOpen ? "action.hover" : "background.paper", transition: "background-color 160ms ease, transform 160ms ease", "&:hover": { bgcolor: "action.hover", transform: "translateY(-2px)" }, "&:focus-visible": { outline: "2px solid", outlineColor: "primary.main", outlineOffset: 2 } }}
         >
           <CardContent sx={{ p: { xs: "10px !important", md: "14px !important" }, minWidth: 0 }}>
             <Stack direction="row" justifyContent="space-between" alignItems="center" spacing={0.5}>
-              <Typography variant="caption" color="text.secondary" noWrap>Aderência global</Typography>
-              <History fontSize="small" color="action" />
+              <Typography variant="caption" color="text.secondary" noWrap>Aderência consolidada</Typography>
+              <HistoryOutlined fontSize="small" color="action" />
             </Stack>
             <Typography variant="h5" fontWeight={700} noWrap color={globalCardColor}>{value}</Typography>
-            <Typography variant="caption" display="block" color="text.secondary" noWrap>{fmt(totals.complete)} / {fmt(totals.taggable)} tageáveis · {timelineOpen ? "Ocultar evolução" : "Ver evolução"}</Typography>
+            <Typography variant="caption" display="block" color="text.secondary" noWrap>{fmt(totals.complete)} / {fmt(totals.taggable)} tageáveis · {timelineOpen ? "Esconder evolução" : "Abrir evolução"}</Typography>
           </CardContent>
         </Card> : <Card key={String(label)} variant="outlined" sx={{ minWidth: 0 }}><CardContent sx={{ p: { xs: "10px !important", md: "14px !important" }, minWidth: 0 }}><Typography variant="caption" color="text.secondary" noWrap display="block">{label}</Typography><Typography variant="h5" fontWeight={700} noWrap>{fmt(Number(value))}</Typography></CardContent></Card>)}
       </Box>
       <Collapse in={timelineOpen} unmountOnExit>
-        <Card variant="outlined" sx={{ mb: 3, overflow: "hidden", background: "linear-gradient(135deg, #ffffff 0%, #f5f8ff 65%, #f0fdfa 100%)" }}>
+        <Card variant="outlined" sx={{ mb: 3, overflow: "hidden", background: "linear-gradient(135deg, #ffffff 0%, #f5f8ff 65%, #EEF4FF 100%)" }}>
           <CardContent sx={{ p: { xs: 2, md: 3 } }}>
             <Stack direction={{ xs: "column", md: "row" }} justifyContent="space-between" alignItems={{ xs: "stretch", md: "center" }} spacing={2} sx={{ mb: 2.5 }}>
               <Box>
-                <Typography variant="overline" color="primary.main" fontWeight={800} letterSpacing={1.1}>HISTÓRICO DE ADERÊNCIA</Typography>
-                <Typography variant="h5" fontWeight={750}>Evolução das tags</Typography>
-                <Typography variant="body2" color="text.secondary">Snapshots de inventário preservados desde 12/10/2026</Typography>
+                <Typography variant="overline" color="primary.main" fontWeight={800} letterSpacing={1.1}>EVOLUÇÃO DA ADERÊNCIA</Typography>
+                <Typography variant="h5" fontWeight={750}>Evolução das tags ao longo do tempo</Typography>
+                <Typography variant="body2" color="text.secondary">Inventários preservados desde 12/10/2026</Typography>
               </Box>
               <Stack direction="row" spacing={1} alignItems="center">
                 <FormControl size="small" sx={{ minWidth: { xs: 210, sm: 260 }, bgcolor: "background.paper" }}>
-                  <InputLabel>Comparar subscription</InputLabel>
-                  <Select label="Comparar subscription" value={timelineSubscription} onChange={(event) => setTimelineSubscription(event.target.value)}>
-                    <MenuItem value="">Somente consolidado</MenuItem>
+                  <InputLabel>Comparar assinatura</InputLabel>
+                  <Select label="Comparar assinatura" value={timelineSubscription} onChange={(event) => setTimelineSubscription(event.target.value)}>
+                    <MenuItem value="">Somente visão consolidada</MenuItem>
                     {(timeline?.subscriptions ?? []).map((item) => <MenuItem key={item.subscription_id} value={item.subscription_id}>{item.name}</MenuItem>)}
                   </Select>
                 </FormControl>
-                <IconButton data-pdf-hide aria-label="Ocultar timeline" onClick={() => setTimelineOpen(false)}><ExpandLess /></IconButton>
+                <IconButton data-pdf-hide aria-label="Ocultar linha do tempo" onClick={() => setTimelineOpen(false)}><ExpandLessOutlined /></IconButton>
               </Stack>
             </Stack>
             {timelineLoading && <LinearProgress sx={{ mb: 2, borderRadius: 2 }} />}
@@ -321,23 +321,23 @@ export default function AzureTagExecutiveDashboard() {
                 <Box sx={{ p: 1.6, borderRadius: 2, bgcolor: "background.paper", border: "1px solid", borderColor: "divider" }}>
                   <Typography variant="caption" color="text.secondary">{timelineMetricLabel.toLocaleUpperCase("pt-BR")}</Typography>
                   <Typography variant="h4" fontWeight={800} color={adherenceLevel(lastTimelineValue).color}>{lastTimelineValue === null ? "—" : `${lastTimelineValue.toLocaleString("pt-BR", { minimumFractionDigits: 1 })}%`}</Typography>
-                  <Typography variant="caption" color="text.secondary">{lastTimelinePoint?.label ?? "Sem medição"}</Typography>
+                  <Typography variant="caption" color="text.secondary">{lastTimelinePoint?.label ?? "Sem leitura"}</Typography>
                 </Box>
                 <Box sx={{ p: 1.6, borderRadius: 2, bgcolor: "background.paper", border: "1px solid", borderColor: "divider" }}>
-                  <Typography variant="caption" color="text.secondary">VARIAÇÃO NO PERÍODO</Typography>
+                  <Typography variant="caption" color="text.secondary">VARIAÇÃO DO PERÍODO</Typography>
                   <Typography variant="h4" fontWeight={800} color={timelineDelta === null ? "text.primary" : timelineDelta >= 0 ? "success.main" : "error.main"}>{timelineDelta === null ? "—" : `${timelineDelta >= 0 ? "+" : ""}${timelineDelta.toLocaleString("pt-BR", { minimumFractionDigits: 1 })} p.p.`}</Typography>
-                  <Typography variant="caption" color="text.secondary">desde {firstTimelinePoint?.label ?? "Sem medição"}</Typography>
+                  <Typography variant="caption" color="text.secondary">desde {firstTimelinePoint?.label ?? "Sem leitura"}</Typography>
                 </Box>
                 <Box sx={{ p: 1.6, borderRadius: 2, bgcolor: "background.paper", border: "1px solid", borderColor: "divider" }}>
-                  <Typography variant="caption" color="text.secondary">MEDIÇÕES DE INVENTÁRIO</Typography>
+                  <Typography variant="caption" color="text.secondary">MEDIÇÕES DO INVENTÁRIO</Typography>
                   <Typography variant="h4" fontWeight={800}>{fmt(validTimelinePoints.length)}</Typography>
                   <Typography variant="caption" color="text.secondary">{firstTimelinePoint?.label ?? "—"} – {lastTimelinePoint?.label ?? "—"}</Typography>
                 </Box>
               </Box>
               <Box sx={{ position: "relative", px: { xs: 0.5, sm: 2 }, py: 2.5, overflowX: "auto" }}>
                 <Box sx={{ minWidth: Math.max(560, timelinePoints.length * 155), position: "relative" }}>
-                  <Box sx={{ position: "absolute", left: 24, right: 24, top: 18, height: 6, borderRadius: 4, bgcolor: "#dbe5f3" }} />
-                  <Box sx={{ position: "absolute", left: 24, width: timelinePoints.length > 1 ? `calc((100% - 48px) * ${(timelinePoints.length - 1) / timelinePoints.length})` : 0, top: 18, height: 6, borderRadius: 4, background: "linear-gradient(90deg, #4338CA, #06b6d4)" }} />
+                  <Box sx={{ position: "absolute", left: 24, right: 24, top: 18, height: 6, borderRadius: 4, bgcolor: "#E1E8F0" }} />
+                  <Box sx={{ position: "absolute", left: 24, width: timelinePoints.length > 1 ? `calc((100% - 48px) * ${(timelinePoints.length - 1) / timelinePoints.length})` : 0, top: 18, height: 6, borderRadius: 4, background: "linear-gradient(90deg, #0F62FE, #0EA5C6)" }} />
                   <Box sx={{ display: "grid", gridTemplateColumns: `repeat(${timelinePoints.length}, minmax(130px, 1fr))`, position: "relative" }}>
                     {timelinePoints.map((point, index) => {
                       const previousPoint = timelinePoints.slice(0, index).reverse().find((candidate) => candidate.value !== null);
@@ -351,7 +351,7 @@ export default function AzureTagExecutiveDashboard() {
                         <Typography variant="caption" display="block" color="text.secondary" sx={{ mt: 1.2 }}>{point.label}</Typography>
                         <Typography variant="h6" fontWeight={800} color={level.color}>{point.value === null ? "—" : `${point.value.toLocaleString("pt-BR", { minimumFractionDigits: 1 })}%`}</Typography>
                         <Typography variant="caption" display="block" color={delta === null ? "text.secondary" : delta >= 0 ? "success.main" : "error.main"} fontWeight={700}>
-                          {index === 0 ? "primeiro snapshot" : delta === null ? "sem comparação" : `${delta >= 0 ? "↑" : "↓"} ${Math.abs(delta).toLocaleString("pt-BR", { minimumFractionDigits: 1 })} p.p.`}
+                          {index === 0 ? "primeiro snapshot" : delta === null ? "sem comparativo" : `${delta >= 0 ? "↑" : "↓"} ${Math.abs(delta).toLocaleString("pt-BR", { minimumFractionDigits: 1 })} p.p.`}
                         </Typography>
                         {timelineSubscription && point.value !== null && point.global !== null && <Typography variant="caption" display="block" color="text.secondary" sx={{ mt: 0.4 }}>global {point.global.toLocaleString("pt-BR", { minimumFractionDigits: 1 })}%</Typography>}
                       </Box>;
@@ -359,10 +359,10 @@ export default function AzureTagExecutiveDashboard() {
                   </Box>
                 </Box>
               </Box>
-              {timelineSubscriptionName && <Typography variant="body2" color="text.secondary" sx={{ mt: 0.5 }}><Box component="span" sx={{ color: "#0891b2", fontWeight: 800 }}>●</Box> {timelineSubscriptionName} · todos os indicadores e marcos mostram esta subscription; aderência global aparece abaixo de cada marco.</Typography>}
+              {timelineSubscriptionName && <Typography variant="body2" color="text.secondary" sx={{ mt: 0.5 }}><Box component="span" sx={{ color: "#0EA5C6", fontWeight: 800 }}>●</Box> {timelineSubscriptionName} · todos os indicadores e marcos mostram esta subscription; aderência consolidada aparece abaixo de cada marco.</Typography>}
             </>}
-            {timeline && timelinePoints.length === 0 && !timelineLoading && <Alert severity="info">Ainda não existem snapshots de inventário desde 12/10/2026.</Alert>}
-            {!timeline && !timelineLoading && <Typography variant="body2" color="text.secondary">Abrindo histórico…</Typography>}
+            {timeline && timelinePoints.length === 0 && !timelineLoading && <Alert severity="info">Ainda não há inventários registrados desde 12/10/2026.</Alert>}
+            {!timeline && !timelineLoading && <Typography variant="body2" color="text.secondary">Abrindo o histórico…</Typography>}
           </CardContent>
         </Card>
       </Collapse>
@@ -374,22 +374,22 @@ export default function AzureTagExecutiveDashboard() {
             <Box role="button" tabIndex={0} onClick={() => toggleSubscription(item.subscription_id)} onKeyDown={(event) => { if (event.key === "Enter") toggleSubscription(item.subscription_id); }} sx={{ display: "grid", gridTemplateColumns: { xs: "1fr auto", md: "minmax(230px,1.3fr) minmax(180px,1fr) minmax(300px,2fr) auto" }, gap: 2, alignItems: "center", p: 2, cursor: "pointer" }}>
               <Box><Typography fontWeight={700}>{item.name}</Typography><Typography variant="caption" color="text.secondary">{item.subscription_id}</Typography></Box>
               <Stack direction="row" alignItems="center" spacing={1.5}>
-                {adherence === null ? <Chip label="Sem base tageável" size="small" /> : <><Box sx={{ position: "relative", display: "inline-flex" }}><CircularProgress variant="determinate" value={100} size={52} thickness={5} sx={{ color: "action.hover" }} /><CircularProgress variant="determinate" value={adherence} size={52} thickness={5} sx={{ position: "absolute", left: 0, color: adherence >= 90 ? "success.main" : adherence >= 60 ? "warning.main" : "error.main" }} /><Typography variant="caption" sx={{ position: "absolute", inset: 0, display: "grid", placeItems: "center", fontWeight: 700 }}>{adherence}%</Typography></Box><Box><Typography variant="caption" color="text.secondary">Aderência</Typography><Typography variant="body2">{fmt(item.fully_tagged)} / {fmt(item.taggable_items)}</Typography></Box></>}
+                {adherence === null ? <Chip label="Sem base com suporte a tags" size="small" /> : <><Box sx={{ position: "relative", display: "inline-flex" }}><CircularProgress variant="determinate" value={100} size={52} thickness={5} sx={{ color: "action.hover" }} /><CircularProgress variant="determinate" value={adherence} size={52} thickness={5} sx={{ position: "absolute", left: 0, color: adherence >= 90 ? "success.main" : adherence >= 60 ? "warning.main" : "error.main" }} /><Typography variant="caption" sx={{ position: "absolute", inset: 0, display: "grid", placeItems: "center", fontWeight: 700 }}>{adherence}%</Typography></Box><Box><Typography variant="caption" color="text.secondary">Aderência</Typography><Typography variant="body2">{fmt(item.fully_tagged)} / {fmt(item.taggable_items)}</Typography></Box></>}
               </Stack>
               <Stack direction="row" gap={0.7} flexWrap="wrap">
                 <Chip size="small" label={`${fmt(item.total_resources)} recursos`} />
                 <Chip size="small" label={`${fmt(item.resource_groups)} RGs`} />
-                <Chip size="small" color="success" variant="outlined" label={`${fmt(item.taggable_resources + item.taggable_resource_groups)} tageáveis`} />
-                <Chip size="small" color="warning" variant="outlined" label={`${fmt(item.non_taggable_resources + item.non_taggable_resource_groups)} não tageáveis`} />
+                <Chip size="small" color="success" variant="outlined" label={`${fmt(item.taggable_resources + item.taggable_resource_groups)} com suporte a tags`} />
+                <Chip size="small" color="warning" variant="outlined" label={`${fmt(item.non_taggable_resources + item.non_taggable_resource_groups)} sem suporte a tags`} />
               </Stack>
-              <IconButton data-pdf-hide size="small" aria-label={isOpen ? "Recolher recursos" : "Ver recursos"}>{isOpen ? <ExpandLess /> : <ExpandMore />}</IconButton>
+              <IconButton data-pdf-hide size="small" aria-label={isOpen ? "Esconder recursos" : "Abrir recursos"}>{isOpen ? <ExpandLessOutlined /> : <ExpandMoreOutlined />}</IconButton>
             </Box>
             {item.inventory_error && <Alert severity="error" sx={{ mx: 2, mb: 2 }}>{dataDisplayText(item.inventory_error)}</Alert>}
             {item.capability_warnings.length > 0 && <Alert severity="warning" sx={{ mx: 2, mb: 2 }}>Classificação de suporte a tags incompleta: {dataDisplayText(item.capability_warnings.join("; "))}</Alert>}
             <Collapse in={isOpen}>
               <CardContent sx={{ pt: 0 }}>
                 {resourceLoading === item.subscription_id && <LinearProgress sx={{ mb: 1 }} />}
-                <Box sx={{ overflowX: "auto" }}><Table size="small"><TableHead><TableRow><TableCell>Recurso / Resource Group</TableCell><TableCell>Tipo</TableCell><TableCell>Grupo</TableCell><TableCell>Status</TableCell><TableCell>Tags presentes no recurso</TableCell></TableRow></TableHead><TableBody>
+                <Box sx={{ overflowX: "auto" }}><Table size="small"><TableHead><TableRow><TableCell>Recurso / grupo de recursos</TableCell><TableCell>Tipo de recurso</TableCell><TableCell>Grupo de recursos</TableCell><TableCell>Estado</TableCell><TableCell>Tags aplicadas ao recurso</TableCell></TableRow></TableHead><TableBody>
                   {(resources[item.subscription_id] ?? []).map((resource) => {
                     const actualTags = resource.tags && typeof resource.tags === "object" ? resource.tags : {};
                     const matching = new Set((resource.matching_tags ?? []).map((key) => key.toLocaleLowerCase()));
@@ -397,7 +397,7 @@ export default function AzureTagExecutiveDashboard() {
                     const expected = resource.expected_tags ?? {};
                     return <TableRow key={resource.resource_id} hover>
                       <TableCell sx={{ maxWidth: 380 }}><Typography variant="body2" noWrap title={resource.resource_name}>{resource.resource_name}</Typography></TableCell>
-                      <TableCell>{resource.is_resource_group ? "Resource Group" : resource.resource_type}</TableCell>
+                      <TableCell>{resource.is_resource_group ? "Grupo de recursos" : resource.resource_type}</TableCell>
                       <TableCell>{resource.is_resource_group ? "—" : resource.resource_group || "—"}</TableCell>
                       <TableCell><Chip size="small" label={statusLabel(resource)} color={resource.taggable === false ? "default" : resource.taggable === null ? "warning" : resource.tag_status === "complete" ? "success" : "error"} />{resource.tag_support_reason && <Typography variant="caption" display="block" color="text.secondary">{resource.tag_support_reason}</Typography>}</TableCell>
                       <TableCell sx={{ minWidth: 300 }}>
@@ -410,26 +410,26 @@ export default function AzureTagExecutiveDashboard() {
                               color={matched ? "success" : managedKey ? "info" : "default"}
                               label={`${key}=${String(value)}`} title={expected[key] ? `Esperado: ${expected[key]}` : undefined} />;
                           })}
-                        </Stack> : <Typography variant="caption" color="text.secondary">Nenhuma tag presente</Typography>}
+                        </Stack> : <Typography variant="caption" color="text.secondary">Nenhuma tag aplicada</Typography>}
                         {Object.keys(expected).length > 0
                           ? <Typography variant="caption" display="block" color="text.secondary" sx={{ mt: 0.5 }}>
-                              Esperado{resource.expected_tags_source === "resource_group" ? " pelo Resource Group" : " pela classificação"}: {Object.entries(expected).map(([key, value]) => `${key}=${value}`).join(" · ")}
+                              Esperado{resource.expected_tags_source === "resource_group" ? " pelo Grupo de recursos" : " pela classificação"}: {Object.entries(expected).map(([key, value]) => `${key}=${value}`).join(" · ")}
                             </Typography>
                           : <Typography variant="caption" display="block" color={resource.expected_tags_ambiguous ? "warning.main" : "text.secondary"} sx={{ mt: 0.5 }}>
-                              {resource.expected_tags_ambiguous ? "Mais de uma classificação possível na base preparada para este Resource Group." : "Expectativa não encontrada na base preparada mais recente."}
+                              {resource.expected_tags_ambiguous ? "Mais de uma classificação possível na base preparada para este grupo de recursos." : "Regra esperada não encontrada na base preparada mais recente."}
                             </Typography>}
                       </TableCell>
                     </TableRow>;
                   })}
                 </TableBody></Table></Box>
-                {tokens[item.subscription_id] && <Button data-pdf-hide size="small" sx={{ mt: 1 }} onClick={() => void fetchResources(item.subscription_id, true)} disabled={resourceLoading === item.subscription_id}>Carregar mais</Button>}
-                {resources[item.subscription_id]?.length === 0 && resourceLoading !== item.subscription_id && <Typography color="text.secondary" sx={{ py: 2 }}>Nenhum recurso retornado nesta subscription.</Typography>}
+                {tokens[item.subscription_id] && <Button data-pdf-hide size="small" sx={{ mt: 1 }} onClick={() => void fetchResources(item.subscription_id, true)} disabled={resourceLoading === item.subscription_id}>Mostrar mais</Button>}
+                {resources[item.subscription_id]?.length === 0 && resourceLoading !== item.subscription_id && <Typography color="text.secondary" sx={{ py: 2 }}>Nenhum recurso retornado nesta assinatura.</Typography>}
               </CardContent>
             </Collapse>
           </Card>;
         })}
       </Stack>
-      {data.subscriptions.length === 0 && !loading && <Alert severity="info">Nenhuma subscription acessível nesta conexão.</Alert>}
+      {data.subscriptions.length === 0 && !loading && <Alert severity="info">Nenhuma assinatura acessível nesta conexão.</Alert>}
     </>}
   </Box>;
 }

@@ -35,7 +35,6 @@ class Department(Base):
     centro_custo = Column(String(50), nullable=True)
     id_orcamento = Column(String(80), nullable=True, index=True)
     ambiente = Column(String(50), nullable=True)
-    cloud_filter = Column(String(50), nullable=True)
     custom_fields = Column(JSON, nullable=True)
     active = Column(Boolean, nullable=False, default=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())

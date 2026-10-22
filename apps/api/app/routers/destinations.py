@@ -12,12 +12,12 @@ from app.schemas.schemas import (
     DestinationTableDetailOut,
 )
 
-router = APIRouter(prefix="/destinations", tags=["destinations"])
+router = APIRouter(prefix="/dados/catalogo", tags=["destinations"])
 
 
 # ─── Destination Tables ──────────────────────────────────────────────────
 
-@router.get("/tables/", response_model=list[DestinationTableOut])
+@router.get("/tabelas/", response_model=list[DestinationTableOut])
 async def list_destination_tables(
     active_only: bool = Query(True),
     db: AsyncSession = Depends(get_db),
@@ -29,7 +29,7 @@ async def list_destination_tables(
     return result.scalars().all()
 
 
-@router.get("/tables/{table_id}", response_model=DestinationTableDetailOut)
+@router.get("/tabelas/{table_id}", response_model=DestinationTableDetailOut)
 async def get_destination_table(table_id: int, db: AsyncSession = Depends(get_db)):
     result = await db.execute(select(DestinationTable).where(DestinationTable.id == table_id))
     dt = result.scalar_one_or_none()
@@ -52,7 +52,7 @@ async def get_destination_table(table_id: int, db: AsyncSession = Depends(get_db
     )
 
 
-@router.post("/tables/", response_model=DestinationTableOut, status_code=201)
+@router.post("/tabelas/", response_model=DestinationTableOut, status_code=201)
 async def create_destination_table(data: DestinationTableCreate, db: AsyncSession = Depends(get_db)):
     physical_name = data.physical_name or f"dest_{data.name.lower().replace(' ', '_').replace('-', '_')}"
 
@@ -72,7 +72,7 @@ async def create_destination_table(data: DestinationTableCreate, db: AsyncSessio
     return dt
 
 
-@router.patch("/tables/{table_id}", response_model=DestinationTableOut)
+@router.patch("/tabelas/{table_id}", response_model=DestinationTableOut)
 async def update_destination_table(
     table_id: int,
     data: DestinationTableUpdate,
@@ -96,7 +96,7 @@ async def update_destination_table(
 
 # ─── Destination Columns ─────────────────────────────────────────────────
 
-@router.get("/tables/{table_id}/columns/", response_model=list[DestinationColumnOut])
+@router.get("/tabelas/{table_id}/colunas/", response_model=list[DestinationColumnOut])
 async def list_columns(table_id: int, db: AsyncSession = Depends(get_db)):
     result = await db.execute(
         select(DestinationColumn)
@@ -106,7 +106,7 @@ async def list_columns(table_id: int, db: AsyncSession = Depends(get_db)):
     return result.scalars().all()
 
 
-@router.post("/tables/{table_id}/columns/", response_model=DestinationColumnOut, status_code=201)
+@router.post("/tabelas/{table_id}/colunas/", response_model=DestinationColumnOut, status_code=201)
 async def add_column(table_id: int, data: DestinationColumnCreate, db: AsyncSession = Depends(get_db)):
     dt_result = await db.execute(select(DestinationTable).where(DestinationTable.id == table_id))
     dt = dt_result.scalar_one_or_none()
@@ -147,7 +147,7 @@ async def add_column(table_id: int, data: DestinationColumnCreate, db: AsyncSess
     return col
 
 
-@router.delete("/columns/{column_id}", status_code=204)
+@router.delete("/colunas/{column_id}", status_code=204)
 async def delete_column(column_id: int, db: AsyncSession = Depends(get_db)):
     result = await db.execute(select(DestinationColumn).where(DestinationColumn.id == column_id))
     col = result.scalar_one_or_none()
@@ -158,7 +158,7 @@ async def delete_column(column_id: int, db: AsyncSession = Depends(get_db)):
     await db.commit()
 
 
-@router.get("/tables/{table_id}/schema")
+@router.get("/tabelas/{table_id}/esquema")
 async def destination_table_schema(table_id: int, db: AsyncSession = Depends(get_db)):
     """Return column names and types from a destination table — for use in rule autocomplete."""
     dt_result = await db.execute(select(DestinationTable).where(DestinationTable.id == table_id))
@@ -183,7 +183,7 @@ async def destination_table_schema(table_id: int, db: AsyncSession = Depends(get
 
 # ─── Source → Destination Mappings ───────────────────────────────────────
 
-@router.get("/mappings/", response_model=list[SourceDestinationMappingOut])
+@router.get("/vinculos/", response_model=list[SourceDestinationMappingOut])
 async def list_source_dest_mappings(
     source_connection_id: int | None = Query(None),
     destination_table_id: int | None = Query(None),
@@ -198,7 +198,7 @@ async def list_source_dest_mappings(
     return result.scalars().all()
 
 
-@router.post("/mappings/", response_model=SourceDestinationMappingOut, status_code=201)
+@router.post("/vinculos/", response_model=SourceDestinationMappingOut, status_code=201)
 async def create_source_dest_mapping(
     data: SourceDestinationMappingCreate,
     db: AsyncSession = Depends(get_db),
@@ -219,7 +219,7 @@ async def create_source_dest_mapping(
     return mapping
 
 
-@router.put("/mappings/{mapping_id}", response_model=SourceDestinationMappingOut)
+@router.put("/vinculos/{mapping_id}", response_model=SourceDestinationMappingOut)
 async def update_source_dest_mapping(
     mapping_id: int,
     data: SourceDestinationMappingUpdate,
@@ -239,7 +239,7 @@ async def update_source_dest_mapping(
     return mapping
 
 
-@router.delete("/mappings/{mapping_id}", status_code=204)
+@router.delete("/vinculos/{mapping_id}", status_code=204)
 async def delete_source_dest_mapping(mapping_id: int, db: AsyncSession = Depends(get_db)):
     result = await db.execute(
         select(SourceDestinationMapping).where(SourceDestinationMapping.id == mapping_id)

@@ -13,18 +13,17 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useMenuSearchParams as useSearchParams } from "../../navigation/useMenuSearchParams";
 import {
   Accordion, AccordionDetails, AccordionSummary, Alert, Box, Button, Chip, CircularProgress, Divider, Drawer, IconButton, LinearProgress,
-  MenuItem, Paper, Stack, Table, TableBody, TableCell, TableHead, TableRow,
+  MenuItem, Paper, Stack, Tab, Table, TableBody, TableCell, TableHead, TableRow, Tabs,
   TextField, Tooltip, Typography,
 } from "@mui/material";
-import AnomalyCaseScope from "./AnomalyCaseScope";
+import AnomalyCaseDrawer, { CAUSE_LABEL, DECISION_LABEL, SEVERITY_COLOR, STATE_LABEL, daysBetween, dt } from "./AnomalyCaseDrawer";
 import AnomaliesCasesDataGrid from "./AnomaliesCasesDataGrid";
 import AnomaliesImpactTab from "./AnomaliesImpactTab";
 import AnomaliesSettingsTab from "./AnomaliesSettingsTab";
-import ExpandMoreIcon from "@mui/icons-material/ExpandMore";
-import CloseIcon from "@mui/icons-material/Close";
-import NotificationsIcon from "@mui/icons-material/Notifications";
-import RefreshIcon from "@mui/icons-material/Refresh";
-import PlayArrowIcon from "@mui/icons-material/PlayArrow";
+import ExpandMoreIcon from "@mui/icons-material/ExpandMoreOutlined";
+import CloseIcon from "@mui/icons-material/CloseOutlined";
+import RefreshIcon from "@mui/icons-material/RefreshOutlined";
+import PlayArrowIcon from "@mui/icons-material/PlayArrowOutlined";
 import type {
   AnomalyCase, AnomalyConfig, AnomalyNotification, AnomalyRunSummary, AnomalySeries, CaseSummary, ImpactSummary,
   ExpectedEventFamily, QualityBucket,
@@ -38,149 +37,22 @@ import {
   updateAnomalyConfig,
 } from "../../services/anomaliesApi";
 
-const STATE_LABEL: Record<string, string> = {
-  NEW: "Novo",
-  ASSIGNED: "Atribuído",
-  INVESTIGATING: "Em investigação",
-  DECIDED: "Decidido",
-  IN_REMEDIATION: "Em remediação",
-  VERIFYING: "Em verificação",
-  RETROSPECTIVE: "Retrospectiva",
-  CLOSED: "Encerrado",
-};
-
 const OPEN_CASE_STATES = ["NEW", "ASSIGNED", "INVESTIGATING", "DECIDED", "IN_REMEDIATION", "VERIFYING", "RETROSPECTIVE"];
 const CASE_SLICE_LABEL: Record<string, string> = {
-  __open__: "Abertos",
-  __overdue__: "Vencidos",
-  __unassigned__: "Sem responsável",
-  __confirmed__: "Anomalias confirmadas",
-  __recurrence__: "Famílias reincidentes",
+  __open__: "Em aberto",
+  __overdue__: "Atrasados",
+  __unassigned__: "Sem dono",
+  __confirmed__: "Anomalias validadas",
+  __recurrence__: "Famílias recorrentes",
 };
 
-const SEVERITY_COLOR: Record<string, "default" | "info" | "warning" | "error"> = {
-  LOW: "default",
-  MEDIUM: "info",
-  HIGH: "warning",
-  CRITICAL: "error",
-};
-
-const DECISION_LABEL: Record<string, string> = {
-  EXPECTED: "Esperado",
-  DATA_ISSUE: "Problema de dados",
-  CONFIRMED_ACTION: "Confirmado — com ação",
-  CONFIRMED_ACCEPTED: "Confirmado — aceito",
-  LOW_PRIORITY_NO_ACTION: "Baixa prioridade, sem ação",
-};
-
-const CAUSE_LABEL: Record<string, string> = {
-  LEGITIMATE_GROWTH: "Crescimento legítimo",
-  EXPECTED_PURCHASE: "Compra/renovação esperada",
-  MISCONFIGURATION: "Configuração indevida",
-  FORGOTTEN_RESOURCE: "Recurso esquecido",
-  PRICE_OR_DISCOUNT_CHANGE: "Mudança de preço/desconto",
-  DATA_ISSUE: "Problema de dados",
-  SECURITY_INCIDENT: "Possível incidente de segurança",
-  UNDETERMINED: "Causa não determinada",
-};
-
-const DISMISSED_RUN_STORAGE_KEY = "openfinops:anomalies:dismissed-run-id";
 
 const money = (value: number | null | undefined, currency = "BRL") =>
   value === null || value === undefined
     ? "—"
     : value.toLocaleString("pt-BR", { style: "currency", currency, maximumFractionDigits: 2 });
 
-const dt = (value: string | null | undefined) =>
-  value ? new Date(value).toLocaleString("pt-BR") : "—";
-
-const daysBetween = (start: string | null | undefined, end: string | null | undefined) => {
-  if (!start) return "—";
-  const from = new Date(`${start.slice(0, 10)}T00:00:00Z`).getTime();
-  const to = end ? new Date(`${end.slice(0, 10)}T00:00:00Z`).getTime() : Date.now();
-  return `${Math.max(1, Math.floor((to - from) / 86_400_000) + 1)} dia(s)`;
-};
-
-function StepPanel({ kase }: { kase: AnomalyCase }) {
-  const steps = (kase.steps ?? []).filter((step) => "etapa" in step);
-  const next = (kase.steps ?? []).find((step) => "proxima_acao" in step);
-  return (
-    <Paper variant="outlined" sx={{ p: 2 }}>
-      <Typography variant="subtitle2" gutterBottom>Etapas do caso</Typography>
-      <Table size="small">
-        <TableHead>
-          <TableRow>
-            <TableCell>Etapa</TableCell>
-            <TableCell>Quando</TableCell>
-            <TableCell>Responsável</TableCell>
-          </TableRow>
-        </TableHead>
-        <TableBody>
-          {steps.map((step, index) => (
-            <TableRow key={index}>
-              <TableCell>{String(step.etapa)}</TableCell>
-              <TableCell>{dt(step.quando as string | null)}</TableCell>
-              <TableCell>
-                {step.responsavel ? `usuário ${step.responsavel}` : "—"}
-                {step.decisao ? ` · ${DECISION_LABEL[String(step.decisao)] ?? step.decisao}` : ""}
-                {step.acoes_abertas ? ` · ${step.acoes_abertas} ação(ões) aberta(s)` : ""}
-                {step.dias_validos ? ` · ${step.dias_validos} dia(s) válido(s)` : ""}
-              </TableCell>
-            </TableRow>
-          ))}
-        </TableBody>
-      </Table>
-      <Divider sx={{ my: 1.5 }} />
-      <Stack direction="row" spacing={2} flexWrap="wrap">
-        <Typography variant="body2">
-          <strong>Prazo de ciência:</strong> {dt(kase.due_at)}
-        </Typography>
-        <Typography variant="body2">
-          <strong>Próxima ação:</strong> {next ? String(next.proxima_acao) : "—"}
-        </Typography>
-        <Typography variant="body2">
-          <strong>Responsável:</strong> {kase.assignee_user_id ? `usuário ${kase.assignee_user_id}` : "Não atribuído"}
-        </Typography>
-        <Typography variant="body2">
-          <strong>Confiança:</strong> {kase.confidence}
-        </Typography>
-        <Typography variant="body2">
-          <strong>Qualidade:</strong> {kase.data_quality}
-        </Typography>
-      </Stack>
-    </Paper>
-  );
-}
-
 type ExpectedEventFamiliesResult = { items: ExpectedEventFamily[]; total: number; note?: string };
-
-type TransitionForm = {
-  command: string;
-  decision: string;
-  cause_category: string;
-  note: string;
-  evidence: string;
-  verification_outcome: string;
-  learning: string;
-  preventive_measure: string;
-  no_preventive_measure_reason: string;
-  assignee_user_id: string;
-  action_description: string;
-};
-
-const EMPTY_FORM: TransitionForm = {
-  command: "acknowledge",
-  decision: "CONFIRMED_ACCEPTED",
-  cause_category: "UNDETERMINED",
-  note: "",
-  evidence: "",
-  verification_outcome: "SUCCESS",
-  learning: "",
-  preventive_measure: "",
-  no_preventive_measure_reason: "",
-  assignee_user_id: "",
-  action_description: "",
-};
 
 export default function Anomalies() {
   const [searchParams, setSearchParams] = useSearchParams();
@@ -193,33 +65,20 @@ export default function Anomalies() {
   const [retrospectiveItems, setRetrospectiveItems] = useState<AnomalyCase[]>([]);
   const [confirmedItems, setConfirmedItems] = useState<AnomalyCase[]>([]);
   const [latestRun, setLatestRun] = useState<AnomalyRunSummary | null>(null);
-  const [dismissedRunId, setDismissedRunId] = useState<number | null>(() => {
-    const stored = Number(window.localStorage.getItem(DISMISSED_RUN_STORAGE_KEY));
-    return Number.isFinite(stored) && stored > 0 ? stored : null;
-  });
   const detectionRunning = latestRun?.status === "QUEUED" || latestRun?.status === "RUNNING";
   const [cases, setCases] = useState<AnomalyCase[]>([]);
   const [total, setTotal] = useState(0);
-  const [selected, setSelected] = useState<AnomalyCase | null>(null);
-  const [events, setEvents] = useState<Array<Record<string, unknown>>>([]);
-  const [series, setSeries] = useState<AnomalySeries | null>(null);
-  const caseRequest = useRef(0);
   const listRequest = useRef(0);
   const [expectedEvents, setExpectedEvents] = useState<ExpectedEventFamiliesResult>({ items: [], total: 0 });
   const [quality, setQuality] = useState<QualityBucket[]>([]);
   const [qualityNote, setQualityNote] = useState<string | null>(null);
   const [remoteError, setRemoteError] = useState<string | null>(null);
-  const [notifications, setNotifications] = useState<AnomalyNotification[]>([]);
-  const [unread, setUnread] = useState(0);
-  const [inboxOpen, setInboxOpen] = useState(false);
-  const [form, setForm] = useState<TransitionForm>(EMPTY_FORM);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [stateFilter, setStateFilter] = useState<string>("NEW");
+  // Filtros do grid (estado, severidade, responsável) ficam no próprio DataGrid.
+  // Aqui só existem os filtros vindos dos indicadores (KPI) do resumo.
+  const [stateFilter, setStateFilter] = useState<string>("");
   const [caseSliceFilter, setCaseSliceFilter] = useState<string>("");
-  const [severityFilter, setSeverityFilter] = useState<string>("");
-  const [queueOnly, setQueueOnly] = useState(false);
-  const [myCasesOnly, setMyCasesOnly] = useState(false);
 
   const config = configs[0];
   const currency = config?.currency ?? "BRL";
@@ -228,20 +87,17 @@ export default function Anomalies() {
     setBusy(true);
     setError(null);
     try {
-      const [configList, metrics, notificationPage, runPage] = await Promise.all([
+      const [configList, metrics, runPage] = await Promise.all([
         listAnomalyConfigs(),
         getAnomalyMetrics(),
-        listAnomalyNotifications({ limit: 25 }),
         listAnomalyRuns(1),
       ]);
       void getAnomalyImpactSummary().then(setImpactSummary).catch(() => setImpactSummary(null));
       setConfigs(configList);
       setSummary(metrics);
-      setNotifications(notificationPage.items);
-      setUnread(notificationPage.unread);
       setLatestRun(runPage.items[0] ?? null);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Falha ao carregar anomalias");
+      setError(err instanceof Error ? err.message : "Não foi possível carregar as anomalias");
     } finally {
       setBusy(false);
     }
@@ -252,9 +108,9 @@ export default function Anomalies() {
       setExpectedEvents(await getExpectedEvents({ limit: 200 }));
       setRemoteError(null);
     } catch (err) {
-      const message = err instanceof Error ? err.message : "Falha ao listar eventos esperados";
+      const message = err instanceof Error ? err.message : "Não foi possível listar os eventos previstos";
       setExpectedEvents({ items: [], total: 0, note: message.includes("409")
-        ? "Nenhuma publicação corrente: execute a detecção para gerar avaliações."
+        ? "Nenhuma publicação vigente: rode a detecção para gerar avaliações."
         : message });
       setRemoteError(null);
     }
@@ -266,10 +122,10 @@ export default function Anomalies() {
       setQuality(payload.items);
       setQualityNote(payload.note ?? null);
     } catch (err) {
-      const message = err instanceof Error ? err.message : "Falha ao listar qualidade";
+      const message = err instanceof Error ? err.message : "Não foi possível listar a qualidade da carga";
       setQuality([]);
       setQualityNote(message.includes("409")
-        ? "Nenhuma publicação corrente: execute a detecção para gerar avaliações."
+        ? "Nenhuma publicação vigente: rode a detecção para gerar avaliações."
         : message);
     }
   }, []);
@@ -280,8 +136,6 @@ export default function Anomalies() {
     try {
       const params: Record<string, unknown> = { limit: 50, order_by: "score" };
       if (stateFilter) params.state = [stateFilter];
-      if (severityFilter) params.severity = [severityFilter];
-      if (queueOnly) params.queue_only = true;
       if (caseSliceFilter === "__overdue__") {
         params.overdue_only = true;
         delete params.state;
@@ -299,11 +153,11 @@ export default function Anomalies() {
       setCases(page.items);
       setTotal(page.total);
     } catch (err) {
-      if (request === listRequest.current) setError(err instanceof Error ? err.message : "Falha ao listar casos");
+      if (request === listRequest.current) setError(err instanceof Error ? err.message : "Não foi possível listar os casos");
     } finally {
       if (request === listRequest.current) setBusy(false);
     }
-  }, [stateFilter, caseSliceFilter, severityFilter, queueOnly]);
+  }, [stateFilter, caseSliceFilter]);
 
   useEffect(() => {
     void loadAll();
@@ -329,7 +183,7 @@ export default function Anomalies() {
           await Promise.all([loadAll(), loadCases()]);
         }
       } catch (err) {
-        if (active) setError(err instanceof Error ? err.message : "Falha ao acompanhar a detecção");
+        if (active) setError(err instanceof Error ? err.message : "Não foi possível acompanhar a detecção");
       } finally {
         pending = false;
       }
@@ -364,123 +218,24 @@ export default function Anomalies() {
     } as Partial<Record<typeof filter, string>>)[filter] ?? "";
     setStateFilter(state);
     setCaseSliceFilter(slice);
-    setSeverityFilter("");
-    setQueueOnly(false);
-    setMyCasesOnly(false);
   };
 
   const setCasesView = (state: string) => {
     setTab(2);
     setStateFilter(state);
     setCaseSliceFilter("");
-    setSeverityFilter("");
-    setQueueOnly(false);
-    setMyCasesOnly(false);
   };
 
-  const openCase = async (id: number) => {
-    const request = ++caseRequest.current;
-    setBusy(true);
-    setSeries(null);
-    // Start the expensive Iceberg read immediately, alongside PostgreSQL detail.
-    const seriesRequest = getAnomalyCaseSeries(id).catch((): AnomalySeries => ({
-      items: [], note: "Série diária indisponível para este caso.",
-    }));
-    try {
-      const [detail, eventPage] = await Promise.all([getAnomalyCase(id), getAnomalyCaseEvents(id)]);
-      if (request !== caseRequest.current) return;
-      setSelected(detail);
-      setEvents(eventPage.items);
-      setForm(EMPTY_FORM);
-      const loadedSeries = await seriesRequest;
-      if (request === caseRequest.current) setSeries(loadedSeries);
-    } catch (err) {
-      if (request === caseRequest.current) setError(err instanceof Error ? err.message : "Falha ao abrir o caso");
-    } finally {
-      if (request === caseRequest.current) setBusy(false);
-    }
-  };
+  const [openCaseId, setOpenCaseId] = useState<number | null>(null);
+  const openCase = async (id: number) => { setOpenCaseId(id); };
 
-  const closeCase = () => {
-    caseRequest.current += 1;
-    setSelected(null);
-    setSeries(null);
-    setBusy(false);
-  };
+  // Link direto para um caso (?caso=<id>), usado pelo resumo de custos.
+  const requestedCase = Number(searchParams.get("caso"));
+  useEffect(() => {
+    if (Number.isInteger(requestedCase) && requestedCase > 0) void openCase(requestedCase);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [requestedCase]);
 
-  const submitCommand = async () => {
-    if (!selected) return;
-    setBusy(true);
-    setError(null);
-    try {
-      const payload: Record<string, unknown> = {
-        command: form.command,
-        case_version: selected.case_version,
-      };
-      if (form.note) payload.note = form.note;
-      if (form.evidence) payload.evidence = form.evidence.split("\n").filter(Boolean);
-      if (form.command === "decide" || form.command === "redecide") {
-        payload.decision = form.decision;
-        payload.cause_category = form.cause_category;
-      }
-      if (form.command === "assign") payload.assignee_user_id = Number(form.assignee_user_id);
-      if (form.command === "validate_result") {
-        payload.verification_outcome = form.verification_outcome;
-        payload.verification_note = form.note || "validado";
-      }
-      if (form.command === "record_retrospective" || form.command === "close") {
-        payload.learning = form.learning;
-        if (form.preventive_measure) payload.preventive_measure = form.preventive_measure;
-        else payload.no_preventive_measure_reason = form.no_preventive_measure_reason || "sem medida preventiva";
-      }
-      await transitionAnomalyCase(selected.id, payload);
-      await openCase(selected.id);
-      await loadCases();
-      await loadAll();
-    } catch (err) {
-      const message = err instanceof Error ? err.message : "Falha no comando";
-      setError(message.includes("409") ? `Conflito de versão (409): ${message}` : message);
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  const addAction = async () => {
-    if (!selected || !form.action_description) return;
-    setBusy(true);
-    try {
-      await createAnomalyAction(selected.id, {
-        description: form.action_description,
-        action_type: "CORRECTIVE",
-        mandatory: true,
-      });
-      await openCase(selected.id);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Falha ao criar ação");
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  const completeAction = async (actionId: number) => {
-    if (!selected) return;
-    setBusy(true);
-    try {
-      await updateAnomalyAction(actionId, { status: "COMPLETED" });
-      await openCase(selected.id);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Falha ao concluir ação");
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  const readNotification = async (id: number) => {
-    await readAnomalyNotification(id, true);
-    const page = await listAnomalyNotifications({ limit: 25 });
-    setNotifications(page.items);
-    setUnread(page.unread);
-  };
 
   const toggleEnabled = async () => {
     if (!config) return;
@@ -489,7 +244,7 @@ export default function Anomalies() {
       await updateAnomalyConfig(config.id, { enabled: !config.enabled });
       await loadAll();
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Falha ao atualizar a configuração");
+      setError(err instanceof Error ? err.message : "Não foi possível atualizar a configuração");
     } finally {
       setBusy(false);
     }
@@ -502,7 +257,7 @@ export default function Anomalies() {
       await enqueueAnomalyRun(config.id);
       await loadAll();
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Falha ao enfileirar a detecção");
+      setError(err instanceof Error ? err.message : "Não foi possível enfileirar a detecção");
     } finally {
       setBusy(false);
     }
@@ -514,16 +269,10 @@ export default function Anomalies() {
     <Box sx={{ p: { xs: 1.5, md: 3 }, maxWidth: 1600, mx: "auto", width: "100%", minWidth: 0, boxSizing: "border-box" }}>
       <Box sx={{ display: "flex", alignItems: { xs: "stretch", md: "center" }, justifyContent: "space-between", gap: 2, mb: 2, flexWrap: "wrap", minWidth: 0 }}>
         <Stack direction="row" spacing={1} alignItems="center">
-          <Typography variant="h5">Anomalias de custo cloud</Typography>
+          <Typography variant="h5">Anomalias de custo em nuvem</Typography>
           {busy && <CircularProgress size={18} />}
         </Stack>
         <Stack direction="row" spacing={0.75} alignItems="center" flexWrap="wrap" useFlexGap>
-          <Tooltip title="Caixa de notificações">
-            <IconButton onClick={() => setInboxOpen(true)} aria-label="Caixa de notificações">
-              <NotificationsIcon />
-              {unread > 0 && <Chip size="small" color="error" label={unread} sx={{ ml: -1, mt: -2 }} />}
-            </IconButton>
-          </Tooltip>
           <Button size="small" startIcon={<RefreshIcon />}
                   onClick={() => { void loadAll(); void loadCases(); void loadExpected(); void loadQuality(); }}>
             Atualizar
@@ -531,8 +280,8 @@ export default function Anomalies() {
           {config && (
             <>
               <Chip size="small" color={config.enabled ? "success" : "default"}
-                    label={config.enabled ? "Habilitada" : "Desabilitada"} />
-              <Button size="small" onClick={toggleEnabled}>{config.enabled ? "Desabilitar" : "Habilitar"}</Button>
+                    label={config.enabled ? "Ativa" : "Inativa"} />
+              <Button size="small" onClick={toggleEnabled}>{config.enabled ? "Desativar" : "Ativar"}</Button>
               <Button size="small" variant="contained" startIcon={<PlayArrowIcon />} onClick={runNow} disabled={!config.enabled || detectionRunning || busy}>
                 Executar detecção
               </Button>
@@ -542,32 +291,18 @@ export default function Anomalies() {
       </Box>
 
       {error && <Alert severity="error" sx={{ mb: 1 }} onClose={() => setError(null)}>{dataDisplayText(error)}</Alert>}
-      {latestRun && latestRun.id !== dismissedRunId && <Alert
-        severity={latestRun.status === "FAILED" ? "error" : latestRun.status === "COMPLETED" ? "success" : "info"}
-        sx={{ mb: 2 }}
-        onClose={() => {
-          setDismissedRunId(latestRun.id);
-          window.localStorage.setItem(DISMISSED_RUN_STORAGE_KEY, String(latestRun.id));
-        }}
-      >
-        Detecção #{latestRun.id} · {latestRun.status === "FAILED" ? "Falhou" : latestRun.status === "COMPLETED" ? "Concluída" : latestRun.status === "CANCELLED" ? "Cancelada" : latestRun.status === "QUEUED" ? "Na fila" : "Em execução"}
-        {dataDisplayText(latestRun.status === "FAILED" ? `: ${latestRun.error ?? latestRun.phase ?? "Consulte os logs de processamento"}`
-          : latestRun.status === "COMPLETED" ? ` · ${latestRun.cases_created ?? 0} caso(s) novo(s), ${latestRun.cases_updated ?? 0} atualizado(s) · ${latestRun.phase ?? ""}`
-            : ` · ${latestRun.phase ?? "Aguardando processamento"}`)}
-      </Alert>}
-
       {tab === 0 && summary && (
         <Box>
           {impactSummary && <Paper variant="outlined" sx={{ p: 2, mb: 2, borderColor: "success.light", background: "linear-gradient(110deg,#f5fbf8,#fff)" }}>
-            <Typography variant="subtitle2">Impacto financeiro dos casos monitorados</Typography>
+            <Typography variant="subtitle2">Impacto financeiro dos casos acompanhados</Typography>
             <Typography variant="caption" color="text.secondary">Atualizado com todos os episódios registrados · saving é projeção para casos corrigidos, não economia realizada auditada.</Typography>
             <Stack direction="row" spacing={2} flexWrap="wrap" sx={{ mt: 1.5 }}>
               {[
-                { label: "Custo excedente incorrido", value: money(impactSummary.incurred_excess_cost, currency), note: "Soma estimada dos dias acima da faixa" },
-                { label: "Saving projetado / mês", value: money(impactSummary.projected_saving_monthly, currency), note: "Casos autocorrigidos ou corrigidos com ação" },
-                { label: "Saving projetado / ano", value: money(impactSummary.projected_saving_annual, currency), note: "Projeção anualizada do ritmo recente" },
-                { label: "Exposição aberta / mês", value: money(impactSummary.open_exposure_monthly, currency), note: "Desvios ativos, aceitos ou reincidentes" },
-                { label: "Exposição aberta / ano", value: money(impactSummary.open_exposure_annual, currency), note: "Projeção anualizada da exposição" },
+                { label: "Excesso já incorrido", value: money(impactSummary.incurred_excess_cost, currency), note: "Soma estimada dos dias fora da faixa" },
+                { label: "Economia projetada / mês", value: money(impactSummary.projected_saving_monthly, currency), note: "Casos corrigidos sozinhos ou com ação" },
+                { label: "Economia projetada / ano", value: money(impactSummary.projected_saving_annual, currency), note: "Projeção anual do ritmo recente" },
+                { label: "Exposição em aberto / mês", value: money(impactSummary.open_exposure_monthly, currency), note: "Variações em aberto, aceitas ou recorrentes" },
+                { label: "Exposição em aberto / ano", value: money(impactSummary.open_exposure_annual, currency), note: "Projeção anual da exposição" },
               ].map((item) => <Paper key={item.label} variant="outlined" sx={{ p: 1.25, minWidth: 180, flex: "1 1 180px", cursor: "pointer", "&:hover": { borderColor: "primary.main", bgcolor: "action.hover" } }} onClick={() => openCasesFilter(item.label.includes("Saving") ? "confirmed" : "open")}>
                 <Typography variant="caption" color="text.secondary">{item.label}</Typography>
                 <Typography variant="h6">{item.value}</Typography>
@@ -577,51 +312,51 @@ export default function Anomalies() {
           </Paper>}
           <Stack direction="row" spacing={2} flexWrap="wrap" sx={{ mb: 2 }}>
             {[
-              { label: "Casos novos", value: summary.new },
-              { label: "Abertos", value: summary.open },
-              { label: "Vencidos", value: summary.overdue },
+              { label: "Casos abertos agora", value: summary.new },
+              { label: "Em aberto", value: summary.open },
+              { label: "Atrasados", value: summary.overdue },
               { label: "Encerrados", value: summary.closed },
-              { label: "Sem responsável", value: summary.unassigned },
-              { label: "Custo anômalo observado", value: money(summary.confirmed_anomalous_cost_cloud ?? summary.anomalous_cost_cloud, currency) },
+              { label: "Sem dono", value: summary.unassigned },
+              { label: "Gasto anômalo observado", value: money(summary.confirmed_anomalous_cost_cloud ?? summary.anomalous_cost_cloud, currency) },
               { label: "Tempo até ciência (h)", value: summary.median_acknowledgement_hours ?? "—" },
               { label: "Tempo até resolução (h)", value: summary.median_resolution_hours ?? "—" },
               { label: "Classificados", value: summary.classified },
-              { label: "Famílias reincidentes", value: summary.recurrence_families },
+              { label: "Famílias recorrentes", value: summary.recurrence_families },
             ].map((item) => (
               <Paper
                 key={item.label}
                 variant="outlined"
                 sx={{ p: 1.5, minWidth: 150, cursor: "pointer", transition: "all .15s", "&:hover": { borderColor: "primary.main", bgcolor: "action.hover", transform: "translateY(-1px)" } }}
                 onClick={() => {
-                  if (item.label === "Abertos") openCasesFilter("open");
+                  if (item.label === "Em aberto") openCasesFilter("open");
                   else if (item.label === "Encerrados") openCasesFilter("closed");
-                  else if (item.label === "Casos novos") openCasesFilter("new");
-                  else if (item.label === "Vencidos") openCasesFilter("overdue");
-                  else if (item.label === "Sem responsável") openCasesFilter("unassigned");
-                  else if (item.label === "Famílias reincidentes") openCasesFilter("recurrence");
+                  else if (item.label === "Casos abertos agora") openCasesFilter("new");
+                  else if (item.label === "Atrasados") openCasesFilter("overdue");
+                  else if (item.label === "Sem dono") openCasesFilter("unassigned");
+                  else if (item.label === "Famílias recorrentes") openCasesFilter("recurrence");
                   else if (item.label === "Classificados") openCasesFilter("confirmed");
                   else setCasesView("");
                 }}
               >
                 <Typography variant="caption" color="text.secondary">{item.label}</Typography>
                 <Typography variant="h6">{item.value}</Typography>
-                {item.label === "Custo anômalo observado" && <Typography variant="caption" color="text.secondary">Confirmadas · {summary.event_period_start ?? "sem início"} a {summary.event_period_end ?? "sem dados"}</Typography>}
-                {item.label === "Tempo até ciência (h)" && <Typography variant="caption" color="text.secondary">Mediana dos casos já reconhecidos</Typography>}
-                {item.label === "Tempo até resolução (h)" && <Typography variant="caption" color="text.secondary">Mediana dos casos encerrados</Typography>}
-                {item.label === "Vencidos" && (
-                  <Typography variant="caption" color="text.secondary">Prazo de ciência sem confirmação</Typography>
+                {item.label === "Gasto anômalo observado" && <Typography variant="caption" color="text.secondary">Validadas · {summary.event_period_start ?? "sem início"} a {summary.event_period_end ?? "sem dados"}</Typography>}
+                {item.label === "Tempo até ciência (h)" && <Typography variant="caption" color="text.secondary">Mediana dos casos já aceitos</Typography>}
+                {item.label === "Tempo até resolução (h)" && <Typography variant="caption" color="text.secondary">Mediana dos casos concluídos</Typography>}
+                {item.label === "Atrasados" && (
+                  <Typography variant="caption" color="text.secondary">Prazo de ciência sem validação</Typography>
                 )}
               </Paper>
             ))}
           </Stack>
           <Paper variant="outlined" sx={{ p: 2, mb: 2 }}>
-            <Typography variant="subtitle2" gutterBottom>Distribuição por estado</Typography>
+            <Typography variant="subtitle2" gutterBottom>Distribuição por situação</Typography>
             <Stack direction="row" spacing={1} flexWrap="wrap">
               {Object.entries(summary.by_state).map(([state, count]) => (
                 <Chip key={state} label={`${STATE_LABEL[state] ?? state}: ${count}`} size="small" clickable onClick={() => setCasesView(state)} />
               ))}
               {Object.keys(summary.by_state).length === 0 && (
-                <Typography variant="body2" color="text.secondary">Nenhum caso registrado ainda.</Typography>
+                <Typography variant="body2" color="text.secondary">Nenhum caso registrado até agora.</Typography>
               )}
             </Stack>
             <Divider sx={{ my: 1.5 }} />
@@ -643,38 +378,13 @@ export default function Anomalies() {
 
       {tab === 2 && (
         <Box>
-          <Stack direction="row" spacing={2} sx={{ mb: 1 }} flexWrap="wrap">
-            <TextField select size="small" label="Estado" value={stateFilter}
-                       onChange={(event) => { setStateFilter(event.target.value); setCaseSliceFilter(""); }} sx={{ minWidth: 170 }}>
-              <MenuItem value="">Todos</MenuItem>
-              {Object.keys(STATE_LABEL).map((state) => (
-                <MenuItem key={state} value={state}>{STATE_LABEL[state]}</MenuItem>
-              ))}
-            </TextField>
-            {caseSliceFilter && <Chip
-              label={`Visão: ${CASE_SLICE_LABEL[caseSliceFilter] ?? caseSliceFilter}`}
-              onDelete={() => setCaseSliceFilter("")}
+          <Stack direction="row" spacing={1.5} alignItems="center" flexWrap="wrap" useFlexGap sx={{ mb: 1.5 }}>
+            <Typography variant="body2" color="text.secondary">{total} caso(s)</Typography>
+            {(caseSliceFilter || stateFilter) && <Chip
               size="small"
-              sx={{ alignSelf: "center" }}
+              label={`Visão: ${caseSliceFilter ? (CASE_SLICE_LABEL[caseSliceFilter] ?? caseSliceFilter) : STATE_LABEL[stateFilter] ?? stateFilter}`}
+              onDelete={() => { setCaseSliceFilter(""); setStateFilter(""); }}
             />}
-            <TextField select size="small" label="Severidade" value={severityFilter}
-                       onChange={(event) => setSeverityFilter(event.target.value)} sx={{ minWidth: 150 }}>
-              <MenuItem value="">Todas</MenuItem>
-              {["LOW", "MEDIUM", "HIGH", "CRITICAL"].map((severity) => (
-                <MenuItem key={severity} value={severity}>{severity}</MenuItem>
-              ))}
-            </TextField>
-            <Button size="small" variant={queueOnly ? "contained" : "outlined"}
-                    onClick={() => setQueueOnly((value) => !value)}>
-              Fila FinOps
-            </Button>
-            <Button size="small" variant={myCasesOnly ? "contained" : "outlined"}
-                    onClick={() => setMyCasesOnly((value) => !value)}>
-              Meus casos
-            </Button>
-            <Typography variant="body2" sx={{ alignSelf: "center" }}>
-              {total} caso(s)
-            </Typography>
           </Stack>
           <Stack spacing={1} sx={{ display: { xs: "flex", md: "none" } }}>
             {cases.map((item) => (
@@ -690,12 +400,12 @@ export default function Anomalies() {
                 <Box sx={{ display: "grid", gridTemplateColumns: "repeat(2,minmax(0,1fr))", gap: 1, mt: 1.25 }}>
                   <Box><Typography variant="caption" color="text.secondary">Observado</Typography><Typography variant="body2" fontWeight={650}>{money(item.observed_cloud, currency)}</Typography></Box>
                   <Box><Typography variant="caption" color="text.secondary">Esperado</Typography><Typography variant="body2" fontWeight={650}>{money(item.expected_cloud, currency)}</Typography></Box>
-                  <Box><Typography variant="caption" color="text.secondary">Custo anômalo</Typography><Typography variant="body2" fontWeight={700} color="error.main">{money(item.anomalous_cost_cloud, currency)}</Typography></Box>
-                  <Box><Typography variant="caption" color="text.secondary">Projeção mensal</Typography><Typography variant="body2" fontWeight={650}>{money(item.projected_month_impact, currency)}</Typography></Box>
+                  <Box><Typography variant="caption" color="text.secondary">Gasto anômalo</Typography><Typography variant="body2" fontWeight={700} color="error.main">{money(item.anomalous_cost_cloud, currency)}</Typography></Box>
+                  <Box><Typography variant="caption" color="text.secondary">Projeção por mês</Typography><Typography variant="body2" fontWeight={650}>{money(item.projected_month_impact, currency)}</Typography></Box>
                 </Box>
               </Paper>
             ))}
-            {cases.length === 0 && <Paper variant="outlined" sx={{ p: 2 }}><Typography variant="body2" color="text.secondary">Nenhum caso encontrado com os filtros atuais.</Typography></Paper>}
+            {cases.length === 0 && <Paper variant="outlined" sx={{ p: 2 }}><Typography variant="body2" color="text.secondary">Nenhum caso corresponde aos filtros atuais.</Typography></Paper>}
           </Stack>
           <Box sx={{ display: { xs: "none", md: "block" } }}>
             <AnomaliesCasesDataGrid cases={cases} currency={currency} onOpen={(id) => void openCase(id)} />
@@ -705,9 +415,9 @@ export default function Anomalies() {
 
       {tab === 6 && (
         <Box>
-          <Typography variant="subtitle2" gutterBottom>Anomalias confirmadas</Typography>
+          <Typography variant="subtitle2" gutterBottom>Anomalias validadas</Typography>
           <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>Casos classificados como “confirmado com ação” ou “confirmado aceito”. Eventos esperados e casos sem decisão ficam fora desta lista.</Typography>
-          <Typography variant="caption" color="text.secondary">{confirmedItems.length} caso(s) · clique em uma linha para abrir a investigação.</Typography>
+          <Typography variant="caption" color="text.secondary">{confirmedItems.length} caso(s) · clique em uma linha para abrir a apuração.</Typography>
           <Box sx={{ mt: 1 }}><AnomaliesCasesDataGrid cases={confirmedItems} currency={currency} onOpen={(id) => void openCase(id)} /></Box>
         </Box>
       )}
@@ -719,10 +429,10 @@ export default function Anomalies() {
       {tab === 3 && (
         <Paper variant="outlined" sx={{ p: 2 }}>
           <Typography variant="subtitle2" gutterBottom>
-            Eventos esperados reconhecidos (permanecem na tabela analítica, sem workflow)
+            Eventos previstos reconhecidos (permanecem na tabela analítica, sem fluxo de tratamento)
           </Typography>
           <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>
-            {expectedEvents.total} avaliação(ões) de evento esperado na publicação corrente
+            {expectedEvents.total} avaliação(ões) de evento previsto na publicação vigente
             {expectedEvents.note ? ` · ${expectedEvents.note}` : ""}
           </Typography>
           <Table size="small">
@@ -733,7 +443,7 @@ export default function Anomalies() {
                 <TableCell align="right">Séries</TableCell>
                 <TableCell align="right">Esperado</TableCell>
                 <TableCell align="right">Observado</TableCell>
-                <TableCell align="right">Desvio</TableCell>
+                <TableCell align="right">Variação</TableCell>
                 <TableCell>Meses</TableCell>
                 <TableCell>Confiança</TableCell>
               </TableRow>
@@ -755,7 +465,7 @@ export default function Anomalies() {
                 <TableRow>
                   <TableCell colSpan={8}>
                     <Typography variant="body2" color="text.secondary">
-                      Nenhum evento esperado publicado.
+                      Nenhum evento previsto publicado.
                     </Typography>
                   </TableCell>
                 </TableRow>
@@ -767,10 +477,10 @@ export default function Anomalies() {
 
       {tab === 4 && (
         <Paper variant="outlined" sx={{ p: 2 }}>
-          <Typography variant="subtitle2" gutterBottom>Saúde do modelo</Typography>
+          <Typography variant="subtitle2" gutterBottom>Qualidade do modelo</Typography>
           <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>
             Dados parciais, referências reconstruídas, tolerância explícita e ausência de coleta.
-            Dado parcial nunca confirma recuperação nem encerra caso.
+            Dado parcial nunca valida recuperação nem encerra caso.
             {qualityNote ? ` ${qualityNote}` : ""}
           </Typography>
           <Table size="small">
@@ -778,9 +488,9 @@ export default function Anomalies() {
               <TableRow>
                 <TableCell>Código</TableCell>
                 <TableCell align="right">Avaliações</TableCell>
-                <TableCell align="right">Custo anômalo</TableCell>
+                <TableCell align="right">Gasto anômalo</TableCell>
                 <TableCell>Períodos</TableCell>
-                <TableCell>Status</TableCell>
+                <TableCell>Estado</TableCell>
               </TableRow>
             </TableHead>
             <TableBody>
@@ -797,7 +507,7 @@ export default function Anomalies() {
                 <TableRow>
                   <TableCell colSpan={5}>
                     <Typography variant="body2" color="text.secondary">
-                      Nenhuma limitação declarada nas avaliações publicadas.
+                      Nenhuma limitação registrada nas avaliações publicadas.
                     </Typography>
                   </TableCell>
                 </TableRow>
@@ -811,22 +521,22 @@ export default function Anomalies() {
         <Paper variant="outlined" sx={{ p: 2 }}>
           <Typography variant="subtitle2" gutterBottom>Retrospectiva</Typography>
           <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>
-            Anomalias confirmadas (com ação ou aceitas), autocorrigidas e corrigidas com ação. O custo observado soma os dias anômalos; savings são projeções do ritmo recente após correção, não economia realizada auditada.
+            Anomalias validadas (com ação ou aceitas), autocorrigidas e corrigidas com ação. O custo observado soma os dias anômalos; savings são projeções do ritmo recente após correção, não economia realizada auditada.
           </Typography>
           <Table size="small">
             <TableHead>
               <TableRow>
                 <TableCell>#</TableCell>
                 <TableCell>Período</TableCell>
-                <TableCell>Situação</TableCell>
+                <TableCell>Estado</TableCell>
                 <TableCell>Duração</TableCell>
-                <TableCell>Custo da anomalia</TableCell>
-                <TableCell>Saving / mês</TableCell>
-                <TableCell>Saving / ano</TableCell>
+                <TableCell>Gasto da anomalia</TableCell>
+                <TableCell>Economia / mês</TableCell>
+                <TableCell>Economia / ano</TableCell>
                 <TableCell>Causa</TableCell>
                 <TableCell>Decisão</TableCell>
                 <TableCell>Aprendizado</TableCell>
-                <TableCell>Medida preventiva</TableCell>
+                <TableCell>Ação preventiva</TableCell>
               </TableRow>
             </TableHead>
             <TableBody>
@@ -834,7 +544,7 @@ export default function Anomalies() {
                 <TableRow key={item.id}>
                   <TableCell>#{item.id}</TableCell>
                   <TableCell>{item.episode_start ?? item.event_date} → {item.episode_end ?? "em andamento"}</TableCell>
-                  <TableCell>{item.deviation_status === "AUTOCORRIGIDO" ? "Voltou ao normal" : item.deviation_status === "CORRIGIDO_COM_ACAO" ? "Corrigido com ação" : STATE_LABEL[item.state] ?? item.state}</TableCell>
+                  <TableCell>{item.deviation_status === "AUTOCORRIGIDO" ? "Voltou ao patamar normal" : item.deviation_status === "CORRIGIDO_COM_ACAO" ? "Resolvido com ação" : STATE_LABEL[item.state] ?? item.state}</TableCell>
                   <TableCell>{daysBetween(item.episode_start, item.episode_end)}</TableCell>
                   <TableCell>{money(item.impact_to_date ?? item.anomalous_cost_cloud, currency)}</TableCell>
                   <TableCell>{item.deviation_status === "AUTOCORRIGIDO" || item.deviation_status === "CORRIGIDO_COM_ACAO" ? money(item.projected_month_impact, currency) : "—"}</TableCell>
@@ -846,252 +556,15 @@ export default function Anomalies() {
                 </TableRow>
               ))}
               {retrospectiveCases.length === 0 && <TableRow><TableCell colSpan={11}>
-                <Typography variant="body2" color="text.secondary">Nenhuma anomalia corrigida ou autocorrigida encontrada no histórico carregado.</Typography>
+                <Typography variant="body2" color="text.secondary">Nenhum caso corrigido ou autorregulado no histórico carregado.</Typography>
               </TableCell></TableRow>}
             </TableBody>
           </Table>
         </Paper>
       )}
 
-      <Drawer anchor="right" open={Boolean(selected)} onClose={closeCase}
-              PaperProps={{ sx: { width: "min(1100px, 96vw)", p: 2, top: { xs: 56, sm: 64 }, height: { xs: "calc(100dvh - 56px)", sm: "calc(100dvh - 64px)" }, overflowX: "hidden" } }}>
-        {selected && (
-          <Box>
-            {(() => {
-              const dataEnd = series?.analysis_data_end ?? series?.data_cutoff;
-              const eventBeyondCutoff = Boolean(dataEnd && selected.event_date > dataEnd);
-              return <>
-            <Stack direction="row" alignItems="center" spacing={1}>
-              <Typography variant="h6" sx={{ fontWeight: 700 }}>Caso #{selected.id}</Typography>
-              <Chip size="small" color={SEVERITY_COLOR[selected.severity] ?? "default"}
-                    label={`${({ LOW: "Baixa", MEDIUM: "Média", HIGH: "Alta", CRITICAL: "Crítica" } as Record<string, string>)[selected.severity] ?? selected.severity}`} />
-              <Chip size="small" label={STATE_LABEL[selected.state] ?? selected.state} />
-              <Box sx={{ flexGrow: 1 }} />
-              <IconButton aria-label="Fechar caso" onClick={closeCase}><CloseIcon /></IconButton>
-            </Stack>
-            <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>
-              {[selected.series_dimensions.cloud_origem, (series?.contributor_series_count ?? 1) > 1 ? `${series?.contributor_series_count} séries agregadas` : selected.series_dimensions.subaccountname, selected.series_dimensions.servicesubcategory ?? selected.series_dimensions.servicename].filter(Boolean).join(" · ")}
-              {" · "}Cobrança em {new Date(`${selected.event_date}T00:00:00Z`).toLocaleDateString("pt-BR", { timeZone: "UTC" })}
-            </Typography>
-            {busy && <LinearProgress sx={{ mb: 1 }} />}
+      <AnomalyCaseDrawer caseId={openCaseId} onClose={() => setOpenCaseId(null)} onChanged={() => { void loadCases(); void loadAll(); }} config={config} />
 
-            {eventBeyondCutoff && <Alert severity="warning" sx={{ mb: 2 }}>
-              Este evento é de {selected.event_date}, mas os dados disponíveis vão somente até {dataEnd} (atraso configurado da fonte: {config?.data_lag_days ?? 2} dia(s)). Ele ainda não pode ser confirmado como anomalia. A avaliação será feita quando a carga desse dia estiver disponível.
-            </Alert>}
-            {series ? <AnomalyCaseScope key={selected.id} kase={selected} series={series} currency={currency} />
-              : <Box sx={{ py: 8, textAlign: "center" }}><CircularProgress size={28} /><Typography color="text.secondary" sx={{ mt: 1 }}>Carregando realizado e forecast…</Typography></Box>}
-            <Accordion sx={{ mt: 2 }} disableGutters>
-              <AccordionSummary expandIcon={<ExpandMoreIcon />}>Acompanhamento e etapas do caso</AccordionSummary>
-              <AccordionDetails><StepPanel kase={selected} /></AccordionDetails>
-            </Accordion>
-
-            <Accordion disableGutters>
-            <AccordionSummary expandIcon={<ExpandMoreIcon />}>Critérios do detector e regras aplicadas</AccordionSummary>
-            <AccordionDetails>
-            <Typography variant="body2" sx={{ mb: 1 }}>Prioridade: {selected.score.toFixed(0)}/100 · Confiança: {selected.confidence} · Qualidade: {selected.data_quality}</Typography>
-            {(selected.explanation?.length ? selected.explanation : []).map((check, index) => (
-              <Typography key={index} variant="body2" sx={{ mb: 0.5 }}>
-                {String(check.explicacao ?? check.criterio)}
-              </Typography>
-            ))}
-            <Stack direction="row" spacing={1} flexWrap="wrap" sx={{ mb: 1 }}>
-              {(!selected.explanation?.length ? selected.reason_codes : []).map((code) => (
-                <Chip key={code} size="small" variant="outlined" label={code} />
-              ))}
-              {selected.applied_rule_refs.map((rule, index) => (
-                <Tooltip key={index} title={rule.status}>
-                  <Chip size="small" label={`regra: ${rule.name}`} />
-                </Tooltip>
-              ))}
-            </Stack>
-            </AccordionDetails></Accordion>
-
-            <Accordion disableGutters defaultExpanded={Boolean(selected.actions?.length)}>
-            <AccordionSummary expandIcon={<ExpandMoreIcon />}>Ações corretivas ({selected.actions?.length ?? 0})</AccordionSummary>
-            <AccordionDetails>
-            <Table size="small">
-              <TableHead>
-                <TableRow>
-                  <TableCell>Descrição</TableCell>
-                  <TableCell>Tipo</TableCell>
-                  <TableCell>Estado</TableCell>
-                  <TableCell>Prazo</TableCell>
-                  <TableCell>Executada</TableCell>
-                  <TableCell />
-                </TableRow>
-              </TableHead>
-              <TableBody>
-                {(selected.actions ?? []).map((action) => (
-                  <TableRow key={action.id}>
-                    <TableCell>{action.description}</TableCell>
-                    <TableCell>{action.action_type}</TableCell>
-                    <TableCell>{action.status}</TableCell>
-                    <TableCell>{dt(action.due_at)}</TableCell>
-                    <TableCell>{dt(action.executed_at)}</TableCell>
-                    <TableCell>
-                      {action.status !== "COMPLETED" && (
-                        <Button size="small" onClick={() => void completeAction(action.id)}>
-                          Concluir
-                        </Button>
-                      )}
-                    </TableCell>
-                  </TableRow>
-                ))}
-                {(selected.actions ?? []).length === 0 && (
-                  <TableRow>
-                    <TableCell colSpan={6}>
-                      <Typography variant="body2" color="text.secondary">Nenhuma ação cadastrada.</Typography>
-                    </TableCell>
-                  </TableRow>
-                )}
-              </TableBody>
-            </Table>
-            <Stack direction="row" spacing={1} sx={{ mt: 1 }}>
-              <TextField size="small" label="Nova ação corretiva" fullWidth
-                         value={form.action_description}
-                         onChange={(event) => setForm({ ...form, action_description: event.target.value })} />
-              <Button variant="outlined" onClick={addAction}>Adicionar</Button>
-            </Stack>
-            </AccordionDetails></Accordion>
-
-            <Divider sx={{ my: 2 }} />
-            <Typography id="anomaly-investigation" variant="h6" gutterBottom sx={{ scrollMarginTop: 16 }}>Tratar este desvio</Typography>
-            <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>Confirme com a área indicada se houve uma mudança planejada. Registre a investigação antes de decidir a ação.</Typography>
-            <Stack direction="row" spacing={1} flexWrap="wrap" sx={{ mb: 1 }}>
-              <TextField select size="small" label="O que fazer" value={form.command}
-                         onChange={(event) => setForm({ ...form, command: event.target.value })}
-                         sx={{ minWidth: 220 }}>
-                {["assign", "acknowledge", "return_to_queue", "start_investigation", "update_investigation",
-                  "decide", "redecide", "start_remediation", "cancel_remediation", "start_verification",
-                  "fail_verification", "validate_result", "record_retrospective", "close", "reopen"]
-                  .map((command) => <MenuItem key={command} value={command}>{({ assign: "Atribuir responsável", acknowledge: "Confirmar ciência", return_to_queue: "Devolver à fila FinOps", start_investigation: "Iniciar investigação", update_investigation: "Registrar investigação", decide: "Registrar decisão", redecide: "Revisar decisão", start_remediation: "Iniciar correção", cancel_remediation: "Cancelar correção", start_verification: "Verificar resultado", fail_verification: "Registrar falha na verificação", validate_result: "Validar resultado", record_retrospective: "Registrar aprendizado", close: "Encerrar caso", reopen: "Reabrir caso" } as Record<string, string>)[command]}</MenuItem>)}
-              </TextField>
-              {form.command === "assign" && (
-                <TextField size="small" label="Responsável (user id)" value={form.assignee_user_id}
-                           onChange={(event) => setForm({ ...form, assignee_user_id: event.target.value })} />
-              )}
-              {(form.command === "decide" || form.command === "redecide") && (
-                <>
-                  <TextField select size="small" label="Decisão" value={form.decision}
-                             onChange={(event) => setForm({ ...form, decision: event.target.value })}
-                             sx={{ minWidth: 220 }}>
-                    {Object.keys(DECISION_LABEL).map((decision) => (
-                      <MenuItem key={decision} value={decision}>{DECISION_LABEL[decision]}</MenuItem>
-                    ))}
-                  </TextField>
-                  <TextField select size="small" label="Causa" value={form.cause_category}
-                             onChange={(event) => setForm({ ...form, cause_category: event.target.value })}
-                             sx={{ minWidth: 220 }}>
-                    {Object.keys(CAUSE_LABEL).map((cause) => (
-                      <MenuItem key={cause} value={cause}>{CAUSE_LABEL[cause]}</MenuItem>
-                    ))}
-                  </TextField>
-                </>
-              )}
-              {form.command === "validate_result" && (
-                <TextField select size="small" label="Resultado" value={form.verification_outcome}
-                           onChange={(event) => setForm({ ...form, verification_outcome: event.target.value })}>
-                  <MenuItem value="SUCCESS">Sucesso</MenuItem>
-                  <MenuItem value="CONFIRMED_ABSENCE">Ausência confirmada</MenuItem>
-                </TextField>
-              )}
-            </Stack>
-            <TextField size="small" fullWidth multiline minRows={2} label="Justificativa / nota"
-                       value={form.note} onChange={(event) => setForm({ ...form, note: event.target.value })}
-                       sx={{ mb: 1 }} />
-            {(form.command === "decide" || form.command === "redecide") && (
-              <TextField size="small" fullWidth multiline minRows={2} label="Evidências (uma por linha)"
-                         value={form.evidence}
-                         onChange={(event) => setForm({ ...form, evidence: event.target.value })}
-                         sx={{ mb: 1 }} />
-            )}
-            {(form.command === "record_retrospective" || form.command === "close") && (
-              <>
-                <TextField size="small" fullWidth label="Aprendizado" value={form.learning}
-                           onChange={(event) => setForm({ ...form, learning: event.target.value })}
-                           sx={{ mb: 1 }} />
-                <Stack direction="row" spacing={1} sx={{ mb: 1 }}>
-                  <TextField size="small" fullWidth label="Medida preventiva"
-                             value={form.preventive_measure}
-                             onChange={(event) => setForm({ ...form, preventive_measure: event.target.value })} />
-                  <TextField size="small" fullWidth label="Justificativa de ausência"
-                             value={form.no_preventive_measure_reason}
-                             onChange={(event) => setForm({ ...form, no_preventive_measure_reason: event.target.value })} />
-                </Stack>
-              </>
-            )}
-            <Button variant="contained" onClick={submitCommand} disabled={busy}>
-              Salvar ação
-            </Button>
-
-            <Accordion sx={{ mt: 2 }} disableGutters>
-            <AccordionSummary expandIcon={<ExpandMoreIcon />}>Histórico e auditoria</AccordionSummary>
-            <AccordionDetails>
-            <Table size="small">
-              <TableHead>
-                <TableRow>
-                  <TableCell>Quando</TableCell>
-                  <TableCell>Evento</TableCell>
-                  <TableCell>De → Para</TableCell>
-                  <TableCell>Versão</TableCell>
-                  <TableCell>Nota</TableCell>
-                </TableRow>
-              </TableHead>
-              <TableBody>
-                {events.map((event) => (
-                  <TableRow key={String(event.id)}>
-                    <TableCell>{dt(event.created_at as string)}</TableCell>
-                    <TableCell>{String(event.event_type)}{event.command ? ` (${event.command})` : ""}</TableCell>
-                    <TableCell>{String(event.from_state ?? "—")} → {String(event.to_state ?? "—")}</TableCell>
-                    <TableCell>{String(event.case_version)}</TableCell>
-                    <TableCell>{String(event.note ?? "—")}</TableCell>
-                  </TableRow>
-                ))}
-              </TableBody>
-            </Table>
-            </AccordionDetails></Accordion>
-              </>;
-            })()}
-          </Box>
-        )}
-      </Drawer>
-
-      <Drawer anchor="right" open={inboxOpen} onClose={() => setInboxOpen(false)}
-              PaperProps={{ sx: { width: "min(520px, 96vw)", p: 2 } }}>
-        <Stack direction="row" alignItems="center" spacing={1}>
-          <Typography variant="h6">Notificações</Typography>
-          <Chip size="small" color={unread ? "error" : "default"} label={`${unread} não lida(s)`} />
-          <Box sx={{ flexGrow: 1 }} />
-          <IconButton onClick={() => setInboxOpen(false)}><CloseIcon /></IconButton>
-        </Stack>
-        <Divider sx={{ my: 1 }} />
-        {notifications.map((notification) => (
-          <Paper key={notification.id} variant="outlined" sx={{ p: 1, mb: 1,
-                  bgcolor: notification.read_at ? "transparent" : "action.hover" }}>
-            <Stack direction="row" spacing={1} alignItems="center">
-              <Chip size="small" label={notification.kind} />
-              {notification.is_finops_queue && <Chip size="small" color="warning" label="fila FinOps" />}
-              <Box sx={{ flexGrow: 1 }} />
-              <Typography variant="caption">{dt(notification.created_at)}</Typography>
-            </Stack>
-            <Typography variant="body2" sx={{ mt: 0.5 }}>{notification.title}</Typography>
-            {notification.body && (
-              <Typography variant="caption" color="text.secondary">{notification.body}</Typography>
-            )}
-            <Stack direction="row" spacing={1} sx={{ mt: 0.5 }}>
-              <Button size="small" onClick={() => void readNotification(notification.id)}>
-                Assumir / confirmar ciência
-              </Button>
-              <Button size="small" onClick={() => { setInboxOpen(false); void openCase(notification.case_id); }}>
-                Abrir caso
-              </Button>
-            </Stack>
-          </Paper>
-        ))}
-        {notifications.length === 0 && (
-          <Typography variant="body2" color="text.secondary">Nenhuma notificação.</Typography>
-        )}
-      </Drawer>
     </Box>
   );
 }

@@ -3,7 +3,7 @@ import { dataDisplayText } from "../../utils/dataPresentation";
 import { useState, useEffect, useMemo, useCallback, memo, useRef } from "react";
 import { useMenuSearchParams as useSearchParams } from "../../navigation/useMenuSearchParams";
 import { Box, Typography, Button, IconButton, Chip, TextField, Select, MenuItem, FormControl, InputLabel, Switch, Checkbox, FormControlLabel, Alert, CircularProgress, Divider, Autocomplete, InputAdornment, Stack, ToggleButton, ToggleButtonGroup } from "@mui/material";
-import { Add, Edit, Delete, Download, ContentCopy, Check, Code, Terminal, Search, Refresh, Clear, AccountTree, Close } from "@mui/icons-material";
+import { AddOutlined, EditOutlined, DeleteOutlined, DownloadOutlined, ContentCopyOutlined, CheckOutlined, CodeOutlined, TerminalOutlined, SearchOutlined, RefreshOutlined, ClearOutlined, AccountTreeOutlined, CloseOutlined } from "@mui/icons-material";
 import {
   getClassifications, createClassification, updateClassification,
   deleteClassification, ClassificationRule, getClassificationsGrid,
@@ -20,11 +20,12 @@ import ClassificationDataGrid, { ClassificationGridFilter } from "./Classificati
 import PolicyFlow from "./PolicyFlow";
 import AzureTagExecutiveDashboard from "./AzureTagExecutiveDashboard";
 import { ORG } from "../../constants/orgLabels";
+import { colors } from "../../theme/tokens";
 
 interface CondEntry { field: string; operator: string; values: string; logic: string }
 
 const CLOUD_FILTER_OPTIONS = [
-  { value: "every", label: "Todas as regras" },
+  { value: "every", label: "Todos os critérios" },
   { value: "global", label: "Global (cross-cloud, sem escopo)" },
   { value: "azure", label: "Azure" },
   { value: "gcp", label: "GCP" },
@@ -45,7 +46,7 @@ const CLOUD_SCOPE_FORM_OPTIONS = [
 ] as const;
 
 const cloudScopeLabel = (scope: string | null | undefined) => {
-  if (!scope) return "Global (cross-cloud)";
+  if (!scope) return "Global (todas as nuvens)";
   return CLOUD_SCOPE_FORM_OPTIONS.find((o) => o.value === scope)?.label ?? scope.toUpperCase();
 };
 
@@ -63,10 +64,10 @@ export default function Classification() {
 
   return (
     <Box>
-      <Typography variant="h4" sx={{ mb: 1 }}>Regras de Classificação</Typography>
+      <Typography variant="h4" sx={{ mb: 1 }}>Classificação por projeto</Typography>
       <ToggleButtonGroup exclusive size="small" value={tab} onChange={(_, value: number | null) => { if (value !== null) setTab(value); }} sx={{ mb: 3 }}>
-        <ToggleButton value={0}>Regras</ToggleButton>
-        <ToggleButton value={1}>Criação de tags</ToggleButton>
+        <ToggleButton value={0}>Regras de projeto</ToggleButton>
+        <ToggleButton value={1}>Aplicação de tags</ToggleButton>
       </ToggleButtonGroup>
       {tab === 0 ? <ClassificationRulesTab /> : <TagsTab />}
     </Box>
@@ -123,7 +124,7 @@ const ClassificationRuleDialog = memo(function ClassificationRuleDialog({
   useEffect(() => {
     if (open) {
       const source = editing || cloning;
-      setForm(source ? { ...formFromRule(source), ...(cloning && !editing ? { name: `${source.name} (cópia)` } : {}) } : formFromRule(null));
+      setForm(source ? { ...formFromRule(source), ...(cloning && !editing ? { name: `${source.name} (duplicado)` } : {}) } : formFromRule(null));
     }
   }, [open, editing, cloning]);
 
@@ -195,11 +196,11 @@ const ClassificationRuleDialog = memo(function ClassificationRuleDialog({
 
   const save = async () => {
     if (!form.department_id) {
-      onError("Selecione o departamento responsável pela classificação.");
+      onError("Escolha a unidade responsável pela classificação.");
       return;
     }
     if (!hasValidConditions) {
-      onError("Defina ao menos uma condição com campo e valor.");
+      onError("Defina ao menos uma condição com coluna e valor.");
       return;
     }
 
@@ -238,7 +239,7 @@ const ClassificationRuleDialog = memo(function ClassificationRuleDialog({
       onClose();
       onSaved();
     } catch (e: unknown) {
-      onError(e instanceof Error ? e.message : "Save failed");
+      onError(e instanceof Error ? e.message : "Não foi possível salvar a classificação");
     }
   };
 
@@ -254,7 +255,7 @@ const ClassificationRuleDialog = memo(function ClassificationRuleDialog({
           )}
 
           <TextField
-            label="Nome"
+            label="Nome da regra"
             value={form.name}
             onChange={(e) => setForm((prev) => ({ ...prev, name: e.target.value }))}
           />
@@ -263,15 +264,15 @@ const ClassificationRuleDialog = memo(function ClassificationRuleDialog({
             departments={departments}
             value={form.department_id}
             onChange={(departmentId) => setForm((prev) => ({ ...prev, department_id: departmentId }))}
-            label="Organograma"
-            helperText="Escolha o departamento na hierarquia, como em Departamentos > Editar Departamento."
+            label="Estrutura organizacional"
+            helperText="Escolha a unidade na estrutura organizacional, como em Estrutura > Editar unidade."
           />
 
           <FormControl fullWidth>
-            <InputLabel>Cloud (escopo da regra)</InputLabel>
+            <InputLabel>Nuvem (abrangência do ajuste)</InputLabel>
             <Select
               value={form.cloud_scope}
-              label="Cloud (escopo da regra)"
+              label="Nuvem (abrangência do ajuste)"
               onChange={(e) => setForm((prev) => ({ ...prev, cloud_scope: e.target.value }))}
             >
               {CLOUD_SCOPE_FORM_OPTIONS.map((s) => (
@@ -288,11 +289,11 @@ const ClassificationRuleDialog = memo(function ClassificationRuleDialog({
             <Typography variant="subtitle2">
               Condições ({form.conditions.filter((c) => c.field && c.values).length} definidas)
             </Typography>
-            <Button size="small" onClick={addCondition}>+ Condição</Button>
+            <Button size="small" onClick={addCondition}>+ Nova condição</Button>
           </Box>
           <Typography variant="caption" color="text.secondary" sx={{ display: "block", mt: -0.5 }}>
             Use | nos valores para OR entre opções do mesmo campo.
-            {destColumns.length === 0 ? " Os campos FOCUS serão sugeridos quando a tabela estiver disponível." : ""}
+            {destColumns.length === 0 ? " Os campos FOCUS serão sugeridos assim que a tabela estiver pronta." : ""}
           </Typography>
 
           <Box
@@ -304,9 +305,9 @@ const ClassificationRuleDialog = memo(function ClassificationRuleDialog({
               alignItems: "start",
             }}
           >
-            <Typography variant="caption" color="text.secondary" fontWeight={600}>Campo</Typography>
-            <Typography variant="caption" color="text.secondary" fontWeight={600}>Operador</Typography>
-            <Typography variant="caption" color="text.secondary" fontWeight={600}>Valores</Typography>
+            <Typography variant="caption" color="text.secondary" fontWeight={600}>Coluna</Typography>
+            <Typography variant="caption" color="text.secondary" fontWeight={600}>Condição</Typography>
+            <Typography variant="caption" color="text.secondary" fontWeight={600}>Valores aceitos</Typography>
             <Box />
 
             {form.conditions.map((cond, i) => (
@@ -331,8 +332,8 @@ const ClassificationRuleDialog = memo(function ClassificationRuleDialog({
                     value={cond.operator}
                     onChange={(e) => updateCondition(i, "operator", e.target.value)}
                   >
-                    <MenuItem value="=">= (igual)</MenuItem>
-                    <MenuItem value="~">~ (contém)</MenuItem>
+                    <MenuItem value="=">é igual a</MenuItem>
+                    <MenuItem value="~">inclui texto</MenuItem>
                   </Select>
                 </FormControl>
                 <Autocomplete
@@ -356,10 +357,10 @@ const ClassificationRuleDialog = memo(function ClassificationRuleDialog({
                     <TextField
                       {...params}
                       fullWidth
-                      placeholder="Selecione ou digite valor | valor2"
+                      placeholder="Escolha ou digite valor | valor2"
                       helperText={
                         cond.field && destinationTableId && !(valueOptions[i] || []).length && !valueLoading[i]
-                          ? "Sem sugestões ainda — digite manualmente ou clique em Atualizar valores."
+                          ? "Sem sugestões ainda — digite manualmente ou clique em Recarregar valores."
                           : undefined
                       }
                     />
@@ -371,14 +372,14 @@ const ClassificationRuleDialog = memo(function ClassificationRuleDialog({
                   color="error"
                   sx={{ mt: 0.25 }}
                 >
-                  <Delete fontSize="small" />
+                  <DeleteOutlined fontSize="small" />
                 </IconButton>
               </Box>
             ))}
           </Box>
 
           <TextField
-            label="Prioridade"
+            label="Ordem de aplicação"
             type="number"
             value={form.priority}
             onChange={(e) => setForm((prev) => ({ ...prev, priority: Number(e.target.value) }))}
@@ -390,7 +391,7 @@ const ClassificationRuleDialog = memo(function ClassificationRuleDialog({
                 onChange={(e) => setForm((prev) => ({ ...prev, active: e.target.checked }))}
               />
             }
-            label="Ativo"
+            label="Em uso"
           />
         </Box>
       </DialogContent>
@@ -472,7 +473,7 @@ export function ClassificationRulesTab() {
       if (e instanceof Error && (e.name === "AbortError" || (e as { code?: string }).code === "ERR_CANCELED")) {
         return;
       }
-      setError(e instanceof Error ? e.message : "Falha ao carregar classificações");
+      setError(e instanceof Error ? e.message : "Não foi possível carregar as classificações");
     } finally {
       setLoading(false);
     }
@@ -514,10 +515,10 @@ export function ClassificationRulesTab() {
     try {
       await deleteClassification(deletePending.id);
       setDeletePending(null);
-      setSuccess("Classificação excluída.");
+      setSuccess("Regra de classificação excluída.");
       void load(queryRef.current);
     } catch (e: unknown) {
-      setError(e instanceof Error ? e.message : "Falha ao excluir classificação");
+      setError(e instanceof Error ? e.message : "Não foi possível excluir a classificação");
     }
   };
 
@@ -526,7 +527,7 @@ export function ClassificationRulesTab() {
     const failed = outcomes.filter(result => result.status === "rejected").length;
     setBulkDeleteOpen(false);
     setSelectedRuleIds([]);
-    setSuccess(failed ? `${outcomes.length - failed} regras excluídas; ${failed} falharam.` : `${outcomes.length} regras excluídas.`);
+    setSuccess(failed ? `${outcomes.length - failed} regras excluídas; ${failed} não puderam ser excluídas.` : `${outcomes.length} regras excluídas.`);
     void load(queryRef.current);
   };
 
@@ -543,25 +544,25 @@ export function ClassificationRulesTab() {
     <Box>
       <Stack direction="row" justifyContent="space-between" alignItems="center" sx={{ mb: 2, minHeight: 52, gap: 2, flexWrap: "wrap" }}>
         <Box>
-          <Typography variant="h6">Classificar projetos</Typography>
+          <Typography variant="h6">Aplicar classificação</Typography>
           <Typography variant="body2" color="text.secondary">
-            Regras que classificam linhas de custo em departamentos da hierarquia.
+            Regras que classificam linhas de custo em unidades da estrutura organizacional.
           </Typography>
         </Box>
         <Stack direction="row" gap={1}>
           <Button
             variant="outlined"
-            startIcon={<Refresh />}
+            startIcon={<RefreshOutlined />}
             onClick={() => {
               setSuccess("");
               refreshClassificationFieldValues(selectedDestId === "" ? undefined : (selectedDestId as number))
-                .then(() => setSuccess("Atualização de valores iniciada em segundo plano."))
-                .catch((e: unknown) => setError(e instanceof Error ? e.message : "Falha ao iniciar a atualização de valores"));
+                .then(() => setSuccess("Recarga de valores iniciada em segundo plano."))
+                .catch((e: unknown) => setError(e instanceof Error ? e.message : "Não foi possível iniciar a recarga de valores"));
             }}
           >
             Atualizar valores
           </Button>
-          <Button variant="contained" startIcon={<Add />} onClick={openNew}>
+          <Button variant="contained" startIcon={<AddOutlined />} onClick={openNew}>
             Nova
           </Button>
         </Stack>
@@ -570,10 +571,10 @@ export function ClassificationRulesTab() {
       {/* Filtros: Cloud primeiro, depois Tabela Destino */}
       <Stack direction="row" spacing={1.5} sx={{ mb: 2, flexWrap: "wrap" }} alignItems="center">
         <FormControl sx={{ minWidth: 220 }} size="small">
-          <InputLabel>Cloud</InputLabel>
+          <InputLabel>Nuvem</InputLabel>
           <Select
             value={cloudFilter}
-            label="Cloud"
+            label="Nuvem"
             onChange={(e) => { const value = e.target.value; setCloudFilter(value); changeFilters(value, selectedDestId); }}
           >
             {CLOUD_FILTER_OPTIONS.map((s) => (
@@ -583,13 +584,13 @@ export function ClassificationRulesTab() {
         </FormControl>
 
         <FormControl sx={{ minWidth: 260 }} size="small">
-          <InputLabel>Tabela Destino</InputLabel>
+          <InputLabel>Tabela de destino</InputLabel>
           <Select
             value={selectedDestId}
-            label="Tabela Destino"
+            label="Tabela de destino"
             onChange={(e) => { const value = e.target.value as number | ""; setSelectedDestId(value); changeFilters(cloudFilter, value); }}
           >
-            <MenuItem value="">Todas as tabelas</MenuItem>
+            <MenuItem value="">Todas as tabelas de destino</MenuItem>
             {destTables.map((t) => (
               <MenuItem key={t.id} value={t.id}>{t.name}</MenuItem>
             ))}
@@ -610,7 +611,7 @@ export function ClassificationRulesTab() {
       {!filtersReady ? (
         <Box sx={{ py: 7 }}>
           <EmptyState
-            message="Nenhuma classificação cadastrada para os filtros selecionados."
+            message="Nenhuma regra de classificação para os filtros escolhidos."
           />
         </Box>
       ) : (
@@ -618,20 +619,20 @@ export function ClassificationRulesTab() {
           <TextField
             fullWidth
             size="small"
-            placeholder="Buscar classificações (nome, departamento ou padrão)"
+            placeholder="Buscar regras (nome, unidade ou padrão)"
             value={search}
             onChange={(event) => setSearch(event.target.value)}
             slotProps={{
               input: {
                 startAdornment: (
                   <InputAdornment position="start">
-                    <Search fontSize="small" />
+                    <SearchOutlined fontSize="small" />
                   </InputAdornment>
                 ),
                 endAdornment: search ? (
                   <InputAdornment position="end">
-                    <IconButton size="small" aria-label="Limpar busca" onClick={() => setSearch("")} edge="end">
-                      <Clear fontSize="small" />
+                    <IconButton size="small" aria-label="Apagar busca" onClick={() => setSearch("")} edge="end">
+                      <ClearOutlined fontSize="small" />
                     </IconButton>
                   </InputAdornment>
                 ) : undefined,
@@ -643,7 +644,7 @@ export function ClassificationRulesTab() {
 
           {selectedRuleIds.length >= 2 && (
             <Stack direction="row" justifyContent="flex-end" sx={{ mb: 1 }}>
-              <Button color="error" variant="contained" startIcon={<Delete />} onClick={() => setBulkDeleteOpen(true)}>
+              <Button color="error" variant="contained" startIcon={<DeleteOutlined />} onClick={() => setBulkDeleteOpen(true)}>
                 Excluir selecionadas ({selectedRuleIds.length})
               </Button>
             </Stack>
@@ -680,7 +681,7 @@ export function ClassificationRulesTab() {
 
       {/* Confirmação Material */}
       <Dialog open={Boolean(deletePending)} onClose={() => setDeletePending(null)} maxWidth="xs" fullWidth>
-        <DialogTitle>Excluir classificação?</DialogTitle>
+        <DialogTitle>Excluir esta classificação?</DialogTitle>
         <DialogContent>
           <Typography>
             Você está prestes a excluir a classificação <strong>{deletePending?.name}</strong>. Esta ação não pode ser desfeita.
@@ -694,11 +695,11 @@ export function ClassificationRulesTab() {
         </DialogActions>
       </Dialog>
       <Dialog open={bulkDeleteOpen} onClose={() => setBulkDeleteOpen(false)} maxWidth="xs" fullWidth>
-        <DialogTitle>Excluir regras selecionadas?</DialogTitle>
+        <DialogTitle>Excluir as regras marcadas?</DialogTitle>
         <DialogContent><Typography>Serão excluídas {selectedRuleIds.length} regras de classificação. Esta ação não pode ser desfeita.</Typography></DialogContent>
         <DialogActions sx={{ px: 3, pb: 2 }}>
           <Button onClick={() => setBulkDeleteOpen(false)}>Cancelar</Button>
-          <Button variant="contained" color="error" onClick={() => void removeSelected()}>Excluir regras</Button>
+          <Button variant="contained" color="error" onClick={() => void removeSelected()}>Excluir selecionadas</Button>
         </DialogActions>
       </Dialog>
     </Box>
@@ -723,13 +724,13 @@ function highlightJsonHtml(jsonStr: string): string {
 
       if (/^"/.test(match)) {
         if (/:$/.test(match)) {
-          clsColor = "#0451a5"; // key -> dark blue
+          clsColor = colors.brand; // key -> dark blue
           fontWeight = "600";
         } else {
           clsColor = "#a31515"; // string -> red/wine
         }
       } else if (/true|false/.test(match)) {
-        clsColor = "#0000ff"; // boolean -> blue
+        clsColor = colors.brand; // boolean -> blue
         fontWeight = "600";
       } else if (/null/.test(match)) {
         clsColor = "#800080"; // null -> purple
@@ -758,11 +759,11 @@ function highlightBashHtml(bashStr: string): string {
     // Highlight variables: $VAR or ${VAR}
     res = res.replace(/(\$\{?[a-zA-Z0-9_]+\}?)/g, '<span style="color: #e36209; font-weight: 600;">$1</span>');
     // Highlight az and common shell commands
-    res = res.replace(/\b(az\s+policy\s+[a-z]+|az\s+[a-z]+|set\s+-[a-z]+|echo|cat|mktemp)\b/g, '<span style="color: #005cc5; font-weight: 600;">$1</span>');
+    res = res.replace(/\b(az\s+policy\s+[a-z]+|az\s+[a-z]+|set\s+-[a-z]+|echo|cat|mktemp)\b/g, '<span style="color: #0F62FE; font-weight: 600;">$1</span>');
     // Highlight flags --foo
-    res = res.replace(/(--[a-zA-Z0-9-]+)/g, '<span style="color: #6f42c1; font-weight: 600;">$1</span>');
+    res = res.replace(/(--[a-zA-Z0-9-]+)/g, '<span style="color: #0B3FA8; font-weight: 600;">$1</span>');
     // Do not run another regex over generated <span> markup. It previously
-    // matched the style attributes and leaked fragments such as "color: #005cc5"
+    // matched the style attributes and leaked fragments such as "color: #0F62FE"
     // into the script preview.
     return res;
   });
@@ -786,13 +787,13 @@ function MappingRow({ mapping, focusFields, onSave }: {
     try { await onSave(draft, mapping.id); } finally { setSaving(false); }
   };
   return <>
-    <TextField size="small" label="Chave da tag Azure" value={draft.tag_key} onChange={(e) => setDraft({ ...draft, tag_key: e.target.value })} />
+    <TextField size="small" label="Nome da tag Azure" value={draft.tag_key} onChange={(e) => setDraft({ ...draft, tag_key: e.target.value })} />
     <Autocomplete size="small" options={focusFields} value={draft.focus_field}
       onChange={(_, value) => setDraft({ ...draft, focus_field: value || "" })}
-      renderInput={(params) => <TextField {...params} label="Campo FOCUS" />} />
+      renderInput={(params) => <TextField {...params} label="Coluna FOCUS" />} />
     <Box sx={{ display: "flex", gap: .75, alignItems: "center", justifyContent: "flex-start", flexWrap: "wrap" }}>
       <Switch size="small" checked={draft.active} onChange={(e) => setDraft({ ...draft, active: e.target.checked })} />
-      {changed && <Chip size="small" color="warning" label="Não salvo" />}
+      {changed && <Chip size="small" color="warning" label="Não gravado" />}
       <Button size="small" variant="contained" disabled={!changed || saving} onClick={save}>
         {saving ? "Salvando…" : "Salvar alterações"}
       </Button>
@@ -811,7 +812,7 @@ function TagMappingsTab() {
   useEffect(() => {
     getAzureTagMappings()
       .then(({ mappings: rows, focus_fields }) => { setMappings(rows); setFocusFields(focus_fields); })
-      .catch((e: unknown) => setError(e instanceof Error ? e.message : "Não foi possível carregar os mapeamentos"))
+      .catch((e: unknown) => setError(e instanceof Error ? e.message : "Não foi possível abrir os mapeamentos"))
       .finally(() => setLoading(false));
   }, []);
 
@@ -821,14 +822,14 @@ function TagMappingsTab() {
       const saved = id ? await updateAzureTagMapping(id, body) : await createAzureTagMapping(body);
       setMappings((current) => id ? current.map((item) => item.id === id ? saved : item) : [...current, saved]);
       setNewMapping({ tag_key: "", focus_field: "", active: true });
-      setSuccess(id ? "Mapeamento atualizado." : "Nova tag adicionada ao mapeamento.");
+      setSuccess(id ? "Mapeamento gravado." : "Nova tag incluída no mapeamento.");
     } catch (e: unknown) {
-      setError(e instanceof Error ? e.message : "Não foi possível salvar o mapeamento");
+      setError(e instanceof Error ? e.message : "Não foi possível gravar o mapeamento");
     }
   };
 
   return <Box>
-    <Typography variant="h6" sx={{ mb: .5 }}>Mapeamento global de tags Azure</Typography>
+    <Typography variant="h6" sx={{ mb: .5 }}>Dicionário global de tags Azure</Typography>
     <Typography variant="body2" color="text.secondary" sx={{ mb: 3 }}>
       A chave é a tag criada no Azure; o valor vem do campo FOCUS selecionado. As mudanças valem para todos os tenants na próxima geração de policies.
     </Typography>
@@ -836,16 +837,16 @@ function TagMappingsTab() {
     {success && <Alert severity="success" sx={{ mb: 2 }} onClose={() => setSuccess("")}>{dataDisplayText(success)}</Alert>}
     {loading ? <CircularProgress size={26} /> : <Box sx={{ maxWidth: 900, border: "1px solid", borderColor: "divider", borderRadius: 2, p: 2 }}>
       <Box sx={{ display: "grid", gridTemplateColumns: "minmax(180px, 1fr) minmax(260px, 1.4fr) minmax(270px, auto)", gap: 1.5, alignItems: "center" }}>
-        <Typography variant="subtitle2">Chave da tag</Typography>
-        <Typography variant="subtitle2">Campo FOCUS (valor)</Typography>
-        <Typography variant="subtitle2">Status e ações</Typography>
+        <Typography variant="subtitle2">Nome da tag</Typography>
+        <Typography variant="subtitle2">Coluna FOCUS (valor)</Typography>
+        <Typography variant="subtitle2">Estado e ações</Typography>
         {mappings.map((mapping) => <MappingRow key={mapping.id} mapping={mapping} focusFields={focusFields} onSave={saveMapping} />)}
         <Divider sx={{ gridColumn: "1 / -1", my: .5 }} />
-        <TextField size="small" label="Nova chave" placeholder="ex.: unidade_negocio" value={newMapping.tag_key} onChange={(e) => setNewMapping({ ...newMapping, tag_key: e.target.value })} />
+        <TextField size="small" label="Nova tag" placeholder="ex.: unidade_negocio" value={newMapping.tag_key} onChange={(e) => setNewMapping({ ...newMapping, tag_key: e.target.value })} />
         <Autocomplete size="small" options={focusFields} value={newMapping.focus_field}
           onChange={(_, value) => setNewMapping({ ...newMapping, focus_field: value || "" })}
-          renderInput={(params) => <TextField {...params} label="Campo FOCUS" placeholder="ex.: service_name" />} />
-        <Button variant="contained" startIcon={<Add />} disabled={!newMapping.tag_key.trim() || !newMapping.focus_field.trim()} onClick={() => saveMapping(newMapping)}>Adicionar</Button>
+          renderInput={(params) => <TextField {...params} label="Coluna FOCUS" placeholder="ex.: service_name" />} />
+        <Button variant="contained" startIcon={<AddOutlined />} disabled={!newMapping.tag_key.trim() || !newMapping.focus_field.trim()} onClick={() => saveMapping(newMapping)}>Incluir</Button>
       </Box>
     </Box>}
   </Box>;
@@ -889,14 +890,14 @@ export function TagsTab() {
       .then(setPolicySubscriptions)
       .catch((e: unknown) => {
         const detail = (e as { response?: { data?: { detail?: unknown } } })?.response?.data?.detail;
-        setError(typeof detail === "string" ? detail : "Não foi possível listar as subscriptions Azure");
+        setError(typeof detail === "string" ? detail : "Não foi possível listar as subscriptions do Azure");
       })
       .finally(() => setSubscriptionsLoading(false));
   }, [selectedTenant]);
 
   const generate = async () => {
     if (!selectedSubscription) {
-      setError("Selecione uma subscription Azure para montar o mapa completo de projetos e policies.");
+      setError("Escolha uma assinatura Azure para montar o mapa completo de projetos e policies.");
       return;
     }
     try {
@@ -927,7 +928,7 @@ export function TagsTab() {
       }
     } catch (e: unknown) {
       const detail = (e as { response?: { data?: { detail?: unknown } } })?.response?.data?.detail;
-      setError(typeof detail === "string" ? detail : (e instanceof Error ? e.message : "Falha ao gerar políticas"));
+      setError(typeof detail === "string" ? detail : (e instanceof Error ? e.message : "Não foi possível gerar as políticas"));
     } finally {
       setLoading(false);
     }
@@ -984,13 +985,13 @@ export function TagsTab() {
 
       <Box sx={{ display: "flex", gap: 2, mb: 3, flexWrap: "wrap", alignItems: "center" }}>
         <FormControl sx={{ minWidth: 280 }} size="small">
-          <InputLabel>Tenant Azure *</InputLabel>
+          <InputLabel>Diretório (tenant) Azure *</InputLabel>
           <Select
             value={selectedTenant}
-            label="Tenant Azure *"
+            label="Diretório (tenant) Azure *"
             onChange={(e) => setSelectedTenant(e.target.value as number | "")}
           >
-            <MenuItem value="">Todos os tenants</MenuItem>
+            <MenuItem value="">Todos os diretórios</MenuItem>
             {tenants.map((t) => (
               <MenuItem key={t.connection_id} value={t.connection_id}>
                 {t.name} ({t.code})
@@ -1000,10 +1001,10 @@ export function TagsTab() {
         </FormControl>
 
         <FormControl sx={{ minWidth: 400 }} size="small" disabled={selectedTenant === "" || subscriptionsLoading || policySubscriptions.length === 0}>
-          <InputLabel>Subscription Azure *</InputLabel>
+          <InputLabel>Assinatura Azure *</InputLabel>
           <Select
             value={selectedSubscription}
-            label="Subscription Azure *"
+            label="Assinatura Azure *"
             onChange={(e) => {
               setSelectedSubscription(String(e.target.value));
               setRows([]);
@@ -1012,7 +1013,7 @@ export function TagsTab() {
               setSuccess("");
             }}
           >
-            <MenuItem value="">{subscriptionsLoading ? "Carregando subscriptions…" : "Selecione uma subscription"}</MenuItem>
+            <MenuItem value="">{subscriptionsLoading ? "Carregando subscriptions…" : "Escolha uma subscription"}</MenuItem>
             {[...policySubscriptions].sort((a, b) => a.name.localeCompare(b.name, "pt-BR", { sensitivity: "base" }) || a.subscription_id.localeCompare(b.subscription_id)).map((subscription) => (
               <MenuItem key={subscription.subscription_id} value={subscription.subscription_id}>
                 {subscription.name} ({subscription.subscription_id})
@@ -1022,15 +1023,15 @@ export function TagsTab() {
         </FormControl>
 
         <Button variant="contained" onClick={generate} disabled={loading || !selectedSubscription}>
-          {loading ? "Gerando..." : "Gerar políticas"}
+          {loading ? "Montando..." : "Montar políticas"}
         </Button>
         <FormControlLabel
           control={<Checkbox checked={planOnly} onChange={(e) => setPlanOnly(e.target.checked)} />}
-          label="Gerar script em modo PLAN"
+          label="Gerar script em modo de simulação (PLAN)"
         />
         <Button
           variant="outlined"
-          startIcon={<Download />}
+          startIcon={<DownloadOutlined />}
           onClick={downloadAll}
           disabled={rows.length === 0}
         >
@@ -1041,30 +1042,30 @@ export function TagsTab() {
 
       {rows.length === 0 && !loading ? (
         <Alert severity="info">
-          Selecione o tenant da conexão e uma subscription. A geração mostrará todas as regras de projeto aplicáveis, suas exceções por prioridade e as policies de Resource Groups e recursos.
+          Selecione o tenant da conexão e uma subscription. A geração mostrará todas as regras de projeto aplicáveis, suas exceções por prioridade e as policies de Grupos de recursos e recursos.
         </Alert>
       ) : (
         <Box>
           <Box sx={{ mb: 3, p: 2, border: "1px solid #d0d7de", borderRadius: 2, bgcolor: "#fff" }}>
-            <Typography variant="h6" fontWeight={700} sx={{ mb: 0.5 }}>Mapa de projetos e policies da subscription</Typography>
+            <Typography variant="h6" fontWeight={700} sx={{ mb: 0.5 }}>Mapa de projetos e policies da assinatura</Typography>
             <Typography variant="body2" color="text.secondary" sx={{ mb: 1.5 }}>
               Este mapa reúne todos os projetos cujas regras ARM podem atingir a subscription selecionada. As exceções mostram qual regra de maior prioridade impede sobreposição.
             </Typography>
             {policyMap.length === 0 ? (
-              <Alert severity="warning">Nenhuma policy ARM elegível foi encontrada para esta subscription. Consulte os diagnósticos no JSON.</Alert>
+              <Alert severity="warning">Nenhuma policy ARM elegível foi encontrada para esta assinatura. Consulte os diagnósticos no JSON.</Alert>
             ) : (
               <Box sx={{ display: "flex", flexDirection: "column", gap: 1 }}>
                 {policyMap.map((item) => (
                   <Box key={`${item.connection_code}-${item.layer}-${item.rule_id}`} sx={{ p: 1.5, border: "1px solid #e6e8eb", borderRadius: 1.5 }}>
                     <Box sx={{ display: "flex", alignItems: "center", gap: 1, flexWrap: "wrap", mb: 0.5 }}>
-                      <Typography variant="subtitle2" fontWeight={700}>{item.department_name || item.tags.projeto || "Projeto sem nome"}</Typography>
-                      <Chip size="small" label={item.layer === "resource_groups" ? "Resource Groups" : "Recursos"} />
+                      <Typography variant="subtitle2" fontWeight={700}>{item.department_name || item.tags.projeto || "Projeto sem identificação"}</Typography>
+                      <Chip size="small" label={item.layer === "resource_groups" ? "Grupos de recursos" : "Recursos"} />
                       <Chip size="small" variant="outlined" label={`Prioridade ${item.priority}`} />
                       <Typography variant="caption" color="text.secondary">Regra #{item.rule_id}: {item.rule_name}</Typography>
                     </Box>
-                    <Typography variant="body2"><strong>Alvo:</strong> {item.observed?.resource_group_name || item.observed?.resource_id || "Subscription conforme seletor da regra"}</Typography>
-                    <Typography variant="body2"><strong>Tags:</strong> {Object.entries(item.tags).map(([key, value]) => `${key}=${value}`).join(" · ")}</Typography>
-                    <Typography variant="body2"><strong>Exceções:</strong> {item.exclusions.length ? item.exclusions.map((exclusion) => `${exclusion.department_name || exclusion.rule_name} (#${exclusion.rule_id})`).join(" · ") : "Nenhuma"}</Typography>
+                    <Typography variant="body2"><strong>Destino:</strong> {item.observed?.resource_group_name || item.observed?.resource_id || "Subscription conforme o seletor da regra"}</Typography>
+                    <Typography variant="body2"><strong>Tags aplicadas:</strong> {Object.entries(item.tags).map(([key, value]) => `${key}=${value}`).join(" · ")}</Typography>
+                    <Typography variant="body2"><strong>Exclusões:</strong> {item.exclusions.length ? item.exclusions.map((exclusion) => `${exclusion.department_name || exclusion.rule_name} (#${exclusion.rule_id})`).join(" · ") : "Nenhuma"}</Typography>
                   </Box>
                 ))}
               </Box>
@@ -1073,7 +1074,7 @@ export function TagsTab() {
           {/* Tenant Summary Cards */}
           <Box sx={{ display: "grid", gridTemplateColumns: { xs: "1fr", md: "repeat(auto-fit, minmax(320px, 1fr))" }, gap: 2, mb: 3 }}>
             {rows.map((t) => (
-              <Box key={t.connection_code} sx={{ p: 2, border: "1px solid #E2E5EE", borderRadius: 2, bgcolor: "#ffffff", boxShadow: "0 1px 3px rgba(0,0,0,0.05)" }}>
+              <Box key={t.connection_code} sx={{ p: 2, border: "1px solid #E1E8F0", borderRadius: 2, bgcolor: "#ffffff", boxShadow: "0 1px 3px rgba(0,0,0,0.05)" }}>
                 <Typography variant="subtitle1" fontWeight={700}>
                   {t.connection_name} <Chip size="small" color="primary" label={`${t.rule_count} regras`} sx={{ ml: 1 }} />
                 </Typography>
@@ -1082,23 +1083,23 @@ export function TagsTab() {
                 </Typography>
                 <Box sx={{ display: "flex", flexDirection: "column", gap: 0.5 }}>
                   <LayerSummary
-                    label="Regras ARM elegíveis"
+                    label="Regras ARM aplicáveis"
                     count={t.coverage?.eligible_rules ?? 0}
                   />
                   <LayerSummary
-                    label="Policies para Resource Groups"
+                    label="Policies para grupos de recursos"
                     count={Array.isArray(t.layers?.resource_groups) ? (t.layers.resource_groups as unknown[]).length : 0}
                   />
                   <LayerSummary
-                    label="Policies para recursos"
+                    label="Policies por recurso"
                     count={Array.isArray(t.layers?.resources) ? (t.layers.resources as unknown[]).length : 0}
                   />
                   <LayerSummary
-                    label="Subscriptions cobertas pela base preparada"
+                    label="Assinaturas cobertas pela base preparada"
                     count={t.subscriptions?.length ?? 0}
                   />
                   <LayerSummary
-                    label="Regras não implantáveis/bloqueadas"
+                    label="Regras bloqueadas ou não implantáveis"
                     count={t.coverage?.diagnostics?.filter((d) => d.status !== "warning").length ?? 0}
                   />
                 </Box>
@@ -1125,12 +1126,12 @@ export function TagsTab() {
           <Box sx={{ border: "1px solid #d0d7de", borderRadius: 2, overflow: "hidden", bgcolor: "#ffffff", boxShadow: "0 1px 4px rgba(0,0,0,0.06)" }}>
             <Box sx={{ display: "flex", justifyContent: "space-between", alignItems: "center", borderBottom: "1px solid #e1e4e8", px: 2, pt: 1, bgcolor: "#f6f8fa", flexWrap: "wrap", gap: 1 }}>
               <ToggleButtonGroup exclusive size="small" value={viewTab} onChange={(_, value: "script" | "json" | null) => { if (value) setViewTab(value); }} aria-label="Formato do conteúdo exportado">
-                <ToggleButton value="script"><Terminal fontSize="small" sx={{ mr: 0.75 }} />Script de deploy</ToggleButton>
-                <ToggleButton value="json"><Code fontSize="small" sx={{ mr: 0.75 }} />Políticas JSON</ToggleButton>
+                <ToggleButton value="script"><TerminalOutlined fontSize="small" sx={{ mr: 0.75 }} />Script de implantação</ToggleButton>
+                <ToggleButton value="json"><CodeOutlined fontSize="small" sx={{ mr: 0.75 }} />Políticas em JSON</ToggleButton>
               </ToggleButtonGroup>
 
               <Box sx={{ display: "flex", gap: 1, pb: 1, alignItems: "center" }}>
-                <Button size="small" startIcon={<AccountTree fontSize="small" />} onClick={() => setFlowDialogOpen(true)}>Ver fluxo</Button>
+                <Button size="small" startIcon={<AccountTreeOutlined fontSize="small" />} onClick={() => setFlowDialogOpen(true)}>Ver fluxograma</Button>
                 <FormControlLabel
                   control={
                     <Switch
@@ -1139,7 +1140,7 @@ export function TagsTab() {
                       onChange={(e) => setIsEditing(e.target.checked)}
                     />
                   }
-                  label={<Typography variant="body2" sx={{ fontWeight: 500 }}>Modo Edição</Typography>}
+                  label={<Typography variant="body2" sx={{ fontWeight: 500 }}>Modo de edição</Typography>}
                   sx={{ mr: 1 }}
                 />
 
@@ -1148,16 +1149,16 @@ export function TagsTab() {
                     <Button
                       size="small"
                       variant="outlined"
-                      startIcon={copied === "script" ? <Check color="success" /> : <ContentCopy />}
+                      startIcon={copied === "script" ? <CheckOutlined color="success" /> : <ContentCopyOutlined />}
                       onClick={() => copyToClipboard(script, "script")}
                       disabled={!script}
                     >
-                      {copied === "script" ? "Copiado!" : "Copiar Script"}
+                      {copied === "script" ? "Copiado com sucesso!" : "Copiar roteiro"}
                     </Button>
                     <Button
                       size="small"
                       variant="contained"
-                      startIcon={<Download />}
+                      startIcon={<DownloadOutlined />}
                       onClick={downloadCurrentScript}
                       disabled={!script}
                     >
@@ -1183,16 +1184,16 @@ export function TagsTab() {
                     <Button
                       size="small"
                       variant="outlined"
-                      startIcon={copied === "json" ? <Check color="success" /> : <ContentCopy />}
+                      startIcon={copied === "json" ? <CheckOutlined color="success" /> : <ContentCopyOutlined />}
                       onClick={() => copyToClipboard(currentJsonString, "json")}
                       disabled={rows.length === 0}
                     >
-                      {copied === "json" ? "Copiado!" : "Copiar JSON"}
+                      {copied === "json" ? "Copiado com sucesso!" : "Copiar como JSON"}
                     </Button>
                     <Button
                       size="small"
                       variant="contained"
-                      startIcon={<Download />}
+                      startIcon={<DownloadOutlined />}
                       onClick={downloadCurrentJson}
                       disabled={rows.length === 0}
                     >
@@ -1246,7 +1247,7 @@ export function TagsTab() {
                   dangerouslySetInnerHTML={{
                     __html:
                       viewTab === "script"
-                        ? highlightBashHtml(script || "# Nenhum script gerado.")
+                        ? highlightBashHtml(script || "# Nenhum script foi gerado.")
                         : highlightJsonHtml(currentJsonString || "{}"),
                   }}
                 />
@@ -1258,9 +1259,9 @@ export function TagsTab() {
       <Dialog fullScreen open={flowDialogOpen} onClose={() => setFlowDialogOpen(false)}>
         <DialogTitle sx={{ display: "flex", alignItems: "center", justifyContent: "space-between", borderBottom: "1px solid", borderColor: "divider" }}>
           Fluxo de policies — {policyFlowTitle(rows[selectedJsonTenantIndex])}
-          <IconButton aria-label="Fechar fluxo de policies" onClick={() => setFlowDialogOpen(false)}><Close /></IconButton>
+          <IconButton aria-label="Fechar fluxograma de policies" onClick={() => setFlowDialogOpen(false)}><CloseOutlined /></IconButton>
         </DialogTitle>
-        <DialogContent sx={{ p: 3, bgcolor: "#FAFBFD" }}>
+        <DialogContent sx={{ p: 3, bgcolor: colors.raised }}>
           <PolicyFlow tenant={rows[selectedJsonTenantIndex]} />
         </DialogContent>
       </Dialog>

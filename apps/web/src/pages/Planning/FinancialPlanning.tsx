@@ -9,15 +9,15 @@ import ContractStoryDashboard from "./ContractStoryDashboard";
 import DollarEvolution from "./DollarEvolution";
 
 const TABS = [
-  { code: "dashboard", label: "Dashboard Executivo", title: "Dashboard Executivo", help: "Histórico consolidado do planejamento financeiro." },
-  { code: "orcamento", label: "Cadastro Orçamentário", title: "Orçamentos", help: "Valores aprovados e carregados por departamento.", budget: true },
-  { code: "acuracia-orcamento", label: "Acurácia de Orçamento", title: "Acurácia de Orçamento", help: "Orçamento vigente contra o realizado por mês." },
-  { code: "forecast-manual", label: "Forecast Manual", title: "Projeções manuais", help: "Projeções mensais inseridas manualmente." },
+  { code: "dashboard", label: "Painel executivo", title: "Painel executivo", help: "Histórico consolidado do planejamento financeiro." },
+  { code: "orcamento", label: "Cadastro de metas", title: "Orçamentos", help: "Valores aprovados e carregados por unidade.", budget: true },
+  { code: "aderencia-orcamento", label: "Aderência à meta", title: "Aderência à meta", help: "Meta vigente contra o efetivado por mês." },
+  { code: "forecast-manual", label: "Previsões manuais", title: "Previsões manuais", help: "Previsões mensais inseridas manualmente." },
   // Temporariamente oculto na interface; implementação e rota permanecem disponíveis.
   // { code: "base-line-contratual", label: "Base Line Contratual", title: "Base Line Contratual", help: "Referência financeira contratual por departamento." },
-  { code: "carta-credito", label: "Carta de Credito", title: "Carta de Credito", help: "Créditos planejados por departamento." },
-  { code: "defesa-orcamentaria", label: "Defesa Orçamentária", title: "Defesa Orçamentária", help: "Propostas, aprovações, cortes e revisões narradas." },
-  { code: "visao-contabil", label: "Pedidos SAP", title: "Pedidos SAP", help: "Pedidos SAP e evolução do consumo e câmbio." },
+  { code: "carta-credito", label: "Carta de crédito", title: "Carta de crédito", help: "Créditos planejados por unidade." },
+  { code: "defesa-orcamentaria", label: "Defesa de meta", title: "Defesa de meta", help: "Propostas, aprovações, cortes e revisões em texto." },
+  { code: "visao-contabil", label: "Pedidos SAP", title: "Pedidos SAP", help: "Pedidos SAP e evolução do consumo e do câmbio." },
 ] as const;
 
 export default function FinancialPlanning() {
@@ -27,7 +27,8 @@ export default function FinancialPlanning() {
     || searchParams.get("dashboard") === "contrato-com-compromisso"
     || (["contract", "contrato"].includes(searchParams.get("tab") || "") && searchParams.get("contract") === "compromisso");
   const legacyStoryTab = ["contract", "contrato"].includes(searchParams.get("tab") || "") && !legacyCommitmentTab;
-  const requested = legacyCommitmentTab || legacyStoryTab ? "dashboard" : searchParams.get("tab") || "dashboard";
+  const requestedTab = searchParams.get("tab");
+  const requested = legacyCommitmentTab || legacyStoryTab ? "dashboard" : requestedTab || "dashboard";
   const active = TABS.find(tab => tab.code === requested) || TABS[0];
   const executiveSubtab = legacyCommitmentTab ? "compromisso" : legacyStoryTab ? "historia-contrato" : searchParams.get("executive") || "orcamento";
 
@@ -38,7 +39,7 @@ export default function FinancialPlanning() {
           {active.title}
         </Typography>
         <Typography color="text.secondary" sx={{ mb: 2 }}>{active.help}</Typography></>}
-        {active.code === "acuracia-orcamento" ? (
+        {active.code === "aderencia-orcamento" ? (
           <BudgetAccuracy />
         ) : active.code === "visao-contabil" ? (
           <VisaoContabil table="dest_dm_cost_visao_completa" filters={EMPTY_FILTERS} filterKey="financial-planning" dollarEvolution={<DollarEvolution />} />

@@ -28,7 +28,7 @@ type GridFilterSpec = { operator: string; value: string | string[] };
 export default function HistoryGrid({ result, loading, onQuery, measureLabel }: Props) {
   const apiRef = useGridApiRef();
   const [search, setSearch] = useState("");
-  const [paginationModel, setPaginationModel] = useState<GridPaginationModel>({ page: 0, pageSize: 100 });
+  const [paginationModel, setPaginationModel] = useState<GridPaginationModel>({ page: 0, pageSize: 50 });
   const [sortModel, setSortModel] = useState<GridSortModel>([]);
   const [filterModel, setFilterModel] = useState<GridFilterModel>({ items: [] });
   const [activeFilters, setActiveFilters] = useState<Record<string, GridFilterSpec>>({});
@@ -37,7 +37,7 @@ export default function HistoryGrid({ result, loading, onQuery, measureLabel }: 
 
   const fields = [...result.rows, ...result.columns];
   const offset = (result as any).offset || 0;
-  const limit = (result as any).limit || 100;
+  const limit = (result as any).limit || 50;
 
   useEffect(() => {
     setPaginationModel({ page: Math.floor(offset / limit), pageSize: limit });
@@ -63,7 +63,7 @@ export default function HistoryGrid({ result, loading, onQuery, measureLabel }: 
     <Stack direction="row" alignItems="center" gap={0.5} sx={{ overflow: "hidden" }}>
       <Typography component="span" variant="inherit" noWrap>{label}</Typography>
       {activeFilters[gridField] && (
-        <Tooltip title="Esta coluna possui um filtro ativo">
+        <Tooltip title="Filtro ativo nesta coluna">
           <FilterAlt fontSize="small" color="primary" />
         </Tooltip>
       )}
@@ -236,7 +236,7 @@ export default function HistoryGrid({ result, loading, onQuery, measureLabel }: 
           paginationMode="server"
           sortingMode="server"
           filterMode="server"
-          pageSizeOptions={[limit]}
+          pageSizeOptions={[50, 100, 500, 1000]}
           paginationModel={paginationModel}
           sortModel={sortModel}
           filterModel={filterModel}
@@ -264,10 +264,10 @@ export default function HistoryGrid({ result, loading, onQuery, measureLabel }: 
         anchorReference="anchorPosition"
         anchorPosition={context ? { top: context.mouseY, left: context.mouseX } : undefined}
       >
-        <MenuItem onClick={() => applyContextFilter("equals")}>Mostrar iguais</MenuItem>
-        <MenuItem onClick={() => applyContextFilter("notEquals")}>Mostrar diferentes</MenuItem>
-        <MenuItem disabled={!context || !activeFilters[context.field]} onClick={() => clearFilter(context?.field)}>Limpar filtro da coluna</MenuItem>
-        <MenuItem disabled={Object.keys(activeFilters).length === 0} onClick={() => clearFilter()}>Limpar todos os filtros</MenuItem>
+        <MenuItem onClick={() => applyContextFilter("equals")}>Filtrar iguais</MenuItem>
+        <MenuItem onClick={() => applyContextFilter("notEquals")}>Filtrar diferentes</MenuItem>
+        <MenuItem disabled={!context || !activeFilters[context.field]} onClick={() => clearFilter(context?.field)}>Remover filtro da coluna</MenuItem>
+        <MenuItem disabled={Object.keys(activeFilters).length === 0} onClick={() => clearFilter()}>Remover todos os filtros</MenuItem>
       </Menu>
 
       <Menu
@@ -280,11 +280,11 @@ export default function HistoryGrid({ result, loading, onQuery, measureLabel }: 
           const field = headerContext?.field;
           setHeaderContext(null);
           if (field) apiRef.current.showColumnMenu(field);
-        }}>Opções da coluna</MenuItem>
-        <MenuItem onClick={() => { exportDisplayed(); setHeaderContext(null); }}>Exportar resultados exibidos</MenuItem>
+        }}>Configurar coluna</MenuItem>
+        <MenuItem onClick={() => { exportDisplayed(); setHeaderContext(null); }}>Baixar resultados exibidos</MenuItem>
         <Divider />
-        <MenuItem disabled={!headerContext || !activeFilters[headerContext.field]} onClick={() => clearFilter(headerContext?.field)}>Limpar filtro da coluna</MenuItem>
-        <MenuItem disabled={Object.keys(activeFilters).length === 0} onClick={() => clearFilter()}>Limpar todos os filtros</MenuItem>
+        <MenuItem disabled={!headerContext || !activeFilters[headerContext.field]} onClick={() => clearFilter(headerContext?.field)}>Remover filtro da coluna</MenuItem>
+        <MenuItem disabled={Object.keys(activeFilters).length === 0} onClick={() => clearFilter()}>Remover todos os filtros</MenuItem>
       </Menu>
     </>
   );

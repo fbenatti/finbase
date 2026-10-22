@@ -4,7 +4,7 @@ from app.database import get_db
 from app.schemas.schemas import PeriodCloseRequest, PeriodConfigUpdate, PeriodStatusOut
 from app.services import period_service
 
-router = APIRouter(prefix="/etl/periods", tags=["periods"])
+router = APIRouter(prefix="/operacoes/periodos", tags=["periods"])
 
 
 @router.get("/", response_model=list[PeriodStatusOut])
@@ -15,7 +15,7 @@ async def list_periods(
     return await period_service.get_periods_report(db, connection_id)
 
 
-@router.post("/close", response_model=PeriodStatusOut)
+@router.post("/fechar", response_model=PeriodStatusOut)
 async def close_period(
     request: PeriodCloseRequest,
     db: AsyncSession = Depends(get_db),
@@ -31,7 +31,7 @@ async def close_period(
     raise HTTPException(status_code=404, detail="Period not found")
 
 
-@router.post("/reopen", response_model=PeriodStatusOut)
+@router.post("/reabrir", response_model=PeriodStatusOut)
 async def reopen_period(
     request: PeriodCloseRequest,
     db: AsyncSession = Depends(get_db),
@@ -47,7 +47,7 @@ async def reopen_period(
     raise HTTPException(status_code=404, detail="Period not found")
 
 
-@router.post("/auto-close", response_model=list[str])
+@router.post("/fechamento-automatico", response_model=list[str])
 async def auto_close(
     connection_id: int = Query(...),
     db: AsyncSession = Depends(get_db),
@@ -57,7 +57,7 @@ async def auto_close(
     return closed
 
 
-@router.put("/config/{connection_id}/{billing_period}", response_model=PeriodStatusOut)
+@router.put("/configuracao/{connection_id}/{billing_period}", response_model=PeriodStatusOut)
 async def update_period_config(
     connection_id: int,
     billing_period: str,

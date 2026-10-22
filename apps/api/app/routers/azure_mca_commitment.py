@@ -20,7 +20,7 @@ from app.core.sso_crypto import _decrypt, _encrypt
 from app.models.source_connection import SourceConnection, SystemIntegration
 
 logger = logging.getLogger(__name__)
-router = APIRouter(prefix="/mca-commitment", tags=["azure-mca-commitment"])
+router = APIRouter(prefix="/custos/compromisso-mca", tags=["azure-mca-commitment"])
 
 ARM = "https://management.azure.com"
 API_VERSION = "2020-11-01-privatepreview"
@@ -143,7 +143,7 @@ async def _get_token(db: AsyncSession) -> str:
         encrypted = secret.get("bearer_token_enc")
         token = _decrypt(str(encrypted)) if encrypted else ""
         if not token:
-            raise HTTPException(400, "Configure o bearer token em /mca-commitment/credentials.")
+            raise HTTPException(400, "Configure o bearer token em /custos/compromisso-mca/credentials.")
         return token.removeprefix("Bearer ").strip()
     if mode == "azure_cli":
         tenant_id = str(cfg.get("tenant_id") or "")
@@ -332,7 +332,7 @@ async def _query_invoice_totals(
     raise HTTPException(502, "Cost Management Query excedeu 100 páginas.")
 
 
-@router.get("/status")
+@router.get("/situacao")
 async def status(db: AsyncSession = Depends(get_db)):
     integration = await _integration(db)
     source = (await db.execute(select(SourceConnection).where(SourceConnection.code == "contratos-mca"))).scalar_one_or_none()
@@ -357,7 +357,7 @@ async def status(db: AsyncSession = Depends(get_db)):
     return {"connection_id": source.id, "source_code": "contratos-mca", "auth_mode": auth_mode, "credential_configured": credential_configured, "billing_account_ids": accounts, "bronze_table": "bronze.raw_azure_commitment_br"}
 
 
-@router.put("/credentials")
+@router.put("/credenciais")
 async def update_credentials(payload: CredentialUpdate, db: AsyncSession = Depends(get_db)):
     integration = await _integration(db)
     config, secret = dict(integration.config_json or {}), dict(integration.secret_json or {})
@@ -390,7 +390,7 @@ async def update_credentials(payload: CredentialUpdate, db: AsyncSession = Depen
     return {"auth_mode": payload.auth_mode, "credential_configured": True, "billing_account_ids": config["billing_account_ids"]}
 
 
-@router.get("/profiles")
+@router.get("/perfis-consumo")
 async def list_profiles(billing_account_id: str | None = None, db: AsyncSession = Depends(get_db)):
     cfg = dict((await _integration(db)).config_json or {})
     accounts = _configured_accounts(cfg)
@@ -410,7 +410,7 @@ async def list_profiles(billing_account_id: str | None = None, db: AsyncSession 
     return {"profiles": [{"billingProfileId": row.get("name"), "displayName": row.get("properties", {}).get("displayName"), "billingAccountId": account_id} for account_id, row in rows]}
 
 
-@router.post("/extract")
+@router.post("/extrair")
 async def extract_invoices(payload: ExtractionRequest, db: AsyncSession = Depends(get_db)):
     """Load compact billed monthly totals; never downloads row-level Cost Details."""
     from app.services import iceberg_service

@@ -2,8 +2,8 @@ import { Dialog, DialogTitle, DialogContent, DialogActions } from "../../compone
 import { dataDisplayText } from "../../utils/dataPresentation";
 import { DATA_LAYER_LABELS } from "../../utils/dataPresentation";
 import { useState, useEffect } from "react";
-import { Box, Typography, Button, Chip, Alert, CircularProgress, Tooltip, TextField, FormControl, InputLabel, Select, MenuItem, FormHelperText, FormControlLabel, Switch, IconButton, Checkbox } from "@mui/material";
-import { Schedule, Add, Edit, Delete, PlayArrow } from "@mui/icons-material";
+import { Box, Typography, Button, Chip, Alert, CircularProgress, Tooltip, TextField, FormControl, InputLabel, Select, MenuItem, FormHelperText, FormControlLabel, Switch, IconButton, Checkbox, Divider } from "@mui/material";
+import { AddOutlined, EditOutlined, DeleteOutlined, PlayArrowOutlined } from "@mui/icons-material";
 import {
   getSchedules, createSchedule, updateSchedule, deleteSchedule, runScheduleNow,
   ScheduledTask, SourceConnection, formatApiError, getDestinationTables, getForecastConfigs,
@@ -13,12 +13,12 @@ import {
 import SortableTable from "../../components/SortableTable";
 
 const cronPresets = [
-  { label: "Diário 03:00", value: "0 3 * * *" },
-  { label: "Diário 06:00", value: "0 6 * * *" },
-  { label: "Semanal (seg 03:00)", value: "0 3 * * 1" },
-  { label: "Mensal (dia 1 03:00)", value: "0 3 1 * *" },
-  { label: "A cada 12h", value: "0 */12 * * *" },
-  { label: "A cada 6h", value: "0 */6 * * *" },
+  { label: "Todo dia às 03:00", value: "0 3 * * *" },
+  { label: "Todo dia às 06:00", value: "0 6 * * *" },
+  { label: "Semanal (seg, às 03:00)", value: "0 3 * * 1" },
+  { label: "Mensal (dia 1, às 03:00)", value: "0 3 1 * *" },
+  { label: "A cada 12 horas", value: "0 */12 * * *" },
+  { label: "A cada 6 horas", value: "0 */6 * * *" },
 ];
 
 interface SchedForm {
@@ -53,6 +53,10 @@ const EMPTY_FORM: SchedForm = {
   backup_layers: ["bronze"],
 };
 
+function SectionTitle({ children }: { children: string }) {
+  return <Divider textAlign="left"><Typography variant="overline" color="text.secondary">{children}</Typography></Divider>;
+}
+
 export default function SchedulesPanel({ connections }: { connections: SourceConnection[] }) {
   const [schedules, setSchedules] = useState<ScheduledTask[]>([]);
   const [dialogOpen, setDialogOpen] = useState(false);
@@ -83,7 +87,7 @@ export default function SchedulesPanel({ connections }: { connections: SourceCon
   );
 
   const loadSchedules = () => {
-    getSchedules().then(setSchedules).catch((e) => setError(formatApiError(e, "Falha ao carregar agendamentos")));
+    getSchedules().then(setSchedules).catch((e) => setError(formatApiError(e, "Não foi possível carregar as programações")));
   };
 
   useEffect(() => {
@@ -174,14 +178,14 @@ export default function SchedulesPanel({ connections }: { connections: SourceCon
       setDialogOpen(false);
       loadSchedules();
     } catch (e: unknown) {
-      setError(formatApiError(e, "Falha ao salvar agendamento"));
+      setError(formatApiError(e, "Não foi possível salvar a programação"));
     }
   };
 
   const remove = async (id: number) => {
-    if (!confirm("Remover agendamento?")) return;
+    if (!confirm("Apagar agendamento?")) return;
     try { await deleteSchedule(id); loadSchedules(); } catch (e: unknown) {
-      setError(formatApiError(e, "Falha ao remover"));
+      setError(formatApiError(e, "Não foi possível remover"));
     }
   };
 
@@ -191,7 +195,7 @@ export default function SchedulesPanel({ connections }: { connections: SourceCon
       await runScheduleNow(id);
       setError("");
     } catch (e: unknown) {
-      setError(formatApiError(e, "Falha ao executar agendamento"));
+      setError(formatApiError(e, "Não foi possível executar a programação"));
     } finally {
       setRunning(prev => { const n = new Set(prev); n.delete(id); return n; });
     }
@@ -203,7 +207,7 @@ export default function SchedulesPanel({ connections }: { connections: SourceCon
   };
 
   const formatSize = (bytes?: number) => {
-    if (bytes == null) return "Carregando…";
+    if (bytes == null) return "Buscando…";
     if (bytes === 0) return "0 B";
     const units = ["B", "KB", "MB", "GB", "TB"];
     const index = Math.min(Math.floor(Math.log(bytes) / Math.log(1024)), units.length - 1);
@@ -217,12 +221,13 @@ export default function SchedulesPanel({ connections }: { connections: SourceCon
 
   return (
     <Box>
-      <Box sx={{ display: "flex", justifyContent: "space-between", alignItems: "center", mb: 2 }}>
-        <Typography variant="h5" sx={{ display: "flex", alignItems: "center", gap: 1 }}>
-          <Schedule /> Agendamentos
-        </Typography>
-        <Button size="small" variant="outlined" startIcon={<Add />} onClick={openNew}>
-          Novo Agendamento
+      <Box sx={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 2, flexWrap: "wrap", mb: 2 }}>
+        <Box>
+          <Typography variant="h6">Programações de coleta</Typography>
+          <Typography variant="body2" color="text.secondary">Coletas, reprocessamentos e backups rodados automaticamente.</Typography>
+        </Box>
+        <Button variant="contained" startIcon={<AddOutlined />} onClick={openNew}>
+          Novo agendamento
         </Button>
       </Box>
 
@@ -230,7 +235,7 @@ export default function SchedulesPanel({ connections }: { connections: SourceCon
 
       {schedules.length === 0 ? (
         <Alert severity="info" sx={{ mb: 2 }}>
-          Nenhum agendamento configurado. Clique em "Novo Agendamento" para automatizar a extração e o reprocessamento da tabela destino.
+          Nenhum agendamento configurado. Clique em "Nova programação" para automatizar a extração e o reprocessamento da tabela destino.
         </Alert>
       ) : (
         <SortableTable
@@ -244,7 +249,7 @@ export default function SchedulesPanel({ connections }: { connections: SourceCon
               render: (s: ScheduledTask) => (
                 <Box>
                   <Typography variant="body2" fontWeight={500}>{s.name}</Typography>
-                  <Chip size="small" variant="outlined" label={s.schedule_type === "backup" ? "Backup full" : s.schedule_type === "reprocess" ? "Reprocessamento" : "Coleta"} sx={{ mt: 0.5 }} />
+                  <Chip size="small" variant="outlined" label={s.schedule_type === "backup" ? "Backup completo" : s.schedule_type === "reprocess" ? "Reprocessamento" : "Coleta"} sx={{ mt: 0.5 }} />
                   <Typography variant="caption" color="text.secondary" sx={{ fontFamily: "monospace" }}>
                     {s.cron_expression}
                   </Typography>
@@ -306,23 +311,23 @@ export default function SchedulesPanel({ connections }: { connections: SourceCon
               key: "_actions", label: "Acoes", width: 140, sortable: false,
               render: (s: ScheduledTask) => (
                 <Box sx={{ display: "flex", gap: 0.5 }}>
-                  <Tooltip title="Executar agora">
+                  <Tooltip title="Rodar agora">
                     <IconButton
                       size="small" color="primary"
                       onClick={() => runNow(s.id)}
                       disabled={running.has(s.id)}
                     >
-                      {running.has(s.id) ? <CircularProgress size={16} /> : <PlayArrow fontSize="small" />}
+                      {running.has(s.id) ? <CircularProgress size={16} /> : <PlayArrowOutlined fontSize="small" />}
                     </IconButton>
                   </Tooltip>
                   <Tooltip title="Editar">
                     <IconButton size="small" onClick={() => openEdit(s)}>
-                      <Edit fontSize="small" />
+                      <EditOutlined fontSize="small" />
                     </IconButton>
                   </Tooltip>
                   <Tooltip title="Remover">
                     <IconButton size="small" color="error" onClick={() => remove(s.id)}>
-                      <Delete fontSize="small" />
+                      <DeleteOutlined fontSize="small" />
                     </IconButton>
                   </Tooltip>
                 </Box>
@@ -336,23 +341,25 @@ export default function SchedulesPanel({ connections }: { connections: SourceCon
         <DialogTitle>{editing ? "Editar" : "Novo"} Agendamento</DialogTitle>
         <DialogContent>
           <Box sx={{ display: "flex", flexDirection: "column", gap: 2, mt: 1 }}>
-            <TextField label="Nome" value={form.name}
+            <SectionTitle>Identificação da programação</SectionTitle>
+            <TextField label="Nome da programação" value={form.name}
               onChange={e => setForm({ ...form, name: e.target.value })} />
             <FormControl size="small">
-              <InputLabel>Tipo</InputLabel>
-              <Select value={form.schedule_type} label="Tipo" onChange={e => {
+              <InputLabel>Tipo de execução</InputLabel>
+              <Select value={form.schedule_type} label="Tipo de execução" onChange={e => {
                 const type = e.target.value as SchedForm["schedule_type"];
-                setForm({ ...form, schedule_type: type, name: form.name || (type === "backup" ? "Backup Diário Full" : type === "reprocess" ? "Reprocessamento" : "") });
+                setForm({ ...form, schedule_type: type, name: form.name || (type === "backup" ? "Backup diário completo" : type === "reprocess" ? "Reprocessamento" : "") });
               }}>
                 <MenuItem value="collection">Coleta</MenuItem>
                 <MenuItem value="reprocess">Reprocessamento</MenuItem>
-                <MenuItem value="backup">Backup Full</MenuItem>
+                <MenuItem value="backup">Backup completo</MenuItem>
               </Select>
             </FormControl>
+            <SectionTitle>Fonte</SectionTitle>
             {form.schedule_type === "backup" && <>
               <Alert severity="info">Cópia de segurança da aplicação, do banco de dados e das bases selecionadas. As estimativas abaixo representam o volume atual dos dados antes da compressão do arquivo.</Alert>
               <Box sx={{ border: 1, borderColor: "divider", borderRadius: 2, p: 1.5 }}>
-                <Typography variant="subtitle2" sx={{ mb: 0.5 }}>Tabelas incluídas no backup</Typography>
+                <Typography variant="subtitle2" sx={{ mb: 0.5 }}>Tabelas incluídas na cópia</Typography>
                 {(["bronze", "silver", "gold"] as const).map(layer => (
                   <FormControlLabel key={layer} sx={{ display: "flex", justifyContent: "space-between", mx: 0 }}
                     control={<Checkbox checked={form.backup_layers.includes(layer)} onChange={e => {
@@ -368,18 +375,18 @@ export default function SchedulesPanel({ connections }: { connections: SourceCon
                       <Typography variant="body2" color="text.secondary">{formatSize(backupSizes?.[layer])}</Typography>
                     </Box>} />
                 ))}
-                <FormHelperText>Estimativa do volume dos arquivos da camada; tamanho final varia após compactação. Pelo menos uma camada deve permanecer selecionada.</FormHelperText>
+                <FormHelperText>Estimativa do volume dos arquivos da camada; o tamanho final varia após compactação. Pelo menos uma camada deve permanecer selecionada.</FormHelperText>
                 <Typography variant="body2" fontWeight={600} sx={{ mt: 1 }}>
                   Selecionado: {formatSize(backupSizes ? form.backup_layers.reduce((sum, layer) => sum + backupSizes[layer], 0) : undefined)}
                 </Typography>
               </Box>
             </>}
             {form.schedule_type !== "backup" && <FormControl size="small">
-              <InputLabel>Conexoes (uma ou varias)</InputLabel>
+              <InputLabel>Conexões (uma ou mais)</InputLabel>
               <Select
                 multiple
                 value={form.connection_ids.length ? form.connection_ids : [form.connection_id]}
-                label="Conexoes (uma ou varias)"
+                label="Conexões (uma ou mais)"
                 onChange={e => {
                   const ids = e.target.value as number[];
                   setForm({ ...form, connection_ids: ids, connection_id: ids[0] || 0 });
@@ -394,48 +401,49 @@ export default function SchedulesPanel({ connections }: { connections: SourceCon
                   <MenuItem key={c.id} value={c.id}>{c.name} ({c.code})</MenuItem>
                 ))}
             </Select>
-              <FormHelperText>Selecione todas as origens que este agendamento deve coletar.</FormHelperText>
+              <FormHelperText>Escolha todas as fontes que esta programação deve coletar.</FormHelperText>
             </FormControl>}
 
             {form.schedule_type === "collection" && <>
-              <FormControlLabel control={<Switch checked={form.destination_reprocess} onChange={e => setForm({ ...form, destination_reprocess: e.target.checked })} />} label="Auto-reprocessar tabela destino após extração" />
-              <FormHelperText>Se desligado, a execução termina na base de origem e as etapas seguintes ficam indisponíveis.</FormHelperText>
+              <FormControlLabel control={<Switch checked={form.destination_reprocess} onChange={e => setForm({ ...form, destination_reprocess: e.target.checked })} />} label="Reprocessar automaticamente a tabela de destino após a coleta" />
+              <FormHelperText>Se desligado, a rodada termina na base de origem e as etapas seguintes ficam indisponíveis.</FormHelperText>
             </>}
 
             {form.schedule_type !== "backup" && (form.schedule_type !== "collection" || form.destination_reprocess) && <>
+              <SectionTitle>Processamento pós-coleta</SectionTitle>
               <Box>
                 <FormControl size="small" fullWidth>
-                  <InputLabel>bases consolidadas</InputLabel>
-                  <Select multiple value={form.destination_table_ids} label="Golds"
+                  <InputLabel>bases consolidadas (camada gold)</InputLabel>
+                  <Select multiple value={form.destination_table_ids} label="Bases consolidadas (gold)"
                     onChange={e => setForm({ ...form, destination_table_ids: e.target.value as number[] })}
                     renderValue={ids => (ids as number[]).map(id => destinations.find(d => d.id === id)?.name || `ID ${id}`).join(", ")}>
                     {destinations.map(d => <MenuItem key={d.id} value={d.id}>{d.name}</MenuItem>)}
                   </Select>
-                  <FormHelperText>Bases consolidadas reprocessadas após a carga de origem (ou relidas na reclassificação).</FormHelperText>
+                  <FormHelperText>Bases consolidadas reprocessadas após a carga da origem (ou relidas na reclassificação).</FormHelperText>
                 </FormControl>
                 <Box sx={{ display: "flex", gap: 1, mt: 0.5 }}>
-                  <Button size="small" onClick={() => setForm({ ...form, destination_table_ids: destinations.map(d => d.id) })}>Selecionar todas</Button>
-                  <Button size="small" onClick={() => setForm({ ...form, destination_table_ids: [] })}>Limpar</Button>
+                  <Button size="small" onClick={() => setForm({ ...form, destination_table_ids: destinations.map(d => d.id) })}>Marcar todas</Button>
+                  <Button size="small" onClick={() => setForm({ ...form, destination_table_ids: [] })}>Limpar seleção</Button>
                 </Box>
               </Box>
-              {form.schedule_type === "collection" && <FormControlLabel control={<Switch checked={form.forecast_after_ingestion} onChange={e => setForm({ ...form, forecast_after_ingestion: e.target.checked })} />} label="Executar Forecast após ingestão e reprocessamento" />}
+              {form.schedule_type === "collection" && <FormControlLabel control={<Switch checked={form.forecast_after_ingestion} onChange={e => setForm({ ...form, forecast_after_ingestion: e.target.checked })} />} label="Gerar previsão após a carga e o reprocessamento" />}
               {form.schedule_type === "reprocess" && <>
-                <FormControl size="small"><InputLabel>Períodos</InputLabel><Select value={form.period_mode} label="Períodos" onChange={e => setForm({ ...form, period_mode: e.target.value as "selected" | "all" })}><MenuItem value="all">Todos disponíveis</MenuItem><MenuItem value="selected">Selecionados</MenuItem></Select></FormControl>
+                <FormControl size="small"><InputLabel>Períodos</InputLabel><Select value={form.period_mode} label="Períodos" onChange={e => setForm({ ...form, period_mode: e.target.value as "selected" | "all" })}><MenuItem value="all">Todos disponíveis</MenuItem><MenuItem value="selected">Marcados</MenuItem></Select></FormControl>
                 {form.period_mode === "selected" && <TextField label="Períodos (YYYYMM)" value={form.billing_periods} onChange={e => setForm({ ...form, billing_periods: e.target.value })} helperText="Ex.: 202601, 202602, 202603" />}
               </>}
-              {(form.schedule_type === "reprocess" || form.forecast_after_ingestion) && <FormControl size="small"><InputLabel>Forecasts candidatos</InputLabel><Select multiple value={form.forecast_config_ids} label="Forecasts candidatos" onChange={e => { const ids = (e.target.value as number[]).map(Number); setForm({ ...form, forecast_config_ids: ids, forecast_config_id: String(ids[0] || "") }); }} renderValue={ids => (ids as number[]).map(id => { const candidate = forecastConfigs.find(c => c.id === Number(id)); return candidate ? `${candidate.name} — ${candidate.table_name || `base consolidada ${candidate.destination_table_id}`}` : `Configuração ${id}`; }).join(", ")}><MenuItem value={0}>Nenhum</MenuItem>{forecastCandidates.map(c => <MenuItem key={c.id} value={c.id}>{c.name} — {c.table_name || `base consolidada ${c.destination_table_id}`}</MenuItem>)}</Select><FormHelperText>{forecastConfigsError ? "Não foi possível carregar as configurações de forecast. Verifique a API." : forecastCandidates.length ? "Somente configurações ativas compatíveis com as bases consolidadas selecionadas." : "Nenhuma configuração ativa compatível com as bases consolidadas selecionadas."}</FormHelperText></FormControl>}
-              <FormControlLabel control={<Switch checked={form.accuracy} onChange={e => setForm({ ...form, accuracy: e.target.checked })} />} label="Gerar acurácia" />
-              <FormControlLabel control={<Switch checked={form.shared_cost} onChange={e => setForm({ ...form, shared_cost: e.target.checked })} />} label="Gerar custo compartilhado" />
+              {(form.schedule_type === "reprocess" || form.forecast_after_ingestion) && <FormControl size="small"><InputLabel>Previsões candidatas</InputLabel><Select multiple value={form.forecast_config_ids} label="Previsões candidatas" onChange={e => { const ids = (e.target.value as number[]).map(Number); setForm({ ...form, forecast_config_ids: ids, forecast_config_id: String(ids[0] || "") }); }} renderValue={ids => (ids as number[]).map(id => { const candidate = forecastConfigs.find(c => c.id === Number(id)); return candidate ? `${candidate.name} — ${candidate.table_name || `base consolidada ${candidate.destination_table_id}`}` : `Configuração ${id}`; }).join(", ")}><MenuItem value={0}>Nenhum</MenuItem>{forecastCandidates.map(c => <MenuItem key={c.id} value={c.id}>{c.name} — {c.table_name || `base consolidada ${c.destination_table_id}`}</MenuItem>)}</Select><FormHelperText>{forecastConfigsError ? "Não foi possível carregar as configurações de forecast. Verifique a API." : forecastCandidates.length ? "Somente configurações ativas compatíveis com as bases consolidadas selecionadas." : "Nenhuma configuração ativa compatível com as bases consolidadas selecionadas."}</FormHelperText></FormControl>}
+              <FormControlLabel control={<Switch checked={form.accuracy} onChange={e => setForm({ ...form, accuracy: e.target.checked })} />} label="Gerar acerto da previsão" />
+              <FormControlLabel control={<Switch checked={form.shared_cost} onChange={e => setForm({ ...form, shared_cost: e.target.checked })} />} label="Gerar rateio de custo compartilhado" />
               <Box>
-                <FormControl size="small" fullWidth><InputLabel>cubos analíticos</InputLabel><Select multiple value={form.gold_rule_ids} label="cubos analíticos" onChange={e => setForm({ ...form, gold_rule_ids: e.target.value as number[] })} renderValue={ids => (ids as number[]).map(id => goldRules.find(r => r.id === id)?.name || `Regra ${id}`).join(", ")}><MenuItem value={0}>Nenhuma</MenuItem>{goldRules.filter(r => r.active).map(r => <MenuItem key={r.id} value={r.id}>{r.name}</MenuItem>)}</Select><FormHelperText>Os cubos analíticos relacionados à base selecionada já aparecem marcados.</FormHelperText></FormControl>
+                <FormControl size="small" fullWidth><InputLabel>cubos analíticos</InputLabel><Select multiple value={form.gold_rule_ids} label="cubos analíticos" onChange={e => setForm({ ...form, gold_rule_ids: e.target.value as number[] })} renderValue={ids => (ids as number[]).map(id => goldRules.find(r => r.id === id)?.name || `Regra ${id}`).join(", ")}><MenuItem value={0}>Nenhuma base</MenuItem>{goldRules.filter(r => r.active).map(r => <MenuItem key={r.id} value={r.id}>{r.name}</MenuItem>)}</Select><FormHelperText>Os modelos analíticos relacionados à base escolhida já aparecem marcados.</FormHelperText></FormControl>
                 <Box sx={{ display: "flex", gap: 1, mt: 0.5 }}>
-                  <Button size="small" onClick={() => setForm({ ...form, gold_rule_ids: goldRules.filter(r => r.active).map(r => r.id).filter((id): id is number => id != null) })}>Selecionar todas</Button>
-                  <Button size="small" onClick={() => setForm({ ...form, gold_rule_ids: [] })}>Limpar</Button>
+                  <Button size="small" onClick={() => setForm({ ...form, gold_rule_ids: goldRules.filter(r => r.active).map(r => r.id).filter((id): id is number => id != null) })}>Marcar todas</Button>
+                  <Button size="small" onClick={() => setForm({ ...form, gold_rule_ids: [] })}>Limpar seleção</Button>
                 </Box>
               </Box>
             </>}
 
-            <Typography variant="subtitle2" sx={{ mt: 1 }}>Expressao Cron</Typography>
+            <SectionTitle>Quando rodar</SectionTitle>
             <Box sx={{ display: "flex", flexWrap: "wrap", gap: 1 }}>
               {cronPresets.map(p => (
                 <Chip
@@ -449,14 +457,14 @@ export default function SchedulesPanel({ connections }: { connections: SourceCon
                 />
               ))}
             </Box>
-            <TextField label="Expressao Cron (custom)" value={form.cron_expression}
+            <TextField label="Expressão cron (personalizada)" value={form.cron_expression}
               onChange={e => setForm({ ...form, cron_expression: e.target.value })}
-              helperText="Formato: minuto hora dia mes dia_semana. Ex: 0 3 * * * (diario as 3h)" />
+              helperText="Formato: minuto hora dia mês dia_semana. Ex.: 0 3 * * * (diário às 3h)" />
 
             <FormControlLabel
               control={<Switch checked={form.active}
                 onChange={e => setForm({ ...form, active: e.target.checked })} />}
-              label="Ativo"
+              label="Em uso"
             />
           </Box>
         </DialogContent>

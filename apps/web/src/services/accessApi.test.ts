@@ -19,7 +19,7 @@ describe("accessApi", () => {
 
   it("simulateDecision chama o simulador da pessoa com os parâmetros", async () => {
     const result = await simulateDecision(10, { operation: "read", resource_type: "table", resource: "fact_cost" });
-    expect(get).toHaveBeenCalledWith("/access/users/10/decision", {
+    expect(get).toHaveBeenCalledWith("/administracao/acessos/usuarios/10/decisao", {
       params: { operation: "read", resource_type: "table", resource: "fact_cost" },
     });
     expect(result.allowed).toBe(true);
@@ -30,16 +30,16 @@ describe("accessApi", () => {
       resource_type: "table", resource: "fact_cost", operation: "read", effect: "allow",
       conditions: [{ column: "department_id", scope_type: "hierarchy", match_mode: "subtree" }],
     });
-    expect(post).toHaveBeenCalledWith("/access/roles/3/acls", expect.objectContaining({ resource: "fact_cost", effect: "allow" }));
+    expect(post).toHaveBeenCalledWith("/administracao/acessos/perfis/3/listas-acesso", expect.objectContaining({ resource: "fact_cost", effect: "allow" }));
   });
 
   it("listRoleAcls lê as ACLs do perfil", async () => {
     await listRoleAcls(3);
-    expect(get).toHaveBeenCalledWith("/access/roles/3/acls");
+    expect(get).toHaveBeenCalledWith("/administracao/acessos/perfis/3/listas-acesso");
   });
 
   it("grantUserScope usa o motivo e o alcance informados", async () => {
     await grantUserScope(10, { scope_id: 2, match_mode: "subtree", reason: "projeto TI" });
-    expect(post).toHaveBeenCalledWith("/access/users/10/scopes", { scope_id: 2, match_mode: "subtree", reason: "projeto TI" });
+    expect(post).toHaveBeenCalledWith("/administracao/acessos/usuarios/10/escopos", { scope_id: 2, match_mode: "subtree", reason: "projeto TI" });
   });
 });

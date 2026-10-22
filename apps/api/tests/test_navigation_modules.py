@@ -85,7 +85,7 @@ def context(monkeypatch):
     async def override_db(): yield db
     app.dependency_overrides[get_db] = override_db
     app.include_router(router)
-    @app.get("/planning/contract-story")
+    @app.get("/planejamento/historia-contratos")
     async def secret_contract(): return {"contract": "allowed"}
     app.add_middleware(RBACMiddleware)
     app.add_middleware(NavigationPolicyMiddleware)
@@ -119,45 +119,45 @@ def test_catalog_sync_is_idempotent_and_preserves_customer_choices(context):
 
 def test_disabling_contract_history_affects_only_selected_customer(context):
     client, _, _, x, _, headers = context
-    response = client.put(f"/modules/customers/{x}/{STORY}", json={"enabled": False}, headers=headers[1])
+    response = client.put(f"/administracao/modulos/clientes/{x}/{STORY}", json={"enabled": False}, headers=headers[1])
     assert response.status_code == 200
-    assert client.get(f"/navigation/access/{STORY}", headers=headers[2]).status_code == 403
-    assert client.get(f"/navigation/access/{STORY}", headers=headers[3]).status_code == 200
-    assert client.get(f"/navigation/access/{BUDGET}", headers=headers[2]).status_code == 200
-    assert client.get("/planning/contract-story", headers=headers[2]).status_code == 403
+    assert client.get(f"/navegacao/acessos/{STORY}", headers=headers[2]).status_code == 403
+    assert client.get(f"/navegacao/acessos/{STORY}", headers=headers[3]).status_code == 200
+    assert client.get(f"/navegacao/acessos/{BUDGET}", headers=headers[2]).status_code == 200
+    assert client.get("/planejamento/historia-contratos", headers=headers[2]).status_code == 403
     forged = {**headers[2], "X-Finbase-Module": BUDGET}
-    assert client.get("/planning/contract-story", headers=forged).status_code == 403
+    assert client.get("/planejamento/historia-contratos", headers=forged).status_code == 403
 
 
 def test_group_disables_children_and_required_admin_cannot_be_disabled(context):
     client, _, _, x, _, headers = context
-    assert client.put(f"/modules/customers/{x}/section_planejamento", json={"enabled": False}, headers=headers[1]).status_code == 200
-    assert client.get(f"/navigation/access/{STORY}", headers=headers[2]).status_code == 403
-    assert client.get(f"/navigation/access/{BUDGET}", headers=headers[2]).status_code == 403
-    assert client.put(f"/modules/customers/{x}/administracao_modulos", json={"enabled": False}, headers=headers[1]).status_code == 422
-    assert client.put(f"/modules/customers/{x}/section_administracao", json={"enabled": False}, headers=headers[1]).status_code == 422
+    assert client.put(f"/administracao/modulos/clientes/{x}/section_planejamento", json={"enabled": False}, headers=headers[1]).status_code == 200
+    assert client.get(f"/navegacao/acessos/{STORY}", headers=headers[2]).status_code == 200  # moved to Panorama, not under the planning group
+    assert client.get(f"/navegacao/acessos/{BUDGET}", headers=headers[2]).status_code == 403
+    assert client.put(f"/administracao/modulos/clientes/{x}/administracao_modulos", json={"enabled": False}, headers=headers[1]).status_code == 422
+    assert client.put(f"/administracao/modulos/clientes/{x}/section_administracao", json={"enabled": False}, headers=headers[1]).status_code == 422
 
 
 def test_membership_cannot_be_selected_by_customer_query_and_scope_applies(context):
     client, _, _, x, y, headers = context
-    result = client.get(f"/navigation?customer_id={y}", headers=headers[2]).json()
+    result = client.get(f"/navegacao?customer_id={y}", headers=headers[2]).json()
     assert result["customer_id"] == x
-    result = client.get("/navigation", headers=headers[4]).json()
+    result = client.get("/navegacao", headers=headers[4]).json()
     leaves = [m for m in result["items"] if m["allowed"] and m["parent_code"]]
     assert [m["code"] for m in leaves] == [STORY]
-    assert client.get("/planning/contract-story", headers={**headers[4], "X-Finbase-Module": STORY}).status_code == 200
-    assert client.get("/planning/contract-story", headers={**headers[4], "X-Finbase-Module": BUDGET}).status_code == 403
+    assert client.get("/planejamento/historia-contratos", headers={**headers[4], "X-Finbase-Module": STORY}).status_code == 200
+    assert client.get("/planejamento/historia-contratos", headers={**headers[4], "X-Finbase-Module": BUDGET}).status_code == 403
 
 
 def test_management_requires_permissions_and_assignment_changes_customer(context):
     client, _, _, x, y, headers = context
-    assert client.get("/navigation").status_code == 401
-    assert client.get("/modules/customers", headers=headers[2]).status_code == 403
-    assert client.put(f"/modules/customers/{x}/{STORY}", json={"enabled": False}, headers=headers[2]).status_code == 403
-    assert client.put("/modules/members/2", json={"customer_id": y}, headers=headers[1]).status_code == 200
-    assert client.get("/navigation", headers=headers[2]).json()["customer_id"] == y
-    assert client.post("/modules/customers", json={"name": "Novo cliente", "slug": "novo-cliente"}, headers=headers[1]).status_code == 201
-    assert client.post("/modules/customers", json={"name": "Duplicado", "slug": "novo-cliente"}, headers=headers[1]).status_code == 409
+    assert client.get("/navegacao").status_code == 401
+    assert client.get("/administracao/modulos/clientes", headers=headers[2]).status_code == 403
+    assert client.put(f"/administracao/modulos/clientes/{x}/{STORY}", json={"enabled": False}, headers=headers[2]).status_code == 403
+    assert client.put("/administracao/modulos/membros/2", json={"customer_id": y}, headers=headers[1]).status_code == 200
+    assert client.get("/navegacao", headers=headers[2]).json()["customer_id"] == y
+    assert client.post("/administracao/modulos/clientes", json={"name": "Novo cliente", "slug": "novo-cliente"}, headers=headers[1]).status_code == 201
+    assert client.post("/administracao/modulos/clientes", json={"name": "Duplicado", "slug": "novo-cliente"}, headers=headers[1]).status_code == 409
 
 
 def test_new_catalog_entry_is_registered_for_existing_customers(context, monkeypatch):
@@ -167,8 +167,22 @@ def test_new_catalog_entry_is_registered_for_existing_customers(context, monkeyp
     added.update(code="planejamento_novo_menu", label="Novo menu", path="/planejamento/novo-menu", api_prefixes=[], position=899)
     monkeypatch.setattr(navigation_service, "CATALOG", [*CATALOG, added])
     asyncio.run(sync_catalog(db))
-    response = client.get(f"/modules/customers/{x}", headers=headers[1])
+    response = client.get(f"/administracao/modulos/clientes/{x}", headers=headers[1])
     row = next(item for item in response.json() if item["code"] == added["code"])
     assert row["path"] == added["path"]
     assert row["configured_enabled"] is True
-    assert client.get(f"/navigation/access/{added['code']}", headers=headers[2]).status_code == 200
+    assert client.get(f"/navegacao/acessos/{added['code']}", headers=headers[2]).status_code == 200
+
+
+def test_renamed_menu_reaches_navigation_and_can_be_restored(context):
+    client, _, _, x, _, headers = context
+    renamed = client.put(f"/administracao/modulos/catalogo/{STORY}", json={"label": "Contratos fechados"}, headers=headers[1])
+    assert renamed.status_code == 200
+    items = {m["code"]: m for m in client.get(f"/administracao/modulos/clientes/{x}", headers=headers[1]).json()}
+    assert items[STORY]["label"] == "Contratos fechados"
+    assert items[STORY]["default_label"] == "Histórico de contratos"
+    restored = client.put(f"/administracao/modulos/catalogo/{STORY}", json={"label": None}, headers=headers[1])
+    assert restored.status_code == 200
+    items = {m["code"]: m for m in client.get(f"/administracao/modulos/clientes/{x}", headers=headers[1]).json()}
+    assert items[STORY]["label"] == "Histórico de contratos"
+    assert items[STORY]["custom_label"] is None

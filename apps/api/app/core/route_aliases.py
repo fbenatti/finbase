@@ -11,20 +11,7 @@ Só entram aliases com correspondência única. Áreas que cobrem vários router
 from starlette.types import ASGIApp, Receive, Scope, Send
 
 # (prefixo do front, prefixo atual da API). Ordem não importa: a busca usa o maior prefixo.
-ROUTE_ALIASES: tuple[tuple[str, str], ...] = (
-    ("/dados/fontes", "/connections"),
-    ("/dados/catalogo", "/destinations"),
-    ("/dados/explorador", "/analysis"),
-    ("/dados/fluxos", "/etl"),
-    ("/dados/mapeamentos", "/mappings"),
-    ("/projecoes", "/forecast"),
-    ("/custos", "/gold"),
-    ("/planejamento", "/planning"),
-    ("/otimizacao", "/savings"),
-    ("/iniciativas", "/ideas"),
-    ("/alertas", "/anomalies"),
-    ("/administracao/auditoria", "/audit"),
-)
+ROUTE_ALIASES: tuple[tuple[str, str], ...] = ()
 
 
 def _matches(path: str, prefix: str) -> bool:

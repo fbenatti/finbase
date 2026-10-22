@@ -23,7 +23,7 @@ export function FieldHelper({ title, placement = "top", sx }: FieldHelperProps) 
     >
       <IconButton
         size="small"
-        aria-label="Ajuda sobre o campo"
+        aria-label="Explicação do campo"
         tabIndex={-1}
         sx={{ color: "text.secondary", p: 0.25, flexShrink: 0, ...sx }}
       >

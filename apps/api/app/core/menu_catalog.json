@@ -2,7 +2,7 @@
   {
     "code": "section_panorama",
     "parent_code": null,
-    "label": "Panorama",
+    "label": "Visão geral",
     "path": "/panorama",
     "renderer": "ModuleIndex",
     "view_params": {},
@@ -17,7 +17,7 @@
   {
     "code": "custos_resumo",
     "parent_code": "section_panorama",
-    "label": "Resumo de custos",
+    "label": "Visão executiva de custos",
     "path": "/custos/resumo",
     "renderer": "GoldDashboard",
     "view_params": {
@@ -34,7 +34,7 @@
   {
     "code": "section_alertas",
     "parent_code": null,
-    "label": "Alertas",
+    "label": "Anomalias",
     "path": "/alertas/inicio",
     "renderer": "ModuleIndex",
     "view_params": {},
@@ -48,15 +48,15 @@
   },
   {
     "code": "alertas_visao_geral",
-    "parent_code": "section_alertas",
-    "label": "Visão geral de alertas",
-    "path": "/alertas/visao-geral",
+    "parent_code": "section_panorama",
+    "label": "Painel de anomalias",
+    "path": "/alertas/painel",
     "renderer": "Anomalies",
     "view_params": {
       "tab": "0"
     },
     "permission_module": "anomalies",
-    "position": 101,
+    "position": 6,
     "icon": "WarningAmberOutlined",
     "required": false,
     "development_only": true,
@@ -66,14 +66,14 @@
   {
     "code": "alertas_impacto_financeiro",
     "parent_code": "section_alertas",
-    "label": "Impacto financeiro",
+    "label": "Impacto no custo",
     "path": "/alertas/impacto-financeiro",
     "renderer": "Anomalies",
     "view_params": {
       "tab": "1"
     },
     "permission_module": "anomalies",
-    "position": 102,
+    "position": 1,
     "icon": "PaidOutlined",
     "required": false,
     "development_only": true,
@@ -83,14 +83,14 @@
   {
     "code": "alertas_investigacoes",
     "parent_code": "section_alertas",
-    "label": "Casos em investigação",
+    "label": "Investigações abertas",
     "path": "/alertas/investigacoes",
     "renderer": "Anomalies",
     "view_params": {
       "tab": "2"
     },
     "permission_module": "anomalies",
-    "position": 103,
+    "position": 2,
     "icon": "QueryStatsOutlined",
     "required": false,
     "development_only": true,
@@ -100,14 +100,14 @@
   {
     "code": "alertas_eventos_esperados",
     "parent_code": "section_alertas",
-    "label": "Eventos esperados",
+    "label": "Eventos previstos",
     "path": "/alertas/eventos-esperados",
     "renderer": "Anomalies",
     "view_params": {
       "tab": "3"
     },
     "permission_module": "anomalies",
-    "position": 104,
+    "position": 3,
     "icon": "ScheduleOutlined",
     "required": false,
     "development_only": true,
@@ -117,14 +117,14 @@
   {
     "code": "alertas_saude_do_modelo",
     "parent_code": "section_alertas",
-    "label": "Saúde do modelo",
+    "label": "Qualidade do modelo",
     "path": "/alertas/saude-do-modelo",
     "renderer": "Anomalies",
     "view_params": {
       "tab": "4"
     },
     "permission_module": "anomalies",
-    "position": 105,
+    "position": 4,
     "icon": "ScienceOutlined",
     "required": false,
     "development_only": true,
@@ -134,14 +134,14 @@
   {
     "code": "alertas_retrospectivas",
     "parent_code": "section_alertas",
-    "label": "Retrospectivas",
+    "label": "Retrospectiva",
     "path": "/alertas/retrospectivas",
     "renderer": "Anomalies",
     "view_params": {
       "tab": "5"
     },
     "permission_module": "anomalies",
-    "position": 106,
+    "position": 5,
     "icon": "HistoryOutlined",
     "required": false,
     "development_only": true,
@@ -151,14 +151,14 @@
   {
     "code": "alertas_confirmados",
     "parent_code": "section_alertas",
-    "label": "Anomalias confirmadas",
+    "label": "Anomalias validadas",
     "path": "/alertas/confirmados",
     "renderer": "Anomalies",
     "view_params": {
       "tab": "6"
     },
     "permission_module": "anomalies",
-    "position": 107,
+    "position": 6,
     "icon": "FactCheckOutlined",
     "required": false,
     "development_only": true,
@@ -168,14 +168,14 @@
   {
     "code": "alertas_configuracao",
     "parent_code": "section_alertas",
-    "label": "Configuração de alertas",
+    "label": "Parâmetros de detecção",
     "path": "/alertas/configuracao",
     "renderer": "Anomalies",
     "view_params": {
       "tab": "7"
     },
     "permission_module": "anomalies",
-    "position": 108,
+    "position": 7,
     "icon": "SettingsOutlined",
     "required": false,
     "development_only": true,
@@ -185,7 +185,7 @@
   {
     "code": "section_planejamento",
     "parent_code": null,
-    "label": "Planejamento",
+    "label": "Orçamento e previsão",
     "path": "/planejamento/inicio",
     "renderer": "ModuleIndex",
     "view_params": {},
@@ -199,8 +199,8 @@
   },
   {
     "code": "planejamento_historico_do_orcamento",
-    "parent_code": "section_planejamento",
-    "label": "Histórico do orçamento",
+    "parent_code": "section_panorama",
+    "label": "Orçamento vs. realizado",
     "path": "/planejamento/historico-do-orcamento",
     "renderer": "FinancialPlanning",
     "view_params": {
@@ -208,7 +208,7 @@
       "executive": "orcamento"
     },
     "permission_module": "planning",
-    "position": 201,
+    "position": 2,
     "icon": "AccountBalanceWalletOutlined",
     "required": false,
     "development_only": false,
@@ -217,8 +217,8 @@
   },
   {
     "code": "planejamento_historia_dos_contratos",
-    "parent_code": "section_planejamento",
-    "label": "História dos contratos",
+    "parent_code": "section_panorama",
+    "label": "Evolução dos contratos",
     "path": "/planejamento/historia-dos-contratos",
     "renderer": "FinancialPlanning",
     "view_params": {
@@ -226,19 +226,19 @@
       "executive": "historia-contrato"
     },
     "permission_module": "planning",
-    "position": 202,
+    "position": 4,
     "icon": "HistoryOutlined",
     "required": false,
     "development_only": false,
     "legacy_path": "/planejamento",
     "api_prefixes": [
-      "/planning/contract-story"
+      "/planejamento/historia-contratos"
     ]
   },
   {
     "code": "planejamento_consumo_de_compromissos",
-    "parent_code": "section_planejamento",
-    "label": "Consumo de compromissos",
+    "parent_code": "section_panorama",
+    "label": "Uso de compromissos",
     "path": "/planejamento/consumo-de-compromissos",
     "renderer": "FinancialPlanning",
     "view_params": {
@@ -246,7 +246,7 @@
       "executive": "compromisso"
     },
     "permission_module": "planning",
-    "position": 203,
+    "position": 3,
     "icon": "ReceiptLongOutlined",
     "required": false,
     "development_only": false,
@@ -256,14 +256,14 @@
   {
     "code": "planejamento_orcamentos",
     "parent_code": "section_planejamento",
-    "label": "Orçamentos",
+    "label": "Metas orçamentárias",
     "path": "/planejamento/orcamentos",
     "renderer": "FinancialPlanning",
     "view_params": {
       "tab": "orcamento"
     },
     "permission_module": "planning",
-    "position": 204,
+    "position": 1,
     "icon": "PaidOutlined",
     "required": false,
     "development_only": false,
@@ -273,14 +273,14 @@
   {
     "code": "planejamento_acuracia_do_orcamento",
     "parent_code": "section_planejamento",
-    "label": "Acurácia do orçamento",
-    "path": "/planejamento/acuracia-do-orcamento",
+    "label": "Execução do orçamento",
+    "path": "/planejamento/aderencia-orcamento",
     "renderer": "FinancialPlanning",
     "view_params": {
-      "tab": "acuracia-orcamento"
+      "tab": "aderencia-orcamento"
     },
     "permission_module": "planning",
-    "position": 205,
+    "position": 2,
     "icon": "AutoGraphOutlined",
     "required": false,
     "development_only": false,
@@ -290,14 +290,14 @@
   {
     "code": "planejamento_projecoes_manuais",
     "parent_code": "section_planejamento",
-    "label": "Projeções manuais",
+    "label": "Previsões manuais",
     "path": "/planejamento/projecoes-manuais",
     "renderer": "FinancialPlanning",
     "view_params": {
       "tab": "forecast-manual"
     },
     "permission_module": "planning",
-    "position": 206,
+    "position": 3,
     "icon": "TrendingUpOutlined",
     "required": false,
     "development_only": false,
@@ -306,8 +306,8 @@
   },
   {
     "code": "planejamento_evolucao_do_dolar",
-    "parent_code": "section_planejamento",
-    "label": "Evolução do dólar",
+    "parent_code": "section_panorama",
+    "label": "Cotação do dólar",
     "path": "/planejamento/evolucao-do-dolar",
     "renderer": "FinancialPlanning",
     "view_params": {
@@ -315,7 +315,7 @@
       "subview": "evolucao-dolar"
     },
     "permission_module": "planning",
-    "position": 207,
+    "position": 5,
     "icon": "CurrencyExchangeOutlined",
     "required": false,
     "development_only": false,
@@ -325,14 +325,14 @@
   {
     "code": "projecoes_acuracia_visao",
     "parent_code": "section_planejamento",
-    "label": "Acurácia · visão",
-    "path": "/projecoes/acuracia/visao",
+    "label": "Precisão: visão geral",
+    "path": "/projecoes/precisao/visao",
     "renderer": "ForecastAccuracy",
     "view_params": {
       "aba": "visao"
     },
     "permission_module": "forecast",
-    "position": 208,
+    "position": 7,
     "icon": "AutoGraphOutlined",
     "required": false,
     "development_only": false,
@@ -342,14 +342,14 @@
   {
     "code": "projecoes_acuracia_desvios",
     "parent_code": "section_planejamento",
-    "label": "Acurácia · desvios",
-    "path": "/projecoes/acuracia/desvios",
+    "label": "Variações da previsão",
+    "path": "/projecoes/precisao/desvios",
     "renderer": "ForecastAccuracy",
     "view_params": {
       "aba": "desvios"
     },
     "permission_module": "forecast",
-    "position": 209,
+    "position": 8,
     "icon": "WarningAmberOutlined",
     "required": false,
     "development_only": false,
@@ -359,14 +359,14 @@
   {
     "code": "projecoes_acuracia_justificativas",
     "parent_code": "section_planejamento",
-    "label": "Acurácia · justificativas",
-    "path": "/projecoes/acuracia/justificativas",
+    "label": "Justificativas de variação",
+    "path": "/projecoes/precisao/justificativas",
     "renderer": "ForecastAccuracy",
     "view_params": {
       "aba": "acks"
     },
     "permission_module": "forecast",
-    "position": 210,
+    "position": 9,
     "icon": "FactCheckOutlined",
     "required": false,
     "development_only": false,
@@ -376,14 +376,14 @@
   {
     "code": "projecoes_configuracao",
     "parent_code": "section_planejamento",
-    "label": "Configuração e execução",
+    "label": "Rodar modelos de previsão",
     "path": "/projecoes/configuracao",
     "renderer": "Forecast",
     "view_params": {
       "tab": "config"
     },
     "permission_module": "forecast",
-    "position": 211,
+    "position": 4,
     "icon": "SettingsOutlined",
     "required": false,
     "development_only": false,
@@ -400,7 +400,7 @@
       "tab": "rules"
     },
     "permission_module": "forecast",
-    "position": 212,
+    "position": 5,
     "icon": "RuleOutlined",
     "required": false,
     "development_only": false,
@@ -410,14 +410,14 @@
   {
     "code": "projecoes_historico",
     "parent_code": "section_planejamento",
-    "label": "Histórico de projeções",
+    "label": "Arquivo de previsões",
     "path": "/projecoes/historico",
     "renderer": "Forecast",
     "view_params": {
       "tab": "history"
     },
     "permission_module": "forecast",
-    "position": 213,
+    "position": 6,
     "icon": "HistoryOutlined",
     "required": false,
     "development_only": false,
@@ -427,7 +427,7 @@
   {
     "code": "section_otimizacao",
     "parent_code": null,
-    "label": "Otimização",
+    "label": "Otimizar custos",
     "path": "/otimizacao/inicio",
     "renderer": "ModuleIndex",
     "view_params": {},
@@ -442,12 +442,12 @@
   {
     "code": "otimizacao_oportunidades",
     "parent_code": "section_otimizacao",
-    "label": "Oportunidades",
+    "label": "Oportunidades de economia",
     "path": "/otimizacao/oportunidades",
     "renderer": "Savings",
     "view_params": {},
     "permission_module": "savings",
-    "position": 301,
+    "position": 1,
     "icon": "SavingsOutlined",
     "required": false,
     "development_only": false,
@@ -457,14 +457,14 @@
   {
     "code": "otimizacao_compromissos_e_compras",
     "parent_code": "section_otimizacao",
-    "label": "Compromissos e compras",
+    "label": "Compras e compromissos",
     "path": "/otimizacao/compromissos-e-compras",
     "renderer": "Savings",
     "view_params": {
       "tab": "compras-compromissos"
     },
     "permission_module": "savings",
-    "position": 302,
+    "position": 2,
     "icon": "EventAvailableOutlined",
     "required": false,
     "development_only": false,
@@ -473,8 +473,8 @@
   },
   {
     "code": "otimizacao_desligamento_painel",
-    "parent_code": "section_otimizacao",
-    "label": "Desligamento · painel",
+    "parent_code": "section_panorama",
+    "label": "Painel de desligamentos",
     "path": "/otimizacao/desligamento/painel",
     "renderer": "Savings",
     "view_params": {
@@ -482,7 +482,7 @@
       "subview": "dashboard"
     },
     "permission_module": "savings",
-    "position": 303,
+    "position": 7,
     "icon": "DashboardOutlined",
     "required": false,
     "development_only": false,
@@ -492,7 +492,7 @@
   {
     "code": "otimizacao_desligamento_governanca",
     "parent_code": "section_otimizacao",
-    "label": "Desligamento · governança",
+    "label": "Regras de desligamento",
     "path": "/otimizacao/desligamento/governanca",
     "renderer": "Savings",
     "view_params": {
@@ -500,7 +500,7 @@
       "subview": "governance"
     },
     "permission_module": "savings",
-    "position": 304,
+    "position": 3,
     "icon": "RuleOutlined",
     "required": false,
     "development_only": false,
@@ -510,7 +510,7 @@
   {
     "code": "otimizacao_desligamento_excecoes",
     "parent_code": "section_otimizacao",
-    "label": "Desligamento · exceções",
+    "label": "Exceções de desligamento",
     "path": "/otimizacao/desligamento/excecoes",
     "renderer": "Savings",
     "view_params": {
@@ -518,7 +518,7 @@
       "subview": "exceptions"
     },
     "permission_module": "savings",
-    "position": 305,
+    "position": 4,
     "icon": "FactCheckOutlined",
     "required": false,
     "development_only": false,
@@ -528,7 +528,7 @@
   {
     "code": "otimizacao_recursos_orfaos",
     "parent_code": "section_otimizacao",
-    "label": "Recursos · órfãos atuais",
+    "label": "Recursos sem uso",
     "path": "/otimizacao/recursos-orfaos",
     "renderer": "Savings",
     "view_params": {
@@ -536,7 +536,7 @@
       "subview": "current"
     },
     "permission_module": "savings",
-    "position": 306,
+    "position": 5,
     "icon": "StorageOutlined",
     "required": false,
     "development_only": false,
@@ -546,7 +546,7 @@
   {
     "code": "otimizacao_economia_gerada",
     "parent_code": "section_otimizacao",
-    "label": "Recursos · economia gerada",
+    "label": "Economia realizada",
     "path": "/otimizacao/economia-gerada",
     "renderer": "Savings",
     "view_params": {
@@ -554,7 +554,7 @@
       "subview": "savings"
     },
     "permission_module": "savings",
-    "position": 307,
+    "position": 6,
     "icon": "SavingsOutlined",
     "required": false,
     "development_only": false,
@@ -564,7 +564,7 @@
   {
     "code": "section_dados",
     "parent_code": null,
-    "label": "Dados e operação",
+    "label": "Operação de dados",
     "path": "/dados/inicio",
     "renderer": "ModuleIndex",
     "view_params": {},
@@ -577,16 +577,31 @@
     "api_prefixes": []
   },
   {
+    "code": "section_consultas",
+    "parent_code": null,
+    "label": "Análises",
+    "path": "/consultas/inicio",
+    "renderer": "ModuleIndex",
+    "view_params": {},
+    "permission_module": null,
+    "position": 401,
+    "icon": "SearchOutlined",
+    "required": false,
+    "development_only": false,
+    "legacy_path": null,
+    "api_prefixes": []
+  },
+  {
     "code": "dados_fontes",
     "parent_code": "section_dados",
-    "label": "Fontes de dados",
+    "label": "Fontes de custo",
     "path": "/dados/fontes",
     "renderer": "Connections",
     "view_params": {
       "view": "connections"
     },
     "permission_module": "connections",
-    "position": 401,
+    "position": 1,
     "icon": "CloudOutlined",
     "required": false,
     "development_only": false,
@@ -603,7 +618,7 @@
       "tab": "destinations"
     },
     "permission_module": "destinations",
-    "position": 402,
+    "position": 2,
     "icon": "TableChartOutlined",
     "required": false,
     "development_only": false,
@@ -613,14 +628,14 @@
   {
     "code": "dados_catalogo_relacionamentos",
     "parent_code": "section_dados",
-    "label": "Relacionamentos",
+    "label": "Relações entre dados",
     "path": "/dados/catalogo/relacionamentos",
     "renderer": "Tables",
     "view_params": {
       "tab": "relationship"
     },
     "permission_module": "destinations",
-    "position": 403,
+    "position": 3,
     "icon": "AccountTreeOutlined",
     "required": false,
     "development_only": false,
@@ -630,12 +645,12 @@
   {
     "code": "dados_fluxos",
     "parent_code": "section_dados",
-    "label": "Fluxos de dados",
+    "label": "Pipelines de dados",
     "path": "/dados/fluxos",
     "renderer": "PipelineBuilder",
     "view_params": {},
     "permission_module": "etl",
-    "position": 404,
+    "position": 4,
     "icon": "AccountTreeOutlined",
     "required": false,
     "development_only": false,
@@ -645,14 +660,14 @@
   {
     "code": "operacoes_dados",
     "parent_code": "section_dados",
-    "label": "Execuções de dados",
+    "label": "Execuções de carga",
     "path": "/operacoes/dados",
     "renderer": "Reprocess",
     "view_params": {
       "tab": "data"
     },
     "permission_module": "etl",
-    "position": 405,
+    "position": 5,
     "icon": "SyncOutlined",
     "required": false,
     "development_only": false,
@@ -662,7 +677,7 @@
   {
     "code": "operacoes_projecoes",
     "parent_code": "section_dados",
-    "label": "Execuções de forecast",
+    "label": "Rodadas de previsão",
     "path": "/operacoes/projecoes",
     "renderer": "Reprocess",
     "view_params": {
@@ -670,7 +685,7 @@
       "subtab": "forecast"
     },
     "permission_module": "etl",
-    "position": 406,
+    "position": 6,
     "icon": "TrendingUpOutlined",
     "required": false,
     "development_only": false,
@@ -680,15 +695,15 @@
   {
     "code": "operacoes_acuracia",
     "parent_code": "section_dados",
-    "label": "Acurácia do forecast",
-    "path": "/operacoes/acuracia",
+    "label": "Qualidade das previsões",
+    "path": "/operacoes/precisao",
     "renderer": "Reprocess",
     "view_params": {
       "tab": "forecast",
       "subtab": "accuracy"
     },
     "permission_module": "etl",
-    "position": 407,
+    "position": 7,
     "icon": "AutoGraphOutlined",
     "required": false,
     "development_only": false,
@@ -698,14 +713,14 @@
   {
     "code": "operacoes_rateios",
     "parent_code": "section_dados",
-    "label": "Custo compartilhado",
+    "label": "Alocação de custo compartilhado",
     "path": "/operacoes/rateios",
     "renderer": "Reprocess",
     "view_params": {
       "tab": "shared"
     },
     "permission_module": "etl",
-    "position": 408,
+    "position": 8,
     "icon": "PaidOutlined",
     "required": false,
     "development_only": false,
@@ -715,7 +730,7 @@
   {
     "code": "operacoes_cubos",
     "parent_code": "section_dados",
-    "label": "Materialização de cubos",
+    "label": "Processamento de cubos",
     "path": "/operacoes/cubos",
     "renderer": "Reprocess",
     "view_params": {
@@ -723,7 +738,7 @@
       "subtab": "cubes"
     },
     "permission_module": "etl",
-    "position": 409,
+    "position": 9,
     "icon": "DataObjectOutlined",
     "required": false,
     "development_only": false,
@@ -733,14 +748,14 @@
   {
     "code": "operacoes_extracoes",
     "parent_code": "section_dados",
-    "label": "Extrações",
+    "label": "Coletas da origem",
     "path": "/operacoes/extracoes",
     "renderer": "Reprocess",
     "view_params": {
       "tab": "extraction"
     },
     "permission_module": "etl",
-    "position": 410,
+    "position": 11,
     "icon": "CloudOutlined",
     "required": false,
     "development_only": false,
@@ -750,14 +765,14 @@
   {
     "code": "operacoes_agendamentos",
     "parent_code": "section_dados",
-    "label": "Agendamentos",
+    "label": "Agendamentos de execução",
     "path": "/operacoes/agendamentos",
     "renderer": "Reprocess",
     "view_params": {
       "tab": "schedules"
     },
     "permission_module": "etl",
-    "position": 411,
+    "position": 12,
     "icon": "ScheduleOutlined",
     "required": false,
     "development_only": false,
@@ -767,14 +782,14 @@
   {
     "code": "operacoes_historico",
     "parent_code": "section_dados",
-    "label": "Histórico de execuções",
+    "label": "Log de execuções",
     "path": "/operacoes/historico",
     "renderer": "Reprocess",
     "view_params": {
       "tab": "logs"
     },
     "permission_module": "etl",
-    "position": 412,
+    "position": 13,
     "icon": "HistoryOutlined",
     "required": false,
     "development_only": false,
@@ -784,14 +799,14 @@
   {
     "code": "dados_explorador_destinos",
     "parent_code": "section_dados",
-    "label": "Explorador · tabelas de destino",
+    "label": "Análise: tabelas de destino",
     "path": "/dados/explorador/destinos",
     "renderer": "Analysis",
     "view_params": {
       "tab": "destino"
     },
     "permission_module": "analysis",
-    "position": 413,
+    "position": 14,
     "icon": "TableChartOutlined",
     "required": false,
     "development_only": false,
@@ -801,14 +816,14 @@
   {
     "code": "dados_explorador_fontes",
     "parent_code": "section_dados",
-    "label": "Explorador · fontes de origem",
+    "label": "Análise: fontes de origem",
     "path": "/dados/explorador/fontes",
     "renderer": "Analysis",
     "view_params": {
       "tab": "fontes"
     },
     "permission_module": "analysis",
-    "position": 414,
+    "position": 15,
     "icon": "CloudOutlined",
     "required": false,
     "development_only": false,
@@ -818,7 +833,7 @@
   {
     "code": "dados_explorador_origem",
     "parent_code": "section_dados",
-    "label": "Base de origem",
+    "label": "Dados brutos (origem)",
     "path": "/dados/explorador/origem",
     "renderer": "Analysis",
     "view_params": {
@@ -826,7 +841,7 @@
       "etapa": "origem"
     },
     "permission_module": "analysis",
-    "position": 415,
+    "position": 16,
     "icon": "StorageOutlined",
     "required": false,
     "development_only": false,
@@ -836,7 +851,7 @@
   {
     "code": "dados_explorador_preparados",
     "parent_code": "section_dados",
-    "label": "Base preparada",
+    "label": "Dados preparados",
     "path": "/dados/explorador/preparados",
     "renderer": "Analysis",
     "view_params": {
@@ -844,7 +859,7 @@
       "etapa": "preparacao"
     },
     "permission_module": "analysis",
-    "position": 416,
+    "position": 17,
     "icon": "DataObjectOutlined",
     "required": false,
     "development_only": false,
@@ -854,7 +869,7 @@
   {
     "code": "dados_explorador_consolidados",
     "parent_code": "section_dados",
-    "label": "Base consolidada",
+    "label": "Dados consolidados",
     "path": "/dados/explorador/consolidados",
     "renderer": "Analysis",
     "view_params": {
@@ -862,7 +877,7 @@
       "etapa": "consolidacao"
     },
     "permission_module": "analysis",
-    "position": 417,
+    "position": 18,
     "icon": "PaidOutlined",
     "required": false,
     "development_only": false,
@@ -872,14 +887,14 @@
   {
     "code": "dados_explorador_temporarios",
     "parent_code": "section_dados",
-    "label": "Área temporária",
+    "label": "Área de staging",
     "path": "/dados/explorador/temporarios",
     "renderer": "Analysis",
     "view_params": {
       "tab": "temporarios"
     },
     "permission_module": "analysis",
-    "position": 418,
+    "position": 19,
     "icon": "DeleteSweepOutlined",
     "required": false,
     "development_only": false,
@@ -888,15 +903,15 @@
   },
   {
     "code": "dados_explorador_tabelas_dinamicas",
-    "parent_code": "section_dados",
-    "label": "Explorador · tabelas dinâmicas",
+    "parent_code": "section_consultas",
+    "label": "Pivot de custos",
     "path": "/dados/explorador/tabelas-dinamicas",
     "renderer": "Analysis",
     "view_params": {
       "tab": "pivot"
     },
     "permission_module": "analysis",
-    "position": 419,
+    "position": 1,
     "icon": "AutoGraphOutlined",
     "required": false,
     "development_only": false,
@@ -905,15 +920,15 @@
   },
   {
     "code": "dados_explorador_busca",
-    "parent_code": "section_dados",
-    "label": "Explorador · busca na fonte",
+    "parent_code": "section_consultas",
+    "label": "Busca na origem",
     "path": "/dados/explorador/busca",
     "renderer": "Analysis",
     "view_params": {
       "tab": "busca"
     },
     "permission_module": "analysis",
-    "position": 420,
+    "position": 2,
     "icon": "ScienceOutlined",
     "required": false,
     "development_only": false,
@@ -923,7 +938,7 @@
   {
     "code": "section_governanca",
     "parent_code": null,
-    "label": "Governança",
+    "label": "Políticas e governança",
     "path": "/governanca/inicio",
     "renderer": "ModuleIndex",
     "view_params": {},
@@ -938,14 +953,14 @@
   {
     "code": "governanca_organizacao",
     "parent_code": "section_governanca",
-    "label": "Organização",
+    "label": "Estrutura organizacional",
     "path": "/governanca/organizacao",
     "renderer": "Governance",
     "view_params": {
       "tab": "organization"
     },
     "permission_module": "planning",
-    "position": 501,
+    "position": 1,
     "icon": "CorporateFareOutlined",
     "required": false,
     "development_only": false,
@@ -955,14 +970,14 @@
   {
     "code": "governanca_classificacao_de_projetos",
     "parent_code": "section_governanca",
-    "label": "Classificação de projetos",
+    "label": "Classificação por projeto",
     "path": "/governanca/classificacao-de-projetos",
     "renderer": "Governance",
     "view_params": {
       "tab": "classification"
     },
     "permission_module": "rules",
-    "position": 502,
+    "position": 2,
     "icon": "LocalOfferOutlined",
     "required": false,
     "development_only": false,
@@ -972,7 +987,7 @@
   {
     "code": "governanca_regras_de_ajuste",
     "parent_code": "section_governanca",
-    "label": "Regras de ajustes",
+    "label": "Regras de ajuste de custo",
     "path": "/governanca/regras-de-ajuste",
     "renderer": "Governance",
     "view_params": {
@@ -980,7 +995,7 @@
       "subtab": "adjustments"
     },
     "permission_module": "rules",
-    "position": 503,
+    "position": 3,
     "icon": "SettingsOutlined",
     "required": false,
     "development_only": false,
@@ -990,7 +1005,7 @@
   {
     "code": "governanca_compromissos",
     "parent_code": "section_governanca",
-    "label": "Reservas e Savings Plans",
+    "label": "Compromissos de tarifa (RI e Savings Plans)",
     "path": "/governanca/compromissos",
     "renderer": "Governance",
     "view_params": {
@@ -998,7 +1013,7 @@
       "subtab": "clone-rules"
     },
     "permission_module": "reservations",
-    "position": 504,
+    "position": 4,
     "icon": "SavingsOutlined",
     "required": false,
     "development_only": false,
@@ -1008,14 +1023,14 @@
   {
     "code": "governanca_contratos",
     "parent_code": "section_governanca",
-    "label": "Contratos e compromissos",
+    "label": "Contratos financeiros",
     "path": "/governanca/contratos",
     "renderer": "Governance",
     "view_params": {
       "tab": "financial-contracts"
     },
     "permission_module": "rules",
-    "position": 505,
+    "position": 5,
     "icon": "ReceiptLongOutlined",
     "required": false,
     "development_only": false,
@@ -1024,15 +1039,15 @@
   },
   {
     "code": "governanca_cubos",
-    "parent_code": "section_governanca",
-    "label": "Cubos analíticos",
+    "parent_code": "section_dados",
+    "label": "Modelos analíticos",
     "path": "/governanca/cubos",
     "renderer": "Governance",
     "view_params": {
       "tab": "cost-relationship"
     },
     "permission_module": "gold",
-    "position": 506,
+    "position": 10,
     "icon": "DataObjectOutlined",
     "required": false,
     "development_only": false,
@@ -1042,7 +1057,7 @@
   {
     "code": "section_administracao",
     "parent_code": null,
-    "label": "Administração",
+    "label": "Configurações e acesso",
     "path": "/administracao/inicio",
     "renderer": "ModuleIndex",
     "view_params": {},
@@ -1057,14 +1072,14 @@
   {
     "code": "administracao_pessoas",
     "parent_code": "section_administracao",
-    "label": "Pessoas e acessos",
+    "label": "Usuários e acessos",
     "path": "/administracao/pessoas",
     "renderer": "Admin",
     "view_params": {
       "tab": "users"
     },
     "permission_module": "users",
-    "position": 601,
+    "position": 1,
     "icon": "ManageAccountsOutlined",
     "required": false,
     "development_only": false,
@@ -1074,14 +1089,14 @@
   {
     "code": "administracao_grupos",
     "parent_code": "section_administracao",
-    "label": "Grupos",
+    "label": "Grupos de acesso",
     "path": "/administracao/grupos",
     "renderer": "Admin",
     "view_params": {
       "tab": "groups"
     },
     "permission_module": "groups",
-    "position": 602,
+    "position": 2,
     "icon": "CorporateFareOutlined",
     "required": false,
     "development_only": false,
@@ -1091,14 +1106,14 @@
   {
     "code": "administracao_funcoes",
     "parent_code": "section_administracao",
-    "label": "Funções e permissões",
+    "label": "Papéis e permissões",
     "path": "/administracao/funcoes",
     "renderer": "Admin",
     "view_params": {
       "tab": "roles"
     },
     "permission_module": "roles",
-    "position": 603,
+    "position": 3,
     "icon": "VpnKeyOutlined",
     "required": false,
     "development_only": false,
@@ -1108,12 +1123,12 @@
   {
     "code": "administracao_auditoria",
     "parent_code": "section_administracao",
-    "label": "Trilha de auditoria",
+    "label": "Registro de auditoria",
     "path": "/administracao/auditoria",
     "renderer": "Audit",
     "view_params": {},
     "permission_module": "audit",
-    "position": 604,
+    "position": 4,
     "icon": "FactCheckOutlined",
     "required": false,
     "development_only": false,
@@ -1123,12 +1138,12 @@
   {
     "code": "administracao_identidade",
     "parent_code": "section_administracao",
-    "label": "Login corporativo",
+    "label": "Autenticação corporativa",
     "path": "/administracao/identidade",
     "renderer": "SsoProviders",
     "view_params": {},
     "permission_module": "auth",
-    "position": 605,
+    "position": 5,
     "icon": "VpnKeyOutlined",
     "required": false,
     "development_only": false,
@@ -1138,12 +1153,12 @@
   {
     "code": "administracao_modulos",
     "parent_code": "section_administracao",
-    "label": "Módulos",
+    "label": "Módulos do sistema",
     "path": "/administracao/modulos",
     "renderer": "Modules",
     "view_params": {},
     "permission_module": "modules",
-    "position": 699,
+    "position": 7,
     "icon": "SettingsOutlined",
     "required": true,
     "development_only": false,
@@ -1153,14 +1168,14 @@
   {
     "code": "governanca_reservas_azure",
     "parent_code": "section_governanca",
-    "label": "Reservas Azure",
+    "label": "Reservas de capacidade Azure",
     "path": "/governanca/reservas-azure",
     "renderer": "Governance",
     "view_params": {
       "tab": "reservas"
     },
     "permission_module": "reservations",
-    "position": 800,
+    "position": 6,
     "icon": "HistoryOutlined",
     "required": false,
     "development_only": false,
@@ -1171,14 +1186,14 @@
   {
     "code": "governanca_politicas_de_tags",
     "parent_code": "section_governanca",
-    "label": "Tags Automatizadas",
+    "label": "Políticas de tags",
     "path": "/governanca/politicas-de-tags",
     "renderer": "Governance",
     "view_params": {
       "tab": "tags"
     },
     "permission_module": "azure_tag_policy",
-    "position": 801,
+    "position": 7,
     "icon": "HistoryOutlined",
     "required": false,
     "development_only": false,
@@ -1189,14 +1204,14 @@
   {
     "code": "planejamento_carta_de_credito",
     "parent_code": "section_planejamento",
-    "label": "Carta de crédito",
+    "label": "Cartas de crédito",
     "path": "/planejamento/carta-de-credito",
     "renderer": "FinancialPlanning",
     "view_params": {
       "tab": "carta-credito"
     },
     "permission_module": "planning",
-    "position": 802,
+    "position": 10,
     "icon": "HistoryOutlined",
     "required": false,
     "development_only": false,
@@ -1207,14 +1222,14 @@
   {
     "code": "planejamento_defesa_orcamentaria",
     "parent_code": "section_planejamento",
-    "label": "Defesa orçamentária",
+    "label": "Defesa do orçamento",
     "path": "/planejamento/defesa-orcamentaria",
     "renderer": "FinancialPlanning",
     "view_params": {
       "tab": "defesa-orcamentaria"
     },
     "permission_module": "planning",
-    "position": 803,
+    "position": 11,
     "icon": "HistoryOutlined",
     "required": false,
     "development_only": false,
@@ -1225,7 +1240,7 @@
   {
     "code": "planejamento_pedidos_sap",
     "parent_code": "section_planejamento",
-    "label": "Pedidos SAP",
+    "label": "Pedidos no SAP",
     "path": "/planejamento/pedidos-sap",
     "renderer": "FinancialPlanning",
     "view_params": {
@@ -1233,12 +1248,27 @@
       "subview": "pedidos-sap"
     },
     "permission_module": "planning",
-    "position": 804,
+    "position": 12,
     "icon": "HistoryOutlined",
     "required": false,
     "development_only": false,
     "legacy_path": "/planejamento",
     "api_prefixes": [],
     "visible": false
+  },
+  {
+    "code": "administracao_conectores",
+    "parent_code": "section_administracao",
+    "label": "Conexões de nuvem",
+    "path": "/administracao/conectores",
+    "renderer": "Connectors",
+    "view_params": {},
+    "permission_module": "connections",
+    "position": 6,
+    "icon": "CableOutlined",
+    "required": false,
+    "development_only": false,
+    "legacy_path": null,
+    "api_prefixes": []
   }
 ]

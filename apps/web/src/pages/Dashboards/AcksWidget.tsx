@@ -3,7 +3,7 @@ import { dataDisplayText } from "../../utils/dataPresentation";
 import { useEffect, useState } from "react";
 import Plot from "@/components/Plot";
 import { Alert, Box, Button, Chip, CircularProgress, Collapse, FormControl, IconButton, InputLabel, LinearProgress, MenuItem, Paper, Select, Stack, Table, TableBody, TableCell, TableContainer, TableHead, TableRow, TextField, Tooltip, Typography } from "@mui/material";
-import { Add, ArrowDownward, ArrowUpward, EditNote, Remove } from "@mui/icons-material";
+import { AddOutlined, ArrowDownwardOutlined, ArrowUpwardOutlined, EditNoteOutlined, RemoveOutlined } from "@mui/icons-material";
 import { ForecastAck, ForecastAccuracyDeltaSeries, ForecastDesvioItem, ForecastDesvioSubcat, createForecastAck, getForecastAccuracyDeltaSeries, getForecastAccuracyDesvios, getForecastAccuracyDesviosSubcategories, getForecastAccuracyMonths, getForecastAcks, getForecastConfigs } from "../../services/api";
 
 const money = new Intl.NumberFormat("pt-BR", { maximumFractionDigits: 0 });
@@ -52,11 +52,11 @@ const SEVERITY_ORDER: Record<string, number> = {
 function DesvioRow({ item, ack, expanded, subcategories, loading, onToggle, onSubcatSeries, onAck }: { item: ForecastDesvioItem; ack: ForecastAck | undefined; expanded: boolean; subcategories?: ForecastDesvioSubcat[]; loading: boolean; onToggle: () => void; onSubcatSeries: (item: ForecastDesvioItem, subcategory: ForecastDesvioSubcat) => void; onAck: () => void }) {
   const justified = Boolean(ack && ack.active !== false);
   const variance = Number(item.variance || 0);
-  const statusLabel = variance > 0 ? "Acima do projetado" : variance < 0 ? "Abaixo do projetado" : "Sem variação";
+  const statusLabel = variance > 0 ? "Acima do previsto" : variance < 0 ? "Abaixo do previsto" : "Sem diferença";
   return (
     <>
     <TableRow hover>
-      <TableCell padding="checkbox"><IconButton size="small" aria-label={`${expanded ? "Fechar" : "Abrir"} detalhe de ${item.name}`} onClick={onToggle}>{expanded ? <Remove fontSize="small" /> : <Add fontSize="small" />}</IconButton></TableCell>
+      <TableCell padding="checkbox"><IconButton size="small" aria-label={`${expanded ? "Fechar" : "Abrir"} detalhe de ${item.name}`} onClick={onToggle}>{expanded ? <RemoveOutlined fontSize="small" /> : <AddOutlined fontSize="small" />}</IconButton></TableCell>
       <TableCell>
         <Typography variant="body2" fontWeight={600}>{item.name}</Typography>
         <Typography variant="caption" color="text.secondary" sx={{ display: "block", maxWidth: 240 }}>
@@ -72,7 +72,7 @@ function DesvioRow({ item, ack, expanded, subcategories, loading, onToggle, onSu
       <TableCell align="center">
         <Tooltip title={statusLabel}>
           <Box component="span" sx={{ display: "inline-flex", color: variance > 0 ? "#DC2626" : variance < 0 ? "#16A34A" : "text.disabled" }}>
-            {variance > 0 ? <ArrowUpward fontSize="small" /> : variance < 0 ? <ArrowDownward fontSize="small" /> : <Remove fontSize="small" />}
+            {variance > 0 ? <ArrowUpwardOutlined fontSize="small" /> : variance < 0 ? <ArrowDownwardOutlined fontSize="small" /> : <RemoveOutlined fontSize="small" />}
           </Box>
         </Tooltip>
       </TableCell>
@@ -83,10 +83,10 @@ function DesvioRow({ item, ack, expanded, subcategories, loading, onToggle, onSu
             <Typography variant="body2" sx={{ maxWidth: 300 }}>{ack?.reason}</Typography>
           </Stack>
         ) : <Stack direction="row" spacing={0.5} alignItems="center" flexWrap="wrap">
-          <Chip size="small" color="warning" label="Desvio não justificado" variant="outlined" />
-          <Tooltip title="Reconhecer desvio">
-            <IconButton size="small" onClick={onAck} aria-label="Reconhecer desvio" sx={{ color: "#5B00CB" }}>
-              <EditNote fontSize="small" />
+          <Chip size="small" color="warning" label="Variação sem justificativa" variant="outlined" />
+          <Tooltip title="Justificar variação">
+            <IconButton size="small" onClick={onAck} aria-label="Justificar variação" sx={{ color: "#0B3FA8" }}>
+              <EditNoteOutlined fontSize="small" />
             </IconButton>
           </Tooltip>
         </Stack>}
@@ -94,7 +94,7 @@ function DesvioRow({ item, ack, expanded, subcategories, loading, onToggle, onSu
     </TableRow>
     <TableRow><TableCell colSpan={8} sx={{ py: 0, borderBottom: expanded ? undefined : 0 }}><Collapse in={expanded} timeout="auto" unmountOnExit><Box sx={{ py: 1.5, px: 2 }}>
       <Typography variant="subtitle2" fontWeight={700} mb={1}>Detalhe por subcategoria · {item.path.join(" > ")}</Typography>
-      {loading ? <CircularProgress size={20} /> : subcategories?.length ? <Table size="small"><TableHead><TableRow><TableCell>Subcategoria</TableCell><TableCell align="right">Projetado</TableCell><TableCell align="right">Realizado</TableCell><TableCell align="right" sx={{ color: "#DC2626" }}>Desvio</TableCell></TableRow></TableHead><TableBody>{subcategories.map((sub) => <TableRow key={sub.subcategory}><TableCell><Stack direction="row" alignItems="center" gap={0.5}><IconButton size="small" onClick={() => onSubcatSeries(item, sub)} aria-label={`Abrir série diária de ${sub.subcategory}`} title="Ver delta dia a dia"><Add fontSize="small" /></IconButton><Typography variant="body2">{sub.subcategory}</Typography></Stack></TableCell><TableCell align="right">{money.format(sub.forecast_value)}</TableCell><TableCell align="right">{money.format(sub.actual_value)}</TableCell><TableCell align="right" sx={{ color: "#DC2626", fontWeight: 600 }}>{money.format(sub.variance)}</TableCell></TableRow>)}</TableBody></Table> : <Typography variant="body2" color="text.secondary">Nenhuma subcategoria encontrada.</Typography>}
+      {loading ? <CircularProgress size={20} /> : subcategories?.length ? <Table size="small"><TableHead><TableRow><TableCell>Subcategoria</TableCell><TableCell align="right">Projetado</TableCell><TableCell align="right">Efetivado</TableCell><TableCell align="right" sx={{ color: "#DC2626" }}>Variação</TableCell></TableRow></TableHead><TableBody>{subcategories.map((sub) => <TableRow key={sub.subcategory}><TableCell><Stack direction="row" alignItems="center" gap={0.5}><IconButton size="small" onClick={() => onSubcatSeries(item, sub)} aria-label={`Abrir série diária de ${sub.subcategory}`} title="Ver delta dia a dia"><AddOutlined fontSize="small" /></IconButton><Typography variant="body2">{sub.subcategory}</Typography></Stack></TableCell><TableCell align="right">{money.format(sub.forecast_value)}</TableCell><TableCell align="right">{money.format(sub.actual_value)}</TableCell><TableCell align="right" sx={{ color: "#DC2626", fontWeight: 600 }}>{money.format(sub.variance)}</TableCell></TableRow>)}</TableBody></Table> : <Typography variant="body2" color="text.secondary">Nenhuma subcategoria localizada.</Typography>}
     </Box></Collapse></TableCell></TableRow>
     </>
   );
@@ -153,13 +153,13 @@ export default function AcksWidget({ department, hideManualHighlights = false }:
       .catch(e => { if (!cancelled) setError(e instanceof Error ? e.message : String(e)); })
       .finally(() => { if (!cancelled) setLoading(false); });
     // Top 5 positivos/negativos dos desvios do mês: os sem ack ativo são
-    // marcados como "Desvio não justificado" e aparecem junto aos justificados.
+    // marcados como "Desvio sem justificativa" e aparecem junto aos justificados.
     getForecastAccuracyMonths(undefined, department || undefined, "all", false)
       .then(months => {
         if (cancelled) return;
         const run = months.find(item => item.target_month === month);
         if (!run) {
-          if (!cancelled) setDesviosWarning(`Nenhum simulado de acurácia para ${prettyMonth(month)} — sem Top 5 de desvios.`);
+          if (!cancelled) setDesviosWarning(`Nenhum simulado de precisão para ${prettyMonth(month)} — sem Top 5 de variações.`);
           return;
         }
         setRunId(run.run_id);
@@ -235,7 +235,7 @@ export default function AcksWidget({ department, hideManualHighlights = false }:
       setAckTarget(null);
       setAckReason("");
     } catch (reason) {
-      setError(reason instanceof Error ? reason.message : "Falha ao registrar o Ack");
+      setError(reason instanceof Error ? reason.message : "Não foi possível registrar a justificativa");
     } finally {
       setSavingAck(false);
     }
@@ -245,9 +245,9 @@ export default function AcksWidget({ department, hideManualHighlights = false }:
     <Paper elevation={0} sx={{ p: 2, borderRadius: 2, border: "1px solid", borderColor: "divider" }}>
       <Stack direction="row" justifyContent="space-between" alignItems="center" sx={{ mb: 1, flexWrap: "wrap", gap: 1 }}>
         <Box>
-          <Typography variant="h6">Motivos de desvio (Ack)</Typography>
+          <Typography variant="h6">Motivos de variação (justificativas)</Typography>
           <Typography variant="body2" color="text.secondary">
-            Desvios reconhecidos no forecast — padrão: último mês no cutoff do forecast
+            Variações reconhecidas no forecast — padrão: último mês no cutoff do forecast
             {department ? ` · filtrado por: ${department}` : ""}.
           </Typography>
         </Box>
@@ -277,11 +277,11 @@ export default function AcksWidget({ department, hideManualHighlights = false }:
                       <TableCell />
                       <TableCell>Projeto</TableCell>
                       <TableCell align="right">Projetado</TableCell>
-                      <TableCell align="right">Realizado</TableCell>
-                      <TableCell align="right">Desvio</TableCell>
-                      <TableCell align="right">Desvio (%)</TableCell>
-                      <TableCell align="center">Status</TableCell>
-                      <TableCell>Motivo de desvio</TableCell>
+                      <TableCell align="right">Efetivado</TableCell>
+                      <TableCell align="right">Variação</TableCell>
+                      <TableCell align="right">Variação (%)</TableCell>
+                      <TableCell align="center">Situação</TableCell>
+                      <TableCell>Causa da variação</TableCell>
                     </TableRow>
                   </TableHead>
                   <TableBody>
@@ -291,7 +291,7 @@ export default function AcksWidget({ department, hideManualHighlights = false }:
                   </TableBody>
               </Table>
               </TableContainer>
-              {positive.length > 5 && <Button size="small" onClick={() => setShowAllPositive((value) => !value)}>{showAllPositive ? "Ver menos" : "Ver tudo"}</Button>}
+              {positive.length > 5 && <Button size="small" onClick={() => setShowAllPositive((value) => !value)}>{showAllPositive ? "Mostrar menos" : "Mostrar tudo"}</Button>}
             </Box>
           )}
           {/* Top 5 negativos (superestimou) */}
@@ -307,11 +307,11 @@ export default function AcksWidget({ department, hideManualHighlights = false }:
                       <TableCell />
                       <TableCell>Projeto</TableCell>
                       <TableCell align="right">Projetado</TableCell>
-                      <TableCell align="right">Realizado</TableCell>
-                      <TableCell align="right">Desvio</TableCell>
-                      <TableCell align="right">Desvio (%)</TableCell>
-                      <TableCell align="center">Status</TableCell>
-                      <TableCell>Motivo de desvio</TableCell>
+                      <TableCell align="right">Efetivado</TableCell>
+                      <TableCell align="right">Variação</TableCell>
+                      <TableCell align="right">Variação (%)</TableCell>
+                      <TableCell align="center">Situação</TableCell>
+                      <TableCell>Causa da variação</TableCell>
                     </TableRow>
                   </TableHead>
                   <TableBody>
@@ -321,7 +321,7 @@ export default function AcksWidget({ department, hideManualHighlights = false }:
                   </TableBody>
               </Table>
               </TableContainer>
-              {negative.length > 5 && <Button size="small" onClick={() => setShowAllNegative((value) => !value)}>{showAllNegative ? "Ver menos" : "Ver tudo"}</Button>}
+              {negative.length > 5 && <Button size="small" onClick={() => setShowAllNegative((value) => !value)}>{showAllNegative ? "Mostrar menos" : "Mostrar tudo"}</Button>}
             </Box>
           )}
           {/* Highlights — registros criados manualmente (sem run_id), como alertas ordenados */}
@@ -356,7 +356,7 @@ export default function AcksWidget({ department, hideManualHighlights = false }:
         </>
       )}
       <Dialog open={ackTarget !== null} onClose={() => !savingAck && setAckTarget(null)} maxWidth="sm" fullWidth>
-        <DialogTitle>Justificar desvio — {ackTarget?.name}</DialogTitle>
+        <DialogTitle>Justificar variação — {ackTarget?.name}</DialogTitle>
         <DialogContent>
           <Stack gap={2} sx={{ mt: 1 }}>
             <Typography variant="body2" color="text.secondary">{ackTarget?.path.join(" > ")}</Typography>
@@ -366,12 +366,12 @@ export default function AcksWidget({ department, hideManualHighlights = false }:
                 {["Pico sazonal", "Migração", "Projeto novo", "Erro de precificação", "Outro"].map((category) => <MenuItem key={category} value={category}>{category}</MenuItem>)}
               </Select>
             </FormControl>
-            <TextField label="Motivo do Ack" value={ackReason} onChange={(event) => setAckReason(event.target.value)} multiline minRows={4} required autoFocus placeholder="Descreva o motivo do desvio..." />
+            <TextField label="Motivo do aceite" value={ackReason} onChange={(event) => setAckReason(event.target.value)} multiline minRows={4} required autoFocus placeholder="Explique o motivo da variação..." />
           </Stack>
         </DialogContent>
         <DialogActions>
           <Button onClick={() => setAckTarget(null)} disabled={savingAck}>Cancelar</Button>
-          <Button variant="contained" onClick={() => void saveAck()} disabled={savingAck || !ackReason.trim()}>{savingAck ? "Salvando..." : "Registrar Ack"}</Button>
+          <Button variant="contained" onClick={() => void saveAck()} disabled={savingAck || !ackReason.trim()}>{savingAck ? "Salvando..." : "Registrar justificativa"}</Button>
         </DialogActions>
       </Dialog>
       <Dialog open={seriesDialog !== null} onClose={() => setSeriesDialog(null)} maxWidth="lg" fullWidth>
@@ -381,21 +381,21 @@ export default function AcksWidget({ department, hideManualHighlights = false }:
             {seriesDialog.loading && <LinearProgress sx={{ mb: 1.5, borderRadius: 1 }} />}
             {seriesDialog.error && <Alert severity="error" sx={{ mb: 1.5 }}>{dataDisplayText(seriesDialog.error)}</Alert>}
             {seriesDialog.data && <>
-              <Typography variant="body2" color="text.secondary" sx={{ mb: 1.5 }}>{prettyMonth(seriesDialog.data.target_month)} · {seriesDialog.data.department || department || "Todos os departamentos"}</Typography>
+              <Typography variant="body2" color="text.secondary" sx={{ mb: 1.5 }}>{prettyMonth(seriesDialog.data.target_month)} · {seriesDialog.data.department || department || "Todas as unidades"}</Typography>
               <Stack direction="row" spacing={3} sx={{ mb: 2 }} flexWrap="wrap">
                 <Box><Typography variant="caption" color="text.secondary">Projetado</Typography><Typography fontWeight={600}>{money.format(seriesDialog.data.forecast_total)}</Typography></Box>
-                <Box><Typography variant="caption" color="text.secondary">Realizado</Typography><Typography fontWeight={600}>{money.format(seriesDialog.data.actual_total)}</Typography></Box>
+                <Box><Typography variant="caption" color="text.secondary">Efetivado</Typography><Typography fontWeight={600}>{money.format(seriesDialog.data.actual_total)}</Typography></Box>
                 <Box><Typography variant="caption" color="text.secondary">Delta</Typography><Typography fontWeight={600} color={seriesDialog.data.variance >= 0 ? "error.main" : "success.main"}>{money.format(seriesDialog.data.variance)} ({pct(seriesDialog.data.variance_pct)})</Typography></Box>
-                <Box><Typography variant="caption" color="text.secondary">Acurácia</Typography><Typography fontWeight={600}>{pct(seriesDialog.data.accuracy)}</Typography></Box>
-                <Box><Typography variant="caption" color="text.secondary">Desvio diário</Typography><Typography fontWeight={600}>{seriesDialog.data.daily_deviation_day != null ? `dia ${seriesDialog.data.daily_deviation_day}` : "não houve"}</Typography></Box>
+                <Box><Typography variant="caption" color="text.secondary">Precisão</Typography><Typography fontWeight={600}>{pct(seriesDialog.data.accuracy)}</Typography></Box>
+                <Box><Typography variant="caption" color="text.secondary">Variação por dia</Typography><Typography fontWeight={600}>{seriesDialog.data.daily_deviation_day != null ? `dia ${seriesDialog.data.daily_deviation_day}` : "não houve"}</Typography></Box>
               </Stack>
               {seriesDialog.data.points.length ? <Plot data={[
-                { type: "bar", name: "Realizado até o rate", x: seriesDialog.data.points.map((point) => point.day), y: seriesDialog.data.points.map((point) => Math.min(point.actual, point.forecast_rate)), marker: { color: "#16A34A" }, hovertext: seriesDialog.data.points.map((point) => `Dia ${point.day}<br>Realizado total: R$ ${money.format(point.actual)}<br>Rate projetado: R$ ${money.format(point.forecast_rate)}`), hovertemplate: "%{hovertext}<extra>Realizado</extra>" },
-                { type: "bar", name: "Excesso do dia", x: seriesDialog.data.points.map((point) => point.day), y: seriesDialog.data.points.map((point) => Math.max(0, point.actual - point.forecast_rate)), marker: { color: "#DC2626" }, hovertext: seriesDialog.data.points.map((point) => `Dia ${point.day}<br>Realizado total: R$ ${money.format(point.actual)}<br>Rate projetado: R$ ${money.format(point.forecast_rate)}<br>Excesso: R$ ${money.format(Math.max(0, point.actual - point.forecast_rate))}`), hovertemplate: "%{hovertext}<extra>Desvio</extra>" },
-                { type: "scatter", mode: "lines", name: "Rate projetado", x: seriesDialog.data.points.map((point) => point.day), y: seriesDialog.data.points.map((point) => point.forecast_rate), line: { color: "#4338CA", dash: "dash", width: 2 }, hovertext: seriesDialog.data.points.map((point) => `Dia ${point.day}<br>Rate projetado: R$ ${money.format(point.forecast_rate)}`), hovertemplate: "%{hovertext}<extra>Projetado</extra>" },
-                ...(seriesDialog.data.daily_deviation_day != null ? [{ type: "scatter" as const, mode: "lines" as const, name: "Desvio começou", x: [seriesDialog.data.daily_deviation_day, seriesDialog.data.daily_deviation_day], y: [0, Math.max(...seriesDialog.data.points.map((point) => point.actual))], line: { color: "#DC2626", dash: "dot" as const, width: 1.5 }, hovertemplate: `Desvio começou a crescer — dia ${seriesDialog.data.daily_deviation_day}<extra></extra>` }] : []),
-              ]} layout={{ autosize: true, height: 420, margin: { l: 70, r: 20, t: 40, b: 50 }, paper_bgcolor: "transparent", plot_bgcolor: "transparent", barmode: "stack", xaxis: { title: { text: "Dia do mês" }, dtick: 1 }, yaxis: { title: { text: "Valor diário (R$)" }, tickformat: ".2s" }, showlegend: true, legend: { orientation: "h", y: -0.18 } }} config={{ displayModeBar: true, responsive: true }} style={{ width: "100%" }} useResizeHandler /> : <Typography color="text.secondary">Sem pontos diários para este item.</Typography>}
-              <Typography variant="caption" color="text.secondary" sx={{ mt: 1, display: "block" }}>Consumo diário vs rate projetado (total mensal ÷ dias). A partir do dia {seriesDialog.data.daily_deviation_day ?? "—"} o realizado do dia passa a ultrapassar o rate projetado — é quando o desvio começa a crescer (excesso empilhado em vermelho).</Typography>
+                { type: "bar", name: "Efetivado até o rate", x: seriesDialog.data.points.map((point) => point.day), y: seriesDialog.data.points.map((point) => Math.min(point.actual, point.forecast_rate)), marker: { color: "#16A34A" }, hovertext: seriesDialog.data.points.map((point) => `Dia ${point.day}<br>Efetivado total: R$ ${money.format(point.actual)}<br>Taxa prevista: R$ ${money.format(point.forecast_rate)}`), hovertemplate: "%{hovertext}<extra>Efetivado</extra>" },
+                { type: "bar", name: "Excesso do dia", x: seriesDialog.data.points.map((point) => point.day), y: seriesDialog.data.points.map((point) => Math.max(0, point.actual - point.forecast_rate)), marker: { color: "#DC2626" }, hovertext: seriesDialog.data.points.map((point) => `Dia ${point.day}<br>Efetivado total: R$ ${money.format(point.actual)}<br>Taxa prevista: R$ ${money.format(point.forecast_rate)}<br>Excesso: R$ ${money.format(Math.max(0, point.actual - point.forecast_rate))}`), hovertemplate: "%{hovertext}<extra>Variação</extra>" },
+                { type: "scatter", mode: "lines", name: "Taxa prevista", x: seriesDialog.data.points.map((point) => point.day), y: seriesDialog.data.points.map((point) => point.forecast_rate), line: { color: "#0F62FE", dash: "dash", width: 2 }, hovertext: seriesDialog.data.points.map((point) => `Dia ${point.day}<br>Taxa prevista: R$ ${money.format(point.forecast_rate)}`), hovertemplate: "%{hovertext}<extra>Projetado</extra>" },
+                ...(seriesDialog.data.daily_deviation_day != null ? [{ type: "scatter" as const, mode: "lines" as const, name: "Início da variação", x: [seriesDialog.data.daily_deviation_day, seriesDialog.data.daily_deviation_day], y: [0, Math.max(...seriesDialog.data.points.map((point) => point.actual))], line: { color: "#DC2626", dash: "dot" as const, width: 1.5 }, hovertemplate: `Início da variação a crescer — dia ${seriesDialog.data.daily_deviation_day}<extra></extra>` }] : []),
+              ]} layout={{ autosize: true, height: 420, margin: { l: 70, r: 20, t: 40, b: 50 }, paper_bgcolor: "transparent", plot_bgcolor: "transparent", barmode: "stack", xaxis: { title: { text: "Dia do período" }, dtick: 1 }, yaxis: { title: { text: "Valor diário (R$)" }, tickformat: ".2s" }, showlegend: true, legend: { orientation: "h", y: -0.18 } }} config={{ displayModeBar: true, responsive: true }} style={{ width: "100%" }} useResizeHandler /> : <Typography color="text.secondary">Sem dados diários para este item.</Typography>}
+              <Typography variant="caption" color="text.secondary" sx={{ mt: 1, display: "block" }}>Consumo diário vs rate projetado (total mensal ÷ dias). A partir do dia {seriesDialog.data.daily_deviation_day ?? "—"} o efetivado do dia passa a ultrapassar o rate projetado — é quando a variação começa a crescer (excesso empilhado em vermelho).</Typography>
             </>}
           </DialogContent>
         </>}

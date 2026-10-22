@@ -108,38 +108,38 @@ export interface IdeaCreateInput {
 }
 
 export const listIdeas = (params?: Record<string, string | number>) =>
-  api.get<Idea[]>("/ideas", { params }).then((r) => r.data);
+  api.get<Idea[]>("/iniciativas", { params }).then((r) => r.data);
 
-export const getIdea = (id: number) => api.get<Idea>(`/ideas/${id}`).then((r) => r.data);
+export const getIdea = (id: number) => api.get<Idea>(`/iniciativas/${id}`).then((r) => r.data);
 
 export const createIdea = (body: IdeaCreateInput) =>
-  api.post<Idea>("/ideas", body).then((r) => r.data);
+  api.post<Idea>("/iniciativas", body).then((r) => r.data);
 
 export const patchIdea = (id: number, body: Partial<IdeaCreateInput>) =>
-  api.patch<Idea>(`/ideas/${id}`, body).then((r) => r.data);
+  api.patch<Idea>(`/iniciativas/${id}`, body).then((r) => r.data);
 
-export const deleteIdea = (id: number) => api.delete(`/ideas/${id}`);
+export const deleteIdea = (id: number) => api.delete(`/iniciativas/${id}`);
 
 export const transitionIdea = (id: number, status: IdeaStatus) =>
-  api.post<Idea>(`/ideas/${id}/transition`, { status }).then((r) => r.data);
+  api.post<Idea>(`/iniciativas/${id}/transicao`, { status }).then((r) => r.data);
 
 export const getIdeaTimeline = (id: number) =>
-  api.get<IdeaTimeline>(`/ideas/${id}/timeline`).then((r) => r.data);
+  api.get<IdeaTimeline>(`/iniciativas/${id}/linha-do-tempo`).then((r) => r.data);
 
-export const voteIdea = (id: number) => api.post<Idea>(`/ideas/${id}/vote`).then((r) => r.data);
+export const voteIdea = (id: number) => api.post<Idea>(`/iniciativas/${id}/votar`).then((r) => r.data);
 
-export const unvoteIdea = (id: number) => api.delete<Idea>(`/ideas/${id}/vote`).then((r) => r.data);
+export const unvoteIdea = (id: number) => api.delete<Idea>(`/iniciativas/${id}/votar`).then((r) => r.data);
 
 export const listIdeaComments = (id: number) =>
-  api.get<IdeaComment[]>(`/ideas/${id}/comments`).then((r) => r.data);
+  api.get<IdeaComment[]>(`/iniciativas/${id}/comentarios`).then((r) => r.data);
 
 export const addIdeaComment = (id: number, body: string) =>
-  api.post<IdeaComment>(`/ideas/${id}/comments`, { body }).then((r) => r.data);
+  api.post<IdeaComment>(`/iniciativas/${id}/comentarios`, { body }).then((r) => r.data);
 
 export const setIdeaAssignees = (id: number, userIds: number[]) =>
-  api.put<Idea>(`/ideas/${id}/assignees`, { user_ids: userIds }).then((r) => r.data);
+  api.put<Idea>(`/iniciativas/${id}/responsaveis`, { user_ids: userIds }).then((r) => r.data);
 
-export const getIdeasBoard = () => api.get<IdeaBoard>("/ideas/board").then((r) => r.data);
+export const getIdeasBoard = () => api.get<IdeaBoard>("/iniciativas/quadro").then((r) => r.data);
 
 export const getIdeasDashboard = (from?: string, to?: string) =>
-  api.get<IdeasDashboard>("/ideas/dashboard", { params: { from, to } }).then((r) => r.data);
+  api.get<IdeasDashboard>("/iniciativas/painel", { params: { from, to } }).then((r) => r.data);

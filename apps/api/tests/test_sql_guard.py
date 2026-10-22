@@ -73,3 +73,20 @@ def test_consulta_vazia_e_recusada():
 
 def test_show_e_describe_nao_sao_select():
     bad("SHOW TABLES", "Só são permitidas")
+
+
+DESTINATIONS = {"dest_modelo_focus"}
+
+
+def test_destino_com_nome_simples_aceita_silver_e_gold():
+    check_read_only_select("SELECT * FROM iceberg.silver.dest_modelo_focus LIMIT 10", DESTINATIONS)
+    check_read_only_select("SELECT * FROM silver.dest_modelo_focus", DESTINATIONS)
+    check_read_only_select("SELECT * FROM iceberg.gold.dest_modelo_focus", DESTINATIONS)
+    check_read_only_select("SELECT * FROM dest_modelo_focus", DESTINATIONS)
+
+
+def test_destino_com_nome_simples_nao_libera_outro_schema():
+    with pytest.raises(SqlRejected):
+        check_read_only_select("SELECT * FROM iceberg.bronze.dest_modelo_focus", DESTINATIONS)
+    with pytest.raises(SqlRejected):
+        check_read_only_select("SELECT * FROM iceberg.silver.dest_outro", DESTINATIONS)

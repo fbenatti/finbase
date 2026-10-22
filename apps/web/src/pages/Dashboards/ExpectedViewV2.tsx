@@ -30,7 +30,7 @@ import {
   Switch,
   Typography,
 } from "@mui/material";
-import { ChevronRight, ExpandMore } from "@mui/icons-material";
+import { ChevronRightOutlined, ExpandMoreOutlined } from "@mui/icons-material";
 import {
   Department,
   formatApiError,
@@ -45,6 +45,7 @@ import {
 } from "../../services/api";
 import AccuracyWidget from "./BudgetAccuracyWidgetV2";
 import ConsumptionDrillDialog from "../GoldDashboard/ConsumptionDrillDialog";
+import { colors } from "../../theme/tokens";
 
 const money = new Intl.NumberFormat("pt-BR", { maximumFractionDigits: 2 });
 const monthNames = ["Jan", "Fev", "Mar", "Abr", "Mai", "Jun", "Jul", "Ago", "Set", "Out", "Nov", "Dez"];
@@ -55,7 +56,7 @@ const compactMoney = (value: number) => Math.abs(value) >= 1_000_000
     ? `R$ ${(value / 1_000).toLocaleString("pt-BR", { maximumFractionDigits: 1 })} K`
     : `R$ ${money.format(value)}`;
 type ChartGranularity = "accumulated" | "monthly" | "daily";
-const FILTER_PALETTE = ["#6416dc", "#9c4dff", "#3b82f6", "#0f9f83", "#ec8b13", "#d9468d", "#53627d", "#00a8cc", "#a33bd1", "#6f9b20"];
+const FILTER_PALETTE = [colors.brandDark, colors.brandLight, colors.info, "#0f9f83", "#ec8b13", "#d9468d", colors.textSecondary, colors.info, "#BE185D", "#6f9b20"];
 const flattenDepartments = (
   nodes: Department[],
   parents: string[] = [],
@@ -214,7 +215,7 @@ export default function ExpectedViewV2({
         ? undefined
         : departmentOptions.find((department) => department.path === director)
             ?.id;
-      // "Todos os períodos" envia year=0: o backend remove o recorte de ano e
+      // "Todo o período" envia year=0: o backend remove o recorte de ano e
       // traz todo o realizado + forecast disponível (inclusive meses futuros).
       const year = periodFrom && periodTo
         ? (periodFrom.slice(0, 4) === periodTo.slice(0, 4) ? Number(periodFrom.slice(0, 4)) : 0)
@@ -245,7 +246,7 @@ export default function ExpectedViewV2({
           )
             return;
           setError(
-            formatApiError(e, "Não foi possível carregar a Visão Esperada"),
+            formatApiError(e, "Não foi possível carregar a visão prevista"),
           );
         })
         .finally(() => {
@@ -292,7 +293,7 @@ export default function ExpectedViewV2({
       if (chartGranularity === "daily") setDailyGold(result as { available: boolean; rows: Array<{ day: string; realizado: number; [column: string]: unknown }> });
       else setGroupedGold(result as GoldQueryResult);
     }).catch((reason: unknown) => {
-      if (active) setChartQueryError(formatApiError(reason, "Não foi possível carregar a série do gráfico"));
+      if (active) setChartQueryError(formatApiError(reason, "Não foi possível montar a série do gráfico"));
     }).finally(() => { if (active) setChartQueryLoading(false); });
     return () => { active = false; controller.abort(); };
   }, [embedded, table, chartGranularity, groupBy, chartFilters, chartFilterGroups, scopeKey, chartHasType]);
@@ -316,7 +317,7 @@ export default function ExpectedViewV2({
   // otherwise the current month shows only the partial spend and the
   // remaining projection disappears from the chart, cards and cumulative.
   // O mês aberto segue o cutoff D-2 do forecast, não o calendário local.
-  // No início de outubro, setembro ainda pode carregar projeção dos dias restantes.
+  // No início de outubro, setembro ainda pode carregar previsão dos dias restantes.
   // Keep only the latest overlap as the D-2 anchor. Older periods can retain
   // forecast rows from previous runs and must not be stacked again.
   const forecastAnchorPeriod = filteredRows.reduce<string | null>(
@@ -368,12 +369,12 @@ export default function ExpectedViewV2({
     0,
   );
   const forecastOnly = forecast - actual - forecastManual;
-  const realizedBudgetPct = budgetAvailable && budget > 0 ? `${(actual / budget * 100).toLocaleString("pt-BR", { maximumFractionDigits: 1 })}%` : "Sem orçamento";
+  const realizedBudgetPct = budgetAvailable && budget > 0 ? `${(actual / budget * 100).toLocaleString("pt-BR", { maximumFractionDigits: 1 })}%` : "Sem meta";
   const actualEnd = filteredRows.reduce(
     (last, row, index) => (row.actual_value == null ? last : index),
     -1,
   );
-  // Mês corrente aberto: no acumulado, a linha de Realizado termina no último
+  // Mês em curso aberto: no acumulado, a linha de Realizado termina no último
   // mês FECHADO (julho) e o Forecast assume a partir do mês corrente tratando
   // o mês inteiro como forecast — a transição vira um passo mensal normal,
   // sem ponto duplicado nem quebra.
@@ -437,7 +438,7 @@ export default function ExpectedViewV2({
         )
       : 0,
   );
-  // Forecast manual is its own stacked layer on top of the Gold forecast.
+  // Previsão manual is its own stacked layer on top of the Gold forecast.
   const forecastManualBars = filteredRows.map((row) =>
     row.actual_value == null || isForecastAnchor(row)
       ? Math.max(0, forecastManualOf(row))
@@ -462,7 +463,7 @@ export default function ExpectedViewV2({
   const receivedOnForecast = filteredRows.map((row) =>
     sharedOn && row.actual_value == null ? Math.max(0, receivedOf(row)) : 0,
   );
-  const sharedLine = { color: "#EA580C", width: 3 };
+  const sharedLine = { color: colors.accent, width: 3 };
   const sharedFill = "rgba(234,88,12,.28)";
   const forecastBaseCumulative = filteredRows.map((_, index) => {
     if (index < forecastStart) return null;
@@ -488,7 +489,7 @@ export default function ExpectedViewV2({
           y: consumptionCumulative,
           type: "scatter",
           mode: "lines+markers",
-          name: "Realizado",
+          name: "Efetivado",
           fill: "tozeroy",
           fillcolor: "rgba(242,169,0,.22)",
           line: { color: "#F2A900", width: 3 },
@@ -501,7 +502,7 @@ export default function ExpectedViewV2({
                 y: actualCumulative,
                 type: "scatter",
                 mode: "lines+markers",
-                name: "Custo compartilhado",
+                name: "Custo rateado",
                 legendgroup: "shared",
                 fill: "tonexty",
                 fillcolor: sharedFill,
@@ -516,7 +517,7 @@ export default function ExpectedViewV2({
           type: "scatter",
           mode: "lines+markers",
           name: "Orçamento",
-          line: { color: "#5A6378", width: 3 },
+          line: { color: colors.textSecondary, width: 3 },
           marker: { size: 5 },
         }] : []),
         ...(sharedOn
@@ -526,7 +527,7 @@ export default function ExpectedViewV2({
                 y: forecastBaseFilled,
                 type: "scatter",
                 mode: "lines",
-                name: "Forecast base",
+                name: "Previsão base",
                 showlegend: false,
                 hoverinfo: "skip",
                 fill: "tozeroy",
@@ -538,13 +539,13 @@ export default function ExpectedViewV2({
                 y: forecastFilled,
                 type: "scatter",
                 mode: "lines+markers",
-                name: "Custo compartilhado",
+                name: "Custo rateado",
                 legendgroup: "shared",
                 showlegend: false,
                 fill: "tonexty",
                 fillcolor: sharedFill,
                 line: sharedLine,
-                marker: { size: 6, color: "#EA580C" },
+                marker: { size: 6, color: colors.accent },
               },
             ]
           : []),
@@ -564,7 +565,7 @@ export default function ExpectedViewV2({
           y: forecastManualFilled,
           type: "scatter",
           mode: "lines+markers",
-          name: "Forecast manual",
+          name: "Previsão manual",
           fill: "tonexty",
           fillcolor: "rgba(134,239,172,.30)",
           line: { color: "#4ADE80", width: 2 },
@@ -576,7 +577,7 @@ export default function ExpectedViewV2({
           x: labels,
           y: filteredRows.map(consumptionOf),
           type: "bar",
-          name: "Realizado",
+          name: "Efetivado",
           marker: { color: "#F2A900" },
         },
         ...(sharedOn
@@ -585,9 +586,9 @@ export default function ExpectedViewV2({
                 x: labels,
                 y: receivedOnActual,
                 type: "bar",
-                name: "Custo compartilhado",
+                name: "Custo rateado",
                 legendgroup: "shared",
-                marker: { color: "#EA580C" },
+                marker: { color: colors.accent },
               },
             ]
           : []),
@@ -602,7 +603,7 @@ export default function ExpectedViewV2({
           x: labels,
           y: forecastManualBars,
           type: "bar",
-          name: "Forecast manual",
+          name: "Previsão manual",
           marker: { color: "#86EFAC" },
         },
         ...(sharedOn
@@ -611,10 +612,10 @@ export default function ExpectedViewV2({
                 x: labels,
                 y: receivedOnForecast,
                 type: "bar",
-                name: "Custo compartilhado",
+                name: "Custo rateado",
                 legendgroup: "shared",
                 showlegend: false,
-                marker: { color: "#EA580C" },
+                marker: { color: colors.accent },
               },
             ]
           : []),
@@ -624,7 +625,7 @@ export default function ExpectedViewV2({
           type: "scatter",
           mode: "lines+markers",
           name: "Orçamento",
-          line: { color: "#5A6378", width: 3 },
+          line: { color: colors.textSecondary, width: 3 },
           marker: { size: 6 },
         }] : []),
       ];
@@ -648,7 +649,7 @@ export default function ExpectedViewV2({
         const sum = (name: string) => groupedSource.filter((row) => String(groupedField(row, groupBy) ?? "Não informado") === name && String(groupedField(row, "tipo") ?? "").toLowerCase() !== "forecast").reduce((total, row) => total + Number(groupedField(row, "realizado") || 0), 0);
         return sum(b) - sum(a);
       })
-    : ["Realizado"];
+    : ["Efetivado"];
   const visibleGroups = groupNames.slice(0, 6);
   const rowValues = (name: string, period: string, kind: "actual" | "forecast") => groupedSource
     .filter((row) => {
@@ -671,12 +672,12 @@ export default function ExpectedViewV2({
       const forecastCumulativeByMonth = actualValues.map((_, i) => groupedLabels.slice(0, i + 1).reduce((sum, period, j) => sum + actualValues[j] + forecastValues[j], 0));
       const projectedValues = forecastCumulativeByMonth.map((value, i) => i < forecastStart ? null : value);
       return [
-        { x: groupedLabels, y: actualCumulativeByMonth, type: "scatter", mode: "lines+markers", name: `${name} · Realizado`, fill: "tozeroy", fillcolor: `${color}22`, line: { color, width: 2.5 }, marker: { size: 5 } },
+        { x: groupedLabels, y: actualCumulativeByMonth, type: "scatter", mode: "lines+markers", name: `${name} · Efetivado`, fill: "tozeroy", fillcolor: `${color}22`, line: { color, width: 2.5 }, marker: { size: 5 } },
         { x: groupedLabels, y: projectedValues, type: "scatter", mode: "lines+markers", name: `${name} · Forecast`, fill: "tozeroy", fillcolor: `${forecastColor}18`, line: { color: forecastColor, width: 2.5, dash: "dash" }, marker: { size: 5 } },
       ];
     }
     return [
-      { x: groupedLabels, y: actualValues, type: "bar", name: `${name} · Realizado`, marker: { color } },
+      { x: groupedLabels, y: actualValues, type: "bar", name: `${name} · Efetivado`, marker: { color } },
       { x: groupedLabels, y: forecastValues, type: "bar", name: `${name} · Forecast`, marker: { color: forecastColor, pattern: { shape: "/" } } },
     ];
   });
@@ -688,7 +689,7 @@ export default function ExpectedViewV2({
         type: "scatter",
         mode: "lines+markers",
         name: "Orçamento",
-        line: { color: "#5A6378", width: 3 },
+        line: { color: colors.textSecondary, width: 3 },
         marker: { size: 5 },
       }]
     : [];
@@ -789,15 +790,15 @@ export default function ExpectedViewV2({
             type: "bar",
             x: stackedDrivers.map((item) => item.name),
             y: stackedDrivers.map((item) => Number(item.actual_value || 0)),
-            name: "Realizado",
+            name: "Efetivado",
             marker: { color: "#F2A900" },
           },
           {
             type: "bar",
             x: stackedDrivers.map((item) => item.name),
             y: stackedDrivers.map((item) => Number(item.shared_value || 0)),
-            name: "Custo compartilhado",
-            marker: { color: "#EA580C" },
+            name: "Custo rateado",
+            marker: { color: colors.accent },
           },
         ]
       : [
@@ -809,8 +810,8 @@ export default function ExpectedViewV2({
             connector: { line: { color: "#9CA3AF" } },
             increasing: { marker: { color: "#EF4444" } },
             decreasing: { marker: { color: "#16A34A" } },
-            totals: { marker: { color: "#5A6378" } },
-            name: "Drivers da variação",
+            totals: { marker: { color: colors.textSecondary } },
+            name: "Fatores da variação",
           },
         ];
   const pathParts = director.split(" > ").filter(Boolean);
@@ -823,7 +824,7 @@ export default function ExpectedViewV2({
           hovermode: "x unified",
           margin: { l: 82, r: 20, t: 25, b: 120 },
           yaxis: {
-            title: { text: "Consumo e rateio", standoff: 12 },
+            title: { text: "Consumo e alocação", standoff: 12 },
             side: "left",
             showticklabels: true,
             tickprefix: "$",
@@ -880,7 +881,7 @@ export default function ExpectedViewV2({
       sx={{
         flex: 1,
         minWidth: 190,
-        border: "1px solid #E2E5EE",
+        border: "1px solid #E1E8F0",
         borderRadius: "16px",
         borderTop: `3px solid ${color}`,
         boxShadow: "0 8px 24px rgba(24, 39, 75, 0.045)",
@@ -898,7 +899,7 @@ export default function ExpectedViewV2({
         </Typography>
         <Typography variant="caption">
           {caption ??
-            (onOpen ? "Clique para ver o detalhe do consumo" : "Ano corrente")}
+            (onOpen ? "Clique para abrir o detalhe do consumo" : "Exercício atual")}
         </Typography>
       </CardContent>
     </Card>
@@ -981,8 +982,8 @@ export default function ExpectedViewV2({
         "Orçamento",
         "Forecast",
         "Outros",
-        "Realizado",
-        "Custo compartilhado",
+        "Efetivado",
+        "Custo rateado",
       ].includes(name)
     )
       return;
@@ -1017,9 +1018,9 @@ export default function ExpectedViewV2({
                 }}
               >
                 {expanded ? (
-                  <ExpandMore fontSize="small" />
+                  <ExpandMoreOutlined fontSize="small" />
                 ) : (
-                  <ChevronRight fontSize="small" />
+                  <ChevronRightOutlined fontSize="small" />
                 )}
               </IconButton>
             )}
@@ -1065,8 +1066,8 @@ export default function ExpectedViewV2({
         separator=">"
         sx={{ mb: 1.5, "& .MuiBreadcrumbs-separator": { mx: 0.5 } }}
       >
-        <Typography color="text.secondary">Visão esperada</Typography>
-        <Typography color="text.secondary">Variância de Forecast</Typography>
+        <Typography color="text.secondary">Visão prevista</Typography>
+        <Typography color="text.secondary">Variação da previsão</Typography>
         {pathParts.map((name, index) => {
           const path = pathParts.slice(0, index + 1).join(" > ");
           const last = index === pathParts.length - 1;
@@ -1142,8 +1143,8 @@ export default function ExpectedViewV2({
               value={periodFilter}
               onChange={(e) => setPeriodFilter(String(e.target.value))}
             >
-              <MenuItem value="current">Ano atual</MenuItem>
-              <MenuItem value="all">Todos os períodos</MenuItem>
+              <MenuItem value="current">Ano em curso</MenuItem>
+              <MenuItem value="all">Todo o período</MenuItem>
               {years.map((year) => (
                 <MenuItem key={year} value={year}>
                   {year}
@@ -1158,18 +1159,18 @@ export default function ExpectedViewV2({
                 onChange={(_, checked) => setIncludeSharedCost(checked)}
               />
             }
-            label="Custo compartilhado"
+            label="Custo rateado"
           />}
         </Stack>
       </Stack>
 
       <Alert severity="info" sx={{ mb: 2 }}>
-        Forecast = realizado dos meses fechados + no mês corrente, realizado
+        Forecast = efetivado dos meses fechados + no mês corrente, realizado
         parcial com o forecast do restante empilhado + forecast dos meses
-        futuros. Forecast Manual compõe o total projetado. Variação = orçamento
+        futuros. Previsão manual compõe o total projetado. Variação = orçamento
         menos o total projetado consolidado. Com o interruptor ligado,
         o custo compartilhado aparece empilhado em laranja sobre o consumo real
-        — não mistura as duas barras. O card Realizado soma os dois.
+        — não mistura as duas barras. O card Efetivado soma os dois.
       </Alert>
       {error && (
         <Alert severity="error" sx={{ mb: 2 }}>
@@ -1189,25 +1190,25 @@ export default function ExpectedViewV2({
           <CircularProgress />
           <Typography color="text.secondary">
 
-            Consultando custos realizados e projeções…
+            Consultando custos realizados e previsões…
           </Typography>
         </Stack>
       ) : (
         <>
           {!budgetAvailable && <Alert severity="info" sx={{ mb: 2 }}>Orçamento e forecast manual indisponíveis para filtros dimensionais: o planejamento não tem granularidade nessa coluna. A tela omite esses valores em vez de reutilizar totais globais.</Alert>}
           <Stack direction="row" gap={2} flexWrap="wrap" mb={2}>
-            {card("Realizado", actual, "#F2A900", () => { setDrillTipo("realizado"); setDrillLabelsManualForecast(false); setDrillPeriod(undefined); setDrillOpen(true); })}
-            {card("Forecast", forecastOnly, "#7C3AED", () => { setDrillTipo("forecast"); setDrillLabelsManualForecast(false); setDrillPeriod(undefined); setDrillOpen(true); }, `Realizado / orçamento: ${realizedBudgetPct} · horizonte até ${filteredRows[filteredRows.length - 1] ? monthLong(filteredRows[filteredRows.length - 1].period) : "—"}`)}
-            {card("Forecast Manual", budgetAvailable ? forecastManual : "Sem forecast manual para este filtro", "#0EA5E9", undefined, "Planejamento manual consolidado")}
-            {card("Orçamento", budgetAvailable ? budget : "Sem orçamento para este filtro", "#5A6378")}
+            {card("Efetivado", actual, "#F2A900", () => { setDrillTipo("realizado"); setDrillLabelsManualForecast(false); setDrillPeriod(undefined); setDrillOpen(true); })}
+            {card("Forecast", forecastOnly, "#64748B", () => { setDrillTipo("forecast"); setDrillLabelsManualForecast(false); setDrillPeriod(undefined); setDrillOpen(true); }, `Efetivado / orçamento: ${realizedBudgetPct} · horizonte até ${filteredRows[filteredRows.length - 1] ? monthLong(filteredRows[filteredRows.length - 1].period) : "—"}`)}
+            {card("Previsão manual", budgetAvailable ? forecastManual : "Sem previsão manual para este filtro", colors.info, undefined, "Metas manuais consolidadas")}
+            {card("Orçamento", budgetAvailable ? budget : "Sem meta para este filtro", colors.textSecondary)}
             {card(
-              "Total projetado",
+              "Total estimado",
               forecast,
               "#16A34A",
               () => { setDrillTipo("ambos"); setDrillLabelsManualForecast(true); setDrillPeriod(undefined); setDrillOpen(true); },
-              "Realizado + Forecast + Forecast Manual",
+              "Efetivado + Previsão + Previsão manual",
             )}
-            {card("Variação", budgetAvailable ? variance : "Sem base", variance >= 0 ? "#16A34A" : "#EF4444")}
+            {card("Variação", budgetAvailable ? variance : "Sem referência", variance >= 0 ? "#16A34A" : "#EF4444")}
           </Stack>
           <Grid container spacing={2}>
             <Grid item xs={12}>
@@ -1217,7 +1218,7 @@ export default function ExpectedViewV2({
                   p: 2,
                   borderRadius: "18px",
                   bgcolor: "#fff",
-                  border: "1px solid #E2E5EE",
+                  border: "1px solid #E1E8F0",
                   boxShadow: "0 8px 24px rgba(24, 39, 75, 0.045)",
                 }}
               >
@@ -1228,21 +1229,21 @@ export default function ExpectedViewV2({
                     </Typography>
                     <Typography variant="caption" color="text.secondary">
                       {chartGranularity === "daily"
-                        ? "Diário · consumo realizado agrupado pela data real disponível na fonte"
+                        ? "Diário · consumo efetivado agrupado pela data real disponível na fonte"
                         : cumulative
                         ? sharedOn
-                          ? "Acumulado · realizado, custo compartilhado por cima, orçamento e forecast"
-                          : "Acumulado · Realizado, orçamento e forecast"
+                          ? "Acumulado · efetivado, custo compartilhado por cima, orçamento e forecast"
+                          : "Acumulado · Efetivado, orçamento e forecast"
                         : sharedOn
                           ? "Mensal · consumo real e custo compartilhado empilhados; forecast e orçamento"
-                          : "Mensal · Realizado e forecast empilhados (mês corrente: parcial + restante); orçamento em linha"}{" "}
+                          : "Mensal · Efetivado e forecast empilhados (mês corrente: parcial + restante); orçamento em linha"}{" "}
                       · clique para decompor o consumo
                     </Typography>
                   </Box>
                   <Stack direction="row" gap={1} flexWrap="wrap" justifyContent={{ xs: "flex-start", lg: "flex-end" }}>
                     <FormControl size="small" sx={{ minWidth: 190 }}>
-                      <InputLabel>Agrupar por</InputLabel>
-                      <Select label="Agrupar por" value={groupBy} onChange={(event) => setGroupBy(String(event.target.value))}>
+                      <InputLabel>Agrupamento</InputLabel>
+                      <Select label="Agrupamento" value={groupBy} onChange={(event) => setGroupBy(String(event.target.value))}>
                         <MenuItem value="">Nenhum</MenuItem>
                         {orderedGroupByOptions.map((field) => <MenuItem key={field} value={field}>{field.replace(/_/g, " ").replace(/^./, (letter) => letter.toUpperCase())}</MenuItem>)}
                       </Select>
@@ -1265,9 +1266,9 @@ export default function ExpectedViewV2({
                   : chartQueryLoading
                     ? <Stack alignItems="center" justifyContent="center" sx={{ height: 420 }} direction="row" gap={1}><CircularProgress size={22} /><Typography color="text.secondary">Carregando série de custos…</Typography></Stack>
                     : chartGranularity === "daily" && !dailyGold?.rows.length
-                      ? <Alert severity="info" sx={{ mt: 1 }}>Sem dados diários disponíveis neste período.</Alert>
+                      ? <Alert severity="info" sx={{ mt: 1 }}>Sem dados diários neste período.</Alert>
                       : groupBy && chartGranularity !== "daily" && groupedGold && !groupedGold.rows.length
-                        ? <Alert severity="info" sx={{ mt: 1 }}>Sem dados realizados para agrupar por esta coluna no período selecionado.</Alert>
+                        ? <Alert severity="info" sx={{ mt: 1 }}>Sem dados efetivados para agrupar por esta coluna no período escolhido.</Alert>
                         : <Plot
                   useResizeHandler
                   style={{ width: "100%", height: 420, cursor: "pointer" }}
@@ -1282,21 +1283,21 @@ export default function ExpectedViewV2({
 
           <Grid container spacing={2} sx={{ mt: 0.5 }}>
             <Grid item xs={12} md={6}>
-              <Paper elevation={0} sx={{ p: 2, height: "100%", borderRadius: "18px", bgcolor: "#fff", border: "1px solid #E2E5EE", boxShadow: "0 8px 24px rgba(24, 39, 75, 0.045)" }}>
-                <Typography variant="h6">{sharedOn ? "Rateio por departamento" : "Drivers da variação"}</Typography>
-                <Typography variant="caption" color="text.secondary">{sharedOn ? "Laranja empilhado no filho que recebe o custo · clique para abrir" : "Filhos do departamento selecionado · clique na barra para abrir o subnível"}</Typography>
+              <Paper elevation={0} sx={{ p: 2, height: "100%", borderRadius: "18px", bgcolor: "#fff", border: "1px solid #E1E8F0", boxShadow: "0 8px 24px rgba(24, 39, 75, 0.045)" }}>
+                <Typography variant="h6">{sharedOn ? "Alocação por unidade" : "Fatores da variação"}</Typography>
+                <Typography variant="caption" color="text.secondary">{sharedOn ? "Laranja empilhado no nó que recebe o custo · clique para abrir" : "Filhos da unidade selecionada · clique na barra para abrir o subnível"}</Typography>
                 <Plot useResizeHandler style={{ width: "100%", height: 360, cursor: "pointer" }} data={waterfallData} layout={{ ...waterfallLayout, height: 360 }} config={{ responsive: true, displaylogo: false }} onClick={(event) => openDriver(String(event.points?.[0]?.x ?? ""))} />
               </Paper>
             </Grid>
             <Grid item xs={12} md={6}>
-              <Paper variant="outlined" sx={{ p: 2, height: "100%", borderRadius: "18px", borderColor: "#E2E5EE", boxShadow: "0 8px 24px rgba(24, 39, 75, 0.045)" }}>
+              <Paper variant="outlined" sx={{ p: 2, height: "100%", borderRadius: "18px", borderColor: colors.border, boxShadow: "0 8px 24px rgba(24, 39, 75, 0.045)" }}>
                 <Typography variant="overline" color="primary" fontWeight={800} sx={{ letterSpacing: ".08em" }}>TENDÊNCIA</Typography>
-                <Typography variant="h6" fontWeight={750} sx={{ color: "#111b4e" }}>Tendência mensal · Forecast × Realizado</Typography>
-                <Typography variant="caption" color="text.secondary">Consumo realizado e projeção por competência; a série começa no primeiro valor disponível, sem preencher meses iniciais com zero.</Typography>
+                <Typography variant="h6" fontWeight={750} sx={{ color: colors.text }}>Tendência mensal · previsão × efetivado</Typography>
+                <Typography variant="caption" color="text.secondary">Consumo efetivado e previsão por competência; a série começa no primeiro valor disponível, sem preencher meses iniciais com zero.</Typography>
                 <Plot useResizeHandler style={{ width: "100%", height: 320 }} data={[
-                  { x: trendActual.map((point) => point.period), y: trendActual.map((point) => point.value), type: "scatter", mode: "lines+markers", name: "Realizado", line: { color: "#6416dc", width: 3 }, marker: { color: "#6416dc", size: 7 } },
-                  { x: trendForecast.map((point) => point.period), y: trendForecast.map((point) => point.value), type: "scatter", mode: "lines+markers", name: "Forecast", line: { color: "#9c4dff", width: 3, dash: "dash" }, marker: { color: "#9c4dff", size: 7 } },
-                ] as any} layout={{ height: 320, autosize: true, margin: { l: 75, r: 20, t: 15, b: 75 }, yaxis: { tickprefix: "R$ ", separatethousands: true, gridcolor: "#EEF0F7" }, xaxis: { gridcolor: "#fff", tickangle: -35 }, legend: { orientation: "h", x: 0, y: -0.28, yanchor: "top" }, paper_bgcolor: "transparent", plot_bgcolor: "transparent" }} config={{ responsive: true, displaylogo: false }} />
+                  { x: trendActual.map((point) => point.period), y: trendActual.map((point) => point.value), type: "scatter", mode: "lines+markers", name: "Efetivado", line: { color: colors.brandDark, width: 3 }, marker: { color: colors.brandDark, size: 7 } },
+                  { x: trendForecast.map((point) => point.period), y: trendForecast.map((point) => point.value), type: "scatter", mode: "lines+markers", name: "Forecast", line: { color: colors.brandLight, width: 3, dash: "dash" }, marker: { color: colors.brandLight, size: 7 } },
+                ] as any} layout={{ height: 320, autosize: true, margin: { l: 75, r: 20, t: 15, b: 75 }, yaxis: { tickprefix: "R$ ", separatethousands: true, gridcolor: colors.tableHead }, xaxis: { gridcolor: "#fff", tickangle: -35 }, legend: { orientation: "h", x: 0, y: -0.28, yanchor: "top" }, paper_bgcolor: "transparent", plot_bgcolor: "transparent" }} config={{ responsive: true, displaylogo: false }} />
               </Paper>
             </Grid>
           </Grid>
@@ -1311,7 +1312,7 @@ export default function ExpectedViewV2({
           color="text.secondary"
           sx={{ display: "block", mt: 1 }}
         >
-          Orçamento anual carregado: {money.format(budget)}
+          Meta anual carregado: {money.format(budget)}
         </Typography>
       )}
       <ConsumptionDrillDialog
@@ -1344,7 +1345,7 @@ export default function ExpectedViewV2({
         mt: -3,
         pb: 3,
         minHeight: "calc(100vh - 64px)",
-        bgcolor: "#FAFBFD",
+        bgcolor: colors.raised,
       }}
     >
       <Box
@@ -1357,9 +1358,9 @@ export default function ExpectedViewV2({
         }}
       >
         <Box sx={{ mb: 2 }}>
-          <Typography variant="h4">Visão executiva</Typography>
+          <Typography variant="h4">Visão para diretoria</Typography>
           <Typography color="text.secondary" sx={{ mt: 0.5 }}>
-            Realizado × forecast × orçamento por departamento, com rateio de
+            Efetivado × previsão × meta por unidade, com alocação de
             custo compartilhado.
           </Typography>
         </Box>
@@ -1371,7 +1372,7 @@ export default function ExpectedViewV2({
             p: { xs: 2, md: 2.5 },
             borderRadius: "18px",
             bgcolor: "#fff",
-            border: "1px solid #E2E5EE",
+            border: "1px solid #E1E8F0",
             boxShadow: "0 8px 24px rgba(24, 39, 75, 0.045)",
           }}
         >

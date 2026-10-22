@@ -4,7 +4,7 @@ Branch `redesign/shell-theme`, a partir de `layot_carbon`. Plano completo: `plan
 
 ## O que mudou no shell
 
-- **Trilho de domínios** à esquerda, fundo índigo escuro. Cada domínio é um botão com ícone e nome. O domínio ativo é destacado.
+- **Trilho de domínios** à esquerda, fundo azul escuro. Cada domínio é um botão com ícone e nome. O domínio ativo é destacado.
 - **Painel de menus** ao lado do trilho. Lista só os menus do domínio escolhido, com rota. Ao escolher um domínio, abre o primeiro menu dele.
 - **Busca de menus** no painel, com atalho Ctrl/Cmd + K. Com busca ativa, mostra os resultados de todos os domínios, com o nome do domínio como legenda.
 - **Cabeçalho** com o domínio (legenda), o nome do menu atual, sino de notificações, usuário e sair.
@@ -20,7 +20,7 @@ Arquivo único: `apps/web/src/theme/tokens.ts`.
 
 | Grupo | Uso |
 | --- | --- |
-| `colors.brand*` | Ação principal, seleção, foco (índigo `#4338CA`) |
+| `colors.brand*` | Ação principal, seleção, foco (azul do logo `#0F62FE`) |
 | `colors.accent` | Destaque laranja (`#EA580C`) |
 | `colors.canvas`, `paper`, `raised`, `tableHead`, `rowHover` | Superfícies e linhas de tabela |
 | `colors.border`, `borderStrong` | Bordas e divisórias |
@@ -34,7 +34,7 @@ Arquivo único: `apps/web/src/theme/tokens.ts`.
 
 O tema MUI (`theme/theme.ts`) lê esses valores. O mapa `legacyColors` e a função de cores por hash de `chartTheme.ts` foram removidos. `chartColor` agora só converte nomes de cinza e as cores semânticas `red` e `green`.
 
-`index.html` carrega Inter e Manrope, e a cor do navegador é `#4338CA`.
+`index.html` carrega Inter e Manrope, e a cor do navegador é `#0F62FE`.
 
 ## Alterações por módulo
 
@@ -59,7 +59,7 @@ O tema MUI (`theme/theme.ts`) lê esses valores. O mapa `legacyColors` e a funç
 
 ## Cores fixas ainda no código
 
-Foram trocadas as cores da identidade antiga (azul-petróleo, azul Carbon, cinzas do layout antigo e o azul `#0A8FDC`). Ainda existem cerca de 860 cores literais em componentes. Elas são cores de dados e de status (vermelho, verde, âmbar, violeta de categorias e legendas). Serão migradas para tokens por componente na Fase 4, com revisão visual, para não alterar o significado dos dados.
+Nesta etapa a paleta passou a ser azul do logo: primária `#0F62FE`, neutros levemente esverdeados, trilho `#162B3A` (azul-marinho do logotipo) e laranja como destaque pontual. As cores azuis, índigo e roxas literais em componentes e gráficos foram trocadas pelos tons da nova paleta. Ainda existem cores literais de dados e de status (vermelho, verde, âmbar) em componentes. Elas serão migradas para tokens por componente na Fase 4, com revisão visual.
 
 ## Próximas fases
 
@@ -73,3 +73,15 @@ Foram trocadas as cores da identidade antiga (azul-petróleo, azul Carbon, cinza
 - Testes de build e de unidade passam, exceto dois testes de `PolicyFlowGraph.test.ts` que já falhavam em `layot_carbon`.
 - Erros de tipo do Plotly em `BudgetAccuracy`, `BudgetAccuracyWidget(V2)` e `CommitmentsDashboard` também já existiam em `layot_carbon`.
 - A revisão visual no navegador (com API ativa) não foi feita nesta fase.
+
+## Ícones e uso de cor
+
+**Biblioteca única:** `@mui/icons-material`, sempre na variante *Outlined* (ex.: `SaveOutlined`, `FilterAltOutlined`). Não use a variante preenchida nem outra biblioteca de ícones. Os imports são `import { SaveOutlined } from "@mui/icons-material"` ou com alias de uso, como `AddOutlined as Add`.
+
+**Tamanho:** `fontSize="small"` (20px) em botões, campos, menus e tabelas. `fontSize="large"` só em estados vazios e cabeçalhos de cartão.
+
+**Cor dos ícones:** `colors.textSecondary` por padrão, `colors.brand` quando o item está ativo ou é a ação principal, e as cores de status (`success`, `warning`, `error`) somente para indicar estado.
+
+**Trilho de áreas:** fundo branco com borda `colors.border`. O item ativo usa fundo `colors.railActive`, texto `colors.brandDark` e um indicador azul à esquerda. Não use fundo escuro nem laranja no trilho.
+
+**Cor de destaque:** o laranja `colors.accent` é reservado para um ponto de atenção por tela (ex.: indicador de seleção, alerta de prioridade). Não use em botões primários.

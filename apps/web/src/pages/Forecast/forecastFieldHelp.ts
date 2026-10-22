@@ -1,17 +1,17 @@
 export const FORECAST_CONFIG_FIELD_HELP = {
-  name: "Nome exibido na lista de configurações e no reprocessamento. Não altera o cálculo.",
+  name: "Nome mostrado na lista de configurações e no reprocessamento. Não altera o cálculo.",
   table:
     "base consolidada de origem dos dados realizados. Cada tabela pode ter apenas uma configuração de forecast. Na edição, a tabela não pode ser trocada.",
   measure:
-    "Coluna numérica que será projetada (ex.: realizado, BilledCost, EffectiveCost). O horizonte e os métodos aplicam-se sobre o total diário dessa medida, agregado por dimensões.",
+    "Coluna numérica que será projetada (ex.: efetivado, BilledCost, EffectiveCost). O horizonte e os métodos aplicam-se sobre o total diário dessa medida, agregado por dimensões.",
   date:
     "Coluna de data ou início do período de consumo usada para montar a série diária (ex.: ChargePeriodStart). O cutoff e as janelas usam os últimos dias com dados nessa coluna.",
   horizon:
-    "Quantidade de meses futuros a projetar a partir do mês de corte de cada série (1–36).\n\nEx.: 12 = estimativa do mês corrente + 11 meses seguintes, sempre sobre a medida selecionada.",
+    "Quantidade de meses futuros a prever a partir do mês de corte de cada série (1–36).\n\nEx.: 12 = estimativa do mês corrente + 11 meses seguintes, sempre sobre a medida selecionada.",
   cutoff:
-    "Dias finais ignorados no realizado e no histórico usado pelas janelas (D-n).\n\nEx.: cutoff 2 e último dado no dia 12 → realizado até o dia 10; dias 11–12 ficam de fora; o forecast cobre o restante do mês.",
+    "Dias finais ignorados no efetivado e no histórico usado pelas janelas (D-n).\n\nEx.: cutoff 2 e último dado no dia 12 → efetivado até o dia 10; dias 11–12 ficam de fora; o forecast cobre o restante do mês.",
   profile:
-    "Atalho que preenche método, crescimento e peso recente. Escolha Personalizada para ajustar cada parâmetro manualmente.",
+    "Atalho que preenche método, crescimento e peso dos dados recentes. Escolha Personalizada para ajustar cada parâmetro manualmente.",
   method:
     "Como calcular a média diária (baseline):\n• AUTO_BACKTEST — compara as janelas habilitadas e escolhe a de menor erro (WAPE).\n• MEAN_7/14/28 — média fixa dos últimos N dias.\n• WEIGHTED — combina a menor e a maior janela habilitada com o peso recente.",
   windows:
@@ -25,13 +25,13 @@ export const FORECAST_CONFIG_FIELD_HELP = {
   dimensions:
     "Colunas que definem cada série independente (chave de agrupamento).\n\nMais dimensões = mais séries e execução mais pesada. Inclua cloud_origem para separar azure-4p, azure-ti, gcp-4p, gcp-ti. Pode ficar vazio para uma série única.",
   intervalConnections:
-    "Conexões cuja fatura mensal deve ser rateada uniformemente entre a coluna de data e o fim do intervalo (ex.: IBM com ChargePeriodStart → ChargePeriodEnd).\n\nDemais conexões usam série diária normal, sem rateio.",
+    "Conexões cuja fatura mensal deve ser alocada uniformemente entre a coluna de data e o fim do intervalo (ex.: IBM com ChargePeriodStart → ChargePeriodEnd).\n\nDemais conexões usam série diária normal, sem alocação.",
   chargeEnd:
-    "Coluna com o fim do intervalo de cobrança para o rateio (ex.: ChargePeriodEnd).\n\nVazio = último dia do período de faturamento (_billing_period) ou mesma coluna de início.",
+    "Coluna com o fim do intervalo de cobrança para a alocação (ex.: ChargePeriodEnd).\n\nVazio = último dia do período de faturamento (_billing_period) ou mesma coluna de início.",
 } as const;
 
 export const FORECAST_RULE_FIELD_HELP = {
-  name: "Nome da regra para identificação na lista. Não afeta o cálculo.",
+  name: "Nome da regra para identificar na lista. Não altera o cálculo.",
   identificationMode:
     "Como localizar linhas na base consolidada:\n• Coluna única — um campo e lista de valores.\n• Cláusulas OR — qualquer cláusula (coluna + valores) que coincidir.",
   column: "Coluna da base consolidada usada para identificar registros afetados por esta regra.",
@@ -41,11 +41,11 @@ export const FORECAST_RULE_FIELD_HELP = {
     "O que fazer com os dados:\n• Excluir da origem — remove da base consolidada antes da agregação quando o campo começa com o valor informado; o campo não precisa ser dimensão.\n• Média de 30 dias — separa a origem e calcula esse componente com a média diária dos últimos 30 dias; ideal para overage que reinicia no ciclo mensal.\n• Ratear fatura mensal — distribui valor no intervalo Start→End.\n• Recorrente — replica compra nos meses seguintes.\n• Cancelar em refund — encerra ao detectar estorno.\n• Substituir — troca por valor fixo.",
   scope:
     "Filtro adicional por dimensão (formato dim=valor, separado por vírgula).\n\nEx.: cloud_origem=ibm-ti restringe a regra a essa origem.",
-  chargeEndColumn: "Coluna com o fim do período de cobrança usada no rateio (ex.: ChargePeriodEnd). Obrigatória para comportamento de rateio.",
+  chargeEndColumn: "Coluna com o fim do período de cobrança usada na alocação (ex.: ChargePeriodEnd). Obrigatória para comportamento de alocação.",
   valueColumn: "Coluna numérica usada como base do valor da regra (geralmente a mesma medida do forecast).",
-  replacementValue: "Valor fixo que substitui a projeção quando o comportamento é Substituir por valor fixo.",
+  replacementValue: "Valor fixado que substitui a previsão quando o comportamento é Substituir por valor fixado.",
   startPeriod: "Primeiro mês (AAAA-MM) em que a regra passa a valer.",
   endPeriod: "Último mês (AAAA-MM) da regra. Vazio = sem data de término.",
   priority: "Ordem de aplicação quando várias regras coincidem. Menor número = maior prioridade.",
-  active: "Regras inativas são ignoradas na execução do forecast.",
+  active: "Regras inativas são ignoradas na execução da previsão.",
 } as const;

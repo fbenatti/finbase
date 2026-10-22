@@ -15,6 +15,7 @@ import { Delete, Edit, ContentCopy, FilterAlt } from "../../components/FinbaseIc
 import { GridColDef, GridFilterModel, GridPaginationModel, GridSortModel, useGridApiRef } from "@mui/x-data-grid";
 import { ClassificationRule, Department } from "../../services/api";
 import { flattenDepartments } from "../../components/DepartmentTreePicker";
+import { RowAction } from "../../components/RowAction";
 
 export type ClassificationGridFilter = {
   field: string;
@@ -84,7 +85,7 @@ export default function ClassificationDataGrid({
   onSelectionChange,
 }: Props) {
   const apiRef = useGridApiRef();
-  const [paginationModel, setPaginationModel] = useState<GridPaginationModel>({ page: 0, pageSize: 25 });
+  const [paginationModel, setPaginationModel] = useState<GridPaginationModel>({ page: 0, pageSize: 50 });
   const [sortModel, setSortModel] = useState<GridSortModel>([]);
   const [filterModel, setFilterModel] = useState<GridFilterModel>({ items: [] });
   const [activeFilters, setActiveFilters] = useState<Record<string, ClassificationGridFilter>>({});
@@ -96,7 +97,7 @@ export default function ClassificationDataGrid({
     <Stack direction="row" alignItems="center" gap={0.5} sx={{ overflow: "hidden" }}>
       <Typography component="span" variant="inherit" noWrap>{label}</Typography>
       {activeFilters[field] && (
-        <Tooltip title="Esta coluna possui um filtro ativo">
+        <Tooltip title="Esta coluna tem um filtro ativo">
           <FilterAlt fontSize="small" color="primary" />
         </Tooltip>
       )}
@@ -118,8 +119,8 @@ export default function ClassificationDataGrid({
     },
     {
       field: "conditions",
-      headerName: "Condições",
-      renderHeader: () => filteredHeader("Condições", "conditions"),
+      headerName: "Critérios",
+      renderHeader: () => filteredHeader("Critérios", "conditions"),
       minWidth: 320,
       flex: 2,
       sortable: false,
@@ -145,8 +146,8 @@ export default function ClassificationDataGrid({
     },
     {
       field: "department_name",
-      headerName: "Organograma",
-      renderHeader: () => filteredHeader("Organograma", "department_name"),
+      headerName: "Hierarquia",
+      renderHeader: () => filteredHeader("Hierarquia", "department_name"),
       minWidth: 280,
       flex: 1.4,
       valueGetter: (_: unknown, row: ClassificationRule) => row.department_name || "—",
@@ -183,8 +184,8 @@ export default function ClassificationDataGrid({
     },
     {
       field: "updated_at",
-      headerName: "Atualizado em",
-      renderHeader: () => filteredHeader("Atualizado em", "updated_at"),
+      headerName: "Última atualização",
+      renderHeader: () => filteredHeader("Última atualização", "updated_at"),
       minWidth: 165,
       type: "dateTime",
       valueGetter: (_, row: ClassificationRule) => (row.updated_at ? new Date(row.updated_at) : null),
@@ -192,7 +193,7 @@ export default function ClassificationDataGrid({
     },
     {
       field: "actions",
-      headerName: "Ações",
+      headerName: "Opções",
       width: 132,
       sortable: false,
       filterable: false,
@@ -200,14 +201,14 @@ export default function ClassificationDataGrid({
       headerAlign: "center",
       renderCell: ({ row }: { row: ClassificationRule }) => (
         <Stack direction="row" alignItems="center" justifyContent="center" sx={{ height: "100%" }}>
-          <Tooltip title="Editar classificação">
-            <IconButton size="small" aria-label={"Editar " + row.name} onClick={(event) => { event.stopPropagation(); onEdit(row); }}><Edit fontSize="small" /></IconButton>
+          <Tooltip title="Editar regra">
+            <RowAction kind="edit" label={"Editar " + row.name} onClick={(event) => { event.stopPropagation(); onEdit(row); }} />
           </Tooltip>
-          <Tooltip title="Clonar classificação">
-            <IconButton size="small" aria-label={"Clonar " + row.name} onClick={(event) => { event.stopPropagation(); onClone(row); }}><ContentCopy fontSize="small" /></IconButton>
+          <Tooltip title="Duplicar regra">
+            <RowAction kind="clone" label={"Clonar " + row.name} onClick={(event) => { event.stopPropagation(); onClone(row); }} />
           </Tooltip>
-          <Tooltip title="Excluir classificação">
-            <IconButton size="small" color="error" aria-label={"Excluir " + row.name} onClick={(event) => { event.stopPropagation(); onDelete(row); }}><Delete fontSize="small" /></IconButton>
+          <Tooltip title="Excluir regra">
+            <RowAction kind="delete" label={"Excluir " + row.name} onClick={(event) => { event.stopPropagation(); onDelete(row); }} />
           </Tooltip>
         </Stack>
       ),
@@ -347,7 +348,7 @@ export default function ClassificationDataGrid({
 
   const exportDisplayed = () => {
     const escape = (value: unknown) => '"' + String(value ?? "").replace(/"/g, '""') + '"';
-    const header = ["Nome", "Condições", "Organograma", "Cloud", "Prioridade", "Ativa", "Atualizado em"];
+    const header = ["Nome", "Critérios", "Hierarquia", "Cloud", "Prioridade", "Ativa", "Última atualização"];
     const lines = [
       header.join(";"),
       ...rows.map((row) => [
@@ -391,7 +392,7 @@ export default function ClassificationDataGrid({
           paginationMode="server"
           sortingMode="server"
           filterMode="server"
-          pageSizeOptions={[10, 25, 50]}
+          pageSizeOptions={[50, 100, 500, 1000]}
           paginationModel={paginationModel}
           sortModel={sortModel}
           filterModel={filterModel}
@@ -419,11 +420,11 @@ export default function ClassificationDataGrid({
         anchorPosition={context ? { top: context.mouseY, left: context.mouseX } : undefined}
       >
         {context?.field === "department_name" ? (
-          <MenuItem onClick={() => applyContextFilter("contains")}>Filtrar por este organograma</MenuItem>
-        ) : <MenuItem onClick={() => applyContextFilter("equals")}>Mostrar iguais</MenuItem>}
-        <MenuItem onClick={() => applyContextFilter("notEquals")}>Mostrar diferentes</MenuItem>
-        <MenuItem disabled={!context || !activeFilters[context.field]} onClick={() => clearFilter(context?.field)}>Limpar filtro da coluna</MenuItem>
-        <MenuItem disabled={Object.keys(activeFilters).length === 0} onClick={() => clearFilter()}>Limpar todos os filtros</MenuItem>
+          <MenuItem onClick={() => applyContextFilter("contains")}>Filtrar por esta estrutura</MenuItem>
+        ) : <MenuItem onClick={() => applyContextFilter("equals")}>Mostrar valores iguais</MenuItem>}
+        <MenuItem onClick={() => applyContextFilter("notEquals")}>Mostrar valores diferentes</MenuItem>
+        <MenuItem disabled={!context || !activeFilters[context.field]} onClick={() => clearFilter(context?.field)}>Limpar filtro desta coluna</MenuItem>
+        <MenuItem disabled={Object.keys(activeFilters).length === 0} onClick={() => clearFilter()}>Remover todos os filtros</MenuItem>
       </Menu>
 
       <Menu
@@ -436,16 +437,16 @@ export default function ClassificationDataGrid({
           const field = headerContext?.field;
           setHeaderContext(null);
           if (field) apiRef.current.showFilterPanel(field);
-        }}>Filtrar esta coluna</MenuItem>
+        }}>Filtrar por esta coluna</MenuItem>
         <MenuItem onClick={() => {
           const field = headerContext?.field;
           setHeaderContext(null);
           if (field) apiRef.current.showColumnMenu(field);
-        }}>Opções da coluna</MenuItem>
-        <MenuItem onClick={() => { exportDisplayed(); setHeaderContext(null); }}>Exportar resultados exibidos</MenuItem>
+        }}>Opções desta coluna</MenuItem>
+        <MenuItem onClick={() => { exportDisplayed(); setHeaderContext(null); }}>Exportar linhas exibidas</MenuItem>
         <Divider />
-        <MenuItem disabled={!headerContext || !activeFilters[headerContext.field]} onClick={() => clearFilter(headerContext?.field)}>Limpar filtro da coluna</MenuItem>
-        <MenuItem disabled={Object.keys(activeFilters).length === 0} onClick={() => clearFilter()}>Limpar todos os filtros</MenuItem>
+        <MenuItem disabled={!headerContext || !activeFilters[headerContext.field]} onClick={() => clearFilter(headerContext?.field)}>Limpar filtro desta coluna</MenuItem>
+        <MenuItem disabled={Object.keys(activeFilters).length === 0} onClick={() => clearFilter()}>Remover todos os filtros</MenuItem>
       </Menu>
     </>
   );

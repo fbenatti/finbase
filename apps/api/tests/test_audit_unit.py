@@ -58,3 +58,56 @@ def test_sanitize_config_matches_connections_pattern():
     assert "private_key" in SECRET_KEYS
     assert "password_hash" in SECRET_KEYS
     assert "access_token" in SECRET_KEYS
+
+
+def test_audit_module_fallback_covers_unmapped_prefixes():
+    from app.core.audit_middleware import audit_module_for
+    # Prefixos que antes não estavam em PATH_MODULE e ficavam sem auditoria
+    assert audit_module_for("/governanca/contratos-financeiros/12") == "contratos-financeiros"
+    assert audit_module_for("/administracao/identidade/provedores/3/testar") == "sso"
+    assert audit_module_for("/operacoes/logs-processamento/cubo/reconstruir") == "processing-logs"
+    assert audit_module_for("/dados/fontes-azure/1/fontes/x/selecao") == "fontes-azure"
+    assert audit_module_for("/custos/compromisso-mca/credenciais") == "reservations"
+    assert audit_module_for("/autenticacao/alterar-senha") == "auth"
+
+
+def test_audit_module_mapped_prefixes_keep_module():
+    from app.core.audit_middleware import audit_module_for
+    assert audit_module_for("/operacoes/periodos/configuracao/1/2026-01") == "periods"
+    assert audit_module_for("/dados/integracoes/x") == "connections"
+
+
+def test_audit_module_excludes_audit_endpoints():
+    from app.core.audit_middleware import audit_module_for
+    assert audit_module_for("/administracao/auditoria") is None
+    assert audit_module_for("/administracao/auditoria/registros") is None
+
+
+def test_every_mutating_route_has_audit_module():
+    """Cobertura: toda rota POST/PUT/PATCH/DELETE da API precisa de módulo de auditoria."""
+    from app.core.audit_middleware import audit_module_for
+    from app.main import app
+
+    mutating = {"POST", "PUT", "PATCH", "DELETE"}
+    missing = []
+    for route in app.routes:
+        methods = getattr(route, "methods", set()) or set()
+        if not methods & mutating:
+            continue
+        if audit_module_for(route.path) is None:
+            missing.append(f"{sorted(methods & mutating)} {route.path}")
+    assert missing == []
+
+
+def test_model_lookup_by_parent_segment():
+    from app.core.audit_middleware import _model_for
+    from app.models.destination import SourceDestinationMapping
+    from app.models.forecast import ForecastConfig
+    from app.models.identity import User
+    from app.models.rules import EtlMapping
+    # Rota aninhada usa "primeiro/pai"; mesmo nome de pai em módulos diferentes não colide
+    assert _model_for(["projecoes", "configuracoes", "5"]) is ForecastConfig
+    assert _model_for(["dados", "catalogo", "vinculos", "3"]) is SourceDestinationMapping
+    assert _model_for(["dados", "mapeamentos", "4"]) is EtlMapping
+    assert _model_for(["administracao", "usuarios", "2"]) is User
+    assert _model_for(["unknown", "thing", "9"]) is None

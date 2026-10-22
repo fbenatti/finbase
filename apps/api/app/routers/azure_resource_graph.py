@@ -31,7 +31,7 @@ from app.services import lakehouse_layers as layers
 from app.services.gold_materialization import GOLD
 
 logger = logging.getLogger(__name__)
-router = APIRouter(prefix="/azure-resource-graph", tags=["azure-resource-graph"])
+router = APIRouter(prefix="/governanca/grafo-recursos-azure", tags=["azure-resource-graph"])
 
 CONNECTOR_TYPE = "azure_resource_graph"
 CLOUD_SCOPE = "azure"
@@ -331,7 +331,7 @@ class SetupRequest(BaseModel):
     connection_id: int | None = None
 
 
-@router.post("/setup", response_model=SetupResponse)
+@router.post("/configurar", response_model=SetupResponse)
 async def setup_resource_graph(body: SetupRequest | None = None, db: AsyncSession = Depends(get_db)):
     """Configura o modelo para fontes ARG habilitadas no catálogo por ambiente.
 
@@ -389,7 +389,7 @@ async def setup_resource_graph(body: SetupRequest | None = None, db: AsyncSessio
     return SetupResponse(connection_id=None, destination_tables=last["destination_tables"], message=last["message"])
 
 
-@router.post("/seed-gold")
+@router.post("/carga-ouro")
 async def seed_gold_orphan_cost(db: AsyncSession = Depends(get_db)):
     """Cria (idempotente) a regra Gold de custo por recurso órfão."""
     result = await seed_orphan_cost_gold(db)
@@ -458,7 +458,7 @@ async def _load_annotations(db: AsyncSession, orphan_rule: str | None = None,
     return {(a.resource_id, a.orphan_rule, a.snapshot_date): a for a in rows}
 
 
-@router.get("/summary")
+@router.get("/resumo")
 async def orphan_summary(
     period: str | None = None,
     snapshot_date: str | None = None,
@@ -546,7 +546,7 @@ async def orphan_summary(
     }
 
 
-@router.get("/orphans")
+@router.get("/orfaos")
 async def list_orphans(
     period: str | None = None,
     snapshot_date: str | None = None,
@@ -633,7 +633,7 @@ def _saving_generated(monthly_cost: float, disappeared_on: str, as_of: str) -> t
     return days, round(float(monthly_cost or 0) * days / 30.4375, 2)
 
 
-@router.get("/orphan-savings")
+@router.get("/economia-orfaos")
 async def orphan_savings(
     orphan_rule: str | None = None,
     tipo_recurso: str | None = None,
@@ -748,7 +748,7 @@ class AnnotationRequest(BaseModel):
     updated_by: str | None = None
 
 
-@router.post("/annotations")
+@router.post("/anotacoes")
 async def upsert_annotation(body: AnnotationRequest, db: AsyncSession = Depends(get_db)):
     """Sobrepõe o status de governança de um órfão. status=ORFAO remove a anotação."""
     if body.status not in ORPHAN_STATUSES:

@@ -361,28 +361,6 @@ def _azure_ptu_gold_daily_job() -> None:
         logger.warning("Azure PTU Gold refresh failed: %s", exc, exc_info=True)
 
 
-def _ai_usage_gold_daily_job() -> None:
-    """Enfileira as cubos Gold auxiliares; a publicação pertence ao escritor Gold."""
-    session = _get_sync_session()
-    try:
-        from app.models.gold_mart_rule import GoldMartRule
-        from app.services.gold_materialization import enqueue_rule_materialization
-
-        codes = {
-            "ai_consumption_daily", "ai_license_snapshot", "copilot_usage_daily",
-            "copilot_license_snapshot", "copilot_user_period",
-        }
-        rules = session.query(GoldMartRule).filter(GoldMartRule.active == True, GoldMartRule.code.in_(codes)).all()  # noqa: E712
-        task = enqueue_rule_materialization(session, rule_ids=[rule.id for rule in rules], source="ai_usage_daily")
-        session.commit()
-        logger.info("AI usage cubos Gold queued in Gold writer: task=%s rules=%d", getattr(task, "id", None), len(rules))
-    except Exception as exc:
-        logger.warning("AI usage cubos Gold refresh failed: %s", exc, exc_info=True)
-        session.rollback()
-    finally:
-        session.close()
-
-
 def _azure_ptu_eventhub_job() -> None:
     try:
         from app.services.azure_ptu_eventhub import consume_all_ptu_eventhubs

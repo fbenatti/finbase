@@ -5,7 +5,7 @@ from app.models.source_connection import SourceConnection
 from app.services import iceberg_service as iceberg
 from app.services.json_schema_discovery import discover_nested_columns
 
-router = APIRouter(prefix="/schema", tags=["schema"])
+router = APIRouter(prefix="/dados/esquema", tags=["schema"])
 
 
 @router.get("/{connection_id}")

@@ -42,17 +42,17 @@ export interface AclInput {
   conditions: AclCondition[];
 }
 
-export const listScopes = () => api.get<AccessScope[]>("/access/scopes").then((r) => r.data);
+export const listScopes = () => api.get<AccessScope[]>("/administracao/acessos/escopos").then((r) => r.data);
 export const createScope = (body: { scope_type: ScopeType; value: string; label?: string }) =>
-  api.post<AccessScope>("/access/scopes", body).then((r) => r.data);
+  api.post<AccessScope>("/administracao/acessos/escopos", body).then((r) => r.data);
 export const listRoleAcls = (roleId: number) =>
-  api.get<AccessAcl[]>(`/access/roles/${roleId}/acls`).then((r) => r.data);
+  api.get<AccessAcl[]>(`/administracao/acessos/perfis/${roleId}/listas-acesso`).then((r) => r.data);
 export const createRoleAcl = (roleId: number, body: AclInput) =>
-  api.post<AccessAcl>(`/access/roles/${roleId}/acls`, body).then((r) => r.data);
-export const deleteAcl = (aclId: number) => api.delete(`/access/acls/${aclId}`);
+  api.post<AccessAcl>(`/administracao/acessos/perfis/${roleId}/listas-acesso`, body).then((r) => r.data);
+export const deleteAcl = (aclId: number) => api.delete(`/administracao/acessos/listas-acesso/${aclId}`);
 export const grantUserScope = (userId: number, body: { scope_id: number; match_mode: MatchMode; reason: string }) =>
-  api.post(`/access/users/${userId}/scopes`, body).then((r) => r.data);
+  api.post(`/administracao/acessos/usuarios/${userId}/escopos`, body).then((r) => r.data);
 export const simulateDecision = (
   userId: number,
   params: { operation: AclOperation; resource_type: AclResourceType; resource: string },
-) => api.get<AccessDecision>(`/access/users/${userId}/decision`, { params }).then((r) => r.data);
+) => api.get<AccessDecision>(`/administracao/acessos/usuarios/${userId}/decisao`, { params }).then((r) => r.data);

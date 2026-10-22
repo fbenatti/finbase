@@ -50,8 +50,9 @@ async def seed_identity(db: AsyncSession) -> None:
     # Garantir permissões dos módulos adicionados depois da criação das roles de
     # sistema. Um módulo novo em ALL_MODULES não entra nas roles já existentes —
     # sem este backfill, todo mundo perde acesso ao módulo novo e o sintoma é um
-    # 403 que parece defeito de RBAC.
-    for modulo_backfill in (IDEAS_MODULE, FINOPS_MODULE, PLANNING_MODULE, ANOMALIES_MODULE, "modules"):
+    # 403 que parece defeito de RBAC. O Administrador recebe todo módulo de
+    # ALL_MODULES a cada boot, então módulos futuros não precisam de lista manual.
+    for modulo_backfill in ALL_MODULES:
         for role_name, actions in (
             ("Administrador", ("read", "create", "update", "delete")),
             ("Leitor Global", ("read",)),

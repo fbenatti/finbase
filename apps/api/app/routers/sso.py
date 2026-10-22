@@ -21,7 +21,7 @@ from app.routers.auth import _issue_tokens, REFRESH_COOKIE_NAME, _set_refresh_co
 
 logger = logging.getLogger(__name__)
 
-router = APIRouter(prefix="/auth/sso", tags=["sso"])
+router = APIRouter(prefix="/autenticacao/sso", tags=["sso"])
 
 _STATE_COOKIE = "sso_state"
 _NONCE_COOKIE = "sso_nonce"
@@ -64,7 +64,7 @@ async def _finish_login(
 
 # ── Lista pública de provedores habilitados (para a tela de login) ───────────
 
-@router.get("/providers")
+@router.get("/provedores")
 async def public_providers(db: AsyncSession = Depends(get_db)):
     result = await db.execute(select(SsoProvider).where(SsoProvider.enabled == True).order_by(SsoProvider.name))  # noqa: E712
     providers = []
@@ -85,7 +85,7 @@ async def public_providers(db: AsyncSession = Depends(get_db)):
 
 # ── OIDC ──────────────────────────────────────────────────────────────────────
 
-@router.get("/{provider}/login")
+@router.get("/{provider}/entrar")
 async def sso_login(
     provider: str,
     request: Request,
@@ -137,7 +137,7 @@ async def _oidc_authorize(prov: SsoProvider, request: Request, login_hint: str |
 
     discovery, metadata = await _oidc_metadata(cfg)
     authorization_endpoint = metadata["authorization_endpoint"]
-    redirect_uri = cfg.get("redirect_uri") or settings.sso_redirect_uri or _base_url(request) + f"/auth/sso/{prov.name}/callback"
+    redirect_uri = cfg.get("redirect_uri") or settings.sso_redirect_uri or _base_url(request) + f"/autenticacao/sso/{prov.name}/retorno"
     # Older provider records stored the space in the display name as %20.
     # Decode before Authlib encodes the redirect URI again.
     redirect_uri = urllib.parse.unquote(redirect_uri)
@@ -193,7 +193,7 @@ def _base_url(request: Request) -> str:
     return f"{proto}://{host}"
 
 
-@router.get("/{provider}/callback")
+@router.get("/{provider}/retorno")
 async def oidc_callback(provider: str, request: Request, response: Response, db: AsyncSession = Depends(get_db)):
     prov = await _get_provider(db, provider)
     if prov.protocol != "oidc":
@@ -216,7 +216,7 @@ async def oidc_callback(provider: str, request: Request, response: Response, db:
 
     from authlib.integrations.httpx_client import AsyncOAuth2Client
     discovery, metadata = await _oidc_metadata(cfg)
-    redirect_uri = cfg.get("redirect_uri") or settings.sso_redirect_uri or _base_url(request) + f"/auth/sso/{prov.name}/callback"
+    redirect_uri = cfg.get("redirect_uri") or settings.sso_redirect_uri or _base_url(request) + f"/autenticacao/sso/{prov.name}/retorno"
     redirect_uri = urllib.parse.unquote(redirect_uri)
     client = AsyncOAuth2Client(
         client_id=cfg.get("client_id"),
@@ -323,7 +323,7 @@ def _saml_request(request: Request, prov: SsoProvider, post_data: dict | None = 
     }
 
 
-@router.get("/{provider}/login-saml")
+@router.get("/{provider}/entrar-saml")
 async def saml_redirect(provider: str, request: Request, db: AsyncSession = Depends(get_db)):
     prov = await _get_provider(db, provider)
     return await _saml_login(prov, request)
@@ -337,8 +337,8 @@ async def _saml_login(prov: SsoProvider, request: Request):
     # assinatura deve ser habilitada em produção.
     import zlib
     request_id = "_" + uuid.uuid4().hex
-    sp_entity = cfg.get("sp_entity_id") or _base_url(request) + "/auth/sso/metadata"
-    acs = cfg.get("acs_url") or _base_url(request) + f"/auth/sso/{prov.name}/acs"
+    sp_entity = cfg.get("sp_entity_id") or _base_url(request) + "/autenticacao/sso/metadados"
+    acs = cfg.get("acs_url") or _base_url(request) + f"/autenticacao/sso/{prov.name}/acs"
     xml = (
         f'<?xml version="1.0" encoding="UTF-8"?>'
         f'<samlp:AuthnRequest xmlns:samlp="urn:oasis:names:tc:SAML:2.0:protocol" '
@@ -416,14 +416,20 @@ async def saml_acs(provider: str, request: Request, response: Response, db: Asyn
 
 def _build_saml_settings(prov: SsoProvider, cfg: dict, request: Request) -> dict:
     base = _base_url(request)
-    sp_entity = cfg.get("sp_entity_id") or base + "/auth/sso/metadata"
+    sp_entity = cfg.get("sp_entity_id") or base + "/autenticacao/sso/metadados"
     return {
-        "strict": False,
-        "debug": True,
+        # Validação estrita: exige assinatura, destino, audiência e InResponseTo.
+        "strict": True,
+        "debug": False,
+        "security": {
+            "wantAssertionsSigned": True,
+            "wantMessagesSigned": True,
+            "wantNameId": True,
+        },
         "sp": {
             "entityId": sp_entity,
             "assertionConsumerService": {
-                "url": cfg.get("acs_url") or base + f"/auth/sso/{prov.name}/acs",
+                "url": cfg.get("acs_url") or base + f"/autenticacao/sso/{prov.name}/acs",
                 "binding": "urn:oasis:names:tc:SAML:2.0:bindings:HTTP-POST",
             },
             "x509cert": cfg.get("sp_x509_cert") or "",
@@ -438,7 +444,7 @@ def _build_saml_settings(prov: SsoProvider, cfg: dict, request: Request) -> dict
     }
 
 
-@router.get("/metadata")
+@router.get("/metadados")
 async def sp_metadata(request: Request, db: AsyncSession = Depends(get_db)):
     """Metadata do SP — pode exigir um provider; usa o primeiro SAML habilitado."""
     result = await db.execute(
@@ -449,8 +455,8 @@ async def sp_metadata(request: Request, db: AsyncSession = Depends(get_db)):
         raise HTTPException(status_code=404, detail="Nenhum provedor SAML habilitado")
     cfg = decrypt_config(prov.config_json)
     base = _base_url(request)
-    sp_entity = cfg.get("sp_entity_id") or base + "/auth/sso/metadata"
-    acs = cfg.get("acs_url") or base + f"/auth/sso/{prov.name}/acs"
+    sp_entity = cfg.get("sp_entity_id") or base + "/autenticacao/sso/metadados"
+    acs = cfg.get("acs_url") or base + f"/autenticacao/sso/{prov.name}/acs"
     xml = f'''<?xml version="1.0"?>
 <md:EntityDescriptor xmlns:md="urn:oasis:names:tc:SAML:2.0:metadata" entityID="{sp_entity}">
   <md:SPSSODescriptor AuthnRequestsSigned="false" WantAssertionsSigned="true" protocolSupportEnumeration="urn:oasis:names:tc:SAML:2.0:protocol">

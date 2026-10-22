@@ -27,7 +27,7 @@ from app.services.trino_service import execute as trino_execute
 from app.services import lakehouse_layers as layers
 from app.services.gold_materialization import GOLD
 
-router = APIRouter(prefix="/planning", tags=["planning"])
+router = APIRouter(prefix="/planejamento", tags=["planning"])
 
 MONTHS = ["jan", "fev", "mar", "abr", "mai", "jun", "jul", "ago", "set", "out", "nov", "dez"]
 LEVELS = [f"Departamento nível {i}" for i in range(1, 8)]
@@ -95,7 +95,7 @@ def _merge_ledger_rows(existing: list[dict[str, Any]], incoming: list[dict[str, 
     return list(merged.values())
 
 
-@router.get("/contract-story")
+@router.get("/historia-contratos")
 async def get_contract_story_ledger(
     db: AsyncSession = Depends(get_db),
     _user: User = Depends(require("planning", "read")),
@@ -157,7 +157,7 @@ def _contract_story_bronze_summary(frame) -> dict[str, Any]:
     }
 
 
-@router.get("/contract-story/bronze-consumption")
+@router.get("/historia-contratos/consumo-bronze")
 async def get_contract_story_bronze_consumption(
     _user: User = Depends(require("planning", "read")),
 ):
@@ -172,7 +172,7 @@ async def get_contract_story_bronze_consumption(
         raise HTTPException(503, "Não foi possível consultar o consumo Bronze do contrato Azure.") from exc
 
 
-@router.put("/contract-story")
+@router.put("/historia-contratos")
 async def save_contract_story_ledger(
     body: ContractStoryLedgerIn,
     db: AsyncSession = Depends(get_db),
@@ -221,7 +221,6 @@ class DefenseProjectIn(BaseModel):
     id_orcamento: str
     centro_custo: str | None = None
     ambiente: str | None = None
-    cloud_filter: str | None = None
     title: str | None = None
     description: str | None = None
 
@@ -650,14 +649,14 @@ async def _publish_version(fin_type: FinancialType, year: int, rows: list[dict[s
     return snapshot
 
 
-@router.get("/types")
+@router.get("/tipos")
 async def list_types(db: AsyncSession = Depends(get_db)):
     await ensure_default_financial_types(db)
     rows = (await db.execute(select(FinancialType).order_by(FinancialType.name))).scalars().all()
     return [_out(r) for r in rows]
 
 
-@router.get("/template")
+@router.get("/modelo")
 async def download_template(year: int, db: AsyncSession = Depends(get_db)):
     if year <= 0: raise HTTPException(422, "Ano inválido")
     departments, _ = await _organization(db)
@@ -832,7 +831,7 @@ async def _parse_excel(raw: bytes, db: AsyncSession, create_missing_departments:
     return parsed
 
 
-@router.get("/type-years/{type_code}")
+@router.get("/anos-por-tipo/{type_code}")
 async def list_years(type_code: str, db: AsyncSession = Depends(get_db)):
     fin_type = (await db.execute(select(FinancialType).where(FinancialType.code == type_code))).scalar_one_or_none()
     if not fin_type: raise HTTPException(404, "Tipificação financeira não encontrada")
@@ -840,14 +839,14 @@ async def list_years(type_code: str, db: AsyncSession = Depends(get_db)):
     return rows
 
 
-@router.get("/scopes/options")
+@router.get("/escopos/opcoes")
 async def planning_scope_options(db: AsyncSession = Depends(get_db)):
     departments, _ = await _organization(db)
     values = {_department_scope(item, departments) for item in departments.values() if item.active}
     return [{"id_orcamento": budget_id, "cloud": cloud} for budget_id, cloud in sorted(values, key=lambda item: ((item[0] or ""), (item[1] or ""))) if budget_id]
 
 
-@router.post("/{type_code}/{year}/import")
+@router.post("/{type_code}/{year}/importar")
 async def import_excel(type_code: str, year: int, file: UploadFile = File(...), title: str = Form(...), description: str = Form(...), event_type: str = Form(...), effective_date: date = Form(...), scope_id_orcamento: str | None = Form(None), scope_cloud: str | None = Form(None), defense_request_id: int | None = Form(None), create_missing_departments: str | None = Form(None), db: AsyncSession = Depends(get_db)):
     if not file.filename or not file.filename.lower().endswith((".xlsx", ".xltm")): raise HTTPException(422, "Envie um arquivo .xlsx ou .xltm")
     fin_type = await _type_for_write(type_code, db)
@@ -930,7 +929,81 @@ def _timeline_event_matches_budget_scope(event: dict[str, Any], scoped_budget_id
     return not event_budget_id or event_budget_id in scoped_budget_ids
 
 
-@router.get("/dashboard/overview")
+@router.get("/painel/areas")
+async def dashboard_areas(year: int, department_id: int | None = None, db: AsyncSession = Depends(get_db)):
+    """Orçamento vigente por área filha do nó selecionado, com tendência mensal e variação desde a carga inicial."""
+    fin_type = (await db.execute(select(FinancialType).where(FinancialType.code == "orcamento"))).scalar_one_or_none()
+    departments, children = await _organization(db)
+    if department_id is not None and department_id not in departments:
+        raise HTTPException(404, "Departamento não encontrado")
+    areas = sorted(children.get(department_id, []), key=lambda item: item.name)
+    parent = {"id": department_id, "path": _levels(departments[department_id], departments)} if department_id is not None else None
+    if fin_type is None or not areas:
+        return {"year": year, "parent": parent, "areas": []}
+    area_ids = {area.id for area in areas}
+
+    def area_of(node_id: int | None) -> int | None:
+        current = departments.get(node_id) if node_id else None
+        while current is not None:
+            if current.id in area_ids:
+                return current.id
+            current = departments.get(current.parent_id) if current.parent_id else None
+        return None
+
+    # Mesmo escopo do dashboard: um nó herda o orçamento do próprio id_orcamento.
+    allowed_budget_ids: set[str] | None = None
+    if department_id is not None:
+        selected_budget = str(_department_scope(departments[department_id], departments)[0] or "")
+        if selected_budget:
+            allowed_budget_ids = {selected_budget}
+        else:
+            # Sem id próprio, o nó herda os orçamentos dos descendentes (igual ao dashboard).
+            subtree: set[int] = set()
+            pending = [department_id]
+            while pending:
+                node_id = pending.pop()
+                if node_id in subtree:
+                    continue
+                subtree.add(node_id)
+                pending.extend(child.id for child in children.get(node_id, []))
+            allowed_budget_ids = {str(_department_scope(departments[item], departments)[0] or "") for item in subtree} - {""}
+    versions = (await db.execute(select(PlanningVersion).where(
+        PlanningVersion.financial_type_id == fin_type.id,
+        PlanningVersion.year == year,
+        PlanningVersion.is_current.is_(True),
+    ))).scalars().all()
+    if allowed_budget_ids is not None:
+        versions = [version for version in versions if not version.scope_id_orcamento or version.scope_id_orcamento in allowed_budget_ids]
+    version_ids = {version.id for version in versions}
+    carga_ids = {version.id for version in versions if version.event_type == "CARGA_INICIAL"}
+    entries = (await db.execute(select(PlanningEntry).where(PlanningEntry.planning_version_id.in_(version_ids)))).scalars().all() if version_ids else []
+    monthly = {area.id: [0.0] * 12 for area in areas}
+    carga = {area.id: 0.0 for area in areas}
+    for entry in entries:
+        key = area_of(entry.department_id)
+        if key is None:
+            continue
+        value = float(entry.value or 0)
+        monthly[key][entry.month - 1] += value
+        if entry.planning_version_id in carga_ids:
+            carga[key] += value
+    rows = []
+    for area in areas:
+        vigente = sum(monthly[area.id])
+        rows.append({
+            "department_id": area.id,
+            "name": area.name,
+            "path": _levels(area, departments),
+            "has_children": bool(children.get(area.id)),
+            "carga_inicial": carga[area.id],
+            "vigente": vigente,
+            "variacao": vigente - carga[area.id],
+            "monthly": monthly[area.id],
+        })
+    return {"year": year, "parent": parent, "areas": rows}
+
+
+@router.get("/painel/resumo")
 async def dashboard_overview(year: int, type_codes: str | None = None, department_id: int | None = None, db: AsyncSession = Depends(get_db)):
     codes = [code for code in (type_codes.split(",") if type_codes else ["orcamento", "forecast-manual", "base-line-contratual", "carta-credito", "defesa-orcamentaria"]) if code]
     types = (await db.execute(select(FinancialType).where(FinancialType.code.in_(codes)))).scalars().all()
@@ -1045,7 +1118,7 @@ async def dashboard_overview(year: int, type_codes: str | None = None, departmen
     return {"year": year, "cards": cards, "series": series, "events": events, "scope": {"department_id": department_id, "path": scope_path, "included_departments": len(scoped_department_ids or departments)}}
 
 
-@router.get("/budget-accuracy")
+@router.get("/aderencia-orcamento")
 async def budget_accuracy(
     year: int,
     month: int | None = None,
@@ -1194,7 +1267,7 @@ async def budget_accuracy(
     }
 
 
-@router.get("/budget-accuracy/detail")
+@router.get("/aderencia-orcamento/detalhe")
 async def budget_accuracy_detail(
     year: int,
     department_id: int,
@@ -1309,7 +1382,7 @@ async def budget_accuracy_detail(
     }
 
 
-@router.post("/budget-accuracy/acks", status_code=201)
+@router.post("/aderencia-orcamento/reconhecimentos", status_code=201)
 async def create_budget_accuracy_ack(body: BudgetAccuracyAckIn, db: AsyncSession = Depends(get_db)):
     if not re.fullmatch(r"\d{6}", body.target_month):
         raise HTTPException(422, "target_month deve estar no formato YYYYMM")
@@ -1337,7 +1410,7 @@ async def create_budget_accuracy_ack(body: BudgetAccuracyAckIn, db: AsyncSession
     return _out(row)
 
 
-@router.get("/budget-accuracy/acks")
+@router.get("/aderencia-orcamento/reconhecimentos")
 async def list_budget_accuracy_acks(
     target_month: str | None = None,
     department_id: int | None = None,
@@ -1373,7 +1446,7 @@ async def _defense_totals(db: AsyncSession, requests: list[BudgetDefenseRequest]
     return {int(version_id): float(total or 0) for version_id, total in rows}
 
 
-@router.get("/budget-defense/requests")
+@router.get("/defesa-orcamentaria/solicitacoes")
 async def list_defense_requests(
     year: int,
     status: str | None = None,
@@ -1398,7 +1471,7 @@ async def list_defense_requests(
     ]
 
 
-@router.get("/budget-defense/departments")
+@router.get("/defesa-orcamentaria/hierarquia")
 async def defense_department_options(
     db: AsyncSession = Depends(get_db),
     user: User = Depends(require("planning", "read")),
@@ -1421,7 +1494,7 @@ async def defense_department_options(
     return items
 
 
-@router.post("/budget-defense/projects", status_code=201)
+@router.post("/defesa-orcamentaria/projetos", status_code=201)
 async def create_defense_project(
     body: DefenseProjectIn,
     db: AsyncSession = Depends(get_db),
@@ -1443,7 +1516,7 @@ async def create_defense_project(
     duplicate = next((item for item in departments.values() if item.active and item.parent_id == parent.id and (item.name or "").strip().lower() == name.lower()), None)
     if duplicate:
         raise HTTPException(422, "Já existe um projeto com este nome neste nó do organograma")
-    department = Department(parent_id=parent.id, name=name, id_orcamento=new_id, centro_custo=body.centro_custo, ambiente=body.ambiente, cloud_filter=body.cloud_filter, active=True)
+    department = Department(parent_id=parent.id, name=name, id_orcamento=new_id, centro_custo=body.centro_custo, ambiente=body.ambiente, active=True)
     db.add(department)
     await db.flush()
     departments[department.id] = department
@@ -1467,7 +1540,7 @@ async def create_defense_project(
     return {"department": _out(department), "request": _defense_request_out(request, departments)}
 
 
-@router.post("/budget-defense/requests", status_code=201)
+@router.post("/defesa-orcamentaria/solicitacoes", status_code=201)
 async def create_defense_request(
     body: DefenseRequestIn,
     db: AsyncSession = Depends(get_db),
@@ -1509,7 +1582,7 @@ async def create_defense_request(
     return _defense_request_out(request, departments)
 
 
-@router.put("/budget-defense/requests/{request_id}")
+@router.put("/defesa-orcamentaria/solicitacoes/{request_id}")
 async def update_defense_request(
     request_id: int,
     body: DefenseRequestUpdateIn,
@@ -1537,7 +1610,7 @@ async def update_defense_request(
     return _defense_request_out(request, departments)
 
 
-@router.post("/budget-defense/requests/{request_id}/submit")
+@router.post("/defesa-orcamentaria/solicitacoes/{request_id}/enviar")
 async def submit_defense_request(
     request_id: int,
     db: AsyncSession = Depends(get_db),
@@ -1557,7 +1630,7 @@ async def submit_defense_request(
     return {**_defense_request_out(request, departments), "annual_total": totals.get(request.defense_version_id, 0.0)}
 
 
-@router.post("/budget-defense/requests/{request_id}/approve")
+@router.post("/defesa-orcamentaria/solicitacoes/{request_id}/aprovar")
 async def approve_defense_request(
     request_id: int,
     body: DefenseApproveIn,
@@ -1589,7 +1662,7 @@ async def approve_defense_request(
     return {**_defense_request_out(request, departments), "annual_total": totals.get(request.defense_version_id, 0.0)}
 
 
-@router.post("/budget-defense/requests/{request_id}/reject")
+@router.post("/defesa-orcamentaria/solicitacoes/{request_id}/rejeitar")
 async def reject_defense_request(
     request_id: int,
     body: DefenseRejectIn,
@@ -1612,7 +1685,7 @@ async def reject_defense_request(
     return _defense_request_out(request, departments)
 
 
-@router.post("/budget-defense/requests/{request_id}/publish")
+@router.post("/defesa-orcamentaria/solicitacoes/{request_id}/publicar")
 async def publish_defense_request(
     request_id: int,
     body: DefensePublishIn,
@@ -1687,8 +1760,6 @@ async def publish_defense_request(
     now = datetime.now(timezone.utc)
     # Materializa a linha: o projeto passa a pertencer ao ID Orçamento final.
     department.id_orcamento = final_id
-    if final_cloud and not department.cloud_filter:
-        department.cloud_filter = final_cloud
     request.status = "PUBLICADA"
     request.final_id_orcamento = final_id
     request.final_cloud = final_cloud
@@ -1712,7 +1783,7 @@ async def publish_defense_request(
 
 
 @router.get("/{type_code}/{year}")
-async def planning_grid(type_code: str, year: int, version_id: int | None = None, scope_id_orcamento: str | None = None, scope_cloud: str | None = None, defense_request_id: int | None = None, db: AsyncSession = Depends(get_db)):
+async def planning_grid(type_code: str, year: int, version_id: int | None = None, scope_id_orcamento: str | None = None, scope_cloud: str | None = None, defense_request_id: int | None = None, scope_hierarquia_id: int | None = None, db: AsyncSession = Depends(get_db)):
     fin_type = (await db.execute(select(FinancialType).where(FinancialType.code == type_code))).scalar_one_or_none()
     if not fin_type: raise HTTPException(404, "Tipificação financeira não encontrada")
     defense_request: BudgetDefenseRequest | None = None
@@ -1730,7 +1801,9 @@ async def planning_grid(type_code: str, year: int, version_id: int | None = None
         query = query.where(PlanningVersion.is_current == True, PlanningVersion.defense_request_id == defense_request.id)
     else:
         query = query.where(PlanningVersion.is_current == True)
-        if scope_id_orcamento: query = query.where(PlanningVersion.scope_id_orcamento == scope_id_orcamento)
+        # Nó da hierarquia tem prioridade; o ID Orçamento segue como fallback.
+        if scope_hierarquia_id: query = query.where(PlanningVersion.scope_hierarquia_id == scope_hierarquia_id)
+        elif scope_id_orcamento: query = query.where(PlanningVersion.scope_id_orcamento == scope_id_orcamento)
         if scope_cloud: query = query.where(PlanningVersion.scope_cloud == scope_cloud)
     versions = (await db.execute(query.order_by(PlanningVersion.effective_date.desc(), PlanningVersion.version.desc()))).scalars().all()
     # Snapshots anteriores ao recorte por Cloud guardam o ID Orçamento, mas
@@ -1857,7 +1930,7 @@ async def save_planning(type_code: str, year: int, body: PlanningSaveIn, db: Asy
     return {"version": _out(snapshot), "rows": len(prepared), "defense_request": _defense_request_out(defense_request, departments) if defense_request else None}
 
 
-@router.get("/{type_code}/{year}/versions")
+@router.get("/{type_code}/{year}/versoes")
 async def list_versions(type_code: str, year: int, db: AsyncSession = Depends(get_db)):
     fin_type = (await db.execute(select(FinancialType).where(FinancialType.code == type_code))).scalar_one_or_none()
     if not fin_type: raise HTTPException(404, "Tipificação financeira não encontrada")
@@ -1865,7 +1938,7 @@ async def list_versions(type_code: str, year: int, db: AsyncSession = Depends(ge
     return [_out(r) for r in rows]
 
 
-@router.get("/{type_code}/{year}/timeline")
+@router.get("/{type_code}/{year}/linha-do-tempo")
 async def planning_timeline(type_code: str, year: int, db: AsyncSession = Depends(get_db)):
     fin_type = (await db.execute(select(FinancialType).where(FinancialType.code == type_code))).scalar_one_or_none()
     if not fin_type: raise HTTPException(404, "Tipificação financeira não encontrada")
@@ -1874,7 +1947,7 @@ async def planning_timeline(type_code: str, year: int, db: AsyncSession = Depend
 
 
 
-@router.post("/defesa-orcamentaria/{year}/versions/{version_id}/publish-budget")
+@router.post("/defesa-orcamentaria/{year}/versoes/{version_id}/publicar-orcamento")
 async def publish_defense_to_budget(year: int, version_id: int, body: BudgetPublishIn, db: AsyncSession = Depends(get_db)):
     defense_type = (await db.execute(select(FinancialType).where(FinancialType.code == "defesa-orcamentaria"))).scalar_one_or_none()
     budget_type = (await db.execute(select(FinancialType).where(FinancialType.code == "orcamento"))).scalar_one_or_none()
@@ -1917,15 +1990,3 @@ async def publish_defense_to_budget(year: int, version_id: int, body: BudgetPubl
     return {"budget_version": _out(snapshot), "defense_version": _out(defense), "rows": len(defense_entries)}
 
 
-@router.post("/{type_code}/{year}/versions/{version_id}/restore")
-async def restore_version(type_code: str, year: int, version_id: int, body: PlanningRestoreIn, db: AsyncSession = Depends(get_db)):
-    fin_type = await _type_for_write(type_code, db)
-    version = await db.get(PlanningVersion, version_id)
-    if not version or version.financial_type_id != fin_type.id or version.year != year: raise HTTPException(404, "Snapshot não encontrado")
-    entries = (await db.execute(select(PlanningEntry).where(PlanningEntry.planning_version_id == version.id, PlanningEntry.entity_type == "department"))).scalars().all()
-    grouped: dict[tuple[str, int], dict[str, Any]] = {}
-    for entry in entries:
-        key = (entry.entity_type, entry.department_id)
-        grouped.setdefault(key, {"entity_type": entry.entity_type, "department_id": entry.department_id, "department_levels": entry.department_levels, "values": [0.0] * 12})["values"][entry.month - 1] = entry.value
-    snapshot = await _publish_version(fin_type, year, list(grouped.values()), "RESTORE", db, title=body.title, description=body.description, event_type=body.event_type, effective_date=body.effective_date, restored_from=version.id, scope_id_orcamento=body.scope_id_orcamento or version.scope_id_orcamento, scope_cloud=body.scope_cloud or version.scope_cloud)
-    return {"version": _out(snapshot)}

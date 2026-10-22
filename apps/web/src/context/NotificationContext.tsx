@@ -2,7 +2,7 @@ import { Dialog, DialogContent, DialogTitle } from "../components/FinbaseDialog"
 import { dataDisplayText } from "../utils/dataPresentation";
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
 import { Alert, AlertColor, Badge, Box, Button, Chip, CircularProgress, Divider, IconButton, LinearProgress, Snackbar, Stack, Typography } from "@mui/material";
-import { Close, DeleteOutline, Notifications, Stop } from "@mui/icons-material";
+import { CloseOutlined, DeleteOutlineOutlined, NotificationsOutlined, StopOutlined } from "@mui/icons-material";
 import {
   cancelEtl,
   cancelForecastRun,
@@ -51,14 +51,14 @@ function kindOf(task: TaskStatus): NotificationKind {
 
 function titleFor(task: TaskStatus, connections: SourceConnection[]): string {
   const k = kindOf(task);
-  if (k === "backup") return "Backup Diário Full · #" + task.id;
-  if (k === "shared_cost") return "Custo compartilhado";
-  if (k === "forecast") return "Forecast";
+  if (k === "backup") return "Backup diário completo · nº " + task.id;
+  if (k === "shared_cost") return "Rateio de custo compartilhado";
+  if (k === "forecast") return "Previsão";
   if (String(task.task_type || task.type || "") === "gold_reprocess") {
-    return "Custos consolidados #" + task.id;
+    return "Base de custos consolidada nº " + task.id;
   }
   if (String(task.task_type || task.type || "") === "ai_cost_relationship_reprocess") {
-    return "Relacionamentos de custo IA #" + task.id;
+    return "Relações de custo (IA) nº " + task.id;
   }
   if (k === "reprocess") {
     const sources = task.connections?.length
@@ -66,7 +66,7 @@ function titleFor(task: TaskStatus, connections: SourceConnection[]): string {
       : (task.connection_ids || (task.connection_id ? [task.connection_id] : []))
           .map((id) => connections.find((connection) => connection.id === id)?.cloud_name
             || connections.find((connection) => connection.id === id)?.name
-            || `conexão ${id}`);
+            || `conexão nº ${id}`);
     const periods = (task.billing_periods || []).map(formatBillingPeriod);
     const sourceLabel = sources.length ? [...new Set(sources)].join(", ") : "origem não informada";
     const periodLabel = periods.length ? [...new Set(periods)].join(", ") : "período não informado";
@@ -74,8 +74,8 @@ function titleFor(task: TaskStatus, connections: SourceConnection[]): string {
   }
   const conn = connections.find((c) => c.id === task.connection_id);
   return conn
-    ? "Extração: " + conn.name + " (" + conn.code + ")"
-    : "Extração #" + String(task.connection_id || "?");
+    ? "Coleta: " + conn.name + " (" + conn.code + ")"
+    : "Coleta nº " + String(task.connection_id || "?");
 }
 
 function formatBillingPeriod(period: string): string {
@@ -93,11 +93,11 @@ function scopeFor(task: TaskStatus, connections: SourceConnection[]): string {
     : (task.connection_ids || (task.connection_id ? [task.connection_id] : []))
         .map((id) => {
           const source = connections.find((connection) => connection.id === id);
-          return source ? `${source.cloud_name || source.name} (${source.code})` : `conexão ${id}`;
+          return source ? `${source.cloud_name || source.name} (${source.code})` : `conexão nº ${id}`;
         });
   const periods = (task.billing_periods || []).map(formatBillingPeriod);
-  const destination = task.destination_table_name || task.table || "destino não informado";
-  return `Origem: ${sourceNames.length ? [...new Set(sourceNames)].join(", ") : "não informada"} · Mês: ${periods.length ? [...new Set(periods)].join(", ") : "não informado"} · Destino: ${destination} (base preparada)`;
+  const destination = task.destination_table_name || task.table || "tabela de destino não informada";
+  return `Origem: ${sourceNames.length ? [...new Set(sourceNames)].join(", ") : "sem informação"} · Mês: ${periods.length ? [...new Set(periods)].join(", ") : "não informado"} · Destino: ${destination} (base preparada)`;
 }
 
 function isOperationalSource(task: TaskStatus): boolean {
@@ -118,8 +118,8 @@ function reprocessStageLabel(item: NotificationItem): string {
   }
   if (item.processed >= item.total) {
     return /publicando partição na camada silver/i.test(item.phase + " " + item.current)
-      ? "Publicando dados preparados..."
-      : "Origem processada · preparando publicação dos dados";
+      ? "Publicando os dados preparados..."
+      : "Fonte processada · preparando publicação dos dados";
   }
   return item.phase || item.status;
 }
@@ -158,16 +158,16 @@ function progressCaption(task: TaskStatus): string {
     if (task.status === "COMPLETED") {
       return Number(task.rows_destination || 0) > 0
         ? `${rows} linhas · total de séries indisponível`
-        : "0 linhas · nenhuma série projetada";
+        : "0 linhas · nenhuma série prevista";
     }
     return Number(task.rows_destination || 0) > 0
-      ? `${rows} linhas · forecast em finalização`
-      : "Calculando séries do forecast";
+      ? `${rows} linhas · previsão em finalização`
+      : "Calculando séries da previsão";
   }
   if (String(task.task_type || task.type || "") === "backup") {
     const bytes = Number(task.downloaded_bytes_total || 0);
     const elapsed = task.started_at ? formatElapsed(Date.now() - new Date(task.started_at).getTime()) : "calculando";
-    const volume = bytes > 0 ? `${formatBytes(bytes)} compactados` : "preparando cópia do banco de dados";
+    const volume = bytes > 0 ? `${formatBytes(bytes)} compactados` : "preparando réplica do banco de dados";
     return `${volume} · ${elapsed} decorridos · aplicação + banco de dados + acervo`;
   }
   if (isOperationalSource(task)) {
@@ -503,9 +503,9 @@ export function NotificationProvider({ children }: { children: React.ReactNode }
       <Dialog open={dialogOpen} onClose={closeDialog} fullWidth maxWidth="sm">
         <DialogTitle>
           <Box sx={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-            <span>Notificações</span>
+            <span>Avisos</span>
             <IconButton size="small" onClick={closeDialog}>
-              <Close fontSize="small" />
+              <CloseOutlined fontSize="small" />
             </IconButton>
           </Box>
         </DialogTitle>
@@ -520,7 +520,7 @@ export function NotificationProvider({ children }: { children: React.ReactNode }
               const isActive = item.status === "QUEUED" || item.status === "RUNNING";
               const color = item.status === "COMPLETED" ? "success" : item.status === "FAILED" || item.status === "CANCELLED" ? "error" : "info";
               return (
-                <Box key={item.id} sx={{ p: 1.5, bgcolor: "#FAFBFD", borderRadius: 1, border: "1px solid #E2E5EE" }}>
+                <Box key={item.id} sx={{ p: 1.5, bgcolor: "#FAFBFD", borderRadius: 1, border: "1px solid #E1E8F0" }}>
                   <Box sx={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 1 }}>
                     <Box sx={{ flex: 1, minWidth: 0 }}>
                       <Typography variant="body2" fontWeight={600} noWrap>
@@ -541,15 +541,15 @@ export function NotificationProvider({ children }: { children: React.ReactNode }
                       <Chip
                         size="small"
                         color={color}
-                        label={isActive ? (item.kind === "backup" && item.totalBytes === 0 ? "EM ANDAMENTO" : item.progress + "%") : item.status}
+                        label={isActive ? (item.kind === "backup" && item.totalBytes === 0 ? "EM CURSO" : item.progress + "%") : item.status}
                       />
                       {isActive && (
                         <IconButton size="small" color="error" onClick={() => void doCancel(item)}>
-                          <Stop fontSize="small" />
+                          <StopOutlined fontSize="small" />
                         </IconButton>
                       )}
                       <IconButton size="small" onClick={() => remove(item.id)}>
-                        <DeleteOutline fontSize="small" />
+                        <DeleteOutlineOutlined fontSize="small" />
                       </IconButton>
                     </Box>
                   </Box>
@@ -584,7 +584,7 @@ export function NotificationProvider({ children }: { children: React.ReactNode }
         </DialogContent>
         {orderedItems.length > 0 && (
           <Box sx={{ p: 1.5, display: "flex", justifyContent: "flex-end" }}>
-            <Button size="small" variant="outlined" onClick={clearAll} startIcon={<DeleteOutline fontSize="small" />}>
+            <Button size="small" variant="outlined" onClick={clearAll} startIcon={<DeleteOutlineOutlined fontSize="small" />}>
               Limpar notificações
             </Button>
           </Box>
@@ -615,7 +615,7 @@ export function NotificationBell(): React.JSX.Element {
   return (
     <IconButton color="inherit" onClick={openDialog}>
       <Badge badgeContent={unreadCount} color="error">
-        <Notifications />
+        <NotificationsOutlined />
       </Badge>
     </IconButton>
   );

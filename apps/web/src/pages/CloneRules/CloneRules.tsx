@@ -10,6 +10,7 @@ import {
   getCloneRules, getConnections, getDestinationSchema, getDestinationTables, updateCloneRule,
 } from "../../services/api";
 import EmptyState from "../../components/EmptyState";
+import { RowAction } from "../../components/RowAction";
 
 type Condition = { field: string; op: string; value: string };
 type Change = { field: string; operation: string; value: string };
@@ -17,13 +18,13 @@ type Change = { field: string; operation: string; value: string };
 const operations = ["=", "!=", "IN", "NOT_IN", "CONTAINS", "NOT_CONTAINS", "EMPTY", "NOT_EMPTY", ">", "<"];
 const transformations = ["SET", "ZERO", "NEGATE", "ABS", "COPY_COLUMN", "HISTORICAL_ON_DEMAND_COST"];
 const roleLabels: Record<string, string> = {
-  meter_id: "Identificador do medidor",
-  unit_price: "Preço unitário",
+  meter_id: "ID do medidor",
+  unit_price: "Preço por unidade",
   quantity: "Quantidade",
-  exchange_rate: "Taxa de câmbio",
-  pricing_model: "Modelo de preço",
-  billed_cost: "Custo faturado",
-  effective_cost: "Custo efetivo",
+  exchange_rate: "Câmbio",
+  pricing_model: "Tipo de preço",
+  billed_cost: "Custo faturado (BilledCost)",
+  effective_cost: "Custo efetivo (EffectiveCost)",
 };
 const roleDefaults: Record<string, string> = {
   meter_id: "source_meter_id",
@@ -49,7 +50,7 @@ export default function CloneRules({ embedded }: { embedded?: boolean } = {}) {
   const [deletePending, setDeletePending] = useState<CloneRule | null>(null);
 
   const [editingId, setEditingId] = useState<number | null>(null);
-  const [name, setName] = useState("Nova regra");
+  const [name, setName] = useState("Nova regra de clonagem");
   const [description, setDescription] = useState("");
   const [connectionId, setConnectionId] = useState<number | "">("");
   const [provider, setProvider] = useState("");
@@ -97,7 +98,7 @@ export default function CloneRules({ embedded }: { embedded?: boolean } = {}) {
 
   const reset = () => {
     setEditingId(null);
-    setName("Nova regra");
+    setName("Nova regra de clonagem");
     setDescription("");
     setConnectionId("");
     setProvider("");
@@ -119,12 +120,12 @@ export default function CloneRules({ embedded }: { embedded?: boolean } = {}) {
 
   const save = async () => {
     if (!tableId) {
-      setError("Selecione a tabela destino.");
+      setError("Selecione a tabela de destino.");
       return;
     }
     const missing = Object.entries(roles).filter(([, v]) => !v).map(([k]) => roleLabels[k]);
     if (missing.length) {
-      setError("Defina os papéis obrigatórios: " + missing.join(", "));
+      setError("Preencha os papéis obrigatórios: " + missing.join(", "));
       return;
     }
     const body: Record<string, unknown> = {
@@ -202,7 +203,7 @@ export default function CloneRules({ embedded }: { embedded?: boolean } = {}) {
     }
   };
 
-  const tableName = (id?: number | null) => tables.find((t) => t.id === id)?.name || ("Tabela #" + String(id ?? "?"));
+  const tableName = (id?: number | null) => tables.find((t) => t.id === id)?.name || ("Tabela nº" + String(id ?? "?"));
 
   const filtered = rules.filter((r) =>
     [r.name, r.description || "", r.provider || ""].join(" ").toLowerCase().includes(search.trim().toLowerCase()),
@@ -210,10 +211,10 @@ export default function CloneRules({ embedded }: { embedded?: boolean } = {}) {
 
   const gridColumns: GridColDef[] = [
     { field: "name", headerName: "Nome", flex: 1, minWidth: 220 },
-    { field: "table", headerName: "Tabela destino", width: 210, valueGetter: (_v, row) => tableName((row as CloneRule).destination_table_id) },
+    { field: "table", headerName: "Tabela de destino", width: 210, valueGetter: (_v, row) => tableName((row as CloneRule).destination_table_id) },
     {
       field: "scope",
-      headerName: "Escopo",
+      headerName: "Abrangência",
       width: 160,
       valueGetter: (_v, row) => {
         const r = row as CloneRule;
@@ -221,7 +222,7 @@ export default function CloneRules({ embedded }: { embedded?: boolean } = {}) {
       },
     },
     { field: "priority", headerName: "Prioridade", width: 110, type: "number" },
-    { field: "version", headerName: "Versão", width: 90, type: "number" },
+    { field: "version", headerName: "Revisão", width: 90, type: "number" },
     {
       field: "active",
       headerName: "Ativa",
@@ -230,21 +231,17 @@ export default function CloneRules({ embedded }: { embedded?: boolean } = {}) {
     },
     {
       field: "actions",
-      headerName: "Ações",
+      headerName: "Opções",
       width: 120,
       sortable: false,
       filterable: false,
       renderCell: ({ row }) => (
         <Stack direction="row">
           <Tooltip title="Editar">
-            <IconButton size="small" onClick={() => openEdit(row as CloneRule)}>
-              <Edit fontSize="small" />
-            </IconButton>
+            <RowAction kind="edit" onClick={() => openEdit(row as CloneRule)} />
           </Tooltip>
-          <Tooltip title="Excluir">
-            <IconButton size="small" color="error" onClick={() => setDeletePending(row as CloneRule)}>
-              <Delete fontSize="small" />
-            </IconButton>
+          <Tooltip title="Remover regra">
+            <RowAction kind="delete" onClick={() => setDeletePending(row as CloneRule)} />
           </Tooltip>
         </Stack>
       ),
@@ -254,11 +251,11 @@ export default function CloneRules({ embedded }: { embedded?: boolean } = {}) {
   const ChangeEditor = ({ title, items, setter }: { title: string; items: Change[]; setter: React.Dispatch<React.SetStateAction<Change[]>> }) => (
     <Box>
       <Typography fontWeight={600}>{title}</Typography>
-      <Typography variant="caption" color="text.secondary">Transformações declarativas: sem SQL, Python ou fórmula livre.</Typography>
+      <Typography variant="caption" color="text.secondary">Transformações declarativas: sem SQL, sem Python e sem fórmula livre.</Typography>
       {items.map((x, i) => (
         <Stack key={i} direction="row" gap={1} mt={1} flexWrap="wrap">
           <Select size="small" value={x.field} displayEmpty onChange={(e) => setChange(setter, i, "field", String(e.target.value))} sx={{ minWidth: 210 }}>
-            <MenuItem value="">Campo</MenuItem>
+            <MenuItem value="">Coluna</MenuItem>
             {available.map((c) => <MenuItem key={c} value={c}>{c}</MenuItem>)}
           </Select>
           <Select size="small" value={x.operation} onChange={(e) => setChange(setter, i, "operation", String(e.target.value))} sx={{ minWidth: 200 }}>
@@ -267,7 +264,7 @@ export default function CloneRules({ embedded }: { embedded?: boolean } = {}) {
           {!["ZERO", "NEGATE", "ABS", "HISTORICAL_ON_DEMAND_COST"].includes(x.operation) && (
             <TextField
               size="small"
-              label={x.operation === "COPY_COLUMN" ? "Coluna de origem" : "Valor"}
+              label={x.operation === "COPY_COLUMN" ? "Coluna da fonte" : "Valor"}
               value={x.value}
               onChange={(e) => setChange(setter, i, "value", e.target.value)}
               select={x.operation === "COPY_COLUMN"}
@@ -279,7 +276,7 @@ export default function CloneRules({ embedded }: { embedded?: boolean } = {}) {
           <Button color="error" onClick={() => setter((all) => all.filter((_, n) => n !== i))}>Remover</Button>
         </Stack>
       ))}
-      <Button size="small" startIcon={<Add />} onClick={() => addChange(setter)} sx={{ mt: 1 }}>Adicionar alteração</Button>
+      <Button size="small" startIcon={<Add />} onClick={() => addChange(setter)} sx={{ mt: 1 }}>Incluir alteração</Button>
     </Box>
   );
 
@@ -291,41 +288,41 @@ export default function CloneRules({ embedded }: { embedded?: boolean } = {}) {
       {error && <Alert severity="error" sx={{ mb: 2 }} onClose={() => setError("")}>{dataDisplayText(error)}</Alert>}
 
       <Alert severity="info" sx={{ mb: 2 }}>
-        <Typography variant="subtitle2" fontWeight={700} gutterBottom>Por que estas regras existem?</Typography>
+        <Typography variant="subtitle2" fontWeight={700} gutterBottom>Para que servem estas regras?</Typography>
         <Typography variant="body2" component="div">
           Na fatura Azure, linhas de <strong>uso (Usage)</strong> cobertas por <strong>Reserva</strong> ou <strong>Savings Plan</strong> frequentemente chegam com custo zerado — o compromisso já foi pago em outro lançamento. Sem esse tratamento, dashboards e pivots subestimam o consumo real da cloud.
           <br /><br />
-          No reprocessamento da base consolidada, cada regra elegível reconstrói o <strong>preço On-Demand de referência</strong> na linha original e cria uma linha sintética de <strong>estorno (Return)</strong> com valor negativo. O total financeiro se mantém; o que muda é a visibilidade do uso real para análise FinOps.
+          No reprocessamento da base consolidada, cada regra elegível reconstrói o <strong>preço sob demanda (OnDemand) de referência</strong> na linha original e cria uma linha sintética de <strong>estorno (Return)</strong> com valor negativo. O total financeiro se mantém; o que muda é a visibilidade do uso real para análise FinOps.
           <br /><br />
-          Templates editáveis para tabelas FOCUS são instalados automaticamente (ex.: <em>Azure Reservation Usage → Return</em>). Se não houver preço On-Demand histórico para o medidor, a linha vai para <strong>pendências</strong> — nada é alterado em silêncio.
+          Templates editáveis para tabelas FOCUS são instalados automaticamente (ex.: <em>Uso de reserva Azure → devolução</em>). Se não houver preço On-Demand histórico para o medidor, a linha vai para <strong>pendências</strong> — nada é alterado em silêncio.
         </Typography>
       </Alert>
 
       <Paper variant="outlined" sx={{ p: { xs: 1.5, md: 2.5 }, bgcolor: "background.paper" }}>
         <Stack direction="row" justifyContent="space-between" alignItems="center" flexWrap="wrap" gap={1.5} sx={{ mb: 2 }}>
           <Box>
-            <Typography variant="h6">Reservas e Savings Plans</Typography>
+            <Typography variant="h6">Compromissos de tarifa (RI e Savings Plan)</Typography>
             <Typography variant="body2" color="text.secondary">
-              Regras de estorno On-Demand para uso coberto por compromisso — por tabela destino FOCUS.
+              Ajustes de estorno sob demanda (OnDemand) para uso coberto por compromisso — por tabela de destino FOCUS.
             </Typography>
           </Box>
           <Stack direction="row" gap={1} flexWrap="wrap" alignItems="center">
             <FormControl size="small" sx={{ minWidth: 250 }}>
-              <InputLabel>Tabela destino</InputLabel>
-              <Select value={tableId} label="Tabela destino" onChange={(e) => { setTableId(Number(e.target.value)); reset(); }}>
+              <InputLabel>Tabela de destino</InputLabel>
+              <Select value={tableId} label="Tabela de destino" onChange={(e) => { setTableId(Number(e.target.value)); reset(); }}>
                 {tables.map((t) => <MenuItem key={t.id} value={t.id}>{t.name}</MenuItem>)}
               </Select>
             </FormControl>
             <TextField
               size="small"
-              placeholder="Buscar regras..."
+              placeholder="Buscar por nome ou tabela..."
               value={search}
               onChange={(e) => setSearch(e.target.value)}
               InputProps={{ startAdornment: <InputAdornment position="start"><Search fontSize="small" /></InputAdornment> }}
               sx={{ minWidth: 240 }}
             />
-            <Button variant="contained" startIcon={<Add />} onClick={openNew}>Nova regra</Button>
-            <Button variant="text" startIcon={<Refresh />} onClick={() => void load()}>Atualizar</Button>
+            <Button variant="contained" startIcon={<Add />} onClick={openNew}>Nova regra de clonagem</Button>
+            <Button variant="text" startIcon={<Refresh />} onClick={() => void load()}>Recarregar dados</Button>
           </Stack>
         </Stack>
 
@@ -335,8 +332,8 @@ export default function CloneRules({ embedded }: { embedded?: boolean } = {}) {
           <Box sx={{ py: 7 }}>
             <EmptyState
               message={search
-                ? "Nenhuma regra corresponde à busca."
-                : "Nenhuma regra cadastrada para esta tabela. Clique em 'Nova regra' para começar."}
+                ? "Nenhuma regra de clonagem encontrada para a busca."
+                : "Nenhuma regra cadastrada para esta tabela. Clique em 'Nova regra de clonagem' para começar."}
             />
           </Box>
         ) : (
@@ -352,7 +349,7 @@ export default function CloneRules({ embedded }: { embedded?: boolean } = {}) {
 
         <Divider sx={{ my: 2 }} />
         <Stack direction="row" justifyContent="space-between" alignItems="center" flexWrap="wrap" gap={1}>
-          <Typography variant="subtitle2">Pendências de preço On-Demand</Typography>
+          <Typography variant="subtitle2">Pendências de preço sob demanda</Typography>
           <Chip label={pending.length + " pendências"} size="small" color={pending.length ? "warning" : "default"} />
         </Stack>
         <Typography variant="caption" color="text.secondary" sx={{ display: "block", mt: 0.5 }}>
@@ -361,41 +358,41 @@ export default function CloneRules({ embedded }: { embedded?: boolean } = {}) {
       </Paper>
 
       <Dialog open={dialogOpen} onClose={() => setDialogOpen(false)} maxWidth="md" fullWidth>
-        <DialogTitle>{editingId ? "Editar regra" : "Nova regra"}</DialogTitle>
+        <DialogTitle>{editingId ? "Editar regra de clonagem" : "Nova regra de clonagem"}</DialogTitle>
         <DialogContent dividers>
           <Stack gap={2} sx={{ mt: 1 }}>
             <Stack direction="row" gap={2} flexWrap="wrap">
               <FormControl sx={{ minWidth: 250 }}>
-                <InputLabel>Tabela destino</InputLabel>
-                <Select value={tableId} label="Tabela destino" onChange={(e) => setTableId(Number(e.target.value))}>
+                <InputLabel>Tabela de destino</InputLabel>
+                <Select value={tableId} label="Tabela de destino" onChange={(e) => setTableId(Number(e.target.value))}>
                   {tables.map((t) => <MenuItem key={t.id} value={t.id}>{t.name}</MenuItem>)}
                 </Select>
               </FormControl>
-              <TextField label="Nome" value={name} onChange={(e) => setName(e.target.value)} sx={{ minWidth: 230 }} />
-              <TextField label="Descrição" value={description} onChange={(e) => setDescription(e.target.value)} sx={{ minWidth: 260 }} />
+              <TextField label="Nome da regra" value={name} onChange={(e) => setName(e.target.value)} sx={{ minWidth: 230 }} />
+              <TextField label="Finalidade" value={description} onChange={(e) => setDescription(e.target.value)} sx={{ minWidth: 260 }} />
               <FormControl sx={{ minWidth: 210 }}>
-                <InputLabel>Conexão (escopo)</InputLabel>
-                <Select value={connectionId} label="Conexão (escopo)" onChange={(e) => setConnectionId(e.target.value === "" ? "" : Number(e.target.value))}>
-                  <MenuItem value="">Todas as conexões</MenuItem>
+                <InputLabel>Conexão (abrangência)</InputLabel>
+                <Select value={connectionId} label="Conexão (abrangência)" onChange={(e) => setConnectionId(e.target.value === "" ? "" : Number(e.target.value))}>
+                  <MenuItem value="">Todas as fontes</MenuItem>
                   {connections.map((c) => <MenuItem key={c.id} value={c.id}>{c.name}</MenuItem>)}
                 </Select>
               </FormControl>
-              <TextField label="Provider (escopo)" value={provider} onChange={(e) => setProvider(e.target.value)} placeholder="azure" />
+              <TextField label="Provedor (abrangência)" value={provider} onChange={(e) => setProvider(e.target.value)} placeholder="azure" />
               <TextField type="number" label="Prioridade" value={priority} onChange={(e) => setPriority(Number(e.target.value))} sx={{ width: 120 }} />
-              <TextField label="Vigência inicial" value={validFrom} onChange={(e) => setValidFrom(e.target.value)} placeholder="AAAAMM" sx={{ width: 140 }} />
-              <TextField label="Vigência final" value={validUntil} onChange={(e) => setValidUntil(e.target.value)} placeholder="AAAAMM" sx={{ width: 140 }} />
+              <TextField label="Início da vigência" value={validFrom} onChange={(e) => setValidFrom(e.target.value)} placeholder="AAAAMM" sx={{ width: 140 }} />
+              <TextField label="Fim da vigência" value={validUntil} onChange={(e) => setValidUntil(e.target.value)} placeholder="AAAAMM" sx={{ width: 140 }} />
               <Stack direction="row" alignItems="center">
                 <Switch checked={enabled} onChange={(e) => setEnabled(e.target.checked)} />
-                <Typography>Ativa</Typography>
+                <Typography>Em uso</Typography>
               </Stack>
             </Stack>
 
             <Divider />
-            <Typography fontWeight={600}>Condições de seleção (AND)</Typography>
+            <Typography fontWeight={600}>Condições de seleção (todas devem valer)</Typography>
             {conditions.map((x, i) => (
               <Stack key={i} direction="row" gap={1} mt={1} flexWrap="wrap">
                 <Select size="small" value={x.field} displayEmpty onChange={(e) => setCondition(i, "field", String(e.target.value))} sx={{ minWidth: 230 }}>
-                  <MenuItem value="">Campo</MenuItem>
+                  <MenuItem value="">Coluna</MenuItem>
                   {columns.map((c) => <MenuItem key={c} value={c}>{c}</MenuItem>)}
                 </Select>
                 <Select size="small" value={x.op} onChange={(e) => setCondition(i, "op", String(e.target.value))}>
@@ -407,10 +404,10 @@ export default function CloneRules({ embedded }: { embedded?: boolean } = {}) {
                 <Button color="error" onClick={() => setConditions((all) => all.filter((_, n) => n !== i))}>Remover</Button>
               </Stack>
             ))}
-            <Button size="small" startIcon={<Add />} onClick={addCondition} sx={{ alignSelf: "flex-start" }}>Adicionar condição</Button>
+            <Button size="small" startIcon={<Add />} onClick={addCondition} sx={{ alignSelf: "flex-start" }}>Incluir condição</Button>
 
             <Divider />
-            <Typography fontWeight={600}>Papéis semânticos</Typography>
+            <Typography fontWeight={600}>Papéis de negócio</Typography>
             <Stack direction="row" gap={1} flexWrap="wrap" mt={1}>
               {Object.entries(roleLabels).map(([key, label]) => (
                 <FormControl key={key} size="small" sx={{ minWidth: 220 }}>
@@ -424,21 +421,21 @@ export default function CloneRules({ embedded }: { embedded?: boolean } = {}) {
 
             <Divider />
             <Stack direction={{ xs: "column", md: "row" }} gap={3}>
-              <Box flex={1}><ChangeEditor title="Alterações na linha original" items={originalChanges} setter={setOriginalChanges} /></Box>
-              <Box flex={1}><ChangeEditor title="Alterações na linha clone" items={cloneChanges} setter={setCloneChanges} /></Box>
+              <Box flex={1}><ChangeEditor title="Alterações na linha de origem" items={originalChanges} setter={setOriginalChanges} /></Box>
+              <Box flex={1}><ChangeEditor title="Alterações na linha clonada" items={cloneChanges} setter={setCloneChanges} /></Box>
             </Stack>
           </Stack>
         </DialogContent>
         <DialogActions sx={{ px: 3, pb: 2 }}>
           <Button onClick={() => setDialogOpen(false)}>Cancelar</Button>
           <Button variant="contained" startIcon={editingId ? <Edit /> : <Add />} onClick={() => void save()}>
-            {editingId ? "Salvar nova versão" : "Criar regra"}
+            {editingId ? "Salvar nova versão" : "Criar regra de clonagem"}
           </Button>
         </DialogActions>
       </Dialog>
 
       <Dialog open={Boolean(deletePending)} onClose={() => setDeletePending(null)} maxWidth="xs" fullWidth>
-        <DialogTitle>Excluir regra?</DialogTitle>
+        <DialogTitle>Excluir esta regra de clonagem?</DialogTitle>
         <DialogContent>
           <Typography>
             Você está prestes a excluir <strong>{deletePending?.name}</strong>. Esta ação não pode ser desfeita.
@@ -446,7 +443,7 @@ export default function CloneRules({ embedded }: { embedded?: boolean } = {}) {
         </DialogContent>
         <DialogActions sx={{ px: 3, pb: 2 }}>
           <Button onClick={() => setDeletePending(null)}>Cancelar</Button>
-          <Button variant="contained" color="error" onClick={() => void remove()}>Excluir regra</Button>
+          <Button variant="contained" color="error" onClick={() => void remove()}>Remover regra de clonagem</Button>
         </DialogActions>
       </Dialog>
     </Box>

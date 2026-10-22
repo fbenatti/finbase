@@ -70,15 +70,7 @@ def _department_path(department_id: int, departments: dict[int, Department]) -> 
 
 
 def _department_cloud_scope(department_id: int, departments: dict[int, Department]) -> str | None:
-    """Resolve a project's cloud from its explicit filter or provider branch."""
-    current = departments.get(department_id)
-    seen: set[int] = set()
-    while current and current.id not in seen:
-        seen.add(current.id)
-        scope = (current.cloud_filter or "").strip()
-        if scope:
-            return connection_cloud_scope(scope) or scope.lower()
-        current = departments.get(current.parent_id) if current.parent_id else None
+    """Resolve a project's cloud from its provider branch in the hierarchy."""
     path = _department_path(department_id, departments)
     if len(path) >= 3 and path[1] in {"Showback", "Chargeback"}:
         return connection_cloud_scope(path[2]) or path[2].lower()
@@ -216,7 +208,7 @@ async def _ensure_rule_output_column(
 
 # ---- EtlMapping ----
 
-@router.get("/mappings/", response_model=list[EtlMappingOut])
+@router.get("/dados/mapeamentos/", response_model=list[EtlMappingOut])
 async def list_mappings(
     connection_id: int | None = Query(None, description="Filter by connection/datasource"),
     db: AsyncSession = Depends(get_db),
@@ -230,7 +222,7 @@ async def list_mappings(
     return result.scalars().all()
 
 
-@router.post("/mappings/", response_model=EtlMappingOut, status_code=201)
+@router.post("/dados/mapeamentos/", response_model=EtlMappingOut, status_code=201)
 async def create_mapping(data: EtlMappingCreate, db: AsyncSession = Depends(get_db)):
     mapping = EtlMapping(**data.model_dump())
     db.add(mapping)
@@ -239,7 +231,7 @@ async def create_mapping(data: EtlMappingCreate, db: AsyncSession = Depends(get_
     return mapping
 
 
-@router.put("/mappings/{mapping_id}", response_model=EtlMappingOut)
+@router.put("/dados/mapeamentos/{mapping_id}", response_model=EtlMappingOut)
 async def update_mapping(mapping_id: int, data: EtlMappingUpdate, db: AsyncSession = Depends(get_db)):
     result = await db.execute(select(EtlMapping).where(EtlMapping.id == mapping_id))
     mapping = result.scalar_one_or_none()
@@ -253,7 +245,7 @@ async def update_mapping(mapping_id: int, data: EtlMappingUpdate, db: AsyncSessi
     return mapping
 
 
-@router.delete("/mappings/{mapping_id}", status_code=204)
+@router.delete("/dados/mapeamentos/{mapping_id}", status_code=204)
 async def delete_mapping(mapping_id: int, db: AsyncSession = Depends(get_db)):
     result = await db.execute(select(EtlMapping).where(EtlMapping.id == mapping_id))
     mapping = result.scalar_one_or_none()
@@ -265,7 +257,7 @@ async def delete_mapping(mapping_id: int, db: AsyncSession = Depends(get_db)):
 
 # ---- BusinessRule ----
 
-@router.get("/business-rules/", response_model=list[BusinessRuleOut])
+@router.get("/dados/regras-negocio/", response_model=list[BusinessRuleOut])
 async def list_business_rules(
     connection_id: int | None = Query(None, description="Filter by connection/datasource"),
     destination_table_id: int | None = Query(None, description="Filter by destination table"),
@@ -295,7 +287,7 @@ async def list_business_rules(
     return result.scalars().all()
 
 
-@router.post("/business-rules/", response_model=BusinessRuleOut, status_code=201)
+@router.post("/dados/regras-negocio/", response_model=BusinessRuleOut, status_code=201)
 async def create_business_rule(data: BusinessRuleCreate, request: Request, db: AsyncSession = Depends(get_db)):
     await _validate_financial_effect(data, db)
     rule = BusinessRule(**data.model_dump())
@@ -340,7 +332,7 @@ async def create_business_rule(data: BusinessRuleCreate, request: Request, db: A
     return rule
 
 
-@router.put("/business-rules/{rule_id}", response_model=BusinessRuleOut)
+@router.put("/dados/regras-negocio/{rule_id}", response_model=BusinessRuleOut)
 async def update_business_rule(rule_id: int, data: BusinessRuleUpdate, request: Request, db: AsyncSession = Depends(get_db)):
     result = await db.execute(select(BusinessRule).where(BusinessRule.id == rule_id))
     rule = result.scalar_one_or_none()
@@ -410,7 +402,7 @@ async def update_business_rule(rule_id: int, data: BusinessRuleUpdate, request: 
     return rule
 
 
-@router.delete("/business-rules/{rule_id}", status_code=204)
+@router.delete("/dados/regras-negocio/{rule_id}", status_code=204)
 async def delete_business_rule(rule_id: int, request: Request, db: AsyncSession = Depends(get_db)):
     result = await db.execute(select(BusinessRule).where(BusinessRule.id == rule_id))
     rule = result.scalar_one_or_none()
@@ -492,7 +484,7 @@ async def _default_focus_table_id(db: AsyncSession) -> int | None:
     )).scalar()
 
 
-@router.get("/classifications/", response_model=list[ClassificationRuleOut])
+@router.get("/dados/classificacoes/", response_model=list[ClassificationRuleOut])
 async def list_classifications(
     connection_id: int | None = Query(None, description="Filter by connection/datasource"),
     destination_table_id: int | None = Query(None, description="Filter by destination table"),
@@ -517,7 +509,7 @@ async def list_classifications(
 
 
 
-@router.get("/classifications/grid")
+@router.get("/dados/classificacoes/grade")
 async def list_classifications_grid(
     limit: int = Query(25, ge=1, le=100),
     offset: int = Query(0, ge=0),
@@ -681,7 +673,7 @@ async def list_classifications_grid(
     return {"items": items, "total": total}
 
 
-@router.get("/classifications/field-values")
+@router.get("/dados/classificacoes/valores-campos")
 async def classification_field_values(
     destination_table_id: int = Query(...),
     field: str = Query(..., min_length=1),
@@ -707,7 +699,7 @@ async def classification_field_values(
     return [{"value": row.value, "count": row.count} for row in rows]
 
 
-@router.post("/classifications/refresh-field-values", status_code=202)
+@router.post("/dados/classificacoes/atualizar-valores-campos", status_code=202)
 async def refresh_classification_field_values(
     destination_table_id: int | None = Query(None),
     fields: str | None = Query(None, description="Campos separados por vírgula (opcional)"),
@@ -720,7 +712,7 @@ async def refresh_classification_field_values(
     return {"status": "started", "destination_table_id": destination_table_id, "fields": field_list}
 
 
-@router.post("/classifications/", response_model=ClassificationRuleOut, status_code=201)
+@router.post("/dados/classificacoes/", response_model=ClassificationRuleOut, status_code=201)
 async def create_classification(data: ClassificationRuleCreate, db: AsyncSession = Depends(get_db)):
     department = (await db.execute(
         select(Department).where(
@@ -742,7 +734,7 @@ async def create_classification(data: ClassificationRuleCreate, db: AsyncSession
     return _classification_rule_out(rule)
 
 
-@router.put("/classifications/{rule_id}", response_model=ClassificationRuleOut)
+@router.put("/dados/classificacoes/{rule_id}", response_model=ClassificationRuleOut)
 async def update_classification(
     rule_id: int, data: ClassificationRuleUpdate, db: AsyncSession = Depends(get_db)
 ):
@@ -771,7 +763,7 @@ async def update_classification(
     return _classification_rule_out(rule)
 
 
-@router.delete("/classifications/{rule_id}", status_code=204)
+@router.delete("/dados/classificacoes/{rule_id}", status_code=204)
 async def delete_classification(rule_id: int, db: AsyncSession = Depends(get_db)):
     result = await db.execute(
         select(ClassificationRule).where(ClassificationRule.id == rule_id)
@@ -785,7 +777,7 @@ async def delete_classification(rule_id: int, db: AsyncSession = Depends(get_db)
 
 # ---- Department ----
 
-@router.get("/departments/", response_model=list[DepartmentOut])
+@router.get("/governanca/hierarquia/", response_model=list[DepartmentOut])
 async def list_departments(
     parent_id: int | None = Query(None, description="Filter by parent department"),
     flat: bool = Query(False, description="Return flat list instead of tree"),
@@ -823,7 +815,7 @@ async def list_departments(
     return roots
 
 
-@router.get("/departments/grid")
+@router.get("/governanca/hierarquia/grade")
 async def list_departments_grid(
     limit: int = Query(25, ge=1, le=100),
     offset: int = Query(0, ge=0),
@@ -862,7 +854,6 @@ async def list_departments_grid(
             Department.centro_custo.ilike(needle),
             Department.id_orcamento.ilike(needle),
             Department.ambiente.ilike(needle),
-            Department.cloud_filter.ilike(needle),
         ))
     fields = {
         "id": Department.id,
@@ -871,7 +862,6 @@ async def list_departments_grid(
         "centro_custo": Department.centro_custo,
         "id_orcamento": Department.id_orcamento,
         "ambiente": Department.ambiente,
-        "cloud_filter": Department.cloud_filter,
         "shared_cost": shared_enabled,
         "active": Department.active,
         "updated_at": Department.updated_at,
@@ -924,7 +914,6 @@ async def list_departments_grid(
         "centro_custo": department.centro_custo,
         "id_orcamento": department.id_orcamento,
         "ambiente": department.ambiente,
-        "cloud_filter": department.cloud_filter,
         "custom_fields": department.custom_fields,
         "shared_cost": bool(shared_cost),
         "active": department.active,
@@ -934,7 +923,7 @@ async def list_departments_grid(
     return {"items": items, "total": total}
 
 
-@router.post("/departments/", response_model=DepartmentOut, status_code=201)
+@router.post("/governanca/hierarquia/", response_model=DepartmentOut, status_code=201)
 async def create_department(data: DepartmentCreate, db: AsyncSession = Depends(get_db)):
     departments = {department.id: department for department in (await db.execute(select(Department))).scalars().all()}
     if data.parent_id is not None:
@@ -954,7 +943,7 @@ async def create_department(data: DepartmentCreate, db: AsyncSession = Depends(g
     return DepartmentOut.model_validate(dept)
 
 
-@router.put("/departments/{dept_id}", response_model=DepartmentOut)
+@router.put("/governanca/hierarquia/{dept_id}", response_model=DepartmentOut)
 async def update_department(dept_id: int, data: DepartmentUpdate, db: AsyncSession = Depends(get_db)):
     departments = {department.id: department for department in (await db.execute(select(Department))).scalars().all()}
     dept = departments.get(dept_id)
@@ -984,7 +973,7 @@ async def update_department(dept_id: int, data: DepartmentUpdate, db: AsyncSessi
     return DepartmentOut.model_validate(dept)
 
 
-@router.post("/departments/bootstrap-cloud-organization")
+@router.post("/governanca/hierarquia/inicializar-organizacao-nuvem")
 async def bootstrap_cloud_organization(db: AsyncSession = Depends(get_db)):
     """Create the standard cloud hierarchy and stage current roots under Showback/Azure.
 
@@ -1040,7 +1029,7 @@ async def bootstrap_cloud_organization(db: AsyncSession = Depends(get_db)):
     }
 
 
-@router.delete("/departments/{dept_id}", status_code=204)
+@router.delete("/governanca/hierarquia/{dept_id}", status_code=204)
 async def delete_department(dept_id: int, db: AsyncSession = Depends(get_db)):
     result = await db.execute(select(Department).where(Department.id == dept_id))
     dept = result.scalar_one_or_none()
@@ -1112,14 +1101,14 @@ def _shared_cost_out(config: DepartmentSharedCost, departments: dict[int, Depart
     )
 
 
-@router.get("/departments/shared-costs", response_model=list[SharedCostOut])
+@router.get("/governanca/hierarquia/custos-compartilhados", response_model=list[SharedCostOut])
 async def list_shared_costs(db: AsyncSession = Depends(get_db)):
     departments = {department.id: department for department in (await db.execute(select(Department))).scalars().all()}
     configs = (await db.execute(select(DepartmentSharedCost))).scalars().all()
     return [_shared_cost_out(config, departments) for config in configs]
 
 
-@router.get("/departments/{dept_id}/shared-cost", response_model=SharedCostOut)
+@router.get("/governanca/hierarquia/{dept_id}/custo-compartilhado", response_model=SharedCostOut)
 async def get_shared_cost(dept_id: int, db: AsyncSession = Depends(get_db)):
     departments = {department.id: department for department in (await db.execute(select(Department))).scalars().all()}
     if dept_id not in departments:
@@ -1130,7 +1119,7 @@ async def get_shared_cost(dept_id: int, db: AsyncSession = Depends(get_db)):
     return _shared_cost_out(config, departments)
 
 
-@router.put("/departments/{dept_id}/shared-cost", response_model=SharedCostOut)
+@router.put("/governanca/hierarquia/{dept_id}/custo-compartilhado", response_model=SharedCostOut)
 async def upsert_shared_cost(dept_id: int, data: SharedCostUpsert, db: AsyncSession = Depends(get_db)):
     departments = {department.id: department for department in (await db.execute(select(Department))).scalars().all()}
     donor = departments.get(dept_id)
@@ -1299,7 +1288,7 @@ def _normalize_return_conditions(conditions: list[dict]) -> list[dict]:
     return normalized
 
 
-@router.post("/departments/import", response_model=CsvImportResult, status_code=201)
+@router.post("/governanca/hierarquia/importar", response_model=CsvImportResult, status_code=201)
 async def import_csv_data(data: CsvImportRequest, db: AsyncSession = Depends(get_db)):
     """Import departments and business rules from finopsNew CSV files."""
     result = CsvImportResult(departments_created=0, classification_rules_created=0)
@@ -1370,7 +1359,6 @@ async def import_csv_data(data: CsvImportRequest, db: AsyncSession = Depends(get
                     name=dn,
                     centro_custo=row.get("CentrodeCusto", "").strip() or None,
                     id_orcamento=row.get("IDOrcamento", "").strip() or None,
-                    cloud_filter=cloud_name or None,
                     ambiente=row.get("Origem", "").strip() or None,
                     custom_fields={
                         "tipo": "Diretoria",
@@ -1446,7 +1434,6 @@ async def import_csv_data(data: CsvImportRequest, db: AsyncSession = Depends(get
                 name=pn,
                 centro_custo=row.get("CentrodeCusto", "").strip() or None,
                 id_orcamento=row.get("IDOrcamento", "").strip() or None,
-                cloud_filter=row.get("Cloud", "").strip() or None,
                 ambiente=row.get("Origem", "").strip() or None,
                 custom_fields={
                     "tipo": "Projeto",
@@ -1541,7 +1528,6 @@ async def import_csv_data(data: CsvImportRequest, db: AsyncSession = Depends(get
                     if len(roots) == 1:
                         dept = Department(
                             parent_id=roots[0], name=project_name,
-                            cloud_filter=cloud or None,
                             custom_fields={"source": "businessRules_download.csv", "association": "provider_directory_fallback"},
                         )
                         db.add(dept)
@@ -1665,7 +1651,7 @@ async def import_csv_data(data: CsvImportRequest, db: AsyncSession = Depends(get
     return result
 
 
-@router.post("/departments/azure-active-classifications-sync")
+@router.post("/governanca/hierarquia/sincronizar-classificacoes-azure")
 async def sync_azure_active_classifications(
     apply: bool = Query(False, description="When true, persist departments and classification rules"),
     db: AsyncSession = Depends(get_db),

@@ -38,37 +38,37 @@ export default function IdeaFormDialog({ open, onClose, onCreated }: Props) {
 
   return (
     <Dialog open={open} onClose={onClose} maxWidth="sm" fullWidth>
-      <DialogTitle>Nova ideia</DialogTitle>
+      <DialogTitle>Registrar ideia</DialogTitle>
       <DialogContent>
         <Stack spacing={2} sx={{ pt: 1 }}>
-          <TextField label="Título" value={form.title} onChange={(e) => setForm({ ...form, title: e.target.value })} required />
-          <TextField label="Descrição" multiline minRows={3} value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} />
+          <TextField label="Título da ideia" value={form.title} onChange={(e) => setForm({ ...form, title: e.target.value })} required />
+          <TextField label="Contexto e proposta" multiline minRows={3} value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} />
           <FormControl fullWidth>
-            <InputLabel>Tipo</InputLabel>
-            <Select label="Tipo" value={form.idea_type} onChange={(e) => setForm({ ...form, idea_type: e.target.value as IdeaType })}>
+            <InputLabel>Natureza</InputLabel>
+            <Select label="Natureza" value={form.idea_type} onChange={(e) => setForm({ ...form, idea_type: e.target.value as IdeaType })}>
               {TYPES.map((t) => <MenuItem key={t} value={t}>{TYPE_LABELS[t]}</MenuItem>)}
             </Select>
           </FormControl>
           <Stack direction="row" spacing={2}>
             <FormControl fullWidth>
-              <InputLabel>Impacto</InputLabel>
-              <Select label="Impacto" value={form.impact} onChange={(e) => setForm({ ...form, impact: e.target.value as IdeaImpact })}>
+              <InputLabel>Impacto esperado</InputLabel>
+              <Select label="Impacto esperado" value={form.impact} onChange={(e) => setForm({ ...form, impact: e.target.value as IdeaImpact })}>
                 {IMPACTS.map((i) => <MenuItem key={i} value={i}>{IMPACT_LABELS[i]}</MenuItem>)}
               </Select>
             </FormControl>
             <FormControl fullWidth>
-              <InputLabel>Dificuldade</InputLabel>
-              <Select label="Dificuldade" value={form.difficulty} onChange={(e) => setForm({ ...form, difficulty: e.target.value as IdeaCreateInput["difficulty"] })}>
+              <InputLabel>Esforço</InputLabel>
+              <Select label="Esforço" value={form.difficulty} onChange={(e) => setForm({ ...form, difficulty: e.target.value as IdeaCreateInput["difficulty"] })}>
                 {DIFFS.map((d) => <MenuItem key={d} value={d}>{d}</MenuItem>)}
               </Select>
             </FormControl>
           </Stack>
-          <TextField label="Prazo" type="date" InputLabelProps={{ shrink: true }} value={form.due_date || ""} onChange={(e) => setForm({ ...form, due_date: e.target.value || undefined })} />
+          <TextField label="Prazo desejado" type="date" InputLabelProps={{ shrink: true }} value={form.due_date || ""} onChange={(e) => setForm({ ...form, due_date: e.target.value || undefined })} />
         </Stack>
       </DialogContent>
       <DialogActions>
         <Button onClick={onClose}>Cancelar</Button>
-        <Button variant="contained" disabled={!form.title.trim() || saving} onClick={() => void save()}>Cadastrar</Button>
+        <Button variant="contained" disabled={!form.title.trim() || saving} onClick={() => void save()}>Registrar</Button>
       </DialogActions>
     </Dialog>
   );

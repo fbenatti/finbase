@@ -31,7 +31,7 @@ from concurrent.futures import ThreadPoolExecutor
 from threading import Lock
 from croniter import croniter
 
-router = APIRouter(prefix="/etl", tags=["etl"])
+router = APIRouter(prefix="/operacoes", tags=["etl"])
 
 
 def _source_bronze_code(connection_code: str, source_key: str | None = None) -> str:
@@ -48,7 +48,7 @@ DOWNLOAD_CSV_MAX_ROWS = int(os.getenv("OPENFINOPS_DOWNLOAD_CSV_MAX_ROWS", "10000
 DOWNLOAD_XLSX_MAX_ROWS = int(os.getenv("OPENFINOPS_DOWNLOAD_XLSX_MAX_ROWS", "200000"))
 
 
-@router.post("/azure-pricesheet/refresh", status_code=202)
+@router.post("/extracoes/tabela-precos-azure/atualizar", status_code=202)
 async def queue_azure_pricesheet_refresh(db: AsyncSession = Depends(get_db)):
     """Queue a full, manifest-validated Azure Price Sheet snapshot refresh."""
     from app.models.etl_task import EtlTask
@@ -113,7 +113,7 @@ async def _reconcile_dead_worker_tasks(db: AsyncSession, reason: str) -> int:
     return len(rows)
 
 
-@router.get("/worker-health")
+@router.get("/execucoes/saude-executor")
 async def worker_health(db: AsyncSession = Depends(get_db)):
     """Report worker liveness without mutating task state.
 
@@ -125,7 +125,7 @@ async def worker_health(db: AsyncSession = Depends(get_db)):
     return aggregate_worker_health()
 
 
-@router.post("/connections/{connection_id}/scan")
+@router.post("/extracoes/fontes/{connection_id}/varrer")
 async def scan_blobs(connection_id: int, db: AsyncSession = Depends(get_db)):
     result = await db.execute(
         select(SourceConnection).where(SourceConnection.id == connection_id)
@@ -305,7 +305,7 @@ async def scan_blobs(connection_id: int, db: AsyncSession = Depends(get_db)):
     raise HTTPException(status_code=400, detail=f"Scan not supported for {conn.connector_type}")
 
 
-@router.get("/connections/{connection_id}/preview")
+@router.get("/extracoes/fontes/{connection_id}/previa")
 async def preview_source(
     connection_id: int,
     limit: int = Query(20, ge=1, le=100),
@@ -332,7 +332,7 @@ async def preview_source(
         raise HTTPException(status_code=502, detail=f"Falha ao consultar o Databricks: {str(exc)[:300]}") from exc
 
 
-@router.get("/blobs/", response_model=list[IngestedBlobOut])
+@router.get("/extracoes/arquivos/", response_model=list[IngestedBlobOut])
 async def list_ingested_blobs(
     connection_id: int | None = None,
     db: AsyncSession = Depends(get_db),
@@ -344,7 +344,7 @@ async def list_ingested_blobs(
     return result.scalars().all()
 
 
-@router.delete("/blobs/skipped", status_code=204)
+@router.delete("/extracoes/arquivos/ignorados", status_code=204)
 async def clear_skipped_blobs(
     connection_id: int = Query(...),
     db: AsyncSession = Depends(get_db),
@@ -416,7 +416,7 @@ async def _purge_gold_if_period_empty(
         conn.config_json = _drop_manual_period_meta(conn.config_json, billing_period)
 
 
-@router.delete("/blobs/{blob_id}", status_code=204)
+@router.delete("/extracoes/arquivos/{blob_id}", status_code=204)
 async def delete_ingested_blob(blob_id: int, db: AsyncSession = Depends(get_db)):
     """Remove ingestion metadata and physical Bronze/Gold rows from Iceberg."""
     from app.services.iceberg_service import delete_bronze_slice
@@ -447,7 +447,7 @@ async def delete_ingested_blob(blob_id: int, db: AsyncSession = Depends(get_db))
     await db.commit()
 
 
-@router.get("/blobs/{blob_id}/download")
+@router.get("/extracoes/arquivos/{blob_id}/baixar")
 async def download_ingested_blob(
     blob_id: int,
     format: Literal["csv", "xlsx"] = Query("csv"),
@@ -536,7 +536,7 @@ async def download_ingested_blob(
     )
 
 
-@router.delete("/blobs/", status_code=204)
+@router.delete("/extracoes/arquivos/", status_code=204)
 async def delete_all_ingested_blobs(
     connection_id: int = Query(..., description="Connection ID to clear all data for"),
     billing_period: str | None = Query(None, description="Optional: only clear a specific period"),
@@ -578,7 +578,7 @@ async def delete_all_ingested_blobs(
     await db.commit()
 
 
-@router.post("/run")
+@router.post("/execucoes/executar")
 async def run_etl(request: EtlRunRequest, db: AsyncSession = Depends(get_db)):
     result = await db.execute(
         select(SourceConnection).where(SourceConnection.id == request.connection_id)
@@ -673,14 +673,14 @@ async def run_etl(request: EtlRunRequest, db: AsyncSession = Depends(get_db)):
     return {"task_id": task_id, "status": "QUEUED", "message": "Extraction queued — worker will pick it up"}
 
 
-@router.post("/cancel/{task_id}")
+@router.post("/execucoes/cancelar/{task_id}")
 async def cancel_etl(task_id: int):
     if cancel_task(task_id):
         return {"status": "CANCELLING"}
     raise HTTPException(status_code=404, detail="Task not found or already finished")
 
 
-@router.post("/connections/{connection_id}/reset-source")
+@router.post("/extracoes/fontes/{connection_id}/redefinir-fonte")
 async def reset_source_for_reimport(connection_id: int, db: AsyncSession = Depends(get_db)):
     """Clear source metadata and Bronze so current CSVs can be reimported cleanly."""
     from app.services import iceberg_service as iceberg
@@ -697,7 +697,7 @@ async def reset_source_for_reimport(connection_id: int, db: AsyncSession = Depen
     return {"status": "READY", "connection_id": connection_id, "bronze_reset": bronze_reset, "message": "Metadados e Bronze removidos. Execute a importação dos CSVs atuais."}
 
 
-@router.get("/status/{task_id}")
+@router.get("/execucoes/situacao/{task_id}")
 async def get_etl_status(task_id: int):
     status = _get_task_status(task_id)
     if not status:
@@ -705,7 +705,7 @@ async def get_etl_status(task_id: int):
     return status
 
 
-@router.get("/tasks/")
+@router.get("/execucoes/tarefas/")
 async def list_running_tasks():
     """List all currently running (non-terminal) ETL tasks."""
     return get_running_tasks()
@@ -713,7 +713,7 @@ async def list_running_tasks():
 
 # --- Skipped Blobs ---
 
-@router.get("/blobs/skipped", response_model=list[SkippedBlobOut])
+@router.get("/extracoes/arquivos/ignorados", response_model=list[SkippedBlobOut])
 async def list_skipped_blobs(
     connection_id: int = Query(...),
     db: AsyncSession = Depends(get_db),
@@ -727,7 +727,7 @@ async def list_skipped_blobs(
     return result.scalars().all()
 
 
-@router.post("/blobs/skip", response_model=SkippedBlobOut, status_code=201)
+@router.post("/extracoes/arquivos/pular", response_model=SkippedBlobOut, status_code=201)
 async def skip_blob(
     body: SkipBlobRequest,
     db: AsyncSession = Depends(get_db),
@@ -755,7 +755,7 @@ async def skip_blob(
     return skipped
 
 
-@router.delete("/blobs/skip/{skip_id}", status_code=204)
+@router.delete("/extracoes/arquivos/pular/{skip_id}", status_code=204)
 async def unskip_blob(skip_id: int, db: AsyncSession = Depends(get_db)):
     """Remove a blob from the skip list so it can be imported again."""
     result = await db.execute(
@@ -982,14 +982,14 @@ async def _execute_connection_test(conn: SourceConnection) -> dict[str, str]:
     }
 
 
-@router.post("/connections/test-config")
+@router.post("/extracoes/fontes/testar-configuracao")
 async def test_connection_config(data: SourceConnectionCreate):
     """Test a connection from form data without persisting it."""
     conn = SourceConnection(**data.model_dump())
     return await _execute_connection_test(conn)
 
 
-@router.post("/connections/{connection_id}/test")
+@router.post("/extracoes/fontes/{connection_id}/testar")
 async def test_connection(connection_id: int, db: AsyncSession = Depends(get_db)):
     result = await db.execute(
         select(SourceConnection).where(SourceConnection.id == connection_id)
@@ -2858,7 +2858,7 @@ def _reclassify_destination_sync(task_id: int, destination_table_id: int, connec
         session.close()
 
 
-@router.post("/reclassify")
+@router.post("/execucoes/reclassificar")
 async def reclassify_destination(body: ReprocessRequest, db: AsyncSession = Depends(get_db)):
     """Queue an incremental Gold-only classification refresh by source/month."""
     from app.models.etl_task import EtlTask
@@ -2878,7 +2878,7 @@ async def reclassify_destination(body: ReprocessRequest, db: AsyncSession = Depe
     return {"task_id": task_ids[0], "task_ids": task_ids, "message": "Reclassificação incremental enfileirada"}
 
 
-@router.post("/reprocess")
+@router.post("/execucoes/reprocessar")
 async def reprocess_destination(body: ReprocessRequest, db: AsyncSession = Depends(get_db)):
     """Queue one atomic Gold publication per source and billing month."""
     from app.models.etl_task import EtlTask
@@ -3267,7 +3267,7 @@ async def reprocess_destination(body: ReprocessRequest, db: AsyncSession = Depen
     }
 
 
-@router.post("/reprocess-shared-cost")
+@router.post("/custos-compartilhados/reprocessar")
 async def reprocess_shared_cost(db: AsyncSession = Depends(get_db)):
     """Enqueue a worker job that writes tipo=rateio rows into the planning table."""
     from app.models.etl_task import EtlTask
@@ -3334,68 +3334,7 @@ async def reprocess_shared_cost(db: AsyncSession = Depends(get_db)):
     }
 
 
-@router.post("/reprocess-ai-cost-relationships")
-async def reprocess_ai_cost_relationships(db: AsyncSession = Depends(get_db)):
-    """Queue one classified FOCUS pass that publishes one Gold per active rule."""
-    from app.models.etl_task import EtlTask
-    from app.models.ai_cost import AiCostLink
-    from app.services.ai_cost_attribution import load_focus_schema
-    from app.services.ai_cost_materialization import _normalized_conditions
-    from sqlalchemy.orm import selectinload
-
-    links = list((await db.execute(select(AiCostLink).options(selectinload(AiCostLink.sources)).where(AiCostLink.active == True))).scalars().all())  # noqa: E712
-    if not links:
-        raise HTTPException(status_code=422, detail="Nenhum relacionamento de custo IA ativo para reprocessar.")
-    schema = await load_focus_schema()
-    invalid_rules = []
-    for link in links:
-        for source in link.sources or []:
-            _, missing = _normalized_conditions(schema, (source.filter_json or {}).get("conditions") or [])
-            if missing:
-                invalid_rules.append(f"{link.name} (fonte {source.id}): {', '.join(missing)}")
-    now = datetime.now(timezone.utc)
-    active = list((await db.execute(select(EtlTask).where(
-        EtlTask.task_type == "ai_cost_relationship_reprocess",
-        EtlTask.status.in_(["QUEUED", "RUNNING"]),
-    ))).scalars().all())
-    if active:
-        raise HTTPException(status_code=409, detail="Já existe um reprocessamento de relacionamentos IA em andamento.")
-    task = EtlTask(task_type="ai_cost_relationship_reprocess", status="QUEUED", errors=[])
-    # A rule with FOCUS fields absent from the current Gold is flagged and
-    # skipped by the worker (per-rule isolation) instead of blocking the
-    # whole batch. Surface the warnings on the queued task for visibility.
-    task.phase = (
-        "Na fila: classificar FOCUS uma vez e publicar as Gold dos relacionamentos"
-        + (f" · {len(invalid_rules)} regra(s) com campo(s) inválido(s)" if invalid_rules else "")
-    )
-    task.started_at = now
-    task.total_blobs = len(links)
-    task.processed_blobs = 0
-    task.rows_destination = 0
-    task.result_json = {
-        "event_log": [{"at": now.isoformat(), "level": "INFO", "message": task.phase}],
-        "warnings": invalid_rules,
-    }
-    db.add(task)
-    await db.commit()
-    await db.refresh(task)
-    return {"task_id": task.id, "status": task.status, "message": task.phase, "warnings": invalid_rules}
-
-
-@router.get("/ai-cost-relationship-history")
-async def ai_cost_relationship_history(limit: int = 30, db: AsyncSession = Depends(get_db)):
-    from app.models.etl_task import EtlTask
-    rows = list((await db.execute(select(EtlTask).where(
-        EtlTask.task_type == "ai_cost_relationship_reprocess"
-    ).order_by(EtlTask.id.desc()).limit(min(max(limit, 1), 100)))).scalars().all())
-    return [{
-        "id": row.id, "status": row.status, "phase": row.phase, "started_at": row.started_at,
-        "finished_at": row.finished_at, "rows_destination": row.rows_destination,
-        "result_json": row.result_json or {}, "error": (row.errors or [None])[0],
-    } for row in rows]
-
-
-@router.get("/shared-cost-history")
+@router.get("/custos-compartilhados/historico")
 async def get_shared_cost_history(limit: int = 30):
     """Return queued, running and finished shared-cost (rateio) jobs."""
     from app.database import SyncSession
@@ -3425,7 +3364,7 @@ async def get_shared_cost_history(limit: int = 30):
         session.close()
 
 
-@router.get("/reprocess-history")
+@router.get("/execucoes/historico-reprocessamento")
 async def get_reprocess_history(limit: int = Query(25, ge=1, le=100), offset: int = Query(0, ge=0), search: str | None = None, sort_field: str = "started_at", sort_direction: str = "desc", filters: str | None = None):
     """Return completed and active reprocess runs with their persisted log."""
     from app.database import SyncSession
@@ -3528,7 +3467,7 @@ async def get_reprocess_history(limit: int = Query(25, ge=1, le=100), offset: in
         session.close()
 
 
-@router.get("/reprocess-status/{task_id}")
+@router.get("/execucoes/situacao-reprocessamento/{task_id}")
 async def get_reprocess_status(task_id: int):
     """Get persisted worker status, using memory only for legacy tasks."""
     from app.services.task_runner import _inmemory_tasks
@@ -3574,7 +3513,7 @@ async def get_reprocess_status(task_id: int):
     }
 
 
-@router.post("/reprocess/cancel/{task_id}")
+@router.post("/execucoes/reprocessar/cancelar/{task_id}")
 async def cancel_reprocess(task_id: int):
     """Cancel a running/queued reprocess task — cross-process via DB + in-memory flag."""
     from app.services.task_runner import _inmemory_tasks, _cancel_flags
@@ -3612,7 +3551,7 @@ async def cancel_reprocess(task_id: int):
     return {"message": "Cancel signal sent", "task_id": task_id}
 
 
-@router.post("/connections/{connection_id}/process-destination")
+@router.post("/extracoes/fontes/{connection_id}/processar-destino")
 async def process_destination_tables(connection_id: int):
     """Legacy: reprocess all dest tables for a single connection (all periods)."""
     from app.database import SyncSession as SS
@@ -3658,7 +3597,7 @@ async def process_destination_tables(connection_id: int):
         return {"success": False, "error": str(e), "rows_written": 0}
 
 
-@router.get("/periods")
+@router.get("/periodos")
 async def list_available_periods(
     connection_id: int = Query(...),
     db: AsyncSession = Depends(get_db),
@@ -3696,7 +3635,7 @@ async def list_available_periods(
     ]
 
 
-@router.get("/connections-for-dest/{destination_table_id}")
+@router.get("/extracoes/fontes-por-destino/{destination_table_id}")
 async def list_connections_for_destination(
     destination_table_id: int,
     db: AsyncSession = Depends(get_db),
@@ -3733,7 +3672,7 @@ from app.models.scheduled_task import ScheduledTask
 from app.services import scheduler_service
 
 
-@router.get("/schedules", response_model=list[ScheduledTaskOut])
+@router.get("/extracoes/agendamentos", response_model=list[ScheduledTaskOut])
 async def list_schedules(db: AsyncSession = Depends(get_db)):
     """List all scheduled ETL tasks."""
     result = await db.execute(
@@ -3742,14 +3681,14 @@ async def list_schedules(db: AsyncSession = Depends(get_db)):
     return result.scalars().all()
 
 
-@router.get("/schedules/backup-size-estimates")
+@router.get("/extracoes/agendamentos/estimativas-backup")
 async def backup_size_estimates():
     """Current uncompressed data volume per selectable Iceberg layer."""
     from app.services.full_backup import backup_layer_size_estimates
     return await asyncio.to_thread(backup_layer_size_estimates)
 
 
-@router.post("/schedules", response_model=ScheduledTaskOut, status_code=201)
+@router.post("/extracoes/agendamentos", response_model=ScheduledTaskOut, status_code=201)
 async def create_schedule(body: ScheduledTaskCreate, db: AsyncSession = Depends(get_db)):
     """Create a new scheduled ETL task."""
     # Validate cron expression
@@ -3784,7 +3723,7 @@ async def create_schedule(body: ScheduledTaskCreate, db: AsyncSession = Depends(
     return sched
 
 
-@router.put("/schedules/{schedule_id}", response_model=ScheduledTaskOut)
+@router.put("/extracoes/agendamentos/{schedule_id}", response_model=ScheduledTaskOut)
 async def update_schedule(schedule_id: int, body: ScheduledTaskUpdate, db: AsyncSession = Depends(get_db)):
     """Update a scheduled ETL task."""
     result = await db.execute(
@@ -3814,7 +3753,7 @@ async def update_schedule(schedule_id: int, body: ScheduledTaskUpdate, db: Async
     return sched
 
 
-@router.delete("/schedules/{schedule_id}", status_code=204)
+@router.delete("/extracoes/agendamentos/{schedule_id}", status_code=204)
 async def delete_schedule(schedule_id: int, db: AsyncSession = Depends(get_db)):
     """Delete a scheduled ETL task."""
     result = await db.execute(
@@ -3829,7 +3768,7 @@ async def delete_schedule(schedule_id: int, db: AsyncSession = Depends(get_db)):
     await db.commit()
 
 
-@router.post("/schedules/{schedule_id}/run")
+@router.post("/extracoes/agendamentos/{schedule_id}/executar")
 async def run_schedule_now(
     schedule_id: int,
     background_tasks: BackgroundTasks,
@@ -3885,7 +3824,7 @@ def _qi_trino(identifier: str) -> str:
     return f'"{escaped}"'
 
 
-@router.get("/history")
+@router.get("/execucoes/historico")
 async def get_extraction_history(
     limit: int = Query(50, ge=1, le=200),
     offset: int = Query(0, ge=0),
@@ -3934,7 +3873,7 @@ async def get_extraction_history(
     return result
 
 
-@router.get("/history/{task_id}/metadata")
+@router.get("/execucoes/historico/{task_id}/metadados")
 async def get_extraction_history_metadata(task_id: int, db: AsyncSession = Depends(get_db)):
     """Retorna metadados e colunas da tabela Bronze para visualização da tarefa."""
     from app.models.etl_task import EtlTask
@@ -3991,7 +3930,7 @@ async def get_extraction_history_metadata(task_id: int, db: AsyncSession = Depen
     }
 
 
-@router.post("/history/{task_id}/query")
+@router.post("/execucoes/historico/{task_id}/consulta")
 async def query_extraction_history_data(
     task_id: int,
     body: ExtractionHistoryQueryIn,

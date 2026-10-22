@@ -5,60 +5,63 @@
  * identidade, altere apenas este arquivo: o tema MUI, os gráficos Plotly e o
  * shell de navegação leem daqui.
  *
- * Cores de status (erro, alerta, sucesso) ficam separadas dos tons da marca,
- * para que um gráfico ou um badge continue legível mesmo com outra paleta.
+ * Paleta "Azul logo": derivada do logotipo. O azul elétrico do símbolo é a
+ * primária, o azul-marinho do nome (#162B3A) vira o trilho lateral e o laranja
+ * aparece só como destaque pontual. Cores de status (erro, alerta, sucesso)
+ * ficam separadas dos tons da marca, para que um gráfico ou um badge continue
+ * legível mesmo com outra paleta.
  */
 
 export const colors = {
-  brand: "#4338CA",
-  brandLight: "#6366F1",
-  brandDark: "#312E81",
-  brandTint: "#EEF2FF",
-  brandSelected: "#E7E9FB",
-  brandHover: "#DCDDF8",
+  brand: "#0F62FE",
+  brandLight: "#6EA8FE",
+  brandDark: "#0B3FA8",
+  brandTint: "#EEF4FF",
+  brandSelected: "#DCE8FF",
+  brandHover: "#CFDFFF",
 
   accent: "#EA580C",
   accentDark: "#C2410C",
 
-  canvas: "#F5F6FA",
+  canvas: "#F5F8FB",
   paper: "#FFFFFF",
   raised: "#FAFBFD",
-  tableHead: "#EEF0F7",
-  rowHover: "#F3F4FB",
-  border: "#E2E5EE",
-  borderStrong: "#CDD2DF",
+  tableHead: "#EEF3F8",
+  rowHover: "#F3F7FC",
+  border: "#E1E8F0",
+  borderStrong: "#C5D2DE",
 
-  text: "#161B2E",
-  textSecondary: "#5A6378",
-  textMuted: "#8A93A8",
+  text: "#162B3A",
+  textSecondary: "#526777",
+  textMuted: "#8497A8",
 
-  rail: "#15123A",
-  railActive: "#2B2770",
-  railText: "#B9B6E8",
+  rail: "#FFFFFF",
+  railActive: "#E6EFFF",
+  railText: "#526777",
 
   success: "#15803D",
   warning: "#B45309",
   error: "#B91C1C",
-  info: "#1D4ED8",
+  info: "#0EA5C6",
 } as const;
 
 /** Série de categorias para gráficos, na ordem de uso. */
 export const chartSeries = [
-  "#4338CA", // índigo (marca)
-  "#0E7490", // ciano escuro
+  "#0F62FE", // azul do logo (marca)
   "#EA580C", // laranja (destaque)
+  "#6EA8FE", // azul claro
+  "#0B3FA8", // azul escuro
+  "#D97706", // âmbar
+  "#64748B", // ardósia
   "#BE185D", // rosa escuro
   "#4D7C0F", // verde oliva
-  "#475569", // ardósia
-  "#D97706", // âmbar
-  "#0369A1", // azul petróleo
 ] as const;
 
 /** Cores semânticas usadas em gráficos (realizado, orçamento, forecast, erro). */
 export const chartSemantic = {
   actual: colors.brand,
-  budget: "#7C3AED",
-  forecast: "#0E7490",
+  budget: "#64748B",
+  forecast: "#0EA5C6",
   negative: colors.error,
   positive: colors.success,
 } as const;

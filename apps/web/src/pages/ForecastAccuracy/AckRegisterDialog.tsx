@@ -1,7 +1,7 @@
 import { Dialog, DialogActions, DialogContent, DialogTitle } from "../../components/FinbaseDialog";
 import { useEffect, useMemo, useState, type ReactElement } from "react";
 import { Box, Button, Collapse, FormControl, IconButton, InputLabel, ListItemButton, ListItemText, MenuItem, Select, Stack, TextField, Typography } from "@mui/material";
-import { ChevronRight, ExpandMore } from "@mui/icons-material";
+import { ChevronRightOutlined, ExpandMoreOutlined } from "@mui/icons-material";
 import { Department, createForecastAck, getDepartments } from "../../services/api";
 
 const ACK_CATEGORIES = ["Pico sazonal", "Migração", "Projeto novo", "Erro de precificação", "Outro"];
@@ -38,7 +38,7 @@ export default function AckRegisterDialog({
     if (organization.length === 0) {
       getDepartments().then(setOrganization).catch(() => setOrganization([]));
     }
-    // Expande o caminho do departamento padrão no organograma.
+    // Expande o caminho do departamento padrão na estrutura.
     if (defaultDepartment && organization.length > 0) {
       const parts = defaultDepartment.split(" > ").map(p => p.trim());
       const expandPath = (nodes: Department[], depth: number) => {
@@ -92,7 +92,7 @@ export default function AckRegisterDialog({
           <Box sx={{ width: 28, display: "flex", justifyContent: "center" }}>
             {children.length > 0 && (
               <IconButton size="small" onClick={event => { event.stopPropagation(); toggleNode(node.id); }}>
-                {expanded ? <ExpandMore fontSize="small" /> : <ChevronRight fontSize="small" />}
+                {expanded ? <ExpandMoreOutlined fontSize="small" /> : <ChevronRightOutlined fontSize="small" />}
               </IconButton>
             )}
           </Box>
@@ -122,11 +122,11 @@ export default function AckRegisterDialog({
 
   return (
     <Dialog open={open} onClose={onClose} maxWidth="sm" fullWidth>
-      <DialogTitle>Cadastrar item de desvio</DialogTitle>
+      <DialogTitle>Registrar item de variação</DialogTitle>
       <DialogContent>
         <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
-          Relacione o item a um departamento do organograma e informe a data do registro. A data define o mês
-          (mesma regra do mês realizado — YYYYMM) e pode ser futura.
+          Relacione o item a uma unidade da estrutura e informe a data do registro. A data define o mês
+          (mesma regra do mês efetivado — YYYYMM) e pode ser futura.
         </Typography>
         {error && <Typography variant="body2" color="error" sx={{ mb: 1 }}>{error}</Typography>}
         <Typography variant="caption" color="text.secondary" fontWeight={700}>Departamento</Typography>
@@ -134,24 +134,24 @@ export default function AckRegisterDialog({
           {organization.filter(d => d.active).map(node => renderNode(node))}
         </Box>
         <TextField
-          fullWidth label="Departamento selecionado" value={dept} size="small" sx={{ mb: 2 }}
+          fullWidth label="Unidade selecionada" value={dept} size="small" sx={{ mb: 2 }}
           InputProps={{ readOnly: true }}
         />
         <TextField
-          fullWidth label="Data do registro" type="date" sx={{ mb: 2 }}
+          fullWidth label="Data de registro" type="date" sx={{ mb: 2 }}
           value={date}
           onChange={e => setDate(e.target.value)}
           InputLabelProps={{ shrink: true }}
-          helperText="O mês do item é derivado desta data (YYYYMM)."
+          helperText="O mês do item é derivado desta data (AAAAMM)."
         />
         <FormControl fullWidth sx={{ mb: 2 }}>
-          <InputLabel>Categoria</InputLabel>
+          <InputLabel>Tipo de desvio</InputLabel>
           <Select label="Categoria" value={category} onChange={e => setCategory(e.target.value)}>
             {ACK_CATEGORIES.map(cat => <MenuItem key={cat} value={cat}>{cat}</MenuItem>)}
           </Select>
         </FormControl>
         <FormControl fullWidth sx={{ mb: 2 }}>
-          <InputLabel>Severidade</InputLabel>
+          <InputLabel>Gravidade</InputLabel>
           <Select label="Severidade" value={severity} onChange={e => setSeverity(e.target.value)}>
             {ACK_SEVERITIES.map(sev => <MenuItem key={sev} value={sev}>{sev}</MenuItem>)}
           </Select>
@@ -160,18 +160,18 @@ export default function AckRegisterDialog({
           fullWidth label="Ordem (menor = aparece primeiro)" type="number" size="small" sx={{ mb: 2 }}
           value={ordem}
           onChange={e => setOrdem(Number(e.target.value) || 0)}
-          helperText="Usada para ordenar os highlights."
+          helperText="Usada para ordenar os destaques."
         />
         <TextField
-          fullWidth multiline minRows={3} label="Motivo do desvio"
+          fullWidth multiline minRows={3} label="Justificativa da variação"
           value={reason} onChange={e => setReason(e.target.value)}
-          placeholder="Ex.: projeto novo contratado após o fechamento do forecast..."
+          placeholder="Ex.: projeto novo contratado após o fechamento da previsão..."
         />
       </DialogContent>
       <DialogActions sx={{ px: 3, pb: 2 }}>
         <Button onClick={onClose}>Cancelar</Button>
         <Button variant="contained" disabled={saving || !dept.trim() || !reason.trim()} onClick={() => void save()}>
-          {saving ? "Salvando..." : "Cadastrar"}
+          {saving ? "Gravando..." : "Registrar"}
         </Button>
       </DialogActions>
     </Dialog>

@@ -50,7 +50,7 @@ def _raise_gold_query_error(table: str, exc: Exception) -> None:
         "message": "Consulta analítica indisponível.",
     }) from exc
 
-router = APIRouter(prefix="/gold", tags=["gold"])
+router = APIRouter(prefix="/custos", tags=["gold"])
 
 
 class FilterCondition(BaseModel):
@@ -195,12 +195,12 @@ def _validate_sources(sources: list[GoldSourceIn]) -> list[str]:
     return warnings
 
 
-@router.get("/rules", response_model=list[GoldRuleOut])
+@router.get("/regras", response_model=list[GoldRuleOut])
 async def list_rules(db: AsyncSession = Depends(get_db)):
     return [_rule_out(rule) for rule in await _load_rules(db)]
 
 
-@router.post("/rules", response_model=GoldRuleOut, status_code=201)
+@router.post("/regras", response_model=GoldRuleOut, status_code=201)
 async def create_rule(data: GoldRuleCreate, db: AsyncSession = Depends(get_db)):
     code = normalize_code(data.code)
     if not code:
@@ -233,7 +233,7 @@ async def create_rule(data: GoldRuleCreate, db: AsyncSession = Depends(get_db)):
     return _rule_out(rule)
 
 
-@router.get("/rules/{rule_id}", response_model=GoldRuleOut)
+@router.get("/regras/{rule_id}", response_model=GoldRuleOut)
 async def get_rule(rule_id: int, db: AsyncSession = Depends(get_db)):
     rule = (await db.execute(
         select(GoldMartRule).options(selectinload(GoldMartRule.sources)).where(GoldMartRule.id == rule_id)
@@ -243,7 +243,7 @@ async def get_rule(rule_id: int, db: AsyncSession = Depends(get_db)):
     return _rule_out(rule)
 
 
-@router.put("/rules/{rule_id}", response_model=GoldRuleOut)
+@router.put("/regras/{rule_id}", response_model=GoldRuleOut)
 async def update_rule(rule_id: int, data: GoldRuleUpdate, db: AsyncSession = Depends(get_db)):
     rule = (await db.execute(
         select(GoldMartRule).options(selectinload(GoldMartRule.sources)).where(GoldMartRule.id == rule_id)
@@ -285,7 +285,7 @@ async def update_rule(rule_id: int, data: GoldRuleUpdate, db: AsyncSession = Dep
     return _rule_out(rule)
 
 
-@router.delete("/rules/{rule_id}", status_code=204)
+@router.delete("/regras/{rule_id}", status_code=204)
 async def delete_rule(rule_id: int, db: AsyncSession = Depends(get_db)):
     rule = await db.get(GoldMartRule, rule_id)
     if not rule:
@@ -303,7 +303,7 @@ async def delete_rule(rule_id: int, db: AsyncSession = Depends(get_db)):
     )
 
 
-@router.delete("/tables/{table_name}", status_code=204)
+@router.delete("/tabelas/{table_name}", status_code=204)
 async def delete_table(table_name: str, db: AsyncSession = Depends(get_db)):
     """Drop a physical Gold table (and its rule when one exists for the code)."""
     import asyncio
@@ -335,7 +335,7 @@ async def delete_table(table_name: str, db: AsyncSession = Depends(get_db)):
     )
 
 
-@router.get("/gold-tables")
+@router.get("/tabelas")
 async def list_gold_tables():
     """Available Gold tables a Gold source can point at."""
     from app.database import SyncSession
@@ -353,7 +353,7 @@ async def list_gold_tables():
     return {"tables": items + planning}
 
 
-@router.get("/gold-schema")
+@router.get("/esquema")
 async def gold_schema(gold_table: str = Query(...)):
     """DESCRIBE a Gold table so the UI can offer valid filter columns."""
     try:
@@ -369,7 +369,7 @@ class GoldPreviewRequest(BaseModel):
     value_column: str = "realizado"
 
 
-@router.post("/preview")
+@router.post("/previa")
 async def preview(body: GoldPreviewRequest):
     try:
         return await preview_source(
@@ -386,7 +386,7 @@ class GoldReprocessRequest(BaseModel):
     billing_periods: list[str] = Field(default_factory=list)
 
 
-@router.post("/reprocess")
+@router.post("/reprocessar")
 async def reprocess_gold_cubes(body: GoldReprocessRequest, db: AsyncSession = Depends(get_db)):
     """Queue one independent task per selected Gold rule."""
     from datetime import datetime, timezone
@@ -445,7 +445,7 @@ async def reprocess_gold_cubes(body: GoldReprocessRequest, db: AsyncSession = De
     }
 
 
-@router.get("/history")
+@router.get("/historico")
 async def gold_history(limit: int = 30, db: AsyncSession = Depends(get_db)):
     from app.models.etl_task import EtlTask
     rows = list((await db.execute(select(EtlTask).where(
@@ -586,7 +586,7 @@ def _gold_filter_clause(schema: dict[str, str], filters: list[GoldQueryFilter]) 
     return " AND ".join(clauses) if clauses else "1=1"
 
 
-@router.post("/query")
+@router.post("/consulta")
 async def query_gold_cubes(body: GoldQueryRequest):
     """Aggregate query over one Gold cube (dest_dm_cost_*) for dashboards.
 
@@ -658,7 +658,7 @@ async def query_gold_cubes(body: GoldQueryRequest):
     return {"table": body.table, "columns": columns, "rows": rows, "row_count": len(rows)}
 
 
-@router.post("/filter-options")
+@router.post("/opcoes-filtro")
 async def query_gold_filter_options(body: GoldFilterOptionsRequest):
     """Search distinct dimension values in Trino with bounded pagination."""
     schema = await _gold_schema(body.table)
@@ -685,7 +685,7 @@ async def query_gold_filter_options(body: GoldFilterOptionsRequest):
     return {"table": body.table, "column": physical, "values": values, "offset": body.offset, "limit": body.limit, "has_more": len(values) == body.limit}
 
 
-@router.post("/daily-consumption")
+@router.post("/consumo-diario")
 async def query_gold_daily_consumption(body: GoldQueryRequest):
     """Return realized consumption by its source date, reading the Silver detail.
 
@@ -874,7 +874,7 @@ async def query_gold_daily_consumption(body: GoldQueryRequest):
     return {"table": body.table, "source": f"silver.{silver_table}", "available": True, "day_column": date_col, "rows": result, "row_count": len(result)}
 
 
-@router.get("/info")
+@router.get("/informacoes")
 async def gold_info(table: str = "dest_dm_cost_visao_completa"):
     """Metadata + coverage of one Gold table: schema, rows, periods."""
     schema = await _gold_schema(table)

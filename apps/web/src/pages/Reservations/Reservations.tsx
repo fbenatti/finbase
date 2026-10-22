@@ -7,19 +7,20 @@ import {
   Grid, InputLabel, MenuItem, Select, Stack, Table, TableBody,
   TableCell, TableHead, TableRow, Tooltip, Typography,
 } from "@mui/material";
-import RefreshIcon from "@mui/icons-material/Refresh";
-import CloudSyncIcon from "@mui/icons-material/CloudSync";
-import FactCheckIcon from "@mui/icons-material/FactCheck";
-import LightbulbIcon from "@mui/icons-material/Lightbulb";
-import ArrowBackIcon from "@mui/icons-material/ArrowBack";
+import RefreshIcon from "@mui/icons-material/RefreshOutlined";
+import CloudSyncIcon from "@mui/icons-material/CloudSyncOutlined";
+import FactCheckIcon from "@mui/icons-material/FactCheckOutlined";
+import LightbulbIcon from "@mui/icons-material/LightbulbOutlined";
+import ArrowBackIcon from "@mui/icons-material/ArrowBackOutlined";
 import SavingsOutlinedIcon from "@mui/icons-material/SavingsOutlined";
-import PercentIcon from "@mui/icons-material/Percent";
-import AccountBalanceWalletIcon from "@mui/icons-material/AccountBalanceWallet";
+import PercentIcon from "@mui/icons-material/PercentOutlined";
+import AccountBalanceWalletIcon from "@mui/icons-material/AccountBalanceWalletOutlined";
 import {
   getReservationsDashboard, getReservationsCatalog, getReservationSources,
   testReservationConnection, collectReservations, getReservationsAdvisor,
   getReservationsRecommendations,
 } from "../../services/api";
+import { colors } from "../../theme/tokens";
 
 const usd = new Intl.NumberFormat("pt-BR", { style: "currency", currency: "USD", maximumFractionDigits: 0 });
 const usd1 = new Intl.NumberFormat("pt-BR", { style: "currency", currency: "USD", maximumFractionDigits: 1 });
@@ -32,40 +33,40 @@ const TAB_KEYS = ["executivo", "catalogo", "recomendacoes", "fontes"] as const;
 const STATUS_COLOR: Record<string, string> = {
   Succeeded: "#16a34a",
   Active: "#16a34a",
-  Expired: "#5A6378",
+  Expired: colors.textSecondary,
   Cancelled: "#dc2626",
   Pending: "#f59e0b",
 };
 const STATUS_BG: Record<string, string> = {
   Succeeded: "#dcfce7",
   Active: "#dcfce7",
-  Expired: "#EEF0F7",
+  Expired: colors.tableHead,
   Cancelled: "#fee2e2",
   Pending: "#fef3c7",
 };
 
 const BENEFIT_LABELS: Record<string, string> = {
-  reserved_instance: "Reserved Instance",
+  reserved_instance: "Reserva de instância (RI)",
   savings_plan: "Savings Plan",
 };
 const BENEFIT_COLORS: Record<string, string> = {
-  reserved_instance: "#0f766e",
-  savings_plan: "#7c3aed",
+  reserved_instance: colors.brand,
+  savings_plan: "#64748B",
 };
 
 const ADVISOR_CATEGORY_COLORS: Record<string, string> = {
   Cost: "#16a34a",
   Security: "#dc2626",
   HighAvailability: "#f59e0b",
-  Performance: "#4338CA",
-  OperationalExcellence: "#7c3aed",
+  Performance: colors.brand,
+  OperationalExcellence: "#64748B",
 };
 const ADVISOR_CATEGORY_BG: Record<string, string> = {
   Cost: "#dcfce7",
   Security: "#fee2e2",
   HighAvailability: "#fef3c7",
-  Performance: "#dbeafe",
-  OperationalExcellence: "#f3e8ff",
+  Performance: colors.brandSelected,
+  OperationalExcellence: colors.brandTint,
 };
 
 function statusChip(status?: string | null) {
@@ -75,8 +76,8 @@ function statusChip(status?: string | null) {
       size="small"
       label={key}
       sx={{
-        bgcolor: STATUS_BG[key] || "#EEF0F7",
-        color: STATUS_COLOR[key] || "#334155",
+        bgcolor: STATUS_BG[key] || colors.tableHead,
+        color: STATUS_COLOR[key] || colors.text,
         fontWeight: 600,
         fontSize: 11,
       }}
@@ -109,7 +110,7 @@ function kpiCard(label: string, value: React.ReactNode, hint?: string, icon?: Re
 
 function expiringLabel(days: number | null | undefined): string {
   if (days == null) return "—";
-  if (days < 0) return `expirado há ${-days} dias`;
+  if (days < 0) return `vencido há ${-days} dias`;
   if (days === 0) return "vence hoje";
   return `em ${days} dia(s)`;
 }
@@ -124,9 +125,9 @@ const UTIL_BUCKETS: Array<{ label: string; min: number; max: number; color: stri
 const CATEGORY_LABELS: Record<string, string> = {
   Cost: "Custo",
   Security: "Segurança",
-  HighAvailability: "Alta disponibilidade",
+  HighAvailability: "Alta disponibilidade (HA)",
   Performance: "Performance",
-  OperationalExcellence: "Excelência operacional",
+  OperationalExcellence: "Excelência na operação",
 };
 
 export default function Reservations() {
@@ -176,7 +177,7 @@ export default function Reservations() {
       }
     } catch (e: any) {
       if (e?.code === "ERR_CANCELED") return;
-      setError(e?.response?.data?.detail || "Falha ao consultar reservas Azure");
+      setError(e?.response?.data?.detail || "Não foi possível consultar as reservas Azure");
     }
   };
 
@@ -195,7 +196,7 @@ export default function Reservations() {
       }
     } catch (e: any) {
       if (e?.code === "ERR_CANCELED") return;
-      setError(e?.response?.data?.detail || "Falha ao consultar recomendações");
+      setError(e?.response?.data?.detail || "Não foi possível consultar as recomendações");
     }
   };
 
@@ -218,7 +219,7 @@ export default function Reservations() {
       alert(dataDisplayText(`${result.status}: ${result.message}`));
       load();
     } catch (e: any) {
-      setError(e?.response?.data?.detail || "Falha no teste de conexão");
+      setError(e?.response?.data?.detail || "O teste de conexão falhou");
     } finally {
       setBusy(false);
     }
@@ -233,7 +234,7 @@ export default function Reservations() {
       setLastCollect(`Coleta enfileirada: ${names}`);
       alert(`Coleta enfileirada para: ${names}`);
     } catch (e: any) {
-      setError(e?.response?.data?.detail || "Falha ao enfileirar coleta");
+      setError(e?.response?.data?.detail || "Não foi possível enviar a coleta para a fila");
     } finally {
       setBusy(false);
     }
@@ -272,7 +273,7 @@ export default function Reservations() {
 
   const expiryBuckets = useMemo(() => {
     const buckets = [
-      { label: "Vence em ≤30d", min: 0, max: 30, n: 0 },
+      { label: "Vence em até 30 dias", min: 0, max: 30, n: 0 },
       { label: "31–60d", min: 31, max: 60, n: 0 },
       { label: "61–90d", min: 61, max: 90, n: 0 },
       { label: ">90d", min: 91, max: 99999, n: 0 },
@@ -290,7 +291,7 @@ export default function Reservations() {
   const pieData: any[] = useMemo(() => {
     const labels = byType.map((b: any) => BENEFIT_LABELS[b.type] || b.type);
     const values = byType.map((b: any) => b.count);
-    const colors = byType.map((b: any) => BENEFIT_COLORS[b.type] || "#0f766e");
+    const colors = byType.map((b: any) => BENEFIT_COLORS[b.type] || colors.brand);
     return [{
       type: "pie",
       labels,
@@ -327,7 +328,7 @@ export default function Reservations() {
             onClick={() => (tab === 2 ? loadRecommendations() : load())}
             disabled={busy}
           >
-            Atualizar
+            Recarregar dados
           </Button>
           <Button
             size="small"
@@ -353,7 +354,7 @@ export default function Reservations() {
       )}
       {dash && dash.available === false && (
         <Alert severity="info" sx={{ mb: 2 }}>
-          {dash.message || "Nenhum dado coletado ainda. Habilite collect_reservations nas conexões Azure e clique em Coletar agora."}
+          {dash.message || "Nenhum dado coletado ainda. Ative collect_reservations nas conexões Azure e clique em Coletar agora."}
         </Alert>
       )}
 
@@ -372,16 +373,16 @@ export default function Reservations() {
             <Stack spacing={2}>
               <Grid container spacing={2}>
                 <Grid item xs={12} sm={6} md={3}>
-                  {kpiCard("Benefícios", num.format(kpis.benefits_total || 0), `${num.format(kpis.benefits_active || 0)} ativos`)}
+                  {kpiCard("Reservas ativas", num.format(kpis.benefits_total || 0), `${num.format(kpis.benefits_active || 0)} ativos`)}
                 </Grid>
                 <Grid item xs={12} sm={6} md={3}>
-                  {kpiCard("Utilização média", kpis.avg_utilization_catalog != null ? pct.format((kpis.avg_utilization_catalog || 0) / 100) : "—")}
+                  {kpiCard("Uso médio", kpis.avg_utilization_catalog != null ? pct.format((kpis.avg_utilization_catalog || 0) / 100) : "—")}
                 </Grid>
                 <Grid item xs={12} sm={6} md={3}>
-                  {kpiCard("Vencem em 30d", num.format(kpis.expiring_30d || 0), `${num.format(kpis.expiring_90d || 0)} nos próximos 90 dias`)}
+                  {kpiCard("Vencem em 30 dias", num.format(kpis.expiring_30d || 0), `${num.format(kpis.expiring_90d || 0)} até 90 dias`)}
                 </Grid>
                 <Grid item xs={12} sm={6} md={3}>
-                  {kpiCard("Compromisso SP", kpis.sp_commitment_total ? `USD ${num1.format(kpis.sp_commitment_total)}` : "—", "por hora")}
+                  {kpiCard("Compromisso (Savings Plan)", kpis.sp_commitment_total ? `USD ${num1.format(kpis.sp_commitment_total)}` : "—", "por hora")}
                 </Grid>
               </Grid>
 
@@ -409,7 +410,7 @@ export default function Reservations() {
                 <Grid item xs={12} md={4}>
                   <Card sx={{ p: 2, borderRadius: 2 }}>
                     <Typography variant="subtitle2" sx={{ fontWeight: 700, mb: 1 }}>
-                      Utilização (1 dia) — clique para detalhar
+                      Uso (1 dia) — clique para detalhar
                     </Typography>
                     <Plot
                       data={[{
@@ -454,7 +455,7 @@ export default function Reservations() {
                         type: "bar",
                         x: expiryBuckets.map((b) => b.label),
                         y: expiryBuckets.map((b) => b.n),
-                        marker: { color: ["#dc2626", "#f59e0b", "#facc15", "#16a34a", "#5A6378"] as string[] },
+                        marker: { color: ["#dc2626", "#f59e0b", "#facc15", "#16a34a", colors.textSecondary] as string[] },
                         text: expiryBuckets.map((b) => String(b.n)),
                         textposition: "outside",
                       }]}
@@ -477,13 +478,13 @@ export default function Reservations() {
                     <Table size="small">
                       <TableHead>
                         <TableRow>
-                          <TableCell sx={{ fontWeight: 700 }}>Benefício</TableCell>
-                          <TableCell sx={{ fontWeight: 700 }}>Tipo</TableCell>
+                          <TableCell sx={{ fontWeight: 700 }}>Reserva</TableCell>
+                          <TableCell sx={{ fontWeight: 700 }}>Modalidade</TableCell>
                           <TableCell sx={{ fontWeight: 700 }}>SKU</TableCell>
-                          <TableCell sx={{ fontWeight: 700 }}>Status</TableCell>
-                          <TableCell sx={{ fontWeight: 700 }}>Termo</TableCell>
-                          <TableCell align="right" sx={{ fontWeight: 700 }}>Vencimento</TableCell>
-                          <TableCell align="right" sx={{ fontWeight: 700 }}>Utilização</TableCell>
+                          <TableCell sx={{ fontWeight: 700 }}>Estado</TableCell>
+                          <TableCell sx={{ fontWeight: 700 }}>Prazo</TableCell>
+                          <TableCell align="right" sx={{ fontWeight: 700 }}>Vence em</TableCell>
+                          <TableCell align="right" sx={{ fontWeight: 700 }}>Uso</TableCell>
                         </TableRow>
                       </TableHead>
                       <TableBody>
@@ -529,26 +530,26 @@ export default function Reservations() {
         <Stack spacing={2}>
           <Stack direction="row" spacing={2} sx={{ alignItems: "center", flexWrap: "wrap" }}>
             <FormControl size="small" sx={{ minWidth: 160 }}>
-              <InputLabel>Tipo</InputLabel>
-              <Select value={typeFilter} onChange={(e) => setTypeFilter(e.target.value)} label="Tipo">
-                <MenuItem value="">Todos</MenuItem>
-                <MenuItem value="reserved_instance">Reserved Instance</MenuItem>
+              <InputLabel>Modalidade</InputLabel>
+              <Select value={typeFilter} onChange={(e) => setTypeFilter(e.target.value)} label="Modalidade">
+                <MenuItem value="">Qualquer modalidade</MenuItem>
+                <MenuItem value="reserved_instance">Reserva de instância (RI)</MenuItem>
                 <MenuItem value="savings_plan">Savings Plan</MenuItem>
               </Select>
             </FormControl>
             <FormControl size="small" sx={{ minWidth: 160 }}>
-              <InputLabel>Status</InputLabel>
-              <Select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)} label="Status">
-                <MenuItem value="">Todos</MenuItem>
-                <MenuItem value="Succeeded">Succeeded</MenuItem>
-                <MenuItem value="Cancelled">Cancelled</MenuItem>
-                <MenuItem value="Expired">Expired</MenuItem>
+              <InputLabel>Estado</InputLabel>
+              <Select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)} label="Estado">
+                <MenuItem value="">Qualquer estado</MenuItem>
+                <MenuItem value="Succeeded">Concluída</MenuItem>
+                <MenuItem value="Cancelled">Cancelada</MenuItem>
+                <MenuItem value="Expired">Expirada</MenuItem>
               </Select>
             </FormControl>
             <FormControl size="small" sx={{ minWidth: 160 }}>
-              <InputLabel>Conexão</InputLabel>
-              <Select value={connectionFilter} onChange={(e) => setConnectionFilter(e.target.value)} label="Conexão">
-                <MenuItem value="">Todas</MenuItem>
+              <InputLabel>Conexão Azure</InputLabel>
+              <Select value={connectionFilter} onChange={(e) => setConnectionFilter(e.target.value)} label="Conexão Azure">
+                <MenuItem value="">Todas as conexões</MenuItem>
                 {allSources.map((s: any) => (
                   <MenuItem key={s.id} value={String(s.id)}>{s.name}</MenuItem>
                 ))}
@@ -565,14 +566,14 @@ export default function Reservations() {
                 startIcon={<ArrowBackIcon />}
                 onClick={() => setUtilBucket(null)}
               >
-                Sair do filtro {utilDrilldown.label} ({utilDrilldown.n})
+                Limpar filtro {utilDrilldown.label} ({utilDrilldown.n})
               </Button>
             )}
           </Stack>
 
           {utilDrilldown && (
             <Alert severity="info">
-              Mostrando reservas com utilização entre <b>{utilDrilldown.label}</b> ({utilDrilldown.n} benefícios). Clique em "Sair do filtro" para voltar.
+              Mostrando reservas com utilização entre <b>{utilDrilldown.label}</b> ({utilDrilldown.n} benefícios). Clique em "Limpar filtro" para voltar.
             </Alert>
           )}
 
@@ -581,17 +582,17 @@ export default function Reservations() {
               <Table size="small" stickyHeader>
                 <TableHead>
                   <TableRow>
-                    <TableCell sx={{ fontWeight: 700 }}>Benefício</TableCell>
-                    <TableCell sx={{ fontWeight: 700 }}>Tipo</TableCell>
+                    <TableCell sx={{ fontWeight: 700 }}>Reserva</TableCell>
+                    <TableCell sx={{ fontWeight: 700 }}>Modalidade</TableCell>
                     <TableCell sx={{ fontWeight: 700 }}>SKU</TableCell>
-                    <TableCell sx={{ fontWeight: 700 }}>Termo</TableCell>
-                    <TableCell align="right" sx={{ fontWeight: 700 }}>Qtd</TableCell>
-                    <TableCell sx={{ fontWeight: 700 }}>Escopo</TableCell>
-                    <TableCell sx={{ fontWeight: 700 }}>Status</TableCell>
-                    <TableCell sx={{ fontWeight: 700 }}>Início</TableCell>
-                    <TableCell sx={{ fontWeight: 700 }}>Fim</TableCell>
-                    <TableCell align="right" sx={{ fontWeight: 700 }}>Utilização</TableCell>
-                    <TableCell sx={{ fontWeight: 700 }}>Conexão</TableCell>
+                    <TableCell sx={{ fontWeight: 700 }}>Prazo</TableCell>
+                    <TableCell align="right" sx={{ fontWeight: 700 }}>Quantidade</TableCell>
+                    <TableCell sx={{ fontWeight: 700 }}>Abrangência</TableCell>
+                    <TableCell sx={{ fontWeight: 700 }}>Estado</TableCell>
+                    <TableCell sx={{ fontWeight: 700 }}>Começa em</TableCell>
+                    <TableCell sx={{ fontWeight: 700 }}>Termina em</TableCell>
+                    <TableCell align="right" sx={{ fontWeight: 700 }}>Uso</TableCell>
+                    <TableCell sx={{ fontWeight: 700 }}>Conexão Azure</TableCell>
                   </TableRow>
                 </TableHead>
                 <TableBody>
@@ -639,7 +640,7 @@ export default function Reservations() {
               <Grid container spacing={2}>
                 <Grid item xs={12} md={3}>
                   {kpiCard(
-                    "Savings potencial",
+                    "Saving potencial",
                     recSummary.savings_total != null ? usd.format(recSummary.savings_total) : "—",
                     `${num.format(recSummary.n || 0)} recomendações`,
                     <SavingsOutlinedIcon fontSize="large" />
@@ -647,7 +648,7 @@ export default function Reservations() {
                 </Grid>
                 <Grid item xs={12} md={3}>
                   {kpiCard(
-                    "Savings % médio",
+                    "Saving % médio",
                     recSummary.avg_savings_pct != null ? pct.format((recSummary.avg_savings_pct || 0) / 100) : "—",
                     undefined,
                     <PercentIcon fontSize="large" />
@@ -655,7 +656,7 @@ export default function Reservations() {
                 </Grid>
                 <Grid item xs={12} md={3}>
                   {kpiCard(
-                    "Compromisso mensal est.",
+                    "Compromisso mensal estimado",
                     recSummary.commitment_total != null ? usd1.format(recSummary.commitment_total) : "—",
                     "por hora",
                     <AccountBalanceWalletIcon fontSize="large" />
@@ -663,7 +664,7 @@ export default function Reservations() {
                 </Grid>
                 <Grid item xs={12} md={3}>
                   {kpiCard(
-                    "Advisor (Cost)",
+                    "Azure Advisor (custo)",
                     num.format(advisorRows.length),
                     `${num.format(advisor?.total || 0)} no total da categoria`,
                     <LightbulbIcon fontSize="large" />
@@ -673,23 +674,23 @@ export default function Reservations() {
 
               <Card sx={{ p: 2, borderRadius: 2 }}>
                 <Typography variant="subtitle2" sx={{ fontWeight: 700, mb: 1 }}>
-                  Recomendações de compra — Savings Plan / Reserved Instance
+                  Recomendações de compra — Savings Plan / Reserva de instância (RI)
                 </Typography>
                 <Box sx={{ maxHeight: 480, overflow: "auto" }}>
                   <Table size="small" stickyHeader>
                     <TableHead>
                       <TableRow>
-                        <TableCell sx={{ fontWeight: 700 }}>Tipo</TableCell>
+                        <TableCell sx={{ fontWeight: 700 }}>Modalidade</TableCell>
                         <TableCell sx={{ fontWeight: 700 }}>SKU</TableCell>
-                        <TableCell sx={{ fontWeight: 700 }}>Termo</TableCell>
-                        <TableCell sx={{ fontWeight: 700 }}>Escopo</TableCell>
-                        <TableCell sx={{ fontWeight: 700 }}>Lookback</TableCell>
-                        <TableCell align="right" sx={{ fontWeight: 700 }}>Compromisso</TableCell>
-                        <TableCell align="right" sx={{ fontWeight: 700 }}>Utilização est.</TableCell>
-                        <TableCell align="right" sx={{ fontWeight: 700 }}>Cobertura</TableCell>
-                        <TableCell align="right" sx={{ fontWeight: 700 }}>Savings</TableCell>
-                        <TableCell align="right" sx={{ fontWeight: 700 }}>Savings %</TableCell>
-                        <TableCell sx={{ fontWeight: 700 }}>Subscription</TableCell>
+                        <TableCell sx={{ fontWeight: 700 }}>Prazo</TableCell>
+                        <TableCell sx={{ fontWeight: 700 }}>Abrangência</TableCell>
+                        <TableCell sx={{ fontWeight: 700 }}>Janela de análise</TableCell>
+                        <TableCell align="right" sx={{ fontWeight: 700 }}>Valor comprometido</TableCell>
+                        <TableCell align="right" sx={{ fontWeight: 700 }}>Uso estimado</TableCell>
+                        <TableCell align="right" sx={{ fontWeight: 700 }}>Cobertura do uso</TableCell>
+                        <TableCell align="right" sx={{ fontWeight: 700 }}>Economia estimada</TableCell>
+                        <TableCell align="right" sx={{ fontWeight: 700 }}>Economia (%)</TableCell>
+                        <TableCell sx={{ fontWeight: 700 }}>Assinatura</TableCell>
                       </TableRow>
                     </TableHead>
                     <TableBody>
@@ -700,8 +701,8 @@ export default function Reservations() {
                               size="small"
                               label={r.kind === "SavingsPlan" ? "Savings Plan" : (r.kind || "—")}
                               sx={{
-                                bgcolor: r.kind === "SavingsPlan" ? "#f3e8ff" : "#dbeafe",
-                                color: r.kind === "SavingsPlan" ? "#6d28d9" : "#1d4ed8",
+                                bgcolor: r.kind === "SavingsPlan" ? colors.brandTint : colors.brandSelected,
+                                color: r.kind === "SavingsPlan" ? colors.brandDark : colors.info,
                                 fontWeight: 600,
                                 fontSize: 11,
                               }}
@@ -744,17 +745,17 @@ export default function Reservations() {
                 <Stack direction="row" justifyContent="space-between" alignItems="center" sx={{ mb: 1, flexWrap: "wrap", gap: 1 }}>
                   <Typography variant="subtitle2" sx={{ fontWeight: 700 }}>
                     <LightbulbIcon sx={{ fontSize: 18, verticalAlign: "middle", mr: 0.5, color: "#f59e0b" }} />
-                    Recomendações do Azure Advisor
+                    Sugestões do Azure Advisor
                   </Typography>
                   <FormControl size="small" sx={{ minWidth: 220 }}>
-                    <InputLabel>Categoria</InputLabel>
-                    <Select value={advisorCategory} onChange={(e) => setAdvisorCategory(e.target.value)} label="Categoria">
+                    <InputLabel>Pilar</InputLabel>
+                    <Select value={advisorCategory} onChange={(e) => setAdvisorCategory(e.target.value)} label="Pilar">
                       {advisorCats.map((c: any) => (
                         <MenuItem key={c.category} value={c.category}>
                           {CATEGORY_LABELS[c.category] || c.category} ({c.n})
                         </MenuItem>
                       ))}
-                      {advisorCats.length === 0 && <MenuItem value="Cost">Custo</MenuItem>}
+                      {advisorCats.length === 0 && <MenuItem value="Cost">Custo mensal</MenuItem>}
                     </Select>
                   </FormControl>
                 </Stack>
@@ -762,10 +763,10 @@ export default function Reservations() {
                   <Table size="small" stickyHeader>
                     <TableHead>
                       <TableRow>
-                        <TableCell sx={{ fontWeight: 700 }}>Impacto</TableCell>
-                        <TableCell sx={{ fontWeight: 700 }}>Recomendação</TableCell>
-                        <TableCell sx={{ fontWeight: 700 }}>Solução</TableCell>
-                        <TableCell sx={{ fontWeight: 700 }}>Subscription</TableCell>
+                        <TableCell sx={{ fontWeight: 700 }}>Severidade</TableCell>
+                        <TableCell sx={{ fontWeight: 700 }}>Sugestão</TableCell>
+                        <TableCell sx={{ fontWeight: 700 }}>Como resolver</TableCell>
+                        <TableCell sx={{ fontWeight: 700 }}>Assinatura</TableCell>
                       </TableRow>
                     </TableHead>
                     <TableBody>
@@ -830,7 +831,7 @@ export default function Reservations() {
                         </Typography>
                       </Box>
                       {enabled ? (
-                        <Chip size="small" label="Coleta habilitada" color="success" icon={<FactCheckIcon />} />
+                        <Chip size="small" label="Coleta ativa" color="success" icon={<FactCheckIcon />} />
                       ) : (
                         <Chip size="small" label="Desabilitada" />
                       )}

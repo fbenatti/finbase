@@ -2,10 +2,10 @@ import { dataDisplayText } from "../../utils/dataPresentation";
 import { useCallback, useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import {
-  Alert, Box, Button, Card, CardContent, Checkbox, Chip, CircularProgress, FormControl, FormControlLabel,
-  InputLabel, LinearProgress, MenuItem, Paper, Select, Stack, Typography,
+  Alert, Box, Button, Chip, CircularProgress, FormControl, InputLabel, LinearProgress,
+  MenuItem, Paper, Select, Stack, Typography,
 } from "@mui/material";
-import { PlayArrow, Visibility } from "@mui/icons-material";
+import { PlayArrowOutlined, VisibilityOutlined } from "@mui/icons-material";
 import {
   ForecastConfig, getForecastAccuracyAvailableMonths, getForecastConfigs, getReprocessStatus, reprocessForecastAccuracy,
 } from "../../services/api";
@@ -41,7 +41,7 @@ export default function ReprocessAccuracyTab() {
       const active = list.find((c) => c.active) || list[0];
       if (active) setConfigId(active.id);
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Falha ao carregar configurações");
+      setError(e instanceof Error ? e.message : "Não foi possível carregar as configurações");
     }
   }, []);
 
@@ -51,19 +51,17 @@ export default function ReprocessAccuracyTab() {
 
   // Meses disponíveis: vem da API (períodos com dados na Gold + simulados já criados).
   // Nada chumbado — quando setembro/2026 tiver dados, aparece automaticamente aqui.
-  const [availableMonths, setAvailableMonths] = useState<string[]>([]);
   useEffect(() => {
     if (!configId) return;
     let cancelled = false;
     getForecastAccuracyAvailableMonths(Number(configId))
       .then((list) => {
         if (cancelled) return;
-        setAvailableMonths(list);
         setMonths(list);
         setSelected(new Set(list));
       })
       .catch((e) => {
-        if (!cancelled) setError(e instanceof Error ? e.message : "Falha ao carregar meses disponíveis");
+        if (!cancelled) setError(e instanceof Error ? e.message : "Não foi possível carregar as competências disponíveis");
       });
     return () => { cancelled = true; };
   }, [configId]);
@@ -82,13 +80,13 @@ export default function ReprocessAccuracyTab() {
         window.setTimeout(() => void pollTask(id), 3000);
       }
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Falha ao consultar o status");
+      setError(e instanceof Error ? e.message : "Não foi possível consultar a situação");
     }
   }, []);
 
   const run = async () => {
     if (!configId || selected.size === 0) {
-      setError("Selecione a configuração e ao menos um mês.");
+      setError("Escolha a configuração e ao menos uma competência.");
       return;
     }
     setStarting(true);
@@ -97,10 +95,10 @@ export default function ReprocessAccuracyTab() {
     try {
       const result = await reprocessForecastAccuracy(Number(configId), [...selected].sort());
       setTaskId(result.task_id);
-      setMessage(`Reprocessamento de acurácia enfileirado (task ${result.task_id}): ${result.months.length} meses.`);
+      setMessage(`Reprocessamento de acerto enviado para a fila (task ${result.task_id}): ${result.months.length} meses.`);
       await pollTask(result.task_id);
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Falha ao enfileirar o reprocessamento");
+      setError(e instanceof Error ? e.message : "Não foi possível enviar o reprocessamento para a fila");
     } finally {
       setStarting(false);
     }
@@ -118,92 +116,91 @@ export default function ReprocessAccuracyTab() {
     : 0;
 
   return (
-    <Box>
-      <Alert severity="info" sx={{ mb: 2 }}>
-        Exibe apenas meses com realizado no mês e no mês anterior, necessário para o forecast simulado em 02/MM
-        (cutoff D-2). O dashboard de acurácia usa automaticamente o snapshot mais recente de cada mês.
-      </Alert>
-      {error && <Alert severity="error" sx={{ mb: 2 }} onClose={() => setError("")}>{dataDisplayText(error)}</Alert>}
-      {message && <Alert severity="success" sx={{ mb: 2 }} onClose={() => setMessage("")}>{dataDisplayText(message)}</Alert>}
+    <Stack spacing={2}>
+      <Box>
+        <Typography variant="h6">Acerto das previsões</Typography>
+        <Typography variant="body2" color="text.secondary">
+          Mostra apenas meses com efetivado no mês e no mês anterior, necessário para o forecast simulado em 02/MM
+          (cutoff D-2). O painel de precisão usa automaticamente o snapshot mais recente de cada mês.
+        </Typography>
+      </Box>
 
-      <Card sx={{ mb: 2 }}>
-        <CardContent>
-          <Stack direction="row" gap={2} alignItems="center" flexWrap="wrap" sx={{ mb: 2 }}>
-            <Typography variant="h6">Configuração</Typography>
-            <FormControl size="small" sx={{ minWidth: 320 }}>
-              <InputLabel id="acc-reproc-config-label">Configuração de forecast</InputLabel>
-              <Select
-                labelId="acc-reproc-config-label"
-                label="Configuração de forecast"
-                value={configId}
-                onChange={(e) => setConfigId(e.target.value as number)}
-              >
-                {configs.map((c) => <MenuItem key={c.id} value={c.id}>{c.name} (config {c.id})</MenuItem>)}
-              </Select>
-            </FormControl>
-          </Stack>
-          <Typography variant="subtitle2" sx={{ mb: 1 }}>Meses (simulado em 02/MM, cutoff = último dia do mês anterior)</Typography>
-          <Paper variant="outlined" sx={{ p: 1.5, mb: 2, display: "flex", flexWrap: "wrap", gap: 0.5 }}>
-            {months.length === 0 && (
-              <Typography variant="body2" color="text.secondary">
-                Nenhum mês elegível: é necessário haver realizado no mês e no mês anterior.
-              </Typography>
-            )}
-            {months.map((month) => (
-              <FormControlLabel
-                key={month}
-                control={<Checkbox size="small" checked={selected.has(month)} onChange={() => toggle(month)} />}
-                label={prettyMonth(month)}
-                sx={{ mr: 0.5 }}
-              />
-            ))}
-            <Button size="small" sx={{ ml: 1 }} onClick={() => setSelected(new Set(months))}>Todos</Button>
-            <Button size="small" onClick={() => setSelected(new Set())}>Nenhum</Button>
-          </Paper>
-          <Stack direction="row" gap={1.5} alignItems="center" flexWrap="wrap">
+      {error && <Alert severity="error" onClose={() => setError("")}>{dataDisplayText(error)}</Alert>}
+      {message && <Alert severity="success" onClose={() => setMessage("")}>{dataDisplayText(message)}</Alert>}
+
+      <Paper variant="outlined" sx={{ p: 2 }}>
+        <Stack direction={{ xs: "column", md: "row" }} spacing={2} alignItems={{ md: "center" }} justifyContent="space-between">
+          <FormControl size="small" sx={{ minWidth: 320 }}>
+            <InputLabel id="acc-reproc-config-label">Configuração de previsão</InputLabel>
+            <Select
+              labelId="acc-reproc-config-label"
+              label="Configuração de previsão"
+              value={configId}
+              onChange={(e) => setConfigId(e.target.value as number)}
+            >
+              {configs.map((c) => <MenuItem key={c.id} value={c.id}>{c.name} (config {c.id})</MenuItem>)}
+            </Select>
+          </FormControl>
+          <Stack direction="row" spacing={1} alignItems="center" flexWrap="wrap" useFlexGap>
+            {task && <Chip size="small" color={statusColor(task.status)} label={task.status || "—"} />}
+            <Button size="small" startIcon={<VisibilityOutlined />} onClick={() => navigate("/projecoes/acuracia/visao")}>
+              Abrir painel de precisão
+            </Button>
             <Button
               variant="contained"
-              startIcon={starting ? <CircularProgress size={16} /> : <PlayArrow />}
+              startIcon={starting ? <CircularProgress size={16} /> : <PlayArrowOutlined />}
               disabled={starting || !configId || selected.size === 0 || isActive(task?.status)}
               onClick={() => void run()}
             >
-              Reprocessar acurácia ({selected.size} mês/meses)
-            </Button>
-            {task && (
-              <Chip
-                size="small"
-                color={statusColor(task.status)}
-                label={task.status || "—"}
-              />
-            )}
-            <Button size="small" startIcon={<Visibility />} onClick={() => navigate("/projecoes/acuracia/visao")}>
-              Abrir dashboard de acurácia
+              Reprocessar precisão ({selected.size})
             </Button>
           </Stack>
-        </CardContent>
-      </Card>
+        </Stack>
+      </Paper>
+
+      <Box>
+        <Typography variant="subtitle2" sx={{ mb: 1 }}>Competências (simuladas em 02/MM, corte = último dia do mês anterior)</Typography>
+        {months.length === 0 ? (
+          <Typography variant="body2" color="text.secondary">
+            Nenhum mês elegível: é necessário haver efetivado no mês e no mês anterior.
+          </Typography>
+        ) : (
+          <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap>
+            {months.map((month) => {
+              const isSelected = selected.has(month);
+              return <Chip
+                key={month}
+                label={prettyMonth(month)}
+                onClick={() => toggle(month)}
+                color={isSelected ? "primary" : "default"}
+                variant={isSelected ? "filled" : "outlined"}
+              />;
+            })}
+            <Button size="small" onClick={() => setSelected(new Set(months))}>Marcar todas</Button>
+            <Button size="small" onClick={() => setSelected(new Set())}>Limpar</Button>
+          </Stack>
+        )}
+      </Box>
 
       {task && (
-        <Card>
-          <CardContent>
-            <Typography variant="h6">Andamento</Typography>
-            <Stack direction="row" justifyContent="space-between" alignItems="center" sx={{ mt: 1 }}>
-              <Typography variant="body2" color="text.secondary">{task.phase || task.status}</Typography>
-              <Typography variant="body2">
-                {task.processed_blobs ?? 0}/{task.total_blobs ?? "—"} meses ({progress}%)
-              </Typography>
-            </Stack>
-            <LinearProgress variant={isActive(task.status) ? "indeterminate" : "determinate"} value={progress} sx={{ mt: 1 }} />
-            {task.error && <Alert severity="error" sx={{ mt: 1.5 }}>{dataDisplayText(task.error)}</Alert>}
-          </CardContent>
-        </Card>
+        <Paper variant="outlined" sx={{ p: 2 }}>
+          <Typography variant="subtitle2">Em andamento</Typography>
+          <Stack direction="row" justifyContent="space-between" alignItems="center" sx={{ mt: 1 }}>
+            <Typography variant="body2" color="text.secondary">{task.phase || task.status}</Typography>
+            <Typography variant="body2">
+              {task.processed_blobs ?? 0}/{task.total_blobs ?? "—"} meses ({progress}%)
+            </Typography>
+          </Stack>
+          <LinearProgress variant={isActive(task.status) ? "indeterminate" : "determinate"} value={progress} sx={{ mt: 1 }} />
+          {task.error && <Alert severity="error" sx={{ mt: 1.5 }}>{dataDisplayText(task.error)}</Alert>}
+        </Paper>
       )}
 
       {taskId && task?.status === "COMPLETED" && (
-        <Alert severity="info" sx={{ mt: 2 }}>
-          Task {taskId} finalizada. Os snapshots novos já estão disponíveis no dashboard de acurácia.
+        <Alert severity="info">
+          Task {taskId} finalizada. Os snapshots novos já estão disponíveis no painel de precisão.
         </Alert>
       )}
-    </Box>
+    </Stack>
   );
 }

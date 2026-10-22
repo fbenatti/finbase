@@ -65,7 +65,6 @@ def serialize_department(dept: Any) -> dict[str, Any]:
         "centro_custo": dept.centro_custo,
         "id_orcamento": getattr(dept, "id_orcamento", None),
         "ambiente": dept.ambiente,
-        "cloud_filter": dept.cloud_filter,
         "custom_fields": dept.custom_fields,
         "active": dept.active,
     }

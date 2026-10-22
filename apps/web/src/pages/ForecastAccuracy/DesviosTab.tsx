@@ -3,7 +3,7 @@ import { dataDisplayText } from "../../utils/dataPresentation";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import Plot from "@/components/Plot";
 import { Alert, Box, Button, Chip, CircularProgress, FormControl, IconButton, InputLabel, LinearProgress, MenuItem, Paper, Select, Stack, Table, TableBody, TableCell, TableContainer, TableHead, TableRow, TextField, Tooltip, Typography } from "@mui/material";
-import { Add, Block, Edit, Remove } from "@mui/icons-material";
+import { AddOutlined, BlockOutlined, EditOutlined, RemoveOutlined } from "@mui/icons-material";
 import {
   ForecastAck, ForecastAccuracyDeltaSeries, ForecastDesvioItem, ForecastDesvios, ForecastDesvioSubcat,
   createForecastAck, deactivateForecastAck, getForecastAccuracyDeltaSeries, getForecastAccuracyDesvios, getForecastAccuracyDesviosSubcategories,
@@ -34,13 +34,13 @@ function DesvioTable({
         <Table size="small">
           <TableHead>
             <TableRow>
-              <TableCell>Departamento (último nível)</TableCell>
-              <TableCell align="right">Projetado</TableCell>
-              <TableCell align="right">Realizado</TableCell>
-              <TableCell align="right">Delta (R$)</TableCell>
-              <TableCell align="right">Delta (%)</TableCell>
-              <TableCell align="right">Acurácia</TableCell>
-              <TableCell align="center">Ack</TableCell>
+              <TableCell>Unidade (último nível)</TableCell>
+              <TableCell align="right">Previsto</TableCell>
+              <TableCell align="right">Efetivado</TableCell>
+              <TableCell align="right">Variação (R$)</TableCell>
+              <TableCell align="right">Variação (%)</TableCell>
+              <TableCell align="right">Precisão</TableCell>
+              <TableCell align="center">Justificativa</TableCell>
             </TableRow>
           </TableHead>
           <TableBody>
@@ -74,13 +74,13 @@ function FragmentRow({ item, color, open, onToggle, subcats, subcatLoading, onAc
         <TableCell>
           <Stack direction="row" alignItems="center" gap={0.5} sx={{ flexWrap: "wrap" }}>
             <IconButton size="small" onClick={event => { event.stopPropagation(); onToggle(); }} aria-label={open ? "recolher" : "expandir"}>
-              {open ? <Remove fontSize="small" /> : <Add fontSize="small" />}
+              {open ? <RemoveOutlined fontSize="small" /> : <AddOutlined fontSize="small" />}
             </IconButton>
             <Typography variant="body2" fontWeight={600}>{item.name}</Typography>
             <Tooltip title={item.path.join(" > ")}>
               <Chip size="small" variant="outlined" label={item.path.join(" > ")} sx={{ maxWidth: 260 }} />
             </Tooltip>
-            {ack && <Chip size="small" color="info" label={`✓ Ack: ${ack.category}`} />}
+            {ack && <Chip size="small" color="info" label={`✓ Justificativa: ${ack.category}`} />}
           </Stack>
           {ack && (
             <Typography variant="caption" color="text.secondary" sx={{ display: "block", pl: 4, maxWidth: 520 }}>
@@ -96,14 +96,14 @@ function FragmentRow({ item, color, open, onToggle, subcats, subcatLoading, onAc
         <TableCell align="center">
           {ack ? (
             <Stack direction="row" alignItems="center" justifyContent="center">
-              <Tooltip title="Editar Ack">
-                <IconButton size="small" aria-label={`Editar Ack de ${item.name}`} onClick={event => { event.stopPropagation(); onAck(); }}>
-                  <Edit fontSize="small" />
+              <Tooltip title="Alterar justificativa">
+                <IconButton size="small" aria-label={`Editar Justificativa de ${item.name}`} onClick={event => { event.stopPropagation(); onAck(); }}>
+                  <EditOutlined fontSize="small" />
                 </IconButton>
               </Tooltip>
-              <Tooltip title="Desativar Ack">
-                <IconButton size="small" color="error" aria-label={`Desativar Ack de ${item.name}`} onClick={event => { event.stopPropagation(); onDeactivateAck(); }}>
-                  <Block fontSize="small" />
+              <Tooltip title="Desativar justificativa">
+                <IconButton size="small" color="error" aria-label={`Desativar Justificativa de ${item.name}`} onClick={event => { event.stopPropagation(); onDeactivateAck(); }}>
+                  <BlockOutlined fontSize="small" />
                 </IconButton>
               </Tooltip>
             </Stack>
@@ -127,10 +127,10 @@ function FragmentRow({ item, color, open, onToggle, subcats, subcatLoading, onAc
                 <TableHead>
                   <TableRow>
                     <TableCell>ServiceSubcategory</TableCell>
-                    <TableCell align="right">Projetado</TableCell>
-                    <TableCell align="right">Realizado</TableCell>
-                    <TableCell align="right">Delta (R$)</TableCell>
-                    <TableCell align="right">Acurácia</TableCell>
+                    <TableCell align="right">Previsto</TableCell>
+                    <TableCell align="right">Efetivado</TableCell>
+                    <TableCell align="right">Variação (R$)</TableCell>
+                    <TableCell align="right">Precisão</TableCell>
                   </TableRow>
                 </TableHead>
                 <TableBody>
@@ -138,8 +138,8 @@ function FragmentRow({ item, color, open, onToggle, subcats, subcatLoading, onAc
                     <TableRow key={sub.subcategory}>
                       <TableCell>
                         <Stack direction="row" alignItems="center" gap={0.5}>
-                          <IconButton size="small" onClick={() => onSubcatSeries(sub)} aria-label={`Gráfico do período de ${sub.subcategory}`} title="Gráfico do período (Projetado × Realizado dia a dia)">
-                            <Add fontSize="small" />
+                          <IconButton size="small" onClick={() => onSubcatSeries(sub)} aria-label={`Gráfico do período de ${sub.subcategory}`} title="Gráfico do período (Estimado × efetivado dia a dia)">
+                            <AddOutlined fontSize="small" />
                           </IconButton>
                           <Typography variant="body2">{sub.subcategory}</Typography>
                         </Stack>
@@ -155,7 +155,7 @@ function FragmentRow({ item, color, open, onToggle, subcats, subcatLoading, onAc
                 </TableBody>
               </Table>
             ) : (
-              <Typography variant="body2" color="text.secondary">Sem subcategorias para este nível.</Typography>
+              <Typography variant="body2" color="text.secondary">Nenhuma subcategoria neste nível.</Typography>
             )}
           </TableCell>
         </TableRow>
@@ -192,11 +192,11 @@ export default function DesviosTab({ runId, targetMonth, department }: { runId: 
     setError("");
     try {
       await deactivateForecastAck(deactivateTarget.id);
-      setMessage(`Ack de ${deactivateTarget.department_name} desativado — não aparece mais nos dashboards.`);
+      setMessage(`Justificativa de ${deactivateTarget.department_name} desativado — não aparece mais nos dashboards.`);
       setDeactivateTarget(null);
       await loadAcks(targetMonth);
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Falha ao desativar o Ack");
+      setError(e instanceof Error ? e.message : "Não foi possível desativar a justificativa");
     } finally {
       setDeactivating(false);
     }
@@ -274,20 +274,20 @@ export default function DesviosTab({ runId, targetMonth, department }: { runId: 
     try {
       if (ackEditing) {
         await updateForecastAck(ackEditing.id, { category: ackCategory, reason: ackReason.trim() });
-        setMessage(`Ack de ${ackTarget.name} editado — versão anterior preservada no histórico.`);
+        setMessage(`Justificativa de ${ackTarget.name} editado — versão anterior preservada no histórico.`);
       } else {
         await createForecastAck({
           run_id: runId, target_month: targetMonth, department: ackTarget.path.join(" > "),
           category: ackCategory, reason: ackReason.trim(),
         });
-        setMessage(`Ack registrado para ${ackTarget.name} (${ackCategory}).`);
+        setMessage(`Justificativa registrada para ${ackTarget.name} (${ackCategory}).`);
       }
       setAckTarget(null);
       setAckEditing(null);
       setAckReason("");
       await loadAcks(targetMonth);
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Falha ao salvar Ack");
+      setError(e instanceof Error ? e.message : "Não foi possível gravar a justificativa");
     } finally {
       setSavingAck(false);
     }
@@ -299,12 +299,12 @@ export default function DesviosTab({ runId, targetMonth, department }: { runId: 
       {error && <Alert severity="error" sx={{ mb: 2 }} onClose={() => setError("")}>{dataDisplayText(error)}</Alert>}
       <Stack direction="row" justifyContent="space-between" alignItems="flex-start" sx={{ mb: 2 }} gap={1} flexWrap="wrap">
         <Typography variant="body2" color="text.secondary">
-          Desvios do mês selecionado no último nível de cada departamento, respeitando o departamento filtrado.
-          <Box component="span" sx={{ color: "#DC2626" }}> Vermelho = subestimou</Box> (realizado acima do projetado — gastou mais) ·{" "}
-          <Box component="span" sx={{ color: "#16A34A" }}>verde = superestimou</Box> (realizado abaixo do projetado — gastou menos). Use o <b>+</b> à esquerda do nome
-          para detalhar por ServiceSubcategory e o botão <b>Ack</b> para justificar o desvio.
+          Variações do mês selecionado no último nível de cada unidade, respeitando a unidade filtrada.
+          <Box component="span" sx={{ color: "#DC2626" }}> Vermelho = subestimou</Box> (efetivado acima do projetado — gastou mais) ·{" "}
+          <Box component="span" sx={{ color: "#16A34A" }}>verde = superestimou</Box> (efetivado abaixo do projetado — gastou menos). Use o <b>+</b> à esquerda do nome
+          para detalhar por ServiceSubcategory e o botão <b>Justificar</b> para explicar a variação.
         </Typography>
-        <Button variant="outlined" size="small" startIcon={<Add fontSize="small" />} onClick={() => setRegisterOpen(true)}>
+        <Button variant="outlined" size="small" startIcon={<AddOutlined fontSize="small" />} onClick={() => setRegisterOpen(true)}>
           Cadastrar item
         </Button>
       </Stack>
@@ -313,7 +313,7 @@ export default function DesviosTab({ runId, targetMonth, department }: { runId: 
       ) : runId == null ? (
         <Box sx={{ py: 6, display: "flex", justifyContent: "center", flexDirection: "column", alignItems: "center", gap: 1 }}>
           <CircularProgress size={24} />
-          <Typography variant="body2" color="text.secondary">Carregando mês selecionado…</Typography>
+          <Typography variant="body2" color="text.secondary">Carregando o mês escolhido…</Typography>
         </Box>
       ) : data ? (
         <>
@@ -322,16 +322,16 @@ export default function DesviosTab({ runId, targetMonth, department }: { runId: 
           <DesvioTable title={`Top 10 negativos (superestimou) · ${data.negative.length}`} items={data.negative} color="#16A34A"
             expanded={expanded} onToggle={toggle} subcats={subcats} subcatLoading={subcatLoading} onAck={openAck} ackByPath={ackByPath} onSubcatSeries={openSubcatSeries} onDeactivateAck={setDeactivateTarget} />
           {data.positive.length === 0 && data.negative.length === 0 && (
-            <Typography variant="body2" color="text.secondary">Sem desvios para o mês/departamento selecionados.</Typography>
+            <Typography variant="body2" color="text.secondary">Sem variações para o mês/unidade selecionados.</Typography>
           )}
         </>
       ) : null}
 
       <Dialog open={ackTarget !== null} onClose={() => setAckTarget(null)} maxWidth="sm" fullWidth>
-        <DialogTitle>{ackEditing ? `Editar Ack — ${ackTarget?.name}` : `Ack do desvio — ${ackTarget?.name}`}</DialogTitle>
+        <DialogTitle>{ackEditing ? `Alterar justificativa — ${ackTarget?.name}` : `Justificativa da variação — ${ackTarget?.name}`}</DialogTitle>
         <DialogContent>
           <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
-            {ackTarget && ackTarget.path.join(" > ")} — projetado {ackTarget && money.format(Number(ackTarget.forecast_value || 0))} × realizado {ackTarget && money.format(Number(ackTarget.actual_value || 0))} (delta {ackTarget && money.format(Number(ackTarget.variance || 0))}).
+            {ackTarget && ackTarget.path.join(" > ")} — projetado {ackTarget && money.format(Number(ackTarget.forecast_value || 0))} × efetivado {ackTarget && money.format(Number(ackTarget.actual_value || 0))} (delta {ackTarget && money.format(Number(ackTarget.variance || 0))}).
           </Typography>
           <FormControl fullWidth sx={{ mb: 2, mt: 1 }}>
             <InputLabel>Categoria</InputLabel>
@@ -340,13 +340,13 @@ export default function DesviosTab({ runId, targetMonth, department }: { runId: 
             </Select>
           </FormControl>
           <TextField
-            fullWidth multiline minRows={3} label="Motivo do desvio vs forecast do início do mês"
+            fullWidth multiline minRows={3} label="Justificativa da variação vs previsão do início do mês"
             value={ackReason} onChange={e => setAckReason(e.target.value)}
-            placeholder="Ex.: migração de workloads anunciada após o fechamento do forecast..."
+            placeholder="Ex.: migração de cargas anunciada após o fechamento da previsão..."
           />
           {ackEditing && ackEditing.history && ackEditing.history.length > 0 && (
             <Box sx={{ mt: 2 }}>
-              <Typography variant="caption" color="text.secondary" fontWeight={700}>Histórico de edições:</Typography>
+              <Typography variant="caption" color="text.secondary" fontWeight={700}>Histórico de alterações:</Typography>
               {ackEditing.history.map((h, index) => (
                 <Typography key={index} variant="caption" color="text.secondary" sx={{ display: "block", mt: 0.5 }}>
                   • {h.category}: {h.reason} <Box component="span" sx={{ opacity: 0.7 }}>(em {new Date(h.changed_at).toLocaleString("pt-BR")})</Box>
@@ -358,7 +358,7 @@ export default function DesviosTab({ runId, targetMonth, department }: { runId: 
         <DialogActions sx={{ px: 3, pb: 2 }}>
           <Button onClick={() => setAckTarget(null)}>Cancelar</Button>
           <Button variant="contained" disabled={savingAck || !ackReason.trim()} onClick={() => void saveAck()}>
-            {savingAck ? "Salvando..." : ackEditing ? "Salvar edição" : "Registrar Ack"}
+            {savingAck ? "Gravando..." : ackEditing ? "Gravar edição" : "Registrar justificativa"}
           </Button>
         </DialogActions>
       </Dialog>
@@ -371,7 +371,7 @@ export default function DesviosTab({ runId, targetMonth, department }: { runId: 
                 <Box>
                   <Typography variant="h6">Período — {seriesDialog.subcategory}</Typography>
                   <Typography variant="body2" color="text.secondary">
-                    {seriesDialog.data?.target_month || targetMonth} · {seriesDialog.data?.department || department || "Todos os departamentos"}
+                    {seriesDialog.data?.target_month || targetMonth} · {seriesDialog.data?.department || department || "Todas as unidades"}
                   </Typography>
                 </Box>
                 <Button size="small" onClick={() => setSeriesDialog(null)}>Fechar</Button>
@@ -388,7 +388,7 @@ export default function DesviosTab({ runId, targetMonth, department }: { runId: 
                       <Typography variant="subtitle1" fontWeight={600}>{money.format(seriesDialog.data.forecast_total)}</Typography>
                     </Box>
                     <Box>
-                      <Typography variant="caption" color="text.secondary">Realizado (mês)</Typography>
+                      <Typography variant="caption" color="text.secondary">Efetivado (mês)</Typography>
                       <Typography variant="subtitle1" fontWeight={600}>{money.format(seriesDialog.data.actual_total)}</Typography>
                     </Box>
                     <Box>
@@ -398,11 +398,11 @@ export default function DesviosTab({ runId, targetMonth, department }: { runId: 
                       </Typography>
                     </Box>
                     <Box>
-                      <Typography variant="caption" color="text.secondary">Acurácia</Typography>
+                      <Typography variant="caption" color="text.secondary">Precisão</Typography>
                       <Typography variant="subtitle1" fontWeight={600}>{pct(seriesDialog.data.accuracy)}</Typography>
                     </Box>
                     <Box>
-                      <Typography variant="caption" color="text.secondary">Desvio começou a crescer</Typography>
+                      <Typography variant="caption" color="text.secondary">Início da variação a crescer</Typography>
                       <Typography variant="subtitle1" fontWeight={600} sx={{ color: seriesDialog.data.daily_deviation_day != null ? "#DC2626" : "#16A34A" }}>
                         {seriesDialog.data.daily_deviation_day != null ? `dia ${seriesDialog.data.daily_deviation_day}` : "não houve (redução)"}
                       </Typography>
@@ -412,14 +412,14 @@ export default function DesviosTab({ runId, targetMonth, department }: { runId: 
                     data={[
                       {
                         type: "bar",
-                        name: "Realizado (dentro do rate diário)",
+                        name: "Efetivado (dentro do ritmo diário)",
                         x: seriesDialog.data.points.map(p => p.day),
                         y: seriesDialog.data.points.map(p => Math.min(p.actual, p.forecast_rate)),
                         marker: { color: "#16A34A" },
                       },
                       {
                         type: "bar",
-                        name: "Excesso do dia (desvio)",
+                        name: "Excesso do dia (variação)",
                         x: seriesDialog.data.points.map(p => p.day),
                         y: seriesDialog.data.points.map(p => Math.max(0, p.actual - p.forecast_rate)),
                         marker: { color: "#DC2626" },
@@ -427,19 +427,19 @@ export default function DesviosTab({ runId, targetMonth, department }: { runId: 
                       {
                         type: "scatter",
                         mode: "lines",
-                        name: "Projetado (rate diário)",
+                        name: "Previsto (ritmo diário)",
                         x: seriesDialog.data.points.map(p => p.day),
                         y: seriesDialog.data.points.map(p => p.forecast_rate),
-                        line: { color: "#4338CA", dash: "dash", width: 2 },
+                        line: { color: "#0F62FE", dash: "dash", width: 2 },
                       },
                       ...(seriesDialog.data.daily_deviation_day != null ? [{
                         type: "scatter" as const,
                         mode: "lines" as const,
-                        name: "Desvio começou",
+                        name: "Início da variação",
                         x: [seriesDialog.data.daily_deviation_day, seriesDialog.data.daily_deviation_day],
                         y: [0, Math.max(...seriesDialog.data.points.map(p => p.actual))],
                         line: { color: "#DC2626", dash: "dot" as const, width: 1.5 },
-                        hovertemplate: "Desvio começou a crescer — dia %{x}<extra></extra>",
+                        hovertemplate: "Variação começou a crescer — dia %{x}<extra></extra>",
                       }] : []),
                     ]}
                     layout={{
@@ -449,7 +449,7 @@ export default function DesviosTab({ runId, targetMonth, department }: { runId: 
                       paper_bgcolor: "transparent",
                       plot_bgcolor: "transparent",
                       barmode: "stack",
-                      xaxis: { title: { text: "Dia do mês" }, dtick: 1 },
+                      xaxis: { title: { text: "Dia do período" }, dtick: 1 },
                       yaxis: { title: { text: "Valor diário (R$)" }, tickformat: ".2s" },
                       showlegend: true,
                       legend: { orientation: "h", y: -0.18 },
@@ -459,9 +459,9 @@ export default function DesviosTab({ runId, targetMonth, department }: { runId: 
                     useResizeHandler
                   />
                   <Typography variant="caption" color="text.secondary" sx={{ mt: 1, display: "block" }}>
-                    Consumo diário vs rate projetado (total mensal ÷ dias). A partir do dia{" "}
-                    {seriesDialog.data.daily_deviation_day ?? "—"} o realizado do dia passa a ultrapassar o
-                    rate projetado — é quando o desvio começa a crescer (excesso empilhado em vermelho).
+                    Consumo diário vs ritmo previsto (total mensal ÷ dias). A partir do dia{" "}
+                    {seriesDialog.data.daily_deviation_day ?? "—"} o efetivado do dia passa a ultrapassar o
+                    rate projetado — é quando a variação começa a crescer (excesso empilhado em vermelho).
                   </Typography>
                 </>
               )}
@@ -478,17 +478,17 @@ export default function DesviosTab({ runId, targetMonth, department }: { runId: 
       />
 
       <Dialog open={deactivateTarget !== null} onClose={() => { if (!deactivating) setDeactivateTarget(null); }} maxWidth="xs" fullWidth>
-        <DialogTitle>Desativar Ack?</DialogTitle>
+        <DialogTitle>Desativar justificativa?</DialogTitle>
         <DialogContent>
           <Typography>
-            Desativar o Ack de <strong>{deactivateTarget?.department_name}</strong>? Ele deixará de aparecer nos
+            Desativar o Justificativa de <strong>{deactivateTarget?.department_name}</strong>? Ele deixará de aparecer nos
             dashboards (Ex.: Visão Esperada) sem perder o registro nem o histórico.
           </Typography>
         </DialogContent>
         <DialogActions sx={{ px: 3, pb: 2 }}>
           <Button disabled={deactivating} onClick={() => setDeactivateTarget(null)}>Cancelar</Button>
           <Button variant="contained" color="error" disabled={deactivating} onClick={() => void confirmDeactivate()}>
-            {deactivating ? "Desativando..." : "Desativar"}
+            {deactivating ? "Inativando..." : "Desativar"}
           </Button>
         </DialogActions>
       </Dialog>

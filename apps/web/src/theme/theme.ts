@@ -65,7 +65,7 @@ export function createAppTheme() {
         },
       },
       MuiDataGrid: {
-        defaultProps: { rowHeight: 48, columnHeaderHeight: 48, disableRowSelectionOnClick: true, slots: dataGridIcons, localeText: ptBR.components.MuiDataGrid.defaultProps.localeText },
+        defaultProps: { rowHeight: 48, columnHeaderHeight: 48, disableRowSelectionOnClick: true, pageSizeOptions: [50, 100, 500, 1000], initialState: { pagination: { paginationModel: { page: 0, pageSize: 50 } } }, slots: dataGridIcons, localeText: ptBR.components.MuiDataGrid.defaultProps.localeText },
         styleOverrides: {
           root: { borderColor: border, backgroundColor: colors.paper, borderRadius: radius.surface, fontSize: "0.875rem", "& .MuiDataGrid-cell:focus, & .MuiDataGrid-columnHeader:focus, & .MuiDataGrid-cell:focus-within, & .MuiDataGrid-columnHeader:focus-within": { outline: "2px solid", outlineColor: "primary.main", outlineOffset: -2 } },
           columnHeader: { backgroundColor: colors.tableHead, padding: "0 16px", "&:focus-within": { outlineOffset: -2 } },

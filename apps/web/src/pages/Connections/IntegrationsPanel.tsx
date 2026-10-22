@@ -19,14 +19,14 @@ import {
 
 /** Rótulo e ajuda por tipo, para o operador saber o que está configurando. */
 const TYPE_HELP: Record<string, string> = {
-  ai_provider: "Serviço de decisão assistida. Não altera fato: não promove um candidato vetado.",
-  itsm: "Abertura de chamado a partir de uma ação aprovada.",
-  auxiliary: "Serviço auxiliar.",
+  ai_provider: "Serviço de apoio à decisão. Não altera fatos: não promove um candidato vetado.",
+  itsm: "Abre chamado a partir de uma ação aprovada.",
+  auxiliary: "Serviço de apoio.",
 };
 
-const TYPE_LABEL: Record<string, string> = { ai_provider: "Serviço de análise", itsm: "Gestão de chamados", auxiliary: "Serviço auxiliar" };
-const STATUS_LABEL: Record<string, string> = { OK: "Validada", NOT_CONFIGURED: "Não configurada", UNAUTHORIZED: "Acesso negado", UNREACHABLE: "Indisponível", ERROR: "Falha na validação" };
-const FIELD_LABEL: Record<string, string> = { base_url: "Endereço do serviço", model: "Modelo", path_systemone: "Caminho de análise", timeout_s: "Tempo limite (segundos)" };
+const TYPE_LABEL: Record<string, string> = { ai_provider: "Motor de análise", itsm: "Mesa de serviços", auxiliary: "Serviço de apoio" };
+const STATUS_LABEL: Record<string, string> = { OK: "Testada com sucesso", NOT_CONFIGURED: "Não configurada", UNAUTHORIZED: "Sem permissão", UNREACHABLE: "Inacessível", ERROR: "Falha no teste" };
+const FIELD_LABEL: Record<string, string> = { base_url: "URL do serviço", model: "Modelo", path_systemone: "Caminho da análise", timeout_s: "Timeout (segundos)" };
 
 const STATUS_COLOR: Record<string, "success" | "warning" | "error" | "default"> = {
   OK: "success",
@@ -59,7 +59,7 @@ export default function IntegrationsPanel() {
       setItems(dados.items || []);
       setErro(null);
     } catch (e) {
-      setErro("Não foi possível carregar os serviços auxiliares.");
+      setErro("Não foi possível carregar os serviços de apoio.");
     } finally {
       setLoading(false);
     }
@@ -107,7 +107,7 @@ export default function IntegrationsPanel() {
       await carregar();
       setEditando(null);
     } catch (e) {
-      setResultado("Falha ao salvar. Verifique os campos.");
+      setResultado("Não foi possível gravar. Confira os campos.");
     } finally {
       setSalvando(false);
     }
@@ -118,7 +118,7 @@ export default function IntegrationsPanel() {
       await saveIntegration(item.code, { enabled: habilitado });
       await carregar();
     } catch {
-      setErro(`Não foi possível ${habilitado ? "habilitar" : "desabilitar"} ${item.name}.`);
+      setErro(`Não foi possível ${habilitado ? "ativar" : "desativar"} ${item.name}.`);
     }
   };
 
@@ -131,7 +131,7 @@ export default function IntegrationsPanel() {
       setResultado(`${r.status}: ${r.message}`);
       await carregar();
     } catch {
-      setResultado("Falha ao executar o teste.");
+      setResultado("Não foi possível executar o teste.");
     } finally {
       setTestando(false);
     }
@@ -158,7 +158,7 @@ export default function IntegrationsPanel() {
 
   return (
     <Paper variant="outlined" sx={{ p: { xs: 2, md: 3 } }}>
-      <Typography variant="h6" sx={{ mb: 1 }}>Serviços conectados</Typography>
+      <Typography variant="h6" sx={{ mb: 1 }}>Serviços ativos</Typography>
       <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
         Serviços que apoiam a análise sem serem fonte de dado de nuvem. O segredo é
         gravado e nunca exibido de volta.
@@ -170,11 +170,11 @@ export default function IntegrationsPanel() {
       <Table size="small" sx={{ minWidth: 680 }}>
         <TableHead>
           <TableRow>
-            <TableCell>Serviço</TableCell>
-            <TableCell>Tipo</TableCell>
-            <TableCell>Estado</TableCell>
-            <TableCell>Último teste</TableCell>
-            <TableCell align="right">Ações</TableCell>
+            <TableCell>Nome</TableCell>
+            <TableCell>Papel</TableCell>
+            <TableCell>Situação</TableCell>
+            <TableCell>Resultado do último teste</TableCell>
+            <TableCell align="right">Operações</TableCell>
           </TableRow>
         </TableHead>
         <TableBody>
@@ -210,8 +210,8 @@ export default function IntegrationsPanel() {
                     label=""
                   />
                   {item.has_secret
-                    ? <Chip size="small" color="success" variant="outlined" label="Acesso configurado" />
-                    : <Chip size="small" color="warning" variant="outlined" label="Acesso pendente" />}
+                    ? <Chip size="small" color="success" variant="outlined" label="Credencial gravada" />
+                    : <Chip size="small" color="warning" variant="outlined" label="Credencial pendente" />}
                 </Stack>
               </TableCell>
               <TableCell>
@@ -227,17 +227,17 @@ export default function IntegrationsPanel() {
                     </Typography>
                   </Stack>
                 ) : (
-                  <Typography variant="caption" color="text.secondary">Não validada</Typography>
+                  <Typography variant="caption" color="text.secondary">Sem teste</Typography>
                 )}
               </TableCell>
               <TableCell align="right">
                 <Stack direction="row" spacing={0.5} justifyContent="flex-end" alignItems="center">
-                  <Button variant="outlined" startIcon={<Edit />} onClick={() => abrir(item)}>Editar serviço</Button>
-                  <Tooltip title="Excluir serviço auxiliar">
+                  <Button variant="outlined" startIcon={<Edit />} onClick={() => abrir(item)}>Alterar serviço</Button>
+                  <Tooltip title="Remover serviço de apoio">
                     <IconButton
                       size="small"
                       color="error"
-                      aria-label={`Excluir ${item.name}`}
+                      aria-label={`Remover ${item.name}`}
                       onClick={() => { setExclusaoErro(null); setExcluindo(item); }}
                     >
                       <DeleteOutline fontSize="small" />
@@ -257,7 +257,7 @@ export default function IntegrationsPanel() {
         maxWidth="xs"
         fullWidth
       >
-        <DialogTitle>Excluir serviço auxiliar?</DialogTitle>
+        <DialogTitle>Remover serviço de apoio?</DialogTitle>
         <DialogContent>
           {exclusaoErro ? (
             <Alert severity="error">{dataDisplayText(exclusaoErro)}</Alert>
@@ -273,7 +273,7 @@ export default function IntegrationsPanel() {
             Cancelar
           </Button>
           <Button color="error" variant="contained" disabled={excluindoEmAndamento || Boolean(exclusaoErro)} onClick={() => void excluir()}>
-            {excluindoEmAndamento ? "Excluindo…" : "Excluir serviço"}
+            {excluindoEmAndamento ? "Removendo…" : "Remover serviço"}
           </Button>
         </DialogActions>
       </Dialog>
@@ -295,24 +295,24 @@ export default function IntegrationsPanel() {
                 size="small"
                 fullWidth
                 helperText={
-                  chave === "base_url" ? "Endereço usado para acessar o serviço."
+                  chave === "base_url" ? "URL usada para acessar o serviço."
                     : chave === "model" ? "Obrigatório para o Jev. Ex.: jev-latest (lista em GET /v1/models)."
-                    : chave === "path_systemone" ? "Caminho do primitivo de decisão."
-                    : chave === "timeout_s" ? "Segundos."
+                    : chave === "path_systemone" ? "Caminho do recurso de decisão."
+                    : chave === "timeout_s" ? "segundos."
                     : undefined
                 }
               />
             ))}
 
             <TextField
-              label={editando?.has_secret ? "Token (já gravado — preencha para substituir)" : "Token"}
+              label={editando?.has_secret ? "Token (já gravado: preencha para substituir)" : "Token"}
               value={segredo.api_key || ""}
               onChange={(e) => setSegredo({ ...segredo, api_key: e.target.value })}
               size="small"
               fullWidth
               type="password"
               autoComplete="new-password"
-              helperText="Após salvar, o token não é exibido novamente."
+              helperText="Depois de salvar, o token não volta a ser exibido."
             />
 
             {resultado && (
@@ -325,7 +325,7 @@ export default function IntegrationsPanel() {
         <DialogActions>
           <Button onClick={() => setEditando(null)}>Cancelar</Button>
           <Button variant="outlined" startIcon={<Validate />} onClick={() => void testar()} disabled={testando || salvando}>
-            {testando ? "Validando…" : "Validar acesso"}
+            {testando ? "Testando…" : "Testar acesso"}
           </Button>
           <Button variant="contained" startIcon={<Save />} onClick={() => void salvar()} disabled={salvando || testando}>
             {salvando ? "Salvando…" : "Salvar serviço"}

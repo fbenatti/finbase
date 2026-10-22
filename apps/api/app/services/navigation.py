@@ -82,7 +82,7 @@ async def module_snapshot(db: AsyncSession, customer_id: int, *, user_id: int | 
         enabled = effective_enabled(row.code, modules, overrides, production=settings.env == "production")
         allowed = enabled and (perms is None or not row.permission_module or has_permission(perms, row.permission_module, "read", row.code))
         result.append({
-            "code": row.code, "parent_code": row.parent_code, "label": row.label, "path": row.path,
+            "code": row.code, "parent_code": row.parent_code, "label": row.custom_label or row.label, "default_label": row.label, "custom_label": row.custom_label, "path": row.path,
             "renderer": row.renderer, "view_params": row.view_params, "legacy_path": row.legacy_path,
             "permission_module": row.permission_module, "permission_scope": row.code,
             "position": row.position, "icon": row.icon, "required": row.required,

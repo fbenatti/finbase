@@ -5,10 +5,7 @@ import {
   Select, MenuItem, FormControl, InputLabel, Alert, CircularProgress,
   Tooltip, Collapse,
 } from "@mui/material";
-import {
-  Delete, Save, Refresh, ArrowForward,
-  Undo, DragIndicator, ExpandMore, ChevronRight, EditOutlined,
-} from "@mui/icons-material";
+import { DeleteOutlined, SaveOutlined, RefreshOutlined, ArrowForwardOutlined, UndoOutlined, DragIndicatorOutlined, ExpandMoreOutlined, ChevronRightOutlined, EditOutlined } from "@mui/icons-material";
 import {
   getConnections, SourceConnection, discoverSchema, ColumnInfo,
   getDestinationTables, getDestinationSchema, DestinationTable, DestinationPartitionSpec,
@@ -272,7 +269,7 @@ export default function Relationship({ embedded }: { embedded?: boolean } = {}) 
       // after saving mappings (e.g. credits[0].type must not collapse project/service).
       setCollapsedJsonGroups(new Set());
     } catch (e: unknown) {
-      setError(e instanceof Error ? e.message : "Failed to load");
+      setError(e instanceof Error ? e.message : "Não foi possível carregar os relacionamentos");
     } finally { setLoading(false); }
   }, [selectedConnId, selectedDestId]);
 
@@ -353,7 +350,7 @@ export default function Relationship({ embedded }: { embedded?: boolean } = {}) 
     }
 
     if (existing?.transformType === "CONDITIONAL") {
-      setSuccess(`"${dragging}" → "${destColumn}" substituirá regra CONDITIONAL existente. Salve para persistir (será RENAME simples).`);
+      setSuccess(`"${dragging}" → "${destColumn}" substituirá a regra CONDITIONAL existente. Salve para persistir (será um RENAME simples).`);
     } else {
       setSuccess(`"${dragging}" → "${destColumn}"`);
     }
@@ -536,7 +533,7 @@ export default function Relationship({ embedded }: { embedded?: boolean } = {}) 
       }
       return next;
     });
-    setSuccess("Perfil Azure → FOCUS aplicado aos campos críticos. Revise e clique em Salvar.");
+    setSuccess("Mapeamento Azure → FOCUS aplicado aos campos críticos. Revise e clique em Salvar.");
   };
 
   // ─── Save ───
@@ -578,7 +575,7 @@ export default function Relationship({ embedded }: { embedded?: boolean } = {}) 
       loadAll();
       loadAllMappings();
     } catch (e: unknown) {
-      setError(e instanceof Error ? e.message : "Save failed");
+      setError(e instanceof Error ? e.message : "Não foi possível salvar os relacionamentos");
     } finally { setSaving(false); }
   };
 
@@ -592,8 +589,8 @@ export default function Relationship({ embedded }: { embedded?: boolean } = {}) 
   };
 
   const formatPartitionSummary = (spec: DestinationPartitionSpec | null | undefined): string => {
-    if (!spec) return "Padrão (mês + conexão)";
-    const grain = spec.grain === "snapshot_date" ? "dia + conexão" : "mês + conexão";
+    if (!spec) return "Padrão (competência + conexão)";
+    const grain = spec.grain === "snapshot_date" ? "dia + fonte" : "mês + fonte";
     const extras = (spec.extra_partitions || []).map((e) => {
       const col = e.column;
       if (e.transform === "bucket") return `${col} bucket(${e.bucket_count ?? 16})`;
@@ -647,23 +644,23 @@ export default function Relationship({ embedded }: { embedded?: boolean } = {}) 
   })();
 
   const handleDeleteTableRel = async (rel: TableRelationship) => {
-    if (!confirm(`Remover o relacionamento entre "${connById.get(rel.source_connection_id)?.name}" e "${destById.get(rel.destination_table_id)?.name}"? Todos os ${rel.column_count} mapeamentos de colunas serão removidos.`)) return;
+    if (!confirm(`Excluir a relação entre "${connById.get(rel.source_connection_id)?.name}" e "${destById.get(rel.destination_table_id)?.name}"? Todos os ${rel.column_count} mapeamentos de campos serão removidos.`)) return;
     setDeletingId(rel.source_connection_id);
     try {
       for (const id of rel.mappingIds) {
         await deleteSourceDestMapping(id);
       }
       setAllMappings(prev => prev.filter(m => !rel.mappingIds.includes(m.id)));
-      setSuccess(`Relacionamento removido (${rel.column_count} mapeamentos).`);
+      setSuccess(`Relação excluída (${rel.column_count} mapeamentos).`);
       loadAll();
     } catch (e: unknown) {
-      setError(e instanceof Error ? e.message : "Erro ao remover.");
+      setError(e instanceof Error ? e.message : "Não foi possível excluir a relação.");
     } finally { setDeletingId(null); }
   };
 
   const relationshipColumns: ColumnDef<TableRelationship>[] = [
     {
-      key: "source_connection_id", label: "Datasource Origem", width: 240,
+      key: "source_connection_id", label: "Fonte de origem", width: 240,
       render: (r) => {
         const conn = connById.get(r.source_connection_id);
         return (
@@ -679,7 +676,7 @@ export default function Relationship({ embedded }: { embedded?: boolean } = {}) 
       },
     },
     {
-      key: "destination_table_id", label: "Tabela Destino", width: 200,
+      key: "destination_table_id", label: "Tabela de destino", width: 200,
       render: (r) => {
         const dest = destById.get(r.destination_table_id);
         return (
@@ -709,7 +706,7 @@ export default function Relationship({ embedded }: { embedded?: boolean } = {}) 
       },
     },
     {
-      key: "column_count", label: "Colunas", width: 80,
+      key: "column_count", label: "Campos", width: 80,
       render: (r) => (
         <Chip
           label={r.column_count}
@@ -746,7 +743,7 @@ export default function Relationship({ embedded }: { embedded?: boolean } = {}) 
     {
       key: "_edit", label: "", width: 50, sortable: false, filterable: false,
       render: (r) => (
-        <Tooltip title="Editar mapeamentos de colunas">
+        <Tooltip title="Editar mapeamentos de campos">
           <IconButton size="small" color="primary"
             onClick={() => {
               setSelectedConnId(r.source_connection_id);
@@ -764,7 +761,7 @@ export default function Relationship({ embedded }: { embedded?: boolean } = {}) 
         <IconButton size="small" color="error"
           onClick={() => handleDeleteTableRel(r)}
           disabled={deletingId === r.source_connection_id}>
-          {deletingId === r.source_connection_id ? <CircularProgress size={16} /> : <Delete sx={{ fontSize: 16 }} />}
+          {deletingId === r.source_connection_id ? <CircularProgress size={16} /> : <DeleteOutlined sx={{ fontSize: 16 }} />}
         </IconButton>
       ),
     },
@@ -805,12 +802,12 @@ export default function Relationship({ embedded }: { embedded?: boolean } = {}) 
           px: 1, py: 0.7, mb: 0.4, borderRadius: 1,
           pl: nested ? 2.5 : 1,
           cursor: "grab",
-          bgcolor: isMapped ? "#e8f5e9" : dragging === col.name ? "#e3f2fd" : nested ? "#fafafa" : "#fff",
-          border: isMapped ? "1px solid #a5d6a7" : "1px solid #E2E5EE",
+          bgcolor: isMapped ? "#e8f5e9" : dragging === col.name ? "#EEF4FF" : nested ? "#fafafa" : "#fff",
+          border: isMapped ? "1px solid #a5d6a7" : "1px solid #E1E8F0",
           opacity: dragging === col.name ? 0.7 : 1,
           userSelect: "none",
           transition: "all 0.15s",
-          "&:hover": { borderColor: "#90caf9", bgcolor: "#f5f9ff" },
+          "&:hover": { borderColor: "#A9C8FF", bgcolor: "#f5f9ff" },
         }}
       >
         {isMapped ? (
@@ -818,7 +815,7 @@ export default function Relationship({ embedded }: { embedded?: boolean } = {}) 
             <Typography variant="caption" color="success.main">✓</Typography>
           </Box>
         ) : (
-          <DragIndicator sx={{ fontSize: 16, color: "#bbb" }} />
+          <DragIndicatorOutlined sx={{ fontSize: 16, color: "#bbb" }} />
         )}
         <Box sx={{ flexGrow: 1, minWidth: 0 }}>
           <Typography
@@ -871,18 +868,19 @@ export default function Relationship({ embedded }: { embedded?: boolean } = {}) 
   return (
     <Box>
       {!embedded && (
-        <Box sx={{ display: "flex", justifyContent: "space-between", alignItems: "center", mb: 3 }}>
-          <Typography variant="h4">Relacionamento</Typography>
+        <Box sx={{ mb: 2 }}>
+          <Typography variant="h6">Relações entre fontes e tabelas</Typography>
+          <Typography variant="body2" color="text.secondary">Ligue os campos de cada fonte aos campos da tabela de destino.</Typography>
         </Box>
       )}
 
-      {/* ── Toolbar ── */}
-      <Box sx={{ display: "flex", gap: 2, mb: 2, flexWrap: "wrap", alignItems: "center" }}>
+      {/* ── Barra de seleção ── */}
+      <Paper variant="outlined" sx={{ p: 2, mb: 2, display: "flex", gap: 2, flexWrap: "wrap", alignItems: "center" }}>
         <FormControl sx={{ minWidth: 220 }} size="small">
-          <InputLabel>Fonte (Datasource)</InputLabel>
+          <InputLabel>Fonte de dados</InputLabel>
           <Select
             value={selectedConnId}
-            label="Fonte (Datasource)"
+            label="Fonte de dados"
             onChange={(e) => { setSelectedConnId(e.target.value as number | ""); setMappings([]); }}
           >
             {connections.map((c) => (
@@ -891,13 +889,13 @@ export default function Relationship({ embedded }: { embedded?: boolean } = {}) 
           </Select>
         </FormControl>
 
-        <ArrowForward sx={{ color: "#888", mt: 1 }} />
+        <ArrowForwardOutlined sx={{ color: "#888", mt: 1 }} />
 
         <FormControl sx={{ minWidth: 200 }} size="small">
-          <InputLabel>Tabela Destino</InputLabel>
+          <InputLabel>Tabela de destino</InputLabel>
           <Select
             value={selectedDestId}
-            label="Tabela Destino"
+            label="Tabela de destino"
             onChange={(e) => {
               const id = e.target.value as number | "";
               setSelectedDestId(id);
@@ -911,7 +909,7 @@ export default function Relationship({ embedded }: { embedded?: boolean } = {}) 
           </Select>
         </FormControl>
 
-        <Button variant="outlined" startIcon={<Refresh />}
+        <Button variant="outlined" startIcon={<RefreshOutlined />}
           onClick={loadAll} disabled={!selectedConnId || !selectedDestId}>
           Carregar
         </Button>
@@ -928,13 +926,13 @@ export default function Relationship({ embedded }: { embedded?: boolean } = {}) 
                 Perfil Azure → FOCUS
               </Button>
             )}
-            <Button variant="contained" startIcon={<Save />} onClick={saveAll}
+            <Button variant="contained" startIcon={<SaveOutlined />} onClick={saveAll}
               disabled={saving || !hasChanges}>
               {saving ? "Salvando..." : "Salvar"}
             </Button>
           </>
         )}
-      </Box>
+      </Paper>
 
       <Box id="destination-partition-settings" sx={{ mb: 2 }}>
         {!selectedDestId ? (
@@ -943,7 +941,7 @@ export default function Relationship({ embedded }: { embedded?: boolean } = {}) 
               Partição base preparada (destino)
             </Typography>
             <Typography variant="body2" color="text.secondary">
-              Escolha <strong>Fonte</strong> (ex. azure-4p) e <strong>Tabela Destino</strong> (ex. MODELO FOCUS).
+              Escolha <strong>Fonte</strong> (ex. azure-4p) e <strong>Tabela de destino</strong> (ex. MODELO FOCUS).
               A fatia de replace usa <code>_billing_period</code> + <code>source_connection_id</code>; extras como
               <code>SubAccountName</code> aparecem abaixo.
             </Typography>
@@ -967,29 +965,23 @@ export default function Relationship({ embedded }: { embedded?: boolean } = {}) 
       {loading && <CircularProgress sx={{ display: "block", mx: "auto", mt: 4 }} />}
 
       {!loading && !selectedConnId && !selectedDestId && (
-        <EmptyState message="Selecione uma fonte e uma tabela destino para criar os relacionamentos." />
+        <EmptyState message="Escolha uma fonte e uma tabela de destino para criar as relações." />
       )}
 
       {!loading && selectedConnId && selectedDestId && sourceCols.length === 0 && (
-        <EmptyState message="Nenhuma coluna encontrada. Execute a coleta primeiro para descobrir a estrutura da fonte." />
+        <EmptyState message="Nenhum campo encontrado. Execute a coleta primeiro para descobrir a estrutura da fonte." />
       )}
 
       {/* ── Drag & Drop area ── */}
       {!loading && sourceCols.length > 0 && (
         <Box sx={{ display: "flex", gap: 2, mt: 1 }}>
           {/* Left: Source columns */}
-          <Paper
-            sx={{
-              width: 340, maxHeight: "calc(100vh - 280px)", overflowY: "auto",
-              p: 1, bgcolor: "#f8f9fa", border: "2px dashed #dee2e6",
-              borderRadius: 2,
-            }}
-          >
+          <Paper variant="outlined" sx={{ width: 340, maxHeight: "calc(100vh - 280px)", overflowY: "auto", p: 1 }}>
             <Typography variant="subtitle2" sx={{ mb: 0.5, px: 1, color: "text.secondary" }}>
-              Colunas da Fonte ({connName})
+              Campos da fonte ({connName})
             </Typography>
             <Typography variant="caption" sx={{ display: "block", mb: 1, px: 1, color: "text.secondary" }}>
-              Uma coluna origem pode mapear para vários destinos (ex.: quantity → ConsumedQuantity e PricingQuantity).
+              Um campo de origem pode mapear para vários destinos (ex.: quantity → ConsumedQuantity e PricingQuantity).
             </Typography>
 
             {flatCols.map((col) => renderSourceColumn(col))}
@@ -1013,7 +1005,7 @@ export default function Relationship({ embedded }: { embedded?: boolean } = {}) 
                     }}
                   >
                     <IconButton size="small" sx={{ p: 0.25 }} aria-label={collapsed ? "Expandir" : "Recolher"}>
-                      {collapsed ? <ChevronRight sx={{ fontSize: 18 }} /> : <ExpandMore sx={{ fontSize: 18 }} />}
+                      {collapsed ? <ChevronRightOutlined sx={{ fontSize: 18 }} /> : <ExpandMoreOutlined sx={{ fontSize: 18 }} />}
                     </IconButton>
                     <Typography variant="body2" sx={{ fontFamily: "monospace", fontSize: "0.8rem", fontWeight: 600, flexGrow: 1 }}>
                       {parent.name}
@@ -1033,7 +1025,7 @@ export default function Relationship({ embedded }: { embedded?: boolean } = {}) 
                   <Collapse in={!collapsed}>
                     <Box sx={{ mt: 0.4, pl: 0.5, borderLeft: "2px solid #cfd8dc", ml: 1.2 }}>
                       {renderSourceColumn(parent, {
-                        subtitle: "Objeto JSON completo (coluna base de origem)",
+                        subtitle: "Objeto JSON completo (campo base de origem)",
                       })}
                       {children.map((col) => renderSourceColumn(col, {
                         nested: true,
@@ -1055,14 +1047,9 @@ export default function Relationship({ embedded }: { embedded?: boolean } = {}) 
           </Box>
 
           {/* Right: Destination columns as drop targets */}
-          <Paper
-            sx={{
-              flexGrow: 1, maxHeight: "calc(100vh - 280px)", overflowY: "auto",
-              p: 1, border: "2px solid #E2E5EE", borderRadius: 2,
-            }}
-          >
+          <Paper variant="outlined" sx={{ flexGrow: 1, maxHeight: "calc(100vh - 280px)", overflowY: "auto", p: 1 }}>
             <Typography variant="subtitle2" sx={{ mb: 1, px: 1, color: "text.secondary" }}>
-              Colunas do Destino ({destTableName})
+              Campos do destino ({destTableName})
             </Typography>
             {destCols.map((dc) => {
               const mapping = mappingByDest.get(dc.name);
@@ -1080,18 +1067,18 @@ export default function Relationship({ embedded }: { embedded?: boolean } = {}) 
                     bgcolor: mapping
                       ? "#e8f5e9"
                       : isDropTarget
-                        ? "#e3f2fd"
+                        ? "#EEF4FF"
                         : isDragging
                           ? "#fafafa"
                           : "#fff",
                     border: mapping
                       ? "1px solid #a5d6a7"
                       : isDropTarget
-                        ? "2px dashed #42a5f5"
-                        : "1px solid #E7E9FB",
+                        ? "2px dashed #6EA8FE"
+                        : "1px solid #DCE8FF",
                     transition: "all 0.15s",
                     cursor: isDragging ? "copy" : "default",
-                    "&:hover": isDragging ? { borderColor: "#90caf9", bgcolor: "#f5f9ff" } : {},
+                    "&:hover": isDragging ? { borderColor: "#A9C8FF", bgcolor: "#f5f9ff" } : {},
                   }}
                 >
                   <Box sx={{ flexGrow: 1, display: "flex", alignItems: "center", gap: 1 }}>
@@ -1130,7 +1117,7 @@ export default function Relationship({ embedded }: { embedded?: boolean } = {}) 
                         <Chip
                           label={
                             <Box component="span" sx={{ display: "flex", alignItems: "center", gap: 0.5 }}>
-                              <DragIndicator sx={{ fontSize: 12 }} />
+                              <DragIndicatorOutlined sx={{ fontSize: 12 }} />
                               <span>{transformChipLabel(mapping)}</span>
                             </Box>
                           }
@@ -1138,7 +1125,7 @@ export default function Relationship({ embedded }: { embedded?: boolean } = {}) 
                           color="success"
                           variant="outlined"
                           onDelete={() => handleUnmap(dc.name)}
-                          deleteIcon={<Delete sx={{ fontSize: 14 }} />}
+                          deleteIcon={<DeleteOutlined sx={{ fontSize: 14 }} />}
                           sx={{ fontSize: "0.68rem", height: 22, maxWidth: 280 }}
                         />
                       </Tooltip>
@@ -1154,7 +1141,7 @@ export default function Relationship({ embedded }: { embedded?: boolean } = {}) 
 
             {destCols.length === 0 && (
               <Typography variant="body2" color="text.secondary" sx={{ p: 2, textAlign: "center" }}>
-                Nenhuma coluna no destino.
+                Nenhum campo no destino.
               </Typography>
             )}
           </Paper>
@@ -1169,29 +1156,29 @@ export default function Relationship({ embedded }: { embedded?: boolean } = {}) 
             color="success" size="small"
           />
           <Chip
-            label={`${sourceCols.filter(c => !mappedSources.has(c.name)).length} colunas fonte não mapeadas`}
+            label={`${sourceCols.filter(c => !mappedSources.has(c.name)).length} campos fonte não mapeados`}
             size="small" variant="outlined"
           />
           {hasChanges && (
             <Chip
-              icon={<Undo sx={{ fontSize: 14 }} />}
-              label="Alterações não salvas"
+              icon={<UndoOutlined sx={{ fontSize: 14 }} />}
+              label="Alterações não gravadas"
               color="warning" size="small"
             />
           )}
         </Box>
       )}
 
-      {/* ── Datagrid: Relacionamentos por Tabela ── */}
+      {/* ── Datagrid: relações por tabela ── */}
       <Box sx={{ mt: 4 }}>
         <Typography variant="h6" sx={{ mb: 1 }}>
-          Relacionamentos Criados
+          Relações criadas
         </Typography>
         {mappingsLoading ? (
           <CircularProgress sx={{ display: "block", mx: "auto", mt: 2 }} />
         ) : tableRels.length === 0 ? (
           <Paper sx={{ p: 3, textAlign: "center", color: "text.secondary" }}>
-            Nenhum relacionamento criado ainda.
+            Nenhuma relação criada ainda.
           </Paper>
         ) : (
           <SortableTable
@@ -1199,7 +1186,7 @@ export default function Relationship({ embedded }: { embedded?: boolean } = {}) 
             data={tableRels}
             getRowKey={(r) => (r as unknown as TableRelationship)._key}
             size="small"
-            placeholder="Filtrar por datasource ou tabela destino..."
+            placeholder="Filtrar por fonte ou tabela de destino..."
             defaultSortKey="destination_table_id"
           />
         )}
@@ -1216,12 +1203,12 @@ export default function Relationship({ embedded }: { embedded?: boolean } = {}) 
           <Paper
             sx={{
               px: 2, py: 1, borderRadius: 2,
-              bgcolor: "#e3f2fd", border: "2px solid #42a5f5",
+              bgcolor: "#EEF4FF", border: "2px solid #6EA8FE",
               boxShadow: 4,
             }}
           >
             <Typography variant="body2" sx={{ fontFamily: "monospace", fontWeight: 600 }}>
-              <DragIndicator sx={{ verticalAlign: "middle", mr: 0.5, fontSize: 16 }} />
+              <DragIndicatorOutlined sx={{ verticalAlign: "middle", mr: 0.5, fontSize: 16 }} />
               {dragging}
             </Typography>
           </Paper>

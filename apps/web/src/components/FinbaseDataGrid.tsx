@@ -35,7 +35,7 @@ const gridStyle: SxProps<Theme> = theme => ({
   backgroundColor: theme.palette.background.paper,
   borderColor: theme.palette.divider,
   "& .MuiDataGrid-columnHeader": {
-    backgroundColor: theme.palette.primary.main === "#4338CA" ? "#E2E5EE" : "#EEF0F7",
+    backgroundColor: theme.palette.primary.main === "#0F62FE" ? "#E1E8F0" : "#EEF3F8",
     color: theme.palette.text.primary, padding: "0 16px",
   },
   "& .MuiDataGrid-columnHeaderTitle, & .MuiDataGrid-columnHeader .MuiTypography-root": { fontWeight: 600, fontSize: "0.875rem" },
@@ -56,6 +56,8 @@ export default function FinbaseDataGrid<R extends GridValidRowModel = any>({ sx,
   return <MuiDataGrid<R>
     rowHeight={48} columnHeaderHeight={48} disableRowSelectionOnClick
     {...props}
+    initialState={{ ...props.initialState, pagination: { ...props.initialState?.pagination, paginationModel: { page: 0, pageSize: 50, ...props.initialState?.pagination?.paginationModel } } }}
+    pageSizeOptions={[50, 100, 500, 1000]}
     slots={{ ...dataGridIcons, toolbar: FinbaseGridToolbar, ...slots }}
     localeText={{ ...ptBR.components.MuiDataGrid.defaultProps.localeText, toolbarExportCSV: props.paginationMode === "server" ? "Exportar página atual (CSV)" : "Exportar registros (CSV)", ...props.localeText }}
     sx={[...(Array.isArray(sx) ? sx : sx ? [sx] : []), gridStyle]}

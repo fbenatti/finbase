@@ -441,17 +441,6 @@ async def _materialize_rule(
     """Build the pre-aggregated Gold table for one rule and swap it atomically."""
     table = rule_target_table(rule.code)
 
-    # These five auxiliary gold cubes have provider-specific schemas and are
-    # materialized by the same atomic publisher, but are still owned by the
-    # Gold rule queue/UI (never by an external script or scheduler shortcut).
-    ai_code = normalize_code(rule.code)
-    if ai_code in _AI_AUXILIARY_GOLD_CUBES:
-        from app.services.ai_usage_gold import refresh_ai_usage_gold_cubes
-        if progress:
-            progress(0, 1, f"Agregando {ai_code} a partir da Gold de IA")
-        result = await refresh_ai_usage_gold_cubes(only_tables=[table])
-        return int((result.get("tables") or {}).get(table) or 0)
-
     # SQL custom: o usuário fornece a query inteira. Ela deve gerar as
     # dimensões e medidas desejadas; nós apenas criamos a tabela no namespace
     # gold e fazemos o swap atômico.

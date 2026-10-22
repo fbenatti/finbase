@@ -26,7 +26,7 @@ from app.services.azure_tag_policy_service import (
 from app.services.azure_tag_dashboard_service import AzureTagDashboardService
 from app.services.azure_tag_timeline_service import AzureTagTimelineService
 
-router = APIRouter(prefix="/azure-tag-policy", tags=["azure-tag-policy"])
+router = APIRouter(prefix="/governanca/politica-tags-azure", tags=["azure-tag-policy"])
 FOCUS_FIELD_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 
 
@@ -60,14 +60,14 @@ async def _validated_mapping(body: TagMappingBody, db: AsyncSession) -> tuple[st
     return tag_key, focus_field
 
 
-@router.get("/tag-mappings")
+@router.get("/mapeamentos-tags")
 async def list_tag_mappings(db: AsyncSession = Depends(get_db)):
     rows = await db.execute(select(AzureTagMapping).order_by(AzureTagMapping.id))
     return {"mappings": [_mapping_dict(row) for row in rows.scalars().all()],
             "focus_fields": await _focus_fields(db)}
 
 
-@router.post("/tag-mappings", status_code=201)
+@router.post("/mapeamentos-tags", status_code=201)
 async def create_tag_mapping(body: TagMappingBody, db: AsyncSession = Depends(get_db)):
     tag_key, focus_field = await _validated_mapping(body, db)
     item = AzureTagMapping(tag_key=tag_key, focus_field=focus_field, active=body.active)
@@ -81,7 +81,7 @@ async def create_tag_mapping(body: TagMappingBody, db: AsyncSession = Depends(ge
     return _mapping_dict(item)
 
 
-@router.put("/tag-mappings/{mapping_id}")
+@router.put("/mapeamentos-tags/{mapping_id}")
 async def update_tag_mapping(mapping_id: int, body: TagMappingBody, db: AsyncSession = Depends(get_db)):
     item = await db.get(AzureTagMapping, mapping_id)
     if not item:
@@ -99,12 +99,12 @@ def _exclusion_summary(exclusions: list[dict], limit: int = 8) -> str:
     return "; ".join(labels) or "Nenhuma"
 
 
-@router.get("/tenants")
+@router.get("/locatarios")
 async def list_tenants(db: AsyncSession = Depends(get_db)):
     return await AzureTagPolicyService(db).list_azure_tenants()
 
 
-@router.get("/subscriptions")
+@router.get("/assinaturas")
 async def list_subscriptions(connection_id: int = Query(...), db: AsyncSession = Depends(get_db)):
     try:
         return {"subscriptions": await AzureTagPolicyService(db).list_subscriptions(connection_id)}
@@ -114,7 +114,7 @@ async def list_subscriptions(connection_id: int = Query(...), db: AsyncSession =
         raise HTTPException(status_code=502, detail=str(exc)) from exc
 
 
-@router.get("/executive-dashboard")
+@router.get("/painel-executivo")
 async def executive_tag_dashboard(connection_id: int = Query(...), db: AsyncSession = Depends(get_db)):
     try:
         return await AzureTagDashboardService(db).executive_summary(connection_id)
@@ -124,7 +124,7 @@ async def executive_tag_dashboard(connection_id: int = Query(...), db: AsyncSess
         raise HTTPException(status_code=502, detail=str(exc)) from exc
 
 
-@router.get("/timeline")
+@router.get("/linha-do-tempo")
 async def azure_tag_policy_timeline(
     connection_id: int = Query(...),
     since: date = Query(default=date(2026, 10, 12)),
@@ -136,7 +136,7 @@ async def azure_tag_policy_timeline(
         raise HTTPException(status_code=404, detail=str(exc)) from exc
 
 
-@router.post("/executive-dashboard/refresh", status_code=202)
+@router.post("/painel-executivo/atualizar", status_code=202)
 async def refresh_executive_tag_dashboard(
     connection_id: int = Query(...), db: AsyncSession = Depends(get_db),
 ):
@@ -204,7 +204,7 @@ async def refresh_executive_tag_dashboard(
     return {"task_id": task.id, "status": "QUEUED", "message": "Coleta Resource Graph enfileirada para atualizar a Bronze."}
 
 
-@router.get("/executive-dashboard/resources")
+@router.get("/painel-executivo/recursos")
 async def executive_tag_dashboard_resources(
     connection_id: int = Query(...),
     subscription_id: str = Query(...),
@@ -223,7 +223,7 @@ async def executive_tag_dashboard_resources(
         raise HTTPException(status_code=502, detail=str(exc)) from exc
 
 
-@router.get("/export")
+@router.get("/exportar")
 async def export_policy(
     connection_id: int | None = Query(None, description="Optional: a single Azure connection/tenant"),
     department_id: int | None = Query(None, description="Optional: compile only one organizational project"),

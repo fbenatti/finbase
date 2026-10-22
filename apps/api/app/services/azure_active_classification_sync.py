@@ -248,7 +248,7 @@ async def sync_active_azure_classifications(
             directory_name = (directory.get("Diretoria") or "").strip()
             parent = departments_by_parent_name.get((azure_root_id, canon(directory_name)))
             if parent is None:
-                parent = Department(parent_id=azure_root_id, name=directory_name, cloud_filter="Azure")
+                parent = Department(parent_id=azure_root_id, name=directory_name)
                 await persist_or_virtual(parent)
                 departments_by_parent_name[(azure_root_id, canon(directory_name))] = parent
                 departments_by_name[canon(parent.name)].append(parent)
@@ -260,7 +260,6 @@ async def sync_active_azure_classifications(
                     name=candidate.project,
                     centro_custo=(directory.get("CentrodeCusto") or "").strip() or None,
                     ambiente=(directory.get("Origem") or "").strip() or None,
-                    cloud_filter=candidate.cloud,
                     custom_fields={"source": "diretorias_download.csv"},
                 )
                 await persist_or_virtual(department)
@@ -274,7 +273,6 @@ async def sync_active_azure_classifications(
             fallback_node = Department(
                 parent_id=FALLBACK_PARENT_ID,
                 name=FALLBACK_NAME,
-                cloud_filter="Azure",
                 custom_fields={"tipo": "organization_5", "source": "azure_active_classification_sync"},
             )
             await persist_or_virtual(fallback_node)
@@ -285,7 +283,6 @@ async def sync_active_azure_classifications(
             department = Department(
                 parent_id=fallback_node.id,
                 name=candidate.project,
-                cloud_filter=candidate.cloud,
                 custom_fields={"source": "projetos_download.csv", "association": "fallback_directory"},
             )
             await persist_or_virtual(department)

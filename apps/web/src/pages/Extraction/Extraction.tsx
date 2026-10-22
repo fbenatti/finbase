@@ -1,7 +1,7 @@
 import { Dialog, DialogTitle, DialogContent, DialogActions } from "../../components/FinbaseDialog";
 import DataGrid from "../../components/FinbaseDataGrid";
 import { dataDisplayText } from "../../utils/dataPresentation";
-import { useState, useEffect, useRef, useCallback, useMemo } from "react";
+import { useState, useEffect, useRef, useCallback, useMemo, type ReactNode } from "react";
 import { Box, Typography, Button, TableCell, Paper, Chip, LinearProgress, Alert, Select, MenuItem, FormControl, InputLabel, Checkbox, FormHelperText, CircularProgress, Tooltip, TextField, FormControlLabel, Switch, IconButton, Stack, Table, TableHead, TableRow, TableBody, TableContainer } from "@mui/material";
 import { PlayArrow, Refresh, Stop, Delete, DeleteForever, Block, Undo, Storage, Schedule, Add, Edit, CloudUpload, Download, TableChart, Visibility } from "../../components/FinbaseIcons";
 import { GridColDef } from "@mui/x-data-grid";
@@ -35,6 +35,19 @@ function formatFileSize(bytes: number): string {
   let size = bytes;
   while (size >= 1024 && i < units.length - 1) { size /= 1024; i++; }
   return `${size.toFixed(i === 0 ? 0 : 1)} ${units[i]}`;
+}
+
+// Seção da barra de extração: rótulo e explicação à esquerda, ações à direita.
+function ToolbarSection({ title, description, children }: { title: string; description: string; children: ReactNode }) {
+  return (
+    <Box sx={{ display: "grid", gridTemplateColumns: { xs: "1fr", md: "220px 1fr" }, gap: { xs: 1, md: 2 }, py: 1.5, borderTop: "1px solid", borderColor: "divider" }}>
+      <Box>
+        <Typography variant="subtitle2">{title}</Typography>
+        <Typography variant="caption" color="text.secondary">{description}</Typography>
+      </Box>
+      <Stack direction="row" spacing={1} alignItems="center" flexWrap="wrap" useFlexGap>{children}</Stack>
+    </Box>
+  );
 }
 
 export default function Extraction({ embedded = false }: { embedded?: boolean }) {
@@ -122,7 +135,7 @@ export default function Extraction({ embedded = false }: { embedded?: boolean })
       setConnections(list);
       const extractable = list.filter((c) => extractableConnectorTypes.has(c.connector_type));
       if (extractable.length === 1) setConnId(extractable[0].id);
-    }).catch((e) => setError(formatApiError(e, "Falha ao carregar conexoes")));
+    }).catch((e) => setError(formatApiError(e, "Não foi possível carregar as conexões")));
   }, [extractableConnectorTypes]);
 
   const loadBlobs = useCallback(async () => {
@@ -152,7 +165,7 @@ export default function Extraction({ embedded = false }: { embedded?: boolean })
     }
     setScanning(true); setError(""); setTask(null); setSelectedPaths(new Set()); setBlobFilter("");
     try { setScanResult(await scanBlobs(connId as number)); }
-    catch (e: unknown) { setError(formatApiError(e, "Falha ao escanear")); }
+    catch (e: unknown) { setError(formatApiError(e, "Não foi possível varrer a fonte")); }
     finally { setScanning(false); }
   };
 
@@ -165,7 +178,7 @@ export default function Extraction({ embedded = false }: { embedded?: boolean })
     try {
       setPreviewData(await getSourcePreview(connId as number, 20));
     } catch (e: unknown) {
-      setPreviewError(formatApiError(e, "Falha ao obter preview do Databricks"));
+      setPreviewError(formatApiError(e, "Não foi possível obter a prévia do Databricks"));
     } finally {
       setPreviewLoading(false);
     }
@@ -183,7 +196,7 @@ export default function Extraction({ embedded = false }: { embedded?: boolean })
       if (isAzurePtuSelected) {
         if (mode === "period") {
           if (selPtuPeriods.length === 0) {
-            setError("Selecione ao menos um mês para buscar métricas históricas.");
+            setError("Escolha ao menos uma competência para buscar métricas históricas.");
             return;
           }
           body.force_periods = selPtuPeriods;
@@ -195,12 +208,12 @@ export default function Extraction({ embedded = false }: { embedded?: boolean })
       }
       const result = await runEtl(body);
       if (result.task_id === 0) {
-        setError(result.message || "Coleta indisponível para este tipo de conexão");
+        setError(result.message || "Coleta não disponível para este tipo de conexão");
         return;
       }
       pollTask(result.task_id);
     } catch (e: unknown) {
-      setError(e instanceof Error ? e.message : "Falha ao iniciar a coleta");
+      setError(e instanceof Error ? e.message : "Não foi possível iniciar a coleta");
     }
   };
 
@@ -209,8 +222,8 @@ export default function Extraction({ embedded = false }: { embedded?: boolean })
     try {
       await resetSourceForReimport(connId as number);
       setTask(null); setBlobs([]); setScanResult(null);
-      setSourceResetMessage("Fonte resetada. Execute Escanear e depois importe os CSVs atuais.");
-    } catch (e: unknown) { setError(e instanceof Error ? e.message : "Falha ao resetar a fonte"); }
+      setSourceResetMessage("Fonte reiniciada. Execute Varrer fonte e depois importe os CSVs atuais.");
+    } catch (e: unknown) { setError(e instanceof Error ? e.message : "Não foi possível reiniciar a fonte"); }
   };
 
   const doCancelTask = async (taskId: number) => {
@@ -218,7 +231,7 @@ export default function Extraction({ embedded = false }: { embedded?: boolean })
     try {
       await cancelEtl(taskId);
     } catch (e: unknown) {
-      setError(e instanceof Error ? e.message : "Cancel failed");
+      setError(e instanceof Error ? e.message : "Não foi possível cancelar");
     }
   };
 
@@ -231,10 +244,10 @@ export default function Extraction({ embedded = false }: { embedded?: boolean })
       if (result.success) {
         setDestProcessResult(`OK: ${result.rows_written.toLocaleString()} linhas escritas na tabela destino`);
       } else {
-        setDestProcessResult(`Erro: ${result.error || "Falha desconhecida"}`);
+        setDestProcessResult(`Erro: ${result.error || "Erro não identificado"}`);
       }
     } catch (e: unknown) {
-      setDestProcessResult(`Erro: ${e instanceof Error ? e.message : "Falha ao processar destino"}`);
+      setDestProcessResult(`Erro: ${e instanceof Error ? e.message : "Não foi possível processar o destino"}`);
     } finally {
       setProcessingDest(false);
     }
@@ -292,13 +305,13 @@ export default function Extraction({ embedded = false }: { embedded?: boolean })
     try {
       const result = await runEtl({ connection_id: connId as number, selected_blobs: paths });
       if (result.task_id === 0) {
-        setError(result.message || "Coleta indisponível para esta conexão");
+        setError(result.message || "Coleta não disponível para esta conexão");
         return;
       }
       setSelectedPaths(new Set(paths));
       pollTask(result.task_id);
     } catch (e: unknown) {
-      setError(e instanceof Error ? e.message : "Falha ao iniciar a importação");
+      setError(e instanceof Error ? e.message : "Não foi possível iniciar a carga");
     }
   };
 
@@ -312,31 +325,31 @@ export default function Extraction({ embedded = false }: { embedded?: boolean })
       // Keep the requests in small batches so a scan with many files does not
       // overload the API or leave part of the selection without feedback.
       for (let index = 0; index < paths.length; index += 10) {
-        await Promise.all(paths.slice(index, index + 10).map(path => apiSkipBlob(connId as number, path, "ACK em massa")));
+        await Promise.all(paths.slice(index, index + 10).map(path => apiSkipBlob(connId as number, path, "Reconhecimento em massa")));
       }
       setSelectedPaths(new Set());
       await loadSkipped();
       await doScan();
     } catch (e: unknown) {
-      setError(e instanceof Error ? e.message : "Falha ao marcar blobs como ignorados");
+      setError(e instanceof Error ? e.message : "Não foi possível marcar os arquivos como ignorados");
     }
   };
 
   const doClearAllAcks = async () => {
     if (!connId || skippedBlobs.length === 0 || isActive) return;
-    if (!confirm(`Remover todos os ${skippedBlobs.length} ACK(s) desta conexão?`)) return;
+    if (!confirm(`Remover todos os ${skippedBlobs.length} reconhecimentos (ACK) desta conexão?`)) return;
     try {
       await clearSkippedBlobs(connId as number);
       setSelectedPaths(new Set());
       await loadSkipped();
       await doScan();
     } catch (e: unknown) {
-      setError(e instanceof Error ? e.message : "Falha ao remover ACKs");
+      setError(e instanceof Error ? e.message : "Não foi possível remover os reconhecimentos");
     }
   };
 
   const doDeleteBlob = async (blobId: number) => {
-    if (!confirm("Remover este dataset da lista de ingestao?")) return;
+    if (!confirm("Remover este dataset da lista de carga?")) return;
     try {
       await deleteIngestedBlob(blobId);
       // Remove immediately from the visible list and reconcile with the API.
@@ -347,7 +360,7 @@ export default function Extraction({ embedded = false }: { embedded?: boolean })
       // the UI cannot keep offering an action for an already deleted blob.
       await loadBlobs();
       const status = (e as { response?: { status?: number } })?.response?.status;
-      if (status !== 404) setError(e instanceof Error ? e.message : "Delete failed");
+      if (status !== 404) setError(e instanceof Error ? e.message : "Não foi possível excluir");
     }
   };
 
@@ -357,7 +370,7 @@ export default function Extraction({ embedded = false }: { embedded?: boolean })
     try {
       await downloadIngestedBlob(blobId, format);
     } catch (err: unknown) {
-      setError(err instanceof Error ? err.message : "Falha ao baixar arquivo");
+      setError(err instanceof Error ? err.message : "Não foi possível baixar o arquivo");
     } finally {
       setDownloadingId(null);
     }
@@ -366,11 +379,11 @@ export default function Extraction({ embedded = false }: { embedded?: boolean })
 
   const doDeleteAll = async () => {
     if (!connId) return;
-    if (!confirm("Remover TODOS os datasets ingeridos desta conexao? Esta acao nao pode ser desfeita.")) return;
+    if (!confirm("Remover TODOS os datasets carregados desta conexão? Esta ação não pode ser desfeita.")) return;
     try {
       await deleteAllIngestedBlobs(connId as number);
       setBlobs([]);
-    } catch (e: unknown) {setError(e instanceof Error ? e.message : "Delete all failed");}
+    } catch (e: unknown) {setError(e instanceof Error ? e.message : "Não foi possível excluir todos");}
   };
 
   const doSkipBlob = async (blobPath: string) => {
@@ -380,7 +393,7 @@ export default function Extraction({ embedded = false }: { embedded?: boolean })
       await apiSkipBlob(connId as number, blobPath);
       loadSkipped();
       doScan();
-    } catch (e: unknown) { setError(e instanceof Error ? e.message : "Skip failed"); }
+    } catch (e: unknown) { setError(e instanceof Error ? e.message : "Não foi possível ignorar"); }
     finally { setSkippingPaths(prev => { const next = new Set(prev); next.delete(blobPath); return next; }); }
   };
 
@@ -390,7 +403,7 @@ export default function Extraction({ embedded = false }: { embedded?: boolean })
       await apiUnskipBlob(skipId);
       loadSkipped();
       doScan();
-    } catch (e: unknown) { setError(e instanceof Error ? e.message : "Unskip failed"); }
+    } catch (e: unknown) { setError(e instanceof Error ? e.message : "Não foi possível reverter o ignorado"); }
     finally { setSkippingPaths(prev => { const next = new Set(prev); next.delete(blobPath); return next; }); }
   };
 
@@ -419,48 +432,73 @@ export default function Extraction({ embedded = false }: { embedded?: boolean })
 
   return (
     <Box>
-      {!embedded && <Typography variant="h4" sx={{ mb: 2 }}>Extração & Monitoramento</Typography>}
+      {!embedded && (
+        <Box sx={{ mb: 2 }}>
+          <Typography variant="h6">Coletas</Typography>
+          <Typography variant="body2" color="text.secondary">Varra a fonte, importe os arquivos para a base de origem e processe para a tabela de destino.</Typography>
+        </Box>
+      )}
 
       <>
-          <Box sx={{ display: "flex", gap: 2, mb: 3, alignItems: "flex-start", flexWrap: "wrap" }}>
-            <FormControl size="small" sx={{ minWidth: 280 }}>
-              <InputLabel>Conexao</InputLabel>
-              <Select value={connId} label="Conexao" onChange={(e) => { setConnId(e.target.value as number); setScanResult(null); setTask(null); }}>
-                {extractableConnections.map((c) => (
-                  <MenuItem key={c.id} value={c.id}>{c.name} ({c.code})</MenuItem>
-                ))}
-              </Select>
-            </FormControl>
-        {connections.length > 0 && extractableConnections.length === 0 && (
-          <Alert severity="warning">Nenhuma conexao disponivel para extracao.</Alert>
-        )}
+          <Paper variant="outlined" sx={{ px: 2, pt: 2, pb: 0.5, mb: 3 }}>
+            <Stack direction={{ xs: "column", md: "row" }} spacing={2} alignItems={{ md: "center" }} justifyContent="space-between">
+              <FormControl size="small" sx={{ minWidth: 280 }}>
+                <InputLabel>Conexão</InputLabel>
+                <Select value={connId} label="Conexão de origem" onChange={(e) => { setConnId(e.target.value as number); setScanResult(null); setTask(null); }}>
+                  {extractableConnections.map((c) => (
+                    <MenuItem key={c.id} value={c.id}>{c.name} ({c.code})</MenuItem>
+                  ))}
+                </Select>
+              </FormControl>
+              {isActive && (
+                <Button
+                  variant="outlined"
+                  color="error"
+                  disabled={isCancelling}
+                  startIcon={isCancelling ? <CircularProgress size={18} /> : <Stop />}
+                  onClick={() => doCancelTask(task!.id)}
+                >
+                  {isCancelling ? "Interrompendo..." : "Parar execução"}
+                </Button>
+              )}
+            </Stack>
+            {connections.length > 0 && extractableConnections.length === 0 && (
+              <Alert severity="warning" sx={{ mt: 2 }}>Nenhuma conexão disponível para coleta.</Alert>
+            )}
 
         {isManualCsvSelected ? (
-          <Button
-            variant="contained"
-            color="primary"
-            startIcon={<CloudUpload />}
-            onClick={() => {
-              const conn = extractableConnections.find((c) => c.id === connId);
-              if (conn) setUploadConn(conn);
-            }}
-          >
-            Upload CSV
-          </Button>
+          <ToolbarSection title="Carga manual" description="Envie um CSV diretamente para a base de origem.">
+            <Button
+              variant="contained"
+              color="primary"
+              startIcon={<CloudUpload />}
+              onClick={() => {
+                const conn = extractableConnections.find((c) => c.id === connId);
+                if (conn) setUploadConn(conn);
+              }}
+            >
+              Upload CSV
+            </Button>
+          </ToolbarSection>
         ) : (
-          <>
-            {!isAzurePtuSelected && <Button variant="outlined" startIcon={scanning ? <CircularProgress size={18} /> : <Refresh />} onClick={doScan} disabled={scanning || !connId}>
-              {scanning ? "Escaneando..." : "Escanear"}
-            </Button>}
+          <ToolbarSection
+            title="Carga manual"
+            description={isAzurePtuSelected ? "Métricas do PTU: coleta recente ou por competência." : "Varra a fonte e importe os arquivos para a base de origem."}
+          >
+            {!isAzurePtuSelected && (
+              <Button variant="outlined" startIcon={scanning ? <CircularProgress size={18} /> : <Refresh />} onClick={doScan} disabled={scanning || !connId}>
+                {scanning ? "Varrendo..." : "Escanear"}
+              </Button>
+            )}
             {isDatabricksSelected && (
               <Button variant="outlined" color="inherit" startIcon={previewLoading ? <CircularProgress size={18} /> : <Visibility />} onClick={() => void doPreview()} disabled={previewLoading || !connId}>
-                {previewLoading ? "Carregando header..." : "Ver header / preview"}
+                {previewLoading ? "Carregando cabeçalho..." : "Ver cabeçalho / prévia"}
               </Button>
             )}
             <Button variant="contained" startIcon={<PlayArrow />} onClick={() => doRun("backfill")}
               disabled={isActive || !connId || !!task?.status?.includes("CANCELLING")}
               color="primary">
-              {isAzurePtuSelected ? "Importar todos os dados disponíveis (~93 dias)" : (hasSelection ? `Importar ${visibleSelectedCount} selecionados` : "Importar Todos")}
+              {isAzurePtuSelected ? "Importar todo o histórico disponível (~93 dias)" : (hasSelection ? `Importar ${visibleSelectedCount} selecionados` : "Importar tudo")}
             </Button>
             {isAzurePtuSelected && (
               <>
@@ -473,7 +511,7 @@ export default function Extraction({ embedded = false }: { embedded?: boolean })
                   Coletar recente (lookback 3h)
                 </Button>
                 <Button
-                  variant="contained"
+                  variant="outlined"
                   color="secondary"
                   startIcon={<PlayArrow />}
                   onClick={() => doRun("period")}
@@ -483,35 +521,32 @@ export default function Extraction({ embedded = false }: { embedded?: boolean })
                 </Button>
               </>
             )}
+          </ToolbarSection>
+        )}
+
+        <ToolbarSection title="Publicação" description="Publica os dados normalizados na tabela de destino, usando os mapeamentos de relação.">
+          <Tooltip title="Converte os dados normalizados para a tabela de destino (MODELO_FOCUS) usando os mapeamentos configurados em Relacionamento.">
+            <Button
+              variant="contained"
+              color="secondary"
+              startIcon={processingDest ? <CircularProgress size={18} /> : <Storage />}
+              onClick={doProcessDest}
+              disabled={isActive || !connId || processingDest}
+            >
+              {processingDest ? "Em processamento..." : "Processar destino"}
+            </Button>
+          </Tooltip>
+        </ToolbarSection>
+
+        {!isManualCsvSelected && (
+          <ToolbarSection title="Limpeza" description="Apaga os dados carregados desta conexão para reimportar do zero.">
             <Button variant="outlined" color="warning" startIcon={<DeleteForever />} onClick={doResetSource}
               disabled={isActive || !connId}>
               Reprocessar origem limpa
             </Button>
-          </>
+          </ToolbarSection>
         )}
-        {isActive && (
-          <Button
-            variant="outlined"
-            color="error"
-            disabled={isCancelling}
-            startIcon={isCancelling ? <CircularProgress size={18} /> : <Stop />}
-            onClick={() => doCancelTask(task!.id)}
-          >
-            {isCancelling ? "Cancelando..." : "Parar"}
-          </Button>
-        )}
-        <Tooltip title="Processa os dados normalizados para a tabela de destino (MODELO_FOCUS) usando os mapeamentos configurados em Relacionamento.">
-          <Button
-            variant="outlined"
-            color="secondary"
-            startIcon={processingDest ? <CircularProgress size={18} /> : <Storage />}
-            onClick={doProcessDest}
-            disabled={isActive || !connId || processingDest}
-          >
-            {processingDest ? "Processando..." : "Processar Destino"}
-          </Button>
-        </Tooltip>
-      </Box>
+      </Paper>
 
       {destProcessResult && (
         <Alert severity={destProcessResult.startsWith("OK") ? "success" : "error"} sx={{ mb: 2 }} onClose={() => setDestProcessResult("")}>
@@ -525,7 +560,7 @@ export default function Extraction({ embedded = false }: { embedded?: boolean })
 
       {extractableConnections.find(c => c.id === connId)?.connector_type === "oci" && (
         <Alert severity="info" sx={{ mb: 2 }}>
-          <strong>Consolidação Inteligente OCI:</strong> Os dados da Oracle Cloud são agrupados e consolidados por dia e recurso para garantir alta performance e tabelas otimizadas, preservando 100% dos valores financeiros, quantidades e tags de negócio.
+          <strong>Consolidação automática OCI:</strong> Os dados da Oracle Cloud são agrupados e consolidados por dia e recurso para garantir alta performance e tabelas otimizadas, preservando 100% dos valores financeiros, quantidades e tags de negócio.
         </Alert>
       )}
 
@@ -534,12 +569,12 @@ export default function Extraction({ embedded = false }: { embedded?: boolean })
           <CircularProgress size={28} />
           <Box>
             <Typography variant="body1" fontWeight={500}>
-              {isAzurePtuSelected ? "Descobrindo deployments PTU..." : "Escaneando blobs..."}
+              {isAzurePtuSelected ? "Localizando deployments PTU..." : "Varrendo arquivos..."}
             </Typography>
             <Typography variant="caption" color="text.secondary">
               {isAzurePtuSelected
-                ? "Consulta ARM Resource Graph e deployments com SKU provisionado"
-                : "Buscando arquivos disponiveis na fonte de dados"}
+                ? "Consulta ao ARM Resource Graph e deployments com SKU provisionado"
+                : "Buscando arquivos disponíveis na fonte de dados"}
             </Typography>
           </Box>
         </Box>
@@ -551,12 +586,12 @@ export default function Extraction({ embedded = false }: { embedded?: boolean })
             <Chip label={task.status} color={STATUS_COLORS[task.status] || "default"} size="small" />
             <Typography variant="body2">
               {isQueued ? (
-                "Aguardando worker..."
+                "Aguardando processamento..."
               ) : isPtuTask ? (
                 <>
                   {task.total_blobs > 0
                     ? `${task.processed_blobs} / ${task.total_blobs} janelas Monitor`
-                    : "Coleta ARM/Monitor em andamento"}
+                    : "Coleta ARM/Monitor em execução"}
                   {" | "}{(task.rows_destination ?? 0).toLocaleString()} registros consolidados
                 </>
               ) : (
@@ -632,17 +667,17 @@ export default function Extraction({ embedded = false }: { embedded?: boolean })
                 </Typography>
               )}
 
-              <Box sx={{ mt: 1, p: 1, bgcolor: "#f7f9fc", borderRadius: 1, border: "1px solid #dbe3ef" }}>
+              <Box sx={{ mt: 1, p: 1, bgcolor: "#f7f9fc", borderRadius: 1, border: "1px solid #E1E8F0" }}>
                 <Typography variant="caption" fontWeight={700} sx={{ display: "block" }}>
-                  {isPtuTask ? "Coleta operacional Azure PTU" : "Importação de dados"}
+                  {isPtuTask ? "Coleta operacional do Azure PTU" : "Carga de dados"}
                 </Typography>
                 <Typography variant="caption" color="text.secondary" sx={{ display: "block" }}>
                   {isPtuTask
-                    ? "Sequência: descoberta ARM → Azure Monitor (janelas de até 30 dias) → persistência horária em dest_azure_ptu_metrics."
-                    : "O download concluído não significa que a importação terminou. A sequência é: Leitura do arquivo → Dados de origem → Preparação e consolidação → Concluído."}
+                    ? "Sequência: descoberta ARM → Azure Monitor (janelas de até 30 dias) → gravação horária em dest_azure_ptu_metrics."
+                    : "O download concluído não significa que a carga terminou. A sequência é: Leitura do arquivo → Dados de origem → Preparação e consolidação → Concluído."}
                 </Typography>
                 <Typography variant="caption" color="primary.main" sx={{ display: "block", mt: 0.25 }}>
-                  {dataDisplayText(task.phase || (isPtuTask ? "Aguardando início da coleta PTU" : "Aguardando início da importação"))}
+                  {dataDisplayText(task.phase || (isPtuTask ? "Aguardando o início da coleta PTU" : "Aguardando início da carga"))}
                 </Typography>
               </Box>
 
@@ -685,13 +720,13 @@ export default function Extraction({ embedded = false }: { embedded?: boolean })
 
           {isTerminal && task.status === "COMPLETED_WITH_ERRORS" && (
             <Alert severity="warning" sx={{ mt: 1 }}>
-              <strong>Dados de origem carregados; preparação pendente.</strong>{" "}
-              {dataDisplayText(task.phase || task.errors?.[0] || "Verifique o relacionamento origem → destino.")}
+              <strong>Dados de origem carregados; preparo pendente.</strong>{" "}
+              {dataDisplayText(task.phase || task.errors?.[0] || "Verifique a relação origem → destino.")}
             </Alert>
           )}
           {isTerminal && task.status === "COMPLETED" && (task.rows_raw ?? 0) > 0 && (task.rows_normalized ?? 0) === 0 && (
             <Alert severity="success" sx={{ mt: 1 }}>
-              <strong>Carga da origem concluída.</strong>  A origem foi carregada sem mapeamento ou transformação. A preparação e a consolidação serão executadas posteriormente.
+              <strong>Carga da fonte concluída.</strong>  A origem foi carregada sem mapeamento ou transformação. A preparação e a consolidação serão executadas posteriormente.
             </Alert>
           )}
 
@@ -719,7 +754,7 @@ export default function Extraction({ embedded = false }: { embedded?: boolean })
             </Typography>
             <Button size="small" variant="outlined" onClick={toggleAll} disabled={!filteredEligibleItems.length || isActive}>
               {filteredEligibleItems.length > 0 && filteredEligibleItems.every(i => selectedPaths.has(i.blob_path))
-                ? "Desmarcar filtrados" : `Selecionar todos filtrados (${filteredEligibleItems.length})`}
+                ? "Desmarcar os filtrados" : `Selecionar todos filtrados (${filteredEligibleItems.length})`}
             </Button>
             <Button size="small" variant="contained" color="success" startIcon={<PlayArrow />}
               onClick={doImportFiltered} disabled={!filteredEligibleItems.length || isActive}>
@@ -741,24 +776,24 @@ export default function Extraction({ embedded = false }: { embedded?: boolean })
               size="small"
               value={blobFilter}
               onChange={event => setBlobFilter(event.target.value)}
-              placeholder="Buscar nos dados escaneados..."
+              placeholder="Buscar nos arquivos varridos..."
               sx={{ mb: 1, minWidth: 320 }}
             />
             <DataGrid
               rows={filteredScanItems.map((item, index) => ({ ...item, id: item.blob_path || index }))}
               columns={[
-                { field: "_check", headerName: "", width: 52, sortable: false, filterable: false, renderHeader: () => { const allSelected = filteredEligibleItems.length > 0 && filteredEligibleItems.every(item => selectedPaths.has(item.blob_path)); const someSelected = filteredEligibleItems.some(item => selectedPaths.has(item.blob_path)); return <Tooltip title={allSelected ? "Desmarcar itens filtrados" : "Selecionar todos os itens filtrados"}><Checkbox size="small" checked={allSelected} indeterminate={!allSelected && someSelected} disabled={isActive || filteredEligibleItems.length === 0} onClick={event => event.stopPropagation()} onChange={toggleAll} /></Tooltip>; }, renderCell: ({ row }) => <Checkbox size="small" checked={selectedPaths.has(row.blob_path)} disabled={isActive || row.status === "SKIPPED" || skippedPaths.has(row.blob_path)} onClick={e => e.stopPropagation()} onChange={() => toggleSelect(row.blob_path)} /> },
+                { field: "_check", headerName: "", width: 52, sortable: false, filterable: false, renderHeader: () => { const allSelected = filteredEligibleItems.length > 0 && filteredEligibleItems.every(item => selectedPaths.has(item.blob_path)); const someSelected = filteredEligibleItems.some(item => selectedPaths.has(item.blob_path)); return <Tooltip title={allSelected ? "Desmarcar itens filtrados" : "Marcar todos os itens filtrados"}><Checkbox size="small" checked={allSelected} indeterminate={!allSelected && someSelected} disabled={isActive || filteredEligibleItems.length === 0} onClick={event => event.stopPropagation()} onChange={toggleAll} /></Tooltip>; }, renderCell: ({ row }) => <Checkbox size="small" checked={selectedPaths.has(row.blob_path)} disabled={isActive || row.status === "SKIPPED" || skippedPaths.has(row.blob_path)} onClick={e => e.stopPropagation()} onChange={() => toggleSelect(row.blob_path)} /> },
                 { field: "status", headerName: "Status", width: 120, renderCell: ({ value }) => <Chip size="small" label={value} color={STATUS_COLORS[String(value)] || "default"} /> },
                 { field: "blob_path", headerName: "Blob", minWidth: 300, flex: 1 },
                 { field: "billing_period", headerName: "Período", width: 120 },
                 { field: "last_modified", headerName: "Modificado", width: 150, type: "dateTime", valueGetter: (_, row) => row.last_modified ? new Date(String(row.last_modified)) : null },
-                { field: "content_length", headerName: "Linhas / tamanho", width: 150, valueGetter: (_, row) => row.row_count != null ? Number(row.row_count).toLocaleString() : formatFileSize(Number(row.content_length || 0)) },
-                { field: "_skip", headerName: "Ações", width: 90, sortable: false, filterable: false, renderCell: ({ row }) => <Tooltip title={skippedPaths.has(row.blob_path) ? "Desfazer ACK" : "Ignorar blob"}><IconButton size="small" color={skippedPaths.has(row.blob_path) ? "success" : "warning"} disabled={isActive || skippingPaths.has(row.blob_path)} onClick={event => { event.stopPropagation(); const entry = skippedBlobs.find(item => item.blob_path === row.blob_path); if (entry) void doUnskipBlob(entry.id, row.blob_path); else void doSkipBlob(row.blob_path); }}>{skippedPaths.has(row.blob_path) ? <Undo fontSize="small" /> : <Block fontSize="small" />}</IconButton></Tooltip> },
+                { field: "content_length", headerName: "Registros / tamanho", width: 150, valueGetter: (_, row) => row.row_count != null ? Number(row.row_count).toLocaleString() : formatFileSize(Number(row.content_length || 0)) },
+                { field: "_skip", headerName: "Ações", width: 90, sortable: false, filterable: false, renderCell: ({ row }) => <Tooltip title={skippedPaths.has(row.blob_path) ? "Desfazer aceite" : "Ignorar arquivo"}><IconButton size="small" color={skippedPaths.has(row.blob_path) ? "success" : "warning"} disabled={isActive || skippingPaths.has(row.blob_path)} onClick={event => { event.stopPropagation(); const entry = skippedBlobs.find(item => item.blob_path === row.blob_path); if (entry) void doUnskipBlob(entry.id, row.blob_path); else void doSkipBlob(row.blob_path); }}>{skippedPaths.has(row.blob_path) ? <Undo fontSize="small" /> : <Block fontSize="small" />}</IconButton></Tooltip> },
               ] as GridColDef[]}
               loading={scanning}
               disableRowSelectionOnClick
-              pageSizeOptions={[100, 250, 500]}
-              initialState={{ pagination: { paginationModel: { pageSize: 100, page: 0 } } }}
+              pageSizeOptions={[50, 100, 500, 1000]}
+              initialState={{ pagination: { paginationModel: { pageSize: 50, page: 0 } } }}
               sx={{ border: 1, borderColor: "divider", borderRadius: 2, bgcolor: "background.paper", "& .MuiDataGrid-columnHeaders": { bgcolor: "background.default" } }}
             />
           </Box>
@@ -767,7 +802,7 @@ export default function Extraction({ embedded = false }: { embedded?: boolean })
             data={filteredScanItems}
             searchValue={blobFilter}
             onSearchChange={setBlobFilter}
-            placeholder="Buscar blobs: 4p, 202505, part_1..."
+            placeholder="Buscar arquivos: 4p, 202505, part_1..."
             getRowKey={(item) => item.blob_path}
             defaultSortKey="billing_period"
             defaultSortDir="desc"
@@ -779,7 +814,7 @@ export default function Extraction({ embedded = false }: { embedded?: boolean })
                     filteredEligibleItems.every(item => selectedPaths.has(item.blob_path));
                   const someFilteredSelected = filteredEligibleItems.some(item => selectedPaths.has(item.blob_path));
                   return (
-                    <Tooltip title={allFilteredSelected ? "Desmarcar todos os filtrados" : "Selecionar todos os filtrados"}>
+                    <Tooltip title={allFilteredSelected ? "Limpar seleção dos filtrados" : "Marcar todos os filtrados"}>
                       <Checkbox
                         size="small"
                         checked={allFilteredSelected}
@@ -839,7 +874,7 @@ export default function Extraction({ embedded = false }: { embedded?: boolean })
                 render: (item: BlobScanItem) => new Date(item.last_modified).toLocaleDateString(),
               },
               {
-                key: "content_length", label: "Linhas / Tamanho", width: 110,
+                key: "content_length", label: "Registros / tamanho", width: 110,
                 render: (item: BlobScanItem) => (
                   item.row_count != null
                     ? item.row_count.toLocaleString()
@@ -862,7 +897,7 @@ export default function Extraction({ embedded = false }: { embedded?: boolean })
                   }
                   if (isSkipped) {
                     return (
-                      <Tooltip title="Desfazer — voltar a permitir importação">
+                      <Tooltip title="Desfazer — voltar a permitir a carga">
                         <button
                           onClick={(e) => { e.stopPropagation(); if (skipEntry) doUnskipBlob(skipEntry.id, item.blob_path); }}
                           style={{ background: "none", border: "none", cursor: "pointer", color: "#2e7d32", padding: 4 }}
@@ -873,7 +908,7 @@ export default function Extraction({ embedded = false }: { embedded?: boolean })
                     );
                   }
                   return (
-                    <Tooltip title="Ignorar — nunca importar este blob">
+                    <Tooltip title="Ignorar — nunca carregar este arquivo">
                       <button
                         onClick={(e) => { e.stopPropagation(); doSkipBlob(item.blob_path); }}
                         style={{ background: "none", border: "none", cursor: "pointer", color: "#ed6c02", padding: 4 }}
@@ -891,10 +926,10 @@ export default function Extraction({ embedded = false }: { embedded?: boolean })
       )}
 
       {!scanResult && !task && !scanning && connId && (
-        <Alert severity="info">Clique em "Escanear" para listar os blobs disponiveis.</Alert>
+        <Alert severity="info">Clique em "Escanear" para listar os arquivos disponíveis.</Alert>
       )}
 
-      {!connId && <EmptyState message="Selecione uma conexao para visualizar os arquivos e executar a coleta." />}
+      {!connId && <EmptyState message="Escolha uma conexão para visualizar os arquivos e executar a coleta." />}
 
       {/* ═══════════════════════════════════════════════════════════ */}
       {/*  AGENDAMENTOS (painel dedicado, independente da conexão)       */}
@@ -904,7 +939,7 @@ export default function Extraction({ embedded = false }: { embedded?: boolean })
       {blobs.length > 0 && (
         <Box sx={{ mt: 4 }}>
           <Box sx={{ display: "flex", justifyContent: "space-between", alignItems: "center", mb: 2 }}>
-            <Typography variant="h6">Historico de Ingestao</Typography>
+            <Typography variant="h6">Histórico de carga</Typography>
             <Button size="small" color="error" startIcon={<DeleteForever />} onClick={doDeleteAll}>
               Limpar Tudo
             </Button>
@@ -928,14 +963,14 @@ export default function Extraction({ embedded = false }: { embedded?: boolean })
                   render: (b: IngestedBlob) => b.row_count?.toLocaleString() || "-",
                 },
                 {
-                  key: "ingested_at", label: "Ingerido em", width: 160,
+                  key: "ingested_at", label: "Carregado em", width: 160,
                   render: (b: IngestedBlob) => new Date(b.ingested_at).toLocaleString(),
                 },
                 {
                   key: "_actions", label: "Ações", width: 130, sortable: false,
                   render: (b: IngestedBlob) => (
                     <Box sx={{ display: "flex", alignItems: "center", gap: 0.5 }}>
-                      <Tooltip title="Download CSV (Origem)">
+                      <Tooltip title="Baixar CSV (origem)">
                         <span>
                           <IconButton
                             size="small"
@@ -947,7 +982,7 @@ export default function Extraction({ embedded = false }: { embedded?: boolean })
                           </IconButton>
                         </span>
                       </Tooltip>
-                      <Tooltip title="Download Excel (XLSX)">
+                      <Tooltip title="Baixar Excel (XLSX)">
                         <span>
                           <IconButton
                             size="small"
@@ -959,7 +994,7 @@ export default function Extraction({ embedded = false }: { embedded?: boolean })
                           </IconButton>
                         </span>
                       </Tooltip>
-                      <Tooltip title="Remover dataset">
+                      <Tooltip title="Remover conjunto de dados">
                         <IconButton
                           size="small"
                           color="error"
@@ -989,12 +1024,12 @@ export default function Extraction({ embedded = false }: { embedded?: boolean })
       {/*  PREVIEW DATABRICKS (header + amostra)                         */}
       {/* ═══════════════════════════════════════════════════════════ */}
       <Dialog open={previewOpen} onClose={() => setPreviewOpen(false)} maxWidth="lg" fullWidth>
-        <DialogTitle>Pré-visualização Databricks</DialogTitle>
+        <DialogTitle>Prévia do Databricks</DialogTitle>
         <DialogContent dividers sx={{ p: 0 }}>
           {previewLoading && (
             <Box sx={{ display: "flex", alignItems: "center", gap: 2, p: 3 }}>
               <CircularProgress size={24} />
-              <Typography variant="body2" color="text.secondary">Consultando o SQL Warehouse...</Typography>
+              <Typography variant="body2" color="text.secondary">Consultando o SQL Warehouse…</Typography>
             </Box>
           )}
           {!previewLoading && previewError && (

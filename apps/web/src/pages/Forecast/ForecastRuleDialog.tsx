@@ -1,8 +1,11 @@
 import { Dialog, DialogActions, DialogContent, DialogTitle } from "../../components/FinbaseDialog";
 import { dataDisplayText } from "../../utils/dataPresentation";
-import { useEffect, useState } from "react";
-import { Alert, Box, Button, FormControl, FormControlLabel, IconButton, InputLabel, MenuItem, Select, Stack, Switch, TextField, Typography } from "@mui/material";
-import { Add, Delete } from "@mui/icons-material";
+import { useEffect, useState, type ReactNode } from "react";
+import {
+  Alert, Box, Button, Chip, FormControl, InputAdornment, InputLabel, MenuItem, Paper, Select, Stack, Switch, TextField,
+  ToggleButton, ToggleButtonGroup, Typography, FormControlLabel, IconButton,
+} from "@mui/material";
+import { AddOutlined, DeleteOutlined } from "@mui/icons-material";
 import {
   ForecastBusinessRule,
   ForecastConfig,
@@ -12,8 +15,6 @@ import {
   formatApiError,
   updateForecastBusinessRule,
 } from "../../services/api";
-import { FieldHelper, FieldWithHelp } from "../../components/FieldHelper";
-import { FORECAST_RULE_FIELD_HELP } from "./forecastFieldHelp";
 import { BEHAVIOR_LABELS } from "./forecastConstants";
 
 type Props = {
@@ -25,10 +26,14 @@ type Props = {
   onSaved: (savedName: string) => void | Promise<void>;
 };
 
-const dialogFieldSx = {
-  "& .MuiOutlinedInput-root:not(.MuiInputBase-multiline)": { height: 40 },
-  "& .MuiInputLabel-root:not(.MuiInputLabel-shrink)": { transform: "translate(14px, 11px) scale(1)" },
-} as const;
+// Uma frase curta por comportamento; some quando não há nada a dizer.
+const BEHAVIOR_HINTS: Record<string, string> = {
+  SOURCE_EXCLUDE_PREFIX: "Remove da base as linhas cujo campo começa com o prefixo. Não precisa estar nas dimensões do forecast.",
+  SOURCE_MEAN_30D_PREFIX: "Separa o prefixo e projeta pela média diária dos últimos 30 dias.",
+  SOURCE_MAX_PREVIOUS_MONTH_PREFIX: "Projeta o mês corrente com o maior entre o ritmo atual e a média do mês fechado anterior.",
+  SOURCE_GITHUB_COPILOT_OVERAGE_2_PHASE: "Antes da primeira cobrança do mês, usa a média dos dias cobrados (30 dias). Depois, usa a maior média.",
+  SOURCE_VALIDITY: "Suspende a previsão do escopo quando o último efetivado estiver além da validade.",
+};
 
 const isChargeIntervalRule = (behavior: string) => behavior === "CHARGE_INTERVAL";
 
@@ -109,6 +114,20 @@ const emptyRule = {
   currentMonthPolicy: "AUTO",
 };
 
+/** Bloco numerado, no mesmo padrão do editor de perfis. */
+function Step({ n, title, hint, children }: { n: number; title: string; hint: string; children: ReactNode }) {
+  return (
+    <Paper variant="outlined" sx={{ p: 2, borderRadius: 2 }}>
+      <Stack direction="row" spacing={1.25} alignItems="baseline" sx={{ mb: 0.25 }}>
+        <Typography variant="caption" sx={{ fontWeight: 700, color: "primary.main" }}>{String(n).padStart(2, "0")}</Typography>
+        <Typography variant="subtitle2" fontWeight={700}>{title}</Typography>
+      </Stack>
+      <Typography variant="caption" color="text.secondary" component="p" sx={{ mb: 1.5, ml: 3.25 }}>{hint}</Typography>
+      <Box sx={{ ml: { xs: 0, sm: 3.25 } }}>{children}</Box>
+    </Paper>
+  );
+}
+
 export default function ForecastRuleDialog({ open, initial, config, meta, onClose, onSaved }: Props) {
   const [rule, setRule] = useState<any>(emptyRule);
   const [saving, setSaving] = useState(false);
@@ -139,7 +158,7 @@ export default function ForecastRuleDialog({ open, initial, config, meta, onClos
 
   const save = async () => {
     if (!rule.name) {
-      setError("Informe o nome da regra.");
+      setError("Dê um nome à regra.");
       return;
     }
     const hasLegacyIdentity = rule.clauseMode !== "or" && rule.identification_column;
@@ -181,312 +200,265 @@ export default function ForecastRuleDialog({ open, initial, config, meta, onClos
       await onSaved(rule.name.trim() || "Regra");
       onClose();
     } catch (e) {
-      setError(formatApiError(e, "Falha ao salvar a regra"));
+      setError(formatApiError(e, "Não foi possível gravar a regra"));
     } finally {
       setSaving(false);
     }
   };
 
+  const columnNames = meta?.columns.map((c) => c.name) ?? [];
+  const behaviorLabel = (BEHAVIOR_LABELS as Record<string, string>)[rule.behavior] ?? rule.behavior;
+  const hint = BEHAVIOR_HINTS[rule.behavior];
+  const identificationSummary = rule.clauseMode === "or"
+    ? (rule.identification_clauses || []).filter((c: ForecastIdentificationClause) => c.column && c.values?.length)
+        .map((c: ForecastIdentificationClause) => `${c.column} em ${(Array.isArray(c.values) ? c.values : []).join(", ")}`).join(" ou ")
+    : rule.identification_column
+      ? `${rule.identification_column} = ${String(Array.isArray(rule.identification_values) ? rule.identification_values.join(", ") : rule.identification_values || "…")}`
+      : "";
+
   return (
-    <Dialog open={open} onClose={onClose} maxWidth="md" fullWidth>
-      <DialogTitle>{initial ? "Editar regra" : "Nova regra de negócio"}</DialogTitle>
-      <DialogContent sx={dialogFieldSx}>
+    <Dialog open={open} onClose={onClose} maxWidth="lg" fullWidth>
+      <DialogTitle>
+        <Stack direction="row" alignItems="center" spacing={1.5}>
+          <span>{initial ? "Alterar regra de negócio" : "Nova regra de previsão"}</span>
+          <Chip size="small" variant="outlined" label={rule.active !== false ? "Ativa" : "Inativa"} />
+        </Stack>
+        <Typography variant="body2" color="text.secondary">Perfil: {config.name}</Typography>
+      </DialogTitle>
+      <DialogContent sx={{ bgcolor: "#FAFBFD" }}>
         {error && <Alert severity="error" sx={{ mb: 2 }} onClose={() => setError("")}>{dataDisplayText(error)}</Alert>}
-        <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
-          Configuração {config.id}: {config.name}. Exclusões da origem são aplicadas antes da agregação; as demais regras, após a projeção matemática.
-        </Typography>
 
-        {rule.behavior === "SOURCE_EXCLUDE_PREFIX" && (
-          <Alert severity="info" sx={{ mb: 2 }}>
-            O campo será filtrado diretamente na base consolidada usando “começa com”. Ele não precisa estar nas dimensões do forecast.
-          </Alert>
-        )}
-        {rule.behavior === "SOURCE_MEAN_30D_PREFIX" && (
-          <Alert severity="info" sx={{ mb: 2 }}>
-            O campo será separado diretamente na base consolidada usando “começa com” e projetado pela média diária dos últimos 30 dias. Ele não precisa estar nas dimensões do forecast.
-          </Alert>
-        )}
-        {rule.behavior === "SOURCE_MAX_PREVIOUS_MONTH_PREFIX" && (
-          <Alert severity="info" sx={{ mb: 2 }}>
-            Separa as cobranças identificadas na base consolidada e compara o ritmo diário do modelo atual com a média diária do mês fechado anterior (incluindo dias sem cobrança). Usa o maior valor para projetar o mês corrente e os próximos.
-          </Alert>
-        )}
-        {rule.behavior === "SOURCE_GITHUB_COPILOT_OVERAGE_2_PHASE" && (
-          <Alert severity="info" sx={{ mb: 2 }}>
-            Separa a fonte identificada na base consolidada. Antes da primeira cobrança positiva no mês, projeta pela média dos dias positivos dos últimos 30 dias. Depois da primeira cobrança, usa a maior entre essa média e a média positiva do mês corrente. Dias sem cobrança não entram nas médias.
-          </Alert>
-        )}
-        {rule.behavior === "SOURCE_VALIDITY" && (
-          <Alert severity="info" sx={{ mb: 2 }}>
-            Suspende as projeções do escopo quando a última data de realizado usada pelo forecast estiver além da validade. A simulação usa a própria data simulada.
-          </Alert>
-        )}
-
-        <Stack spacing={2}>
-          <Stack direction="row" gap={1.5} flexWrap="wrap" alignItems="flex-start">
-            <FieldWithHelp help={FORECAST_RULE_FIELD_HELP.name} sx={{ minWidth: 240, flex: 1 }}>
-              <TextField
-                label="Nome"
-                value={rule.name}
-                onChange={(e) => setRule({ ...rule, name: e.target.value })}
-                fullWidth
-              />
-            </FieldWithHelp>
-            <FieldWithHelp help={FORECAST_RULE_FIELD_HELP.identificationMode} sx={{ minWidth: 200 }}>
-              <FormControl fullWidth>
-                <InputLabel>Identificação</InputLabel>
-                <Select
-                  label="Identificação"
-                  value={rule.clauseMode || "legacy"}
-                  onChange={(e) => setRule({ ...rule, clauseMode: e.target.value as "legacy" | "or" })}
-                >
-                  <MenuItem value="legacy">Coluna única</MenuItem>
-                  <MenuItem value="or">Cláusulas OR</MenuItem>
-                </Select>
-              </FormControl>
-            </FieldWithHelp>
-          </Stack>
-
-          {rule.behavior === "SOURCE_VALIDITY" && (
-            <FieldWithHelp help="Idade máxima dos dados realizados para permitir a projeção deste escopo. Com 30 dias, suspende quando a idade passar de 30 dias.">
-              <TextField
-                type="number"
-                label="Validade da fonte (dias)"
-                inputProps={{ min: 1, max: 365, step: 1 }}
-                value={rule.maxAgeDays ?? 30}
-                onChange={(e) => setRule({ ...rule, maxAgeDays: Number(e.target.value) })}
-                sx={{ width: 240 }}
-              />
-            </FieldWithHelp>
-          )}
-
-          {rule.clauseMode === "or" ? (
-            <Stack spacing={1.5}>
-              {(rule.identification_clauses || []).map((clause: ForecastIdentificationClause, index: number) => (
-                <Stack key={index} direction="row" gap={1.5} alignItems="center" flexWrap="wrap">
-                  <FieldWithHelp help={FORECAST_RULE_FIELD_HELP.column} sx={{ minWidth: 200, flex: 1 }}>
-                    <FormControl fullWidth>
-                      <InputLabel>Coluna</InputLabel>
-                      <Select
-                        label="Coluna"
-                        value={clause.column}
-                        onChange={(e) => {
-                          const next = [...(rule.identification_clauses || [])];
-                          next[index] = { ...next[index], column: e.target.value };
-                          setRule({ ...rule, identification_clauses: next });
-                        }}
-                      >
-                        {meta?.columns.map((c) => <MenuItem key={c.name} value={c.name}>{c.name}</MenuItem>)}
-                      </Select>
-                    </FormControl>
-                  </FieldWithHelp>
-                  <FieldWithHelp help={FORECAST_RULE_FIELD_HELP.values} sx={{ minWidth: 220, flex: 1.4 }}>
-                    <TextField
-                      label="Valores"
-                      value={Array.isArray(clause.values) ? clause.values.join(", ") : clause.values}
-                      onChange={(e) => {
-                        const next = [...(rule.identification_clauses || [])];
-                        next[index] = { ...next[index], values: e.target.value.split(/[,;\n]+/).map((s) => s.trim()).filter(Boolean) };
-                        setRule({ ...rule, identification_clauses: next });
-                      }}
-                      fullWidth
-                    />
-                  </FieldWithHelp>
-                  <IconButton
-                    color="error"
-                    aria-label="Remover cláusula"
-                    onClick={() =>
+        <Box sx={{ display: "grid", gap: 2, alignItems: "start", gridTemplateColumns: { xs: "1fr", md: "minmax(0, 1fr) 320px" } }}>
+          <Stack spacing={2} sx={{ minWidth: 0 }}>
+            <Step n={1} title="Nome e comportamento" hint="O que a regra faz com as cobranças que encontrar.">
+              <Stack direction={{ xs: "column", sm: "row" }} spacing={1.5}>
+                <TextField label="Nome da regra" value={rule.name} fullWidth onChange={(e) => setRule({ ...rule, name: e.target.value })} />
+                <FormControl fullWidth>
+                  <InputLabel>Comportamento</InputLabel>
+                  <Select
+                    label="Comportamento"
+                    value={rule.behavior}
+                    onChange={(e) => {
+                      const behavior = e.target.value;
                       setRule({
                         ...rule,
-                        identification_clauses: (rule.identification_clauses || []).filter((_: unknown, i: number) => i !== index),
-                      })
-                    }
+                        behavior,
+                        reference_column:
+                          behavior === "CHARGE_INTERVAL"
+                            ? rule.reference_column || meta?.default_charge_end_column || meta?.columns.find((c) => c.name.toLowerCase() === "chargeperiodend")?.name || ""
+                            : rule.reference_column,
+                      });
+                    }}
                   >
-                    <Delete />
-                  </IconButton>
-                </Stack>
-              ))}
-              <Box>
-                <Button size="small" startIcon={<Add />} onClick={() =>
-                  setRule({
-                    ...rule,
-                    identification_clauses: [...(rule.identification_clauses || []), { column: "", values: [] }],
-                  })
-                }>
-                  Cláusula OR
-                </Button>
-              </Box>
-            </Stack>
-          ) : (
-            <Stack direction="row" gap={1.5} flexWrap="wrap" alignItems="flex-start">
-              <FieldWithHelp help={FORECAST_RULE_FIELD_HELP.column} sx={{ minWidth: 200 }}>
-                <FormControl fullWidth>
-                  <InputLabel>Coluna</InputLabel>
-                  <Select
-                    label="Coluna"
-                    value={rule.identification_column}
-                    onChange={(e) => setRule({ ...rule, identification_column: e.target.value })}
-                  >
-                    {meta?.columns.map((c) => <MenuItem key={c.name} value={c.name}>{c.name}</MenuItem>)}
+                    {Object.entries(BEHAVIOR_LABELS).map(([value, label]) => <MenuItem key={value} value={value}>{label}</MenuItem>)}
                   </Select>
                 </FormControl>
-              </FieldWithHelp>
-              <FieldWithHelp help={FORECAST_RULE_FIELD_HELP.values} sx={{ minWidth: 220, flex: 1 }}>
+              </Stack>
+              {hint && <Alert severity="info" sx={{ mt: 1.5 }}>{hint}</Alert>}
+            </Step>
+
+            <Step n={2} title="Quais cobranças" hint="Identifique as linhas da base consolidada que a regra atinge.">
+              <ToggleButtonGroup
+                size="small"
+                exclusive
+                value={rule.clauseMode || "legacy"}
+                onChange={(_, v: "legacy" | "or" | null) => v && setRule({ ...rule, clauseMode: v })}
+                sx={{ mb: 1.5 }}
+              >
+                <ToggleButton value="legacy">Uma coluna</ToggleButton>
+                <ToggleButton value="or">Várias condições (OR)</ToggleButton>
+              </ToggleButtonGroup>
+
+              {rule.behavior === "SOURCE_VALIDITY" && (
                 <TextField
-                  label="Valores"
-                  value={Array.isArray(rule.identification_values) ? rule.identification_values.join(", ") : rule.identification_values}
-                  onChange={(e) => setRule({ ...rule, identification_values: e.target.value })}
-                  fullWidth
+                  type="number"
+                  label="Validade da fonte"
+                  value={rule.maxAgeDays ?? 30}
+                  slotProps={{ htmlInput: { min: 1, max: 365, step: 1 }, input: { endAdornment: <InputAdornment position="end">dias</InputAdornment> } }}
+                  helperText="Idade máxima do efetivado para continuar projetando."
+                  onChange={(e) => setRule({ ...rule, maxAgeDays: Number(e.target.value) })}
+                  sx={{ width: 240, mb: 1.5 }}
                 />
-              </FieldWithHelp>
-            </Stack>
-          )}
+              )}
 
-          <Stack direction="row" gap={1.5} flexWrap="wrap" alignItems="flex-start">
-            <FieldWithHelp help={FORECAST_RULE_FIELD_HELP.chargeType} sx={{ minWidth: 140 }}>
-              <FormControl fullWidth>
-                <InputLabel>Tipo</InputLabel>
-                <Select label="Tipo" value={rule.charge_type} onChange={(e) => setRule({ ...rule, charge_type: e.target.value })}>
-                  {["Usage", "Return", "Purchase", "Refund", "Credit"].map((x) => <MenuItem key={x} value={x}>{x}</MenuItem>)}
-                </Select>
-              </FormControl>
-            </FieldWithHelp>
-            <FieldWithHelp help={FORECAST_RULE_FIELD_HELP.behavior} sx={{ minWidth: 280, flex: 1 }}>
-              <FormControl fullWidth>
-                <InputLabel>Comportamento</InputLabel>
-                <Select
-                  label="Comportamento"
-                  value={rule.behavior}
-                  onChange={(e) => {
-                    const behavior = e.target.value;
-                    setRule({
-                      ...rule,
-                      behavior,
-                      reference_column:
-                        behavior === "CHARGE_INTERVAL"
-                          ? rule.reference_column || meta?.default_charge_end_column || meta?.columns.find((c) => c.name.toLowerCase() === "chargeperiodend")?.name || ""
-                          : rule.reference_column,
-                    });
-                  }}
-                >
-                  {Object.entries(BEHAVIOR_LABELS).map(([value, label]) => <MenuItem key={value} value={value}>{label}</MenuItem>)}
-                </Select>
-              </FormControl>
-            </FieldWithHelp>
-            <FieldWithHelp help={FORECAST_RULE_FIELD_HELP.scope} sx={{ minWidth: 240, flex: 1 }}>
-              <TextField
-                label="Escopo (dim=valor)"
-                placeholder="cloud_origem=oci-prod"
-                value={rule.scopeText || ""}
-                onChange={(e) => setRule({ ...rule, scopeText: e.target.value })}
-                fullWidth
-              />
-            </FieldWithHelp>
-          </Stack>
-
-          <Stack direction="row" gap={1.5} flexWrap="wrap" alignItems="flex-start">
-            {isChargeIntervalRule(rule.behavior) ? (
-              <FieldWithHelp help={FORECAST_RULE_FIELD_HELP.chargeEndColumn} sx={{ minWidth: 220 }}>
-                <FormControl fullWidth>
-                  <InputLabel>Coluna fim do período</InputLabel>
-                  <Select
-                    label="Coluna fim do período"
-                    value={rule.reference_column || meta?.default_charge_end_column || ""}
-                    onChange={(e) => setRule({ ...rule, reference_column: e.target.value })}
-                  >
-                    {meta?.columns.map((c) => <MenuItem key={c.name} value={c.name}>{c.name}</MenuItem>)}
-                  </Select>
-                </FormControl>
-              </FieldWithHelp>
-            ) : (
-              <>
-                <FieldWithHelp help={FORECAST_RULE_FIELD_HELP.valueColumn} sx={{ minWidth: 180 }}>
+              {rule.clauseMode === "or" ? (
+                <Stack spacing={1.25}>
+                  {(rule.identification_clauses || []).map((clause: ForecastIdentificationClause, index: number) => (
+                    <Stack key={index} direction={{ xs: "column", sm: "row" }} gap={1} alignItems={{ sm: "center" }}>
+                      <FormControl fullWidth>
+                        <InputLabel>Coluna</InputLabel>
+                        <Select
+                          label="Coluna"
+                          value={clause.column}
+                          onChange={(e) => {
+                            const next = [...(rule.identification_clauses || [])];
+                            next[index] = { ...next[index], column: e.target.value };
+                            setRule({ ...rule, identification_clauses: next });
+                          }}
+                        >
+                          {columnNames.map((name) => <MenuItem key={name} value={name}>{name}</MenuItem>)}
+                        </Select>
+                      </FormControl>
+                      <TextField
+                        label="Valores"
+                        placeholder="separe por vírgula"
+                        value={Array.isArray(clause.values) ? clause.values.join(", ") : clause.values}
+                        fullWidth
+                        onChange={(e) => {
+                          const next = [...(rule.identification_clauses || [])];
+                          next[index] = { ...next[index], values: e.target.value.split(/[,;\n]+/).map((s) => s.trim()).filter(Boolean) };
+                          setRule({ ...rule, identification_clauses: next });
+                        }}
+                      />
+                      <IconButton
+                        color="error"
+                        aria-label="Remover condição"
+                        onClick={() =>
+                          setRule({
+                            ...rule,
+                            identification_clauses: (rule.identification_clauses || []).filter((_: unknown, i: number) => i !== index),
+                          })
+                        }
+                      >
+                        <DeleteOutlined />
+                      </IconButton>
+                    </Stack>
+                  ))}
+                  <Box>
+                    <Button size="small" startIcon={<AddOutlined />} onClick={() =>
+                      setRule({
+                        ...rule,
+                        identification_clauses: [...(rule.identification_clauses || []), { column: "", values: [] }],
+                      })
+                    }>
+                      Adicionar condição
+                    </Button>
+                  </Box>
+                </Stack>
+              ) : (
+                <Stack direction={{ xs: "column", sm: "row" }} gap={1.5}>
                   <FormControl fullWidth>
-                    <InputLabel>Coluna de valor</InputLabel>
-                    <Select
-                      label="Coluna de valor"
-                      value={rule.value_column || config.measure_column}
-                      onChange={(e) => setRule({ ...rule, value_column: e.target.value })}
-                    >
-                      {meta?.columns.map((c) => <MenuItem key={c.name} value={c.name}>{c.name}</MenuItem>)}
+                    <InputLabel>Coluna</InputLabel>
+                    <Select label="Coluna" value={rule.identification_column} onChange={(e) => setRule({ ...rule, identification_column: e.target.value })}>
+                      {columnNames.map((name) => <MenuItem key={name} value={name}>{name}</MenuItem>)}
                     </Select>
                   </FormControl>
-                </FieldWithHelp>
-                {rule.behavior === "REPLACE_VALUE" && (
-                  <FieldWithHelp help={FORECAST_RULE_FIELD_HELP.replacementValue} sx={{ width: 156 }}>
-                    <TextField
-                      type="number"
-                      label="Valor fixo"
-                      value={rule.replacement_value ?? ""}
-                      onChange={(e) => setRule({ ...rule, replacement_value: e.target.value === "" ? null : Number(e.target.value) })}
-                      fullWidth
-                    />
-                  </FieldWithHelp>
+                  <TextField
+                    label="Valores"
+                    placeholder="separe por vírgula"
+                    fullWidth
+                    value={Array.isArray(rule.identification_values) ? rule.identification_values.join(", ") : rule.identification_values}
+                    onChange={(e) => setRule({ ...rule, identification_values: e.target.value })}
+                  />
+                </Stack>
+              )}
+
+              <TextField
+                label="Escopo opcional"
+                placeholder="cloud_origem=oci-prod"
+                helperText="Pares dimensão=valor, separados por vírgula."
+                value={rule.scopeText || ""}
+                fullWidth
+                onChange={(e) => setRule({ ...rule, scopeText: e.target.value })}
+                sx={{ mt: 1.5 }}
+              />
+            </Step>
+
+            <Step n={3} title="Valor da regra" hint="De onde vem o número e como ele entra na previsão.">
+              <Stack direction={{ xs: "column", sm: "row" }} gap={1.5}>
+                <FormControl fullWidth>
+                  <InputLabel>Tipo de cobrança</InputLabel>
+                  <Select label="Tipo de cobrança" value={rule.charge_type} onChange={(e) => setRule({ ...rule, charge_type: e.target.value })}>
+                    {["Usage", "Return", "Purchase", "Refund", "Credit"].map((x) => <MenuItem key={x} value={x}>{x}</MenuItem>)}
+                  </Select>
+                </FormControl>
+                {isChargeIntervalRule(rule.behavior) ? (
+                  <FormControl fullWidth>
+                    <InputLabel>Coluna de fim do período</InputLabel>
+                    <Select label="Coluna de fim do período" value={rule.reference_column || meta?.default_charge_end_column || ""}
+                      onChange={(e) => setRule({ ...rule, reference_column: e.target.value })}>
+                      {columnNames.map((name) => <MenuItem key={name} value={name}>{name}</MenuItem>)}
+                    </Select>
+                  </FormControl>
+                ) : (
+                  <FormControl fullWidth>
+                    <InputLabel>Coluna do valor</InputLabel>
+                    <Select label="Coluna do valor" value={rule.value_column || config.measure_column}
+                      onChange={(e) => setRule({ ...rule, value_column: e.target.value })}>
+                      {columnNames.map((name) => <MenuItem key={name} value={name}>{name}</MenuItem>)}
+                    </Select>
+                  </FormControl>
                 )}
-              </>
-            )}
+              </Stack>
+              {rule.behavior === "REPLACE_VALUE" && (
+                <TextField
+                  type="number"
+                  label="Valor fixado"
+                  helperText="Substitui o valor original por este número."
+                  value={rule.replacement_value ?? ""}
+                  onChange={(e) => setRule({ ...rule, replacement_value: e.target.value === "" ? null : Number(e.target.value) })}
+                  sx={{ width: 240, mt: 1.5 }}
+                />
+              )}
+              {["RECURRING_MONTHLY", "RECURRING_UNTIL_END"].includes(rule.behavior) && (
+                <FormControl fullWidth sx={{ mt: 1.5 }}>
+                  <InputLabel>Mês em curso</InputLabel>
+                  <Select label="Mês em curso" value={rule.currentMonthPolicy || "AUTO"}
+                    onChange={(e) => setRule({ ...rule, currentMonthPolicy: e.target.value })}>
+                    <MenuItem value="AUTO">Automático, pelo histórico de cobranças</MenuItem>
+                    <MenuItem value="ZERO_WHEN_REALIZED">Zerar se já houver efetivado no mês</MenuItem>
+                    <MenuItem value="DAILY_REMAINDER">Projetar o consumo diário dos dias restantes</MenuItem>
+                  </Select>
+                </FormControl>
+              )}
+            </Step>
+
+            <Step n={4} title="Vigência e prioridade" hint="Quando a regra vale e qual ganha em caso de conflito.">
+              <Stack direction={{ xs: "column", sm: "row" }} gap={1.5} alignItems={{ sm: "center" }}>
+                <TextField type="month" label="Início" value={rule.start_period} fullWidth slotProps={{ inputLabel: { shrink: true } }}
+                  onChange={(e) => setRule({ ...rule, start_period: e.target.value })} />
+                <TextField type="month" label="Fim" value={rule.end_period || ""} fullWidth slotProps={{ inputLabel: { shrink: true } }}
+                  helperText="Vazio = sem fim."
+                  onChange={(e) => setRule({ ...rule, end_period: e.target.value })} />
+                <TextField type="number" label="Prioridade" value={rule.priority ?? 10} fullWidth
+                  helperText="Maior número vence."
+                  onChange={(e) => setRule({ ...rule, priority: Number(e.target.value) })} />
+              </Stack>
+              <FormControlLabel sx={{ mt: 1 }}
+                control={<Switch checked={rule.active !== false} onChange={(e) => setRule({ ...rule, active: e.target.checked })} />}
+                label="Regra ativa" />
+            </Step>
           </Stack>
 
-          {["RECURRING_MONTHLY", "RECURRING_UNTIL_END"].includes(rule.behavior) && (
-            <FormControl fullWidth>
-              <InputLabel>Mês corrente</InputLabel>
-              <Select label="Mês corrente" value={rule.currentMonthPolicy || "AUTO"}
-                onChange={(e) => setRule({ ...rule, currentMonthPolicy: e.target.value })}>
-                <MenuItem value="AUTO">Automático conforme o histórico de cobranças</MenuItem>
-                <MenuItem value="ZERO_WHEN_REALIZED">Zerar forecast quando já houver realizado no mês</MenuItem>
-                <MenuItem value="DAILY_REMAINDER">Projetar consumo diário dos dias restantes</MenuItem>
-              </Select>
-              <Typography variant="caption" color="text.secondary">
-                Para cobranças mensais já realizadas, zera a projeção adicional do mês. Os meses futuros seguem o valor mensal de referência.
-              </Typography>
-            </FormControl>
-          )}
-          <Stack direction="row" gap={1.5} flexWrap="wrap" alignItems="center">
-            <FieldWithHelp help={FORECAST_RULE_FIELD_HELP.startPeriod} sx={{ width: 186 }}>
-              <TextField
-                type="month"
-                label="Início"
-                value={rule.start_period}
-                onChange={(e) => setRule({ ...rule, start_period: e.target.value })}
-                slotProps={{ inputLabel: { shrink: true } }}
-                fullWidth
-              />
-            </FieldWithHelp>
-            <FieldWithHelp help={FORECAST_RULE_FIELD_HELP.endPeriod} sx={{ width: 186 }}>
-              <TextField
-                type="month"
-                label="Fim (opcional)"
-                value={rule.end_period || ""}
-                onChange={(e) => setRule({ ...rule, end_period: e.target.value })}
-                slotProps={{ inputLabel: { shrink: true } }}
-                fullWidth
-              />
-            </FieldWithHelp>
-            <FieldWithHelp help={FORECAST_RULE_FIELD_HELP.priority} sx={{ width: 126 }}>
-              <TextField
-                type="number"
-                label="Prioridade"
-                value={rule.priority ?? 10}
-                onChange={(e) => setRule({ ...rule, priority: Number(e.target.value) })}
-                fullWidth
-              />
-            </FieldWithHelp>
-            <Stack direction="row" alignItems="center" gap={0.25}>
-              <FormControlLabel
-                control={
-                  <Switch checked={rule.active !== false} onChange={(e) => setRule({ ...rule, active: e.target.checked })} />
-                }
-                label="Ativa"
-              />
-              <FieldHelper title={FORECAST_RULE_FIELD_HELP.active} sx={{ mt: 0 }} />
+          <Paper variant="outlined" sx={{ p: 2, borderRadius: 2, position: { md: "sticky" }, top: 0, bgcolor: "background.paper" }}>
+            <Typography variant="overline" color="text.secondary">Prévia da regra</Typography>
+            <Typography variant="subtitle1" fontWeight={700} sx={{ mb: 1 }}>{rule.name?.trim() || "Sem nome"}</Typography>
+            <Typography variant="body2" sx={{ mb: 2 }}>
+              Aplica <strong>{behaviorLabel}</strong> às cobranças do tipo <strong>{rule.charge_type}</strong>
+              {identificationSummary ? <> onde <strong>{identificationSummary}</strong></> : " (defina a identificação)"}
+              {rule.start_period && <>, a partir de <strong>{rule.start_period}</strong></>}
+              {rule.end_period ? <> até <strong>{rule.end_period}</strong></> : ", sem fim"}.
+            </Typography>
+            <Stack spacing={1.25}>
+              {[
+                { label: "Valor", value: isChargeIntervalRule(rule.behavior) ? (rule.reference_column || "—") : (rule.value_column || config.measure_column) },
+                { label: "Escopo", value: String(rule.scopeText || "").trim() || "todas as séries" },
+                { label: "Prioridade", value: String(rule.priority ?? 10) },
+                { label: "Situação", value: rule.active !== false ? "Ativa" : "Inativa" },
+              ].map((row) => (
+                <Stack key={row.label} direction="row" justifyContent="space-between" spacing={1}>
+                  <Typography variant="caption" color="text.secondary">{row.label}</Typography>
+                  <Typography variant="caption" fontWeight={600} sx={{ textAlign: "right", wordBreak: "break-all" }}>{row.value}</Typography>
+                </Stack>
+              ))}
             </Stack>
-          </Stack>
-        </Stack>
+          </Paper>
+        </Box>
       </DialogContent>
-      <DialogActions sx={{ px: 3, pb: 2 }}>
+      <DialogActions sx={{ px: 3, py: 2 }}>
         <Button onClick={onClose}>Cancelar</Button>
         <Button variant="contained" disabled={saving} onClick={() => void save()}>
-          {saving ? "Salvando..." : initial ? "Salvar regra" : "Adicionar regra"}
+          {saving ? "Salvando..." : initial ? "Salvar regra" : "Incluir regra"}
         </Button>
       </DialogActions>
     </Dialog>

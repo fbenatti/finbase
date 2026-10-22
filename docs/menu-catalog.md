@@ -69,3 +69,38 @@ armazenados por cliente.
 Os testes usam banco isolado e cobrem clientes diferentes, restrições de administração,
 desativação de grupos, escopos de leitura, acesso direto ao recurso de contratos e
 migração dos links. A validação do catálogo confere rotas únicas e renderers registrados.
+
+
+## Revisão de agrupamento (Panorama e busca)
+
+- Painéis de leitura foram para **Panorama**: Resumo de custos, Orçamento, Compromissos, Histórico de contratos, Câmbio do dólar, Visão de alertas e Painel de desligamento. Continuam com a mesma rota, o mesmo `view_params` e o mesmo `permission_module`.
+- Os grupos Planejamento, Alertas, Otimização, Dados e operação, Governança e Administração foram reordenados por função. O `position` é reiniciado em cada grupo.
+- Rótulos passaram a seguir o glossário em [finbase-data-language.md](finbase-data-language.md). Códigos, caminhos e permissões não mudaram.
+- As cinco telas fora do menu (Reservas Azure, Tags Automatizadas, Carta de crédito, Defesa orçamentária e Pedidos SAP) mantêm o grupo de origem.
+- A busca do menu (`apps/web/src/navigation/menuSearchIndex.ts`) compara só o rótulo de cada tela, em qualquer nível. A permissão ainda exige que o grupo ancestral esteja liberado.
+- O teste `test_group_disables_children_and_required_admin_cannot_be_disabled` agora desativa `section_planejamento` e confirma que a história dos contratos continua acessível pelo Panorama.
+- A árvore completa está em [finbase-navigation-inventory.md](finbase-navigation-inventory.md).
+
+## Ajustes de menu (feedback de Fernando)
+
+- **Cubos analíticos** saiu de Governança e foi para a área Dados e operação, junto das operações de dados. A rota `/governanca/cubos` e a permissão `gold` não mudaram.
+- Nova área **Consultas**, só para dados e consultas: Tabelas dinâmicas e Busca na fonte. Rotas `/dados/explorador/tabelas-dinamicas` e `/dados/explorador/busca` mantidas.
+- **Governança > Organização** virou **Hierarquia**. Só o rótulo mudou; a rota `/governanca/organizacao` continua.
+- Nova entrada **Administração > Conectores** com rota própria `/administracao/conectores`, permissão `connections`. A tela é um placeholder em `apps/web/src/pages/Admin/Connectors.tsx` até a página definitiva ser construída.
+
+## Renomear menus (Administração > Módulos)
+
+- Grupos e telas podem ser renomeados em **Administração > Módulos**. A tela agrupa cada grupo com as telas dele, e cada item tem um botão de edição.
+- O nome novo fica em `navigation_module.custom_label`. O rótulo do catálogo (`label` no JSON) continua sendo o nome original, usado em `default_label`.
+- `PUT /modules/catalog/{code}` grava o nome (`{"label": "..."}`). Com `{"label": null}` volta ao nome original. Exige `modules.update`.
+- `GET /navigation` e `GET /modules/customers/{id}` devolvem `label` já com o nome novo, então menus, busca e migalhas usam o nome renomeado.
+- A sincronização do catálogo não sobrescreve `custom_label`, então o nome sobrevive a reinícios.
+- Títulos escritos dentro das próprias páginas não mudam com o nome do menu.
+
+## Rotas renomeadas
+
+- `/planejamento/acuracia-do-orcamento` virou `/planejamento/aderencia-orcamento`.
+- `/projecoes/acuracia` virou `/projecoes/precisao` (com `visao`, `desvios` e `justificativas`).
+- `/operacoes/acuracia` virou `/operacoes/precisao`.
+
+As rotas antigas redirecionam para as novas, com a aba e os filtros preservados. Os `code`, os `permission_module` e os escopos de permissão não mudaram, então nenhum acesso concedido foi alterado.

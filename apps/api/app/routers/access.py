@@ -20,7 +20,7 @@ from app.models.identity import User
 from app.services import access_cache
 from app.services.access_service import decide_for_user, load_scopes
 
-router = APIRouter(prefix="/access", tags=["access"])
+router = APIRouter(prefix="/administracao/acessos", tags=["access"])
 
 
 class ConditionIn(BaseModel):
@@ -62,7 +62,7 @@ def _acl_out(acl: AccessAcl) -> dict:
     }
 
 
-@router.get("/users/{user_id}/decision")
+@router.get("/usuarios/{user_id}/decisao")
 async def simulate_decision(
     user_id: int,
     operation: Literal["read", "create", "write", "delete"],
@@ -84,13 +84,13 @@ async def simulate_decision(
     }
 
 
-@router.get("/users/{user_id}/scopes")
+@router.get("/usuarios/{user_id}/escopos")
 async def user_scopes(user_id: int, db: AsyncSession = Depends(get_db), _: User = Depends(require("users", "read"))):
     scopes = await load_scopes(db, user_id)
     return [{"scope_type": s.scope_type, "value": s.value, "match_mode": s.match_mode} for s in scopes]
 
 
-@router.post("/scopes", status_code=201)
+@router.post("/escopos", status_code=201)
 async def create_scope(body: ScopeIn, db: AsyncSession = Depends(get_db), _: User = Depends(require("users", "update"))):
     scope = AccessScope(**body.model_dump())
     db.add(scope)
@@ -99,13 +99,13 @@ async def create_scope(body: ScopeIn, db: AsyncSession = Depends(get_db), _: Use
     return {"id": scope.id, "scope_type": scope.scope_type, "value": scope.value}
 
 
-@router.get("/scopes")
+@router.get("/escopos")
 async def list_scopes(db: AsyncSession = Depends(get_db), _: User = Depends(require("users", "read"))):
     rows = (await db.execute(select(AccessScope).order_by(AccessScope.scope_type, AccessScope.value))).scalars().all()
     return [{"id": s.id, "scope_type": s.scope_type, "value": s.value, "label": s.label, "node_ref": s.node_ref} for s in rows]
 
 
-@router.get("/roles/{role_id}/acls")
+@router.get("/perfis/{role_id}/listas-acesso")
 async def list_acls(role_id: int, db: AsyncSession = Depends(get_db), _: User = Depends(require("roles", "read"))):
     acls = (await db.execute(
         select(AccessAcl).options(selectinload(AccessAcl.conditions))
@@ -114,7 +114,7 @@ async def list_acls(role_id: int, db: AsyncSession = Depends(get_db), _: User = 
     return [_acl_out(a) for a in acls]
 
 
-@router.post("/roles/{role_id}/acls", status_code=201)
+@router.post("/perfis/{role_id}/listas-acesso", status_code=201)
 async def create_acl(role_id: int, body: AclIn, db: AsyncSession = Depends(get_db), _: User = Depends(require("users", "update"))):
     try:
         validate_grant_fields(body.effect, body.resource_type, body.operation)
@@ -134,13 +134,13 @@ async def create_acl(role_id: int, body: AclIn, db: AsyncSession = Depends(get_d
     return _acl_out(acl)
 
 
-@router.delete("/acls/{acl_id}", status_code=204)
+@router.delete("/listas-acesso/{acl_id}", status_code=204)
 async def delete_acl(acl_id: int, db: AsyncSession = Depends(get_db), _: User = Depends(require("users", "delete"))):
     await db.execute(delete(AccessAcl).where(AccessAcl.id == acl_id))
     await access_cache.bump_version(db)
 
 
-@router.post("/users/{user_id}/scopes", status_code=201)
+@router.post("/usuarios/{user_id}/escopos", status_code=201)
 async def grant_user_scope(
     user_id: int,
     body: UserScopeIn,

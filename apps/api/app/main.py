@@ -8,8 +8,9 @@ from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import select, text
 from app.config import settings
 from app.database import engine, Base, async_session
-from app.routers import connections, csv_upload, etl, rules, periods, analysis, ai_dashboards, ai_copilot, ai_provider_dashboards, destinations, schema, forecast, clone_rules, planning, anomalies, savings, azure_tag_policy, gold, azure_ptu, reservations, scheduled_shutdown, azure_resource_graph, azure_sources, azure_mca_commitment, oci_operational, ideas, financial_contracts, auth as auth_router, users as users_router, groups as groups_router, roles as roles_router, audit as audit_router, sso as sso_router, sso_providers as sso_providers_router, integrations, processing_logs
+from app.routers import connections, csv_upload, etl, rules, periods, analysis, destinations, schema, forecast, clone_rules, planning, anomalies, savings, azure_tag_policy, gold, reservations, scheduled_shutdown, azure_resource_graph, azure_sources, azure_mca_commitment, oci_operational, ideas, financial_contracts, auth as auth_router, users as users_router, groups as groups_router, roles as roles_router, audit as audit_router, sso as sso_router, sso_providers as sso_providers_router, integrations, processing_logs
 from app.routers import modules as modules_router
+from app.routers import connector_visibility as connector_visibility_router
 from app.core.navigation_middleware import NavigationPolicyMiddleware
 from app.seed import seed
 from app.services import scheduler_service
@@ -167,6 +168,7 @@ async def lifespan(app: FastAPI):
         from app.models.idea import Idea, IdeaAssignee, IdeaVote, IdeaComment, IdeaStatusInterval  # noqa: F401
         from app.models.identity import User, Role, RolePermission, Group, RefreshToken, UserGrant, SsoProvider  # noqa: F401
         from app.models.audit_log import AuditLog  # noqa: F401
+        from app.models.connector_visibility import ConnectorHidden  # noqa: F401
         from app.models.azure_tag_mapping import AzureTagMapping  # noqa: F401
         from app.models.gold_manifest import GoldManifest  # noqa: F401
         from app.models.anomaly import (  # noqa: F401
@@ -194,6 +196,7 @@ async def lifespan(app: FastAPI):
         # idempotent migration next to startup until Alembic is introduced.
         await _execute_migration(conn, "ALTER TABLE user_account ADD COLUMN IF NOT EXISTS failed_attempts INTEGER NOT NULL DEFAULT 0")
         await _execute_migration(conn, "ALTER TABLE user_account ADD COLUMN IF NOT EXISTS locked_until TIMESTAMPTZ")
+        await _execute_migration(conn, "ALTER TABLE navigation_module ADD COLUMN IF NOT EXISTS custom_label VARCHAR(160)")
         await _execute_migration(conn, "ALTER TABLE role_permission ADD COLUMN IF NOT EXISTS scope VARCHAR(60)")
         await _execute_migration(conn, "ALTER TABLE user_grant ADD COLUMN IF NOT EXISTS scope VARCHAR(60)")
         await _execute_migration(conn, "ALTER TABLE role_permission DROP CONSTRAINT IF EXISTS uq_role_permission")
@@ -640,6 +643,53 @@ async def lifespan(app: FastAPI):
               END IF;
             END $$
         """)
+        # Hierarquia (Fase 1, aditiva): caminho raiz→folha em JSONB e id da folha.
+        # Os níveis fixos organograma_nivel_* continuam como fallback de leitura.
+        await _execute_migration(conn, """
+            DO $$ BEGIN
+              IF to_regclass('fact_cost') IS NOT NULL THEN
+                ALTER TABLE fact_cost ADD COLUMN IF NOT EXISTS hierarquia JSONB;
+                ALTER TABLE fact_cost ADD COLUMN IF NOT EXISTS hierarquia_id INTEGER;
+                UPDATE fact_cost
+                SET hierarquia = to_jsonb(ARRAY_REMOVE(ARRAY[
+                      organograma_nivel_1, organograma_nivel_2, organograma_nivel_3,
+                      organograma_nivel_4, organograma_nivel_5, organograma_nivel_6,
+                      organograma_nivel_7], NULL))
+                WHERE hierarquia IS NULL;
+                -- Id da folha: caminho de nomes da árvore department (menor id em empate).
+                WITH RECURSIVE tree AS (
+                  SELECT id, name, ARRAY[name]::TEXT[] AS path
+                  FROM department WHERE parent_id IS NULL
+                  UNION ALL
+                  SELECT d.id, d.name, t.path || d.name::TEXT
+                  FROM department d JOIN tree t ON d.parent_id = t.id
+                ), leaf AS (
+                  SELECT path, MIN(id) AS id FROM tree GROUP BY path
+                )
+                UPDATE fact_cost f
+                SET hierarquia_id = leaf.id
+                FROM leaf
+                WHERE f.hierarquia_id IS NULL
+                  AND f.hierarquia IS NOT NULL
+                  AND leaf.path = ARRAY(SELECT jsonb_array_elements_text(f.hierarquia));
+              END IF;
+            END $$
+        """)
+        # Grade de planejamento (Fase 1, aditiva): o nó da hierarquia substitui o
+        # ID Orçamento como escopo. Versões antigas recebem o menor nó com esse id.
+        await _execute_migration(conn, """
+            DO $$ BEGIN
+              IF to_regclass('planning_version') IS NOT NULL THEN
+                ALTER TABLE planning_version ADD COLUMN IF NOT EXISTS scope_hierarquia_id INTEGER REFERENCES department(id) ON DELETE SET NULL;
+                CREATE INDEX IF NOT EXISTS ix_planning_version_scope_hierarquia_id ON planning_version (scope_hierarquia_id);
+                UPDATE planning_version pv
+                SET scope_hierarquia_id = (
+                  SELECT MIN(d.id) FROM department d WHERE d.id_orcamento = pv.scope_id_orcamento
+                )
+                WHERE pv.scope_hierarquia_id IS NULL AND pv.scope_id_orcamento IS NOT NULL;
+              END IF;
+            END $$
+        """)
         await _execute_migration(conn, """
             DO $$
             DECLARE
@@ -1042,6 +1092,9 @@ app.add_middleware(
 )
 
 app.add_middleware(NavigationPolicyMiddleware)
+
+from app.core.route_aliases import RouteAliasMiddleware  # noqa: E402
+app.add_middleware(RouteAliasMiddleware)  # mais externo: autorização e auditoria veem o caminho canônico
 app.include_router(modules_router.router)
 app.include_router(auth_router.router)
 app.include_router(users_router.router)
@@ -1051,15 +1104,13 @@ app.include_router(audit_router.router)
 app.include_router(sso_router.router)
 app.include_router(sso_providers_router.router)
 app.include_router(connections.router)
+app.include_router(connector_visibility_router.router)
 app.include_router(csv_upload.router)
 app.include_router(etl.router)
 app.include_router(processing_logs.router)
 app.include_router(rules.router)
 app.include_router(periods.router)
 app.include_router(analysis.router)
-app.include_router(ai_dashboards.router)
-app.include_router(ai_copilot.router)
-app.include_router(ai_provider_dashboards.router)
 app.include_router(destinations.router)
 app.include_router(schema.router)
 app.include_router(forecast.router)
@@ -1069,7 +1120,6 @@ app.include_router(planning.router)
 app.include_router(savings.router)
 app.include_router(azure_tag_policy.router)
 app.include_router(gold.router)
-app.include_router(azure_ptu.router)
 app.include_router(reservations.router)
 app.include_router(scheduled_shutdown.router)
 app.include_router(azure_resource_graph.router)
@@ -1079,8 +1129,10 @@ app.include_router(integrations.router)
 app.include_router(financial_contracts.router)
 app.include_router(oci_operational.router)
 app.include_router(ideas.router)
+from app.routers import access as access_router  # noqa: E402
+app.include_router(access_router.router)
 
 
-@app.get("/health")
+@app.get("/saude")
 async def health():
     return {"status": "ok"}

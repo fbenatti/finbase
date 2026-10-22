@@ -47,6 +47,22 @@ def referenced_tables(sql: str) -> set[str]:
     return tables - ctes
 
 
+# Destinos são guardados sem schema (ex.: "dest_modelo_focus"). A tabela real fica
+# no schema silver, e as consultas prontas do front usam gold. O nome simples
+# libera só esses dois schemas, nenhum outro.
+DESTINATION_SCHEMAS = ("silver", "gold")
+
+
+def _expand_allowed(allowed_tables: set[str]) -> set[str]:
+    expanded: set[str] = set()
+    for table in allowed_tables:
+        name = table.strip().lower()
+        expanded.add(name)
+        if "." not in name:
+            expanded.update(f"{schema}.{name}" for schema in DESTINATION_SCHEMAS)
+    return expanded
+
+
 def check_read_only_select(sql: str, allowed_tables: set[str]) -> None:
     """Levanta SqlRejected se a consulta não for uma leitura permitida."""
     clean = _strip_literals(sql).strip().rstrip(";").strip()
@@ -64,7 +80,7 @@ def check_read_only_select(sql: str, allowed_tables: set[str]) -> None:
     if banned:
         raise SqlRejected(f"Palavra não permitida na consulta: {banned[0].upper()}.")
 
-    allowed = {t.lower() for t in allowed_tables}
+    allowed = _expand_allowed(allowed_tables)
     for table in sorted(referenced_tables(sql)):
         # aceita "schema.tabela" ou "catalogo.schema.tabela": compara os dois últimos nomes
         short = ".".join(table.split(".")[-2:])

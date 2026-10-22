@@ -15,7 +15,7 @@ from app.models.processing_log import ProcessingLog
 from app.services.trino_service import execute as trino_execute
 from app.services.processing_logs import PROCESSING_LOG_CUBE, async_sync_etl_task_log
 
-router = APIRouter(prefix="/processing-logs", tags=["processing-logs"])
+router = APIRouter(prefix="/operacoes/logs-processamento", tags=["processing-logs"])
 logger = logging.getLogger(__name__)
 
 
@@ -107,7 +107,7 @@ async def list_processing_logs(
     return {"items": [_serialize(row) for row in result], "total": total}
 
 
-@router.get("/cube/status")
+@router.get("/cubo/situacao")
 async def processing_log_cube_status():
     try:
         rows = await trino_execute(
@@ -131,7 +131,7 @@ async def _rebuild_processing_log_cube() -> None:
         logger.exception("Falha ao reconstruir cubo operacional de logs")
 
 
-@router.post("/cube/rebuild", status_code=202)
+@router.post("/cubo/reconstruir", status_code=202)
 async def rebuild_processing_log_cube(background_tasks: BackgroundTasks):
     background_tasks.add_task(_rebuild_processing_log_cube)
     return {"status": "QUEUED", "table": PROCESSING_LOG_CUBE,

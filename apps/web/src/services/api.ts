@@ -8,22 +8,22 @@ export const api = axios.create({
 });
 
 export async function getContractStoryLedger() {
-  const { data } = await api.get("/planning/contract-story");
+  const { data } = await api.get("/planejamento/historia-contratos");
   return data;
 }
 
 export async function getContractStoryBronzeConsumption() {
-  const { data } = await api.get("/planning/contract-story/bronze-consumption");
+  const { data } = await api.get("/planejamento/historia-contratos/consumo-bronze");
   return data;
 }
 
 export async function getMcaCommitmentStatus() {
-  const { data } = await api.get("/mca-commitment/status");
+  const { data } = await api.get("/custos/compromisso-mca/situacao");
   return data;
 }
 
 export async function getMcaCommitmentProfiles() {
-  const { data } = await api.get("/mca-commitment/profiles", { timeout: 120000 });
+  const { data } = await api.get("/custos/compromisso-mca/perfis-consumo", { timeout: 120000 });
   return data;
 }
 
@@ -32,7 +32,7 @@ export async function extractMcaCommitmentInvoices(payload: {
   end_period: string;
   billing_account_ids?: string[];
 }) {
-  const { data } = await api.post("/mca-commitment/extract", payload, { timeout: 600000 });
+  const { data } = await api.post("/custos/compromisso-mca/extrair", payload, { timeout: 600000 });
   return data;
 }
 
@@ -41,22 +41,22 @@ export async function saveContractStoryLedger(ledger: {
   months: Record<string, Array<Record<string, unknown>>>;
   milestones: Record<string, Array<Record<string, unknown>>>;
 }) {
-  const { data } = await api.put("/planning/contract-story", ledger);
+  const { data } = await api.put("/planejamento/historia-contratos", ledger);
   return data;
 }
 
 export async function getReservationSources(signal?: AbortSignal) {
-  const { data } = await api.get("/reservations/sources", { signal });
+  const { data } = await api.get("/custos/reservas/fontes", { signal });
   return data;
 }
 export async function testReservationConnection(connectionId: number) {
   const { data } = await api.post(
-    `/reservations/connections/${connectionId}/test`,
+    `/custos/reservas/fontes/${connectionId}/testar`,
   );
   return data;
 }
 export async function collectReservations(connectionIds: number[] = []) {
-  const { data } = await api.post("/reservations/collect", {
+  const { data } = await api.post("/custos/reservas/coletar", {
     connection_ids: connectionIds,
   });
   return data;
@@ -65,21 +65,21 @@ export async function getReservationsDashboard(
   params: Record<string, unknown> = {},
   signal?: AbortSignal,
 ) {
-  const { data } = await api.get("/reservations/dashboard", { params, signal });
+  const { data } = await api.get("/custos/reservas/painel", { params, signal });
   return data;
 }
 export async function getReservationsCatalog(
   params: Record<string, unknown> = {},
   signal?: AbortSignal,
 ) {
-  const { data } = await api.get("/reservations/catalog", { params, signal });
+  const { data } = await api.get("/custos/reservas/catalogo", { params, signal });
   return data;
 }
 export async function getReservationsUtilization(
   params: Record<string, unknown> = {},
   signal?: AbortSignal,
 ) {
-  const { data } = await api.get("/reservations/utilization", {
+  const { data } = await api.get("/custos/reservas/utilizacao", {
     params,
     signal,
   });
@@ -89,14 +89,14 @@ export async function getReservationsAdvisor(
   params: Record<string, unknown> = {},
   signal?: AbortSignal,
 ) {
-  const { data } = await api.get("/reservations/advisor", { params, signal });
+  const { data } = await api.get("/custos/reservas/recomendador", { params, signal });
   return data;
 }
 export async function getReservationsRecommendations(
   params: Record<string, unknown> = {},
   signal?: AbortSignal,
 ) {
-  const { data } = await api.get("/reservations/recommendations", {
+  const { data } = await api.get("/custos/reservas/recomendacoes", {
     params,
     signal,
   });
@@ -104,7 +104,7 @@ export async function getReservationsRecommendations(
 }
 
 const CANCELLABLE_ANALYSIS =
-  /^\/(analysis\/(expected-view|pivot|query)|ai-dashboards\/|visoes-consumo-ia\/dashboard|reservations\/dashboard)/;
+  /^\/(dados\/explorador\/(visao-esperada|dinamica|consulta)|custos\/reservas\/painel)/;
 const pendingAnalysis = new Set<AbortController>();
 type ExpectedViewInflight = {
   count: number;
@@ -182,10 +182,10 @@ export function onSessionExpired(handler: () => void) {
 /** Rotas de /auth que NÃO usam Bearer (públicas ou via cookie). */
 function isTokenlessPublic(url: string): boolean {
   return (
-    url.startsWith("/auth/login") ||
-    url.startsWith("/auth/refresh") ||
-    url.startsWith("/auth/sso") ||
-    url.startsWith("/auth/login-config")
+    url.startsWith("/autenticacao/entrar") ||
+    url.startsWith("/autenticacao/atualizar") ||
+    url.startsWith("/autenticacao/sso") ||
+    url.startsWith("/autenticacao/configuracao-entrada")
   );
 }
 
@@ -284,7 +284,7 @@ export async function apiLogout(): Promise<void> {
 }
 
 export async function apiMe(): Promise<AuthUser> {
-  const { data } = await api.get("/auth/me");
+  const { data } = await api.get("/autenticacao/meu-perfil");
   return data;
 }
 
@@ -304,7 +304,7 @@ export async function apiChangePassword(
   currentPassword: string,
   newPassword: string,
 ): Promise<void> {
-  await api.post("/auth/change-password", {
+  await api.post("/autenticacao/alterar-senha", {
     current_password: currentPassword,
     new_password: newPassword,
   });
@@ -363,7 +363,7 @@ export async function getAuditLogs(
         },
       ]
     : (filters ?? []);
-  const { data } = await api.get("/audit/logs", {
+  const { data } = await api.get("/administracao/auditoria/registros", {
     params: {
       ...query,
       ...(effectiveFilters.length
@@ -385,7 +385,7 @@ export async function getAuditLog(
     request_id?: string | null;
   }
 > {
-  const { data } = await api.get(`/audit/logs/${id}`);
+  const { data } = await api.get(`/administracao/auditoria/registros/${id}`);
   return data;
 }
 
@@ -576,7 +576,6 @@ export interface Department {
   centro_custo: string | null;
   id_orcamento: string | null;
   ambiente: string | null;
-  cloud_filter: string | null;
   custom_fields: Record<string, unknown> | null;
   active: boolean;
   children: Department[];
@@ -598,18 +597,28 @@ export async function getConnections(
   withData?: boolean,
 ): Promise<SourceConnection[]> {
   const params = withData ? { with_data: true } : {};
-  const { data } = await api.get("/connections/", { params });
+  const { data } = await api.get("/dados/fontes/", { params });
   return data;
 }
 
 export async function getConnection(id: number): Promise<SourceConnection> {
-  const { data } = await api.get(`/connections/${id}`);
+  const { data } = await api.get(`/dados/fontes/${id}`);
   return data;
 }
 
 export interface ConnectionsGridResponse {
   items: SourceConnection[];
   total: number;
+}
+
+export async function getHiddenConnectorTypes(): Promise<string[]> {
+  const { data } = await api.get<{ hidden: string[] }>("/dados/fontes/visibilidade/");
+  return data.hidden;
+}
+
+export async function updateHiddenConnectorTypes(hidden: string[]): Promise<string[]> {
+  const { data } = await api.put<{ hidden: string[] }>("/dados/fontes/visibilidade/", { hidden });
+  return data.hidden;
 }
 
 export async function getConnectionsGrid(params: {
@@ -636,7 +645,7 @@ export async function getConnectionsGrid(params: {
   }>;
 }): Promise<ConnectionsGridResponse> {
   const { filters, ...query } = params;
-  const { data } = await api.get("/connections/grid", {
+  const { data } = await api.get("/dados/fontes/grade", {
     params: {
       ...query,
       ...(filters?.length ? { filters: JSON.stringify(filters) } : {}),
@@ -648,7 +657,7 @@ export async function getConnectionsGrid(params: {
 export async function createConnection(
   body: Partial<SourceConnection>,
 ): Promise<SourceConnection> {
-  const { data } = await api.post("/connections/", body);
+  const { data } = await api.post("/dados/fontes/", body);
   return data;
 }
 
@@ -656,17 +665,17 @@ export async function updateConnection(
   id: number,
   body: Partial<SourceConnection>,
 ): Promise<SourceConnection> {
-  const { data } = await api.put(`/connections/${id}`, body);
+  const { data } = await api.put(`/dados/fontes/${id}`, body);
   return data;
 }
 
 export async function deleteConnection(id: number): Promise<void> {
-  await api.delete(`/connections/${id}`);
+  await api.delete(`/dados/fontes/${id}`);
 }
 
 // Scan & ETL
 export async function scanBlobs(connectionId: number): Promise<BlobScanResult> {
-  const { data } = await api.post(`/etl/connections/${connectionId}/scan`);
+  const { data } = await api.post(`/operacoes/extracoes/fontes/${connectionId}/varrer`);
   return data;
 }
 
@@ -680,7 +689,7 @@ export async function getSourcePreview(
   connectionId: number,
   limit = 20,
 ): Promise<SourcePreview> {
-  const { data } = await api.get(`/etl/connections/${connectionId}/preview`, {
+  const { data } = await api.get(`/operacoes/extracoes/fontes/${connectionId}/previa`, {
     params: { limit },
   });
   return data;
@@ -690,7 +699,7 @@ export async function getIngestedBlobs(
   connectionId?: number,
 ): Promise<IngestedBlob[]> {
   const params = connectionId ? { connection_id: connectionId } : {};
-  const { data } = await api.get("/etl/blobs/", { params });
+  const { data } = await api.get("/operacoes/extracoes/arquivos/", { params });
   return data;
 }
 
@@ -698,7 +707,7 @@ export async function downloadIngestedBlob(
   blobId: number,
   format: "csv" | "xlsx" = "csv",
 ): Promise<void> {
-  const response = await api.get(`/etl/blobs/${blobId}/download`, {
+  const response = await api.get(`/operacoes/extracoes/arquivos/${blobId}/baixar`, {
     params: { format },
     responseType: "blob",
   });
@@ -732,7 +741,7 @@ export async function runEtl(body: {
   backfill_days?: number;
   lookback_hours?: number;
 }): Promise<{ task_id: number; status: string; message?: string }> {
-  const { data } = await api.post("/etl/run", body);
+  const { data } = await api.post("/operacoes/execucoes/executar", body);
   return data;
 }
 
@@ -740,7 +749,7 @@ export async function resetSourceForReimport(
   connectionId: number,
 ): Promise<{ status: string; message: string }> {
   const { data } = await api.post(
-    `/etl/connections/${connectionId}/reset-source`,
+    `/operacoes/extracoes/fontes/${connectionId}/redefinir-fonte`,
   );
   return data;
 }
@@ -790,12 +799,12 @@ export interface TaskStatus {
 }
 
 export async function getTaskStatus(taskId: number): Promise<TaskStatus> {
-  const { data } = await api.get(`/etl/status/${taskId}`);
+  const { data } = await api.get(`/operacoes/execucoes/situacao/${taskId}`);
   return data;
 }
 
 export async function getRunningTasks(): Promise<TaskStatus[]> {
-  const { data } = await api.get("/etl/tasks/");
+  const { data } = await api.get("/operacoes/execucoes/tarefas/");
   return data;
 }
 
@@ -804,25 +813,25 @@ export interface WorkerHealth {
   heartbeat_age_seconds: number | null;
 }
 export async function getWorkerHealth(): Promise<WorkerHealth> {
-  const { data } = await api.get("/etl/worker-health");
+  const { data } = await api.get("/operacoes/execucoes/saude-executor");
   return data;
 }
 
 export async function cancelEtl(taskId: number): Promise<void> {
-  await api.post(`/etl/cancel/${taskId}`);
+  await api.post(`/operacoes/execucoes/cancelar/${taskId}`);
 }
 
 export async function testConnection(
   connectionId: number,
 ): Promise<{ status: string; message: string }> {
-  const { data } = await api.post(`/etl/connections/${connectionId}/test`);
+  const { data } = await api.post(`/operacoes/extracoes/fontes/${connectionId}/testar`);
   return data;
 }
 
 export async function testConnectionConfig(
   body: Partial<SourceConnection>,
 ): Promise<{ status: string; message: string }> {
-  const { data } = await api.post("/etl/connections/test-config", body);
+  const { data } = await api.post("/operacoes/extracoes/fontes/testar-configuracao", body);
   return data;
 }
 
@@ -830,7 +839,7 @@ export async function processDestinationTables(
   connectionId: number,
 ): Promise<{ success: boolean; rows_written: number; error?: string }> {
   const { data } = await api.post(
-    `/etl/connections/${connectionId}/process-destination`,
+    `/operacoes/extracoes/fontes/${connectionId}/processar-destino`,
   );
   return data;
 }
@@ -844,7 +853,7 @@ export interface AvailablePeriod {
 export async function getAvailablePeriods(
   connectionId: number,
 ): Promise<AvailablePeriod[]> {
-  const { data } = await api.get("/etl/periods", {
+  const { data } = await api.get("/operacoes/periodos", {
     params: { connection_id: connectionId },
   });
   return data;
@@ -855,39 +864,8 @@ export async function reprocessSharedCost(): Promise<{
   status: string;
   message: string;
 }> {
-  const { data } = await api.post("/etl/reprocess-shared-cost");
+  const { data } = await api.post("/operacoes/custos-compartilhados/reprocessar");
   purgeExpectedViewCache();
-  return data;
-}
-
-export async function reprocessAICostRelationships(): Promise<{
-  task_id: number;
-  status: string;
-  message: string;
-  warnings?: string[];
-}> {
-  const { data } = await api.post("/etl/reprocess-ai-cost-relationships");
-  return data;
-}
-
-export interface AICostRelationshipHistoryItem {
-  id: number;
-  status: string;
-  phase?: string;
-  started_at?: string;
-  finished_at?: string;
-  rows_destination?: number;
-  errors?: string[];
-  result_json?: {
-    failed?: Array<{ link_id: number; name?: string; error?: string }>;
-    warnings?: string[];
-  };
-}
-
-export async function getAICostRelationshipHistory(): Promise<
-  AICostRelationshipHistoryItem[]
-> {
-  const { data } = await api.get("/etl/ai-cost-relationship-history");
   return data;
 }
 
@@ -908,7 +886,7 @@ export interface SharedCostJob {
 }
 
 export async function getSharedCostHistory(): Promise<SharedCostJob[]> {
-  const { data } = await api.get("/etl/shared-cost-history");
+  const { data } = await api.get("/operacoes/custos-compartilhados/historico");
   return data;
 }
 
@@ -924,7 +902,7 @@ export async function reprocessDest(body: {
   queue_group?: string;
   message: string;
 }> {
-  const { data } = await api.post("/etl/reprocess", body);
+  const { data } = await api.post("/operacoes/execucoes/reprocessar", body);
   purgeExpectedViewCache();
   return data;
 }
@@ -934,7 +912,7 @@ export async function reclassifyDest(body: {
   connection_ids: number[];
   billing_periods: string[];
 }): Promise<{ task_id: number; task_ids?: number[]; message: string }> {
-  const { data } = await api.post("/etl/reclassify", body);
+  const { data } = await api.post("/operacoes/execucoes/reclassificar", body);
   purgeExpectedViewCache();
   return data;
 }
@@ -987,12 +965,12 @@ export interface ProcessingLog {
 export async function getProcessingLogs(params: {
   limit?: number; offset?: number; search?: string; process_type?: string; status?: string;
 } = {}): Promise<{ items: ProcessingLog[]; total: number }> {
-  const { data } = await api.get("/processing-logs", { params });
+  const { data } = await api.get("/operacoes/logs-processamento", { params });
   return data;
 }
 
 export async function getProcessingLog(id: number): Promise<ProcessingLog> {
-  const { data } = await api.get(`/processing-logs/${id}`);
+  const { data } = await api.get(`/operacoes/logs-processamento/${id}`);
   return data;
 }
 
@@ -1004,19 +982,19 @@ export interface ProcessingLogCubeStatus {
 }
 
 export async function getProcessingLogCubeStatus(): Promise<ProcessingLogCubeStatus> {
-  const { data } = await api.get("/processing-logs/cube/status");
+  const { data } = await api.get("/operacoes/logs-processamento/cubo/situacao");
   return data;
 }
 
 export async function rebuildProcessingLogCube(): Promise<{ status: string; message: string }> {
-  const { data } = await api.post("/processing-logs/cube/rebuild");
+  const { data } = await api.post("/operacoes/logs-processamento/cubo/reconstruir");
   return data;
 }
 
 export async function getReprocessStatus(
   taskId: number,
 ): Promise<ReprocessStatus> {
-  const { data } = await api.get(`/etl/reprocess-status/${taskId}`);
+  const { data } = await api.get(`/operacoes/execucoes/situacao-reprocessamento/${taskId}`);
   return data;
 }
 export async function getReprocessHistory(
@@ -1041,7 +1019,7 @@ export async function getReprocessHistory(
   } = {},
 ): Promise<{ items: ReprocessStatus[]; total: number }> {
   const { sort, filters, ...rest } = params;
-  const { data } = await api.get("/etl/reprocess-history", {
+  const { data } = await api.get("/operacoes/execucoes/historico-reprocessamento", {
     params: {
       ...rest,
       sort_field: sort?.field,
@@ -1055,7 +1033,7 @@ export async function getReprocessHistory(
 export async function cancelReprocess(
   taskId: number,
 ): Promise<{ message: string }> {
-  const { data } = await api.post(`/etl/reprocess/cancel/${taskId}`);
+  const { data } = await api.post(`/operacoes/execucoes/reprocessar/cancelar/${taskId}`);
   return data;
 }
 
@@ -1065,14 +1043,14 @@ export async function getMappings(
 ): Promise<EtlMapping[]> {
   const params =
     connectionId !== undefined ? { connection_id: connectionId } : {};
-  const { data } = await api.get("/mappings/", { params });
+  const { data } = await api.get("/dados/mapeamentos/", { params });
   return data;
 }
 
 export async function createMapping(
   body: Partial<EtlMapping>,
 ): Promise<EtlMapping> {
-  const { data } = await api.post("/mappings/", body);
+  const { data } = await api.post("/dados/mapeamentos/", body);
   return data;
 }
 
@@ -1080,12 +1058,12 @@ export async function updateMapping(
   id: number,
   body: Partial<EtlMapping>,
 ): Promise<EtlMapping> {
-  const { data } = await api.put(`/mappings/${id}`, body);
+  const { data } = await api.put(`/dados/mapeamentos/${id}`, body);
   return data;
 }
 
 export async function deleteMapping(id: number): Promise<void> {
-  await api.delete(`/mappings/${id}`);
+  await api.delete(`/dados/mapeamentos/${id}`);
 }
 
 // Business Rules
@@ -1097,14 +1075,14 @@ export async function getBusinessRules(
   if (connectionId !== undefined) params.connection_id = connectionId;
   if (destinationTableId !== undefined)
     params.destination_table_id = destinationTableId;
-  const { data } = await api.get("/business-rules/", { params });
+  const { data } = await api.get("/dados/regras-negocio/", { params });
   return data;
 }
 
 export async function createBusinessRule(
   body: Partial<BusinessRule>,
 ): Promise<BusinessRule> {
-  const { data } = await api.post("/business-rules/", body);
+  const { data } = await api.post("/dados/regras-negocio/", body);
   return data;
 }
 
@@ -1112,12 +1090,12 @@ export async function updateBusinessRule(
   id: number,
   body: Partial<BusinessRule>,
 ): Promise<BusinessRule> {
-  const { data } = await api.put(`/business-rules/${id}`, body);
+  const { data } = await api.put(`/dados/regras-negocio/${id}`, body);
   return data;
 }
 
 export async function deleteBusinessRule(id: number): Promise<void> {
-  await api.delete(`/business-rules/${id}`);
+  await api.delete(`/dados/regras-negocio/${id}`);
 }
 
 export interface FinancialContractScope {
@@ -1146,32 +1124,32 @@ export interface FinancialContract {
 }
 
 export async function getFinancialContracts(): Promise<FinancialContract[]> {
-  const { data } = await api.get("/financial-contracts");
+  const { data } = await api.get("/governanca/contratos-financeiros");
   return data;
 }
 
 export async function getFinancialContractsOverview(): Promise<Record<string, unknown>[]> {
-  const { data } = await api.get("/financial-contracts/overview");
+  const { data } = await api.get("/governanca/contratos-financeiros/resumo");
   return data;
 }
 
 export async function getFinancialContractScopes(): Promise<FinancialContractScope[]> {
-  const { data } = await api.get("/financial-contracts/options/budget-scopes");
+  const { data } = await api.get("/governanca/contratos-financeiros/opcoes/escopos-orcamento");
   return data;
 }
 
 export async function createFinancialContract(body: Partial<FinancialContract>): Promise<FinancialContract> {
-  const { data } = await api.post("/financial-contracts", body);
+  const { data } = await api.post("/governanca/contratos-financeiros", body);
   return data;
 }
 
 export async function updateFinancialContract(id: number, body: Partial<FinancialContract>): Promise<FinancialContract> {
-  const { data } = await api.put(`/financial-contracts/${id}`, body);
+  const { data } = await api.put(`/governanca/contratos-financeiros/${id}`, body);
   return data;
 }
 
 export async function getFinancialContractSettlements(id: number): Promise<Record<string, unknown>[]> {
-  const { data } = await api.get(`/financial-contracts/${id}/settlements`);
+  const { data } = await api.get(`/governanca/contratos-financeiros/${id}/liquidacoes`);
   return data;
 }
 
@@ -1179,7 +1157,7 @@ export async function recalculateFinancialContract(
   id: number,
   body: { period_from?: string; period_until?: string; recalculate_all?: boolean },
 ) {
-  const { data } = await api.post(`/financial-contracts/${id}/settlements/recalculate`, body);
+  const { data } = await api.post(`/governanca/contratos-financeiros/${id}/liquidacoes/recalcular`, body);
   return data;
 }
 
@@ -1194,7 +1172,7 @@ export async function getClassifications(
   if (departmentId !== undefined) params.department_id = departmentId;
   if (destinationTableId !== undefined)
     params.destination_table_id = destinationTableId;
-  const { data } = await api.get("/classifications/", { params });
+  const { data } = await api.get("/dados/classificacoes/", { params });
   return data;
 }
 
@@ -1227,7 +1205,7 @@ export async function getClassificationsGrid(
   } = {},
   signal?: AbortSignal,
 ): Promise<ClassificationsGridResponse> {
-  const { data } = await api.get("/classifications/grid", {
+  const { data } = await api.get("/dados/classificacoes/grade", {
     params: {
       ...params,
       filters: params.filters?.length
@@ -1242,7 +1220,7 @@ export async function getClassificationsGrid(
 export async function createClassification(
   body: Partial<ClassificationRule>,
 ): Promise<ClassificationRule> {
-  const { data } = await api.post("/classifications/", body);
+  const { data } = await api.post("/dados/classificacoes/", body);
   return data;
 }
 
@@ -1250,12 +1228,12 @@ export async function updateClassification(
   id: number,
   body: Partial<ClassificationRule>,
 ): Promise<ClassificationRule> {
-  const { data } = await api.put(`/classifications/${id}`, body);
+  const { data } = await api.put(`/dados/classificacoes/${id}`, body);
   return data;
 }
 
 export async function deleteClassification(id: number): Promise<void> {
-  await api.delete(`/classifications/${id}`);
+  await api.delete(`/dados/classificacoes/${id}`);
 }
 
 export interface ClassificationFieldValue {
@@ -1270,7 +1248,7 @@ export async function getClassificationFieldValues(params: {
   search?: string;
   limit?: number;
 }): Promise<ClassificationFieldValue[]> {
-  const { data } = await api.get("/classifications/field-values", { params });
+  const { data } = await api.get("/dados/classificacoes/valores-campos", { params });
   return data;
 }
 
@@ -1278,7 +1256,7 @@ export async function refreshClassificationFieldValues(
   destination_table_id?: number,
 ): Promise<{ status: string; destination_table_id?: number | null }> {
   const { data } = await api.post(
-    "/classifications/refresh-field-values",
+    "/dados/classificacoes/atualizar-valores-campos",
     null,
     {
       params: destination_table_id ? { destination_table_id } : {},
@@ -1489,17 +1467,17 @@ export interface AzureTagPolicyExport {
 }
 
 export async function getAzureTenants(): Promise<AzureTenant[]> {
-  const { data } = await api.get("/azure-tag-policy/tenants");
+  const { data } = await api.get("/governanca/politica-tags-azure/locatarios");
   return data;
 }
 
 export async function getAzurePolicySubscriptions(connectionId: number): Promise<AzurePolicySubscription[]> {
-  const { data } = await api.get("/azure-tag-policy/subscriptions", { params: { connection_id: connectionId } });
+  const { data } = await api.get("/governanca/politica-tags-azure/assinaturas", { params: { connection_id: connectionId } });
   return data.subscriptions;
 }
 
 export async function getAzureTagExecutiveDashboard(connectionId: number): Promise<AzureTagExecutiveDashboard> {
-  const { data } = await api.get("/azure-tag-policy/executive-dashboard", {
+  const { data } = await api.get("/governanca/politica-tags-azure/painel-executivo", {
     params: { connection_id: connectionId },
   });
   return data;
@@ -1509,7 +1487,7 @@ export async function getAzureTagPolicyTimeline(
   connectionId: number,
   since = "2026-10-12",
 ): Promise<AzureTagPolicyTimeline> {
-  const { data } = await api.get("/azure-tag-policy/timeline", {
+  const { data } = await api.get("/governanca/politica-tags-azure/linha-do-tempo", {
     params: { connection_id: connectionId, since },
   });
   return data;
@@ -1520,7 +1498,7 @@ export async function getAzureTagExecutiveResources(
   subscriptionId: string,
   pageToken?: string | null,
 ): Promise<AzureTagExecutiveResourcePage> {
-  const { data } = await api.get("/azure-tag-policy/executive-dashboard/resources", {
+  const { data } = await api.get("/governanca/politica-tags-azure/painel-executivo/recursos", {
     params: { connection_id: connectionId, subscription_id: subscriptionId, page_token: pageToken || undefined },
   });
   return data;
@@ -1529,7 +1507,7 @@ export async function getAzureTagExecutiveResources(
 export async function queueAzureTagExecutiveRefresh(
   connectionId: number,
 ): Promise<{ task_id: number; status: string; message: string }> {
-  const { data } = await api.post("/azure-tag-policy/executive-dashboard/refresh", null, {
+  const { data } = await api.post("/governanca/politica-tags-azure/painel-executivo/atualizar", null, {
     params: { connection_id: connectionId },
   });
   return data;
@@ -1539,14 +1517,14 @@ export async function getAzureTagMappings(): Promise<{
   mappings: AzureTagMapping[];
   focus_fields: string[];
 }> {
-  const { data } = await api.get("/azure-tag-policy/tag-mappings");
+  const { data } = await api.get("/governanca/politica-tags-azure/mapeamentos-tags");
   return data;
 }
 
 export async function createAzureTagMapping(
   body: Omit<AzureTagMapping, "id">,
 ): Promise<AzureTagMapping> {
-  const { data } = await api.post("/azure-tag-policy/tag-mappings", body);
+  const { data } = await api.post("/governanca/politica-tags-azure/mapeamentos-tags", body);
   return data;
 }
 
@@ -1554,7 +1532,7 @@ export async function updateAzureTagMapping(
   id: number,
   body: Omit<AzureTagMapping, "id">,
 ): Promise<AzureTagMapping> {
-  const { data } = await api.put(`/azure-tag-policy/tag-mappings/${id}`, body);
+  const { data } = await api.put(`/governanca/politica-tags-azure/mapeamentos-tags/${id}`, body);
   return data;
 }
 
@@ -1570,7 +1548,7 @@ export async function exportAzureTagPolicy(
   if (departmentId !== undefined) params.department_id = departmentId;
   if (planOnly) params.plan_only = true;
   if (subscriptionId) params.subscription_id = subscriptionId;
-  const { data } = await api.get("/azure-tag-policy/export", { params });
+  const { data } = await api.get("/governanca/politica-tags-azure/exportar", { params });
   return data;
 }
 
@@ -1598,14 +1576,14 @@ export async function getDepartments(
   const params: Record<string, string | number | boolean> = {};
   if (flat !== undefined) params.flat = flat;
   if (parentId !== undefined) params.parent_id = parentId;
-  const { data } = await api.get("/departments/", { params });
+  const { data } = await api.get("/governanca/hierarquia/", { params });
   return data;
 }
 
 export async function createDepartment(
   body: Partial<Department>,
 ): Promise<Department> {
-  const { data } = await api.post("/departments/", body);
+  const { data } = await api.post("/governanca/hierarquia/", body);
   return data;
 }
 
@@ -1613,12 +1591,12 @@ export async function updateDepartment(
   id: number,
   body: Partial<Department>,
 ): Promise<Department> {
-  const { data } = await api.put(`/departments/${id}`, body);
+  const { data } = await api.put(`/governanca/hierarquia/${id}`, body);
   return data;
 }
 
 export async function deleteDepartment(id: number): Promise<void> {
-  await api.delete(`/departments/${id}`);
+  await api.delete(`/governanca/hierarquia/${id}`);
 }
 
 export type SharedCostMode = "consumption" | "equal" | "custom";
@@ -1639,13 +1617,13 @@ export interface SharedCostConfig {
   targets: SharedCostTarget[];
 }
 export async function getSharedCosts(): Promise<SharedCostConfig[]> {
-  const { data } = await api.get("/departments/shared-costs");
+  const { data } = await api.get("/governanca/hierarquia/custos-compartilhados");
   return data;
 }
 export async function getDepartmentSharedCost(
   id: number,
 ): Promise<SharedCostConfig> {
-  const { data } = await api.get(`/departments/${id}/shared-cost`);
+  const { data } = await api.get(`/governanca/hierarquia/${id}/custo-compartilhado`);
   return data;
 }
 export async function upsertDepartmentSharedCost(
@@ -1657,7 +1635,7 @@ export async function upsertDepartmentSharedCost(
     targets: Array<{ department_id: number; percent?: number | null }>;
   },
 ): Promise<SharedCostConfig> {
-  const { data } = await api.put(`/departments/${id}/shared-cost`, body);
+  const { data } = await api.put(`/governanca/hierarquia/${id}/custo-compartilhado`, body);
   return data;
 }
 
@@ -1673,7 +1651,7 @@ export interface CloudOrganizationBootstrapResult {
   reprocess_required: boolean;
 }
 export async function bootstrapCloudOrganization(): Promise<CloudOrganizationBootstrapResult> {
-  const { data } = await api.post("/departments/bootstrap-cloud-organization");
+  const { data } = await api.post("/governanca/hierarquia/inicializar-organizacao-nuvem");
   return data;
 }
 
@@ -1698,7 +1676,7 @@ export interface GridParams {
 export async function getDepartmentsGrid(
   params: GridParams = {},
 ): Promise<{ items: Department[]; total: number }> {
-  const { data } = await api.get("/departments/grid", {
+  const { data } = await api.get("/governanca/hierarquia/grade", {
     params: {
       ...params,
       filters: params.filters?.length
@@ -1719,7 +1697,7 @@ export async function importCsvData(body?: {
   diretorias_path?: string;
   business_rules_path?: string;
 }): Promise<CsvImportResult> {
-  const { data } = await api.post("/departments/import", body || {});
+  const { data } = await api.post("/governanca/hierarquia/importar", body || {});
   return data;
 }
 
@@ -1736,7 +1714,7 @@ export interface PeriodStatusOut {
 export async function getPeriods(
   connectionId: number,
 ): Promise<PeriodStatusOut[]> {
-  const { data } = await api.get("/etl/periods/", {
+  const { data } = await api.get("/operacoes/periodos/", {
     params: { connection_id: connectionId },
   });
   return data;
@@ -1746,7 +1724,7 @@ export async function closePeriod(
   connectionId: number,
   billingPeriod: string,
 ): Promise<PeriodStatusOut> {
-  const { data } = await api.post("/etl/periods/close", {
+  const { data } = await api.post("/operacoes/periodos/fechar", {
     connection_id: connectionId,
     billing_period: billingPeriod,
   });
@@ -1757,7 +1735,7 @@ export async function reopenPeriod(
   connectionId: number,
   billingPeriod: string,
 ): Promise<PeriodStatusOut> {
-  const { data } = await api.post("/etl/periods/reopen", {
+  const { data } = await api.post("/operacoes/periodos/reabrir", {
     connection_id: connectionId,
     billing_period: billingPeriod,
   });
@@ -1767,7 +1745,7 @@ export async function reopenPeriod(
 export async function autoClosePeriods(
   connectionId: number,
 ): Promise<string[]> {
-  const { data } = await api.post("/etl/periods/auto-close", null, {
+  const { data } = await api.post("/operacoes/periodos/fechamento-automatico", null, {
     params: { connection_id: connectionId },
   });
   return data;
@@ -1775,14 +1753,14 @@ export async function autoClosePeriods(
 
 // Delete ingested datasets
 export async function deleteIngestedBlob(blobId: number): Promise<void> {
-  await api.delete(`/etl/blobs/${blobId}`);
+  await api.delete(`/operacoes/extracoes/arquivos/${blobId}`);
 }
 
 export async function deleteAllIngestedBlobs(
   connectionId: number,
   billingPeriod?: string,
 ): Promise<void> {
-  await api.delete("/etl/blobs/", {
+  await api.delete("/operacoes/extracoes/arquivos/", {
     params: { connection_id: connectionId, billing_period: billingPeriod },
   });
 }
@@ -1792,7 +1770,7 @@ export async function getSkippedBlobs(
   connectionId: number,
 ): Promise<SkippedBlob[]> {
   return (
-    await api.get("/etl/blobs/skipped", {
+    await api.get("/operacoes/extracoes/arquivos/ignorados", {
       params: { connection_id: connectionId },
     })
   ).data;
@@ -1803,7 +1781,7 @@ export async function skipBlob(
   reason?: string,
 ): Promise<SkippedBlob> {
   return (
-    await api.post("/etl/blobs/skip", {
+    await api.post("/operacoes/extracoes/arquivos/pular", {
       connection_id: connectionId,
       blob_path: blobPath,
       reason,
@@ -1811,12 +1789,12 @@ export async function skipBlob(
   ).data;
 }
 export async function clearSkippedBlobs(connectionId: number): Promise<void> {
-  await api.delete("/etl/blobs/skipped", {
+  await api.delete("/operacoes/extracoes/arquivos/ignorados", {
     params: { connection_id: connectionId },
   });
 }
 export async function unskipBlob(skipId: number): Promise<void> {
-  await api.delete(`/etl/blobs/skip/${skipId}`);
+  await api.delete(`/operacoes/extracoes/arquivos/pular/${skipId}`);
 }
 
 // Destination Tables
@@ -1876,7 +1854,7 @@ export interface SourceDestinationMapping {
 export async function getDestinationTables(
   activeOnly = true,
 ): Promise<DestinationTable[]> {
-  const { data } = await api.get("/destinations/tables/", {
+  const { data } = await api.get("/dados/catalogo/tabelas/", {
     params: { active_only: activeOnly },
   });
   return data;
@@ -1885,7 +1863,7 @@ export async function getDestinationTables(
 export async function getDestinationTable(
   tableId: number,
 ): Promise<DestinationTableDetail> {
-  const { data } = await api.get(`/destinations/tables/${tableId}`);
+  const { data } = await api.get(`/dados/catalogo/tabelas/${tableId}`);
   return data;
 }
 
@@ -1894,7 +1872,7 @@ export async function createDestinationTable(body: {
   description?: string;
   partition_spec_json?: DestinationPartitionSpec;
 }): Promise<DestinationTable> {
-  const { data } = await api.post("/destinations/tables/", body);
+  const { data } = await api.post("/dados/catalogo/tabelas/", body);
   return data;
 }
 
@@ -1907,14 +1885,14 @@ export async function updateDestinationTable(
     partition_spec_json?: DestinationPartitionSpec | null;
   },
 ): Promise<DestinationTable> {
-  const { data } = await api.patch(`/destinations/tables/${tableId}`, body);
+  const { data } = await api.patch(`/dados/catalogo/tabelas/${tableId}`, body);
   return data;
 }
 
 export async function getDestinationColumns(
   tableId: number,
 ): Promise<DestinationColumn[]> {
-  const { data } = await api.get(`/destinations/tables/${tableId}/columns/`);
+  const { data } = await api.get(`/dados/catalogo/tabelas/${tableId}/colunas/`);
   return data;
 }
 
@@ -1923,14 +1901,14 @@ export async function addDestinationColumn(
   body: { column_name: string; data_type?: string; is_required?: boolean },
 ): Promise<DestinationColumn> {
   const { data } = await api.post(
-    `/destinations/tables/${tableId}/columns/`,
+    `/dados/catalogo/tabelas/${tableId}/colunas/`,
     body,
   );
   return data;
 }
 
 export async function deleteDestinationColumn(columnId: number): Promise<void> {
-  await api.delete(`/destinations/columns/${columnId}`);
+  await api.delete(`/dados/catalogo/colunas/${columnId}`);
 }
 
 export async function getSourceDestMappings(
@@ -1942,14 +1920,14 @@ export async function getSourceDestMappings(
     params.source_connection_id = sourceConnectionId;
   if (destinationTableId !== undefined)
     params.destination_table_id = destinationTableId;
-  const { data } = await api.get("/destinations/mappings/", { params });
+  const { data } = await api.get("/dados/catalogo/vinculos/", { params });
   return data;
 }
 
 export async function createSourceDestMapping(
   body: Partial<SourceDestinationMapping>,
 ): Promise<SourceDestinationMapping> {
-  const { data } = await api.post("/destinations/mappings/", body);
+  const { data } = await api.post("/dados/catalogo/vinculos/", body);
   return data;
 }
 
@@ -1957,12 +1935,12 @@ export async function updateSourceDestMapping(
   id: number,
   body: Partial<SourceDestinationMapping>,
 ): Promise<SourceDestinationMapping> {
-  const { data } = await api.put(`/destinations/mappings/${id}`, body);
+  const { data } = await api.put(`/dados/catalogo/vinculos/${id}`, body);
   return data;
 }
 
 export async function deleteSourceDestMapping(id: number): Promise<void> {
-  await api.delete(`/destinations/mappings/${id}`);
+  await api.delete(`/dados/catalogo/vinculos/${id}`);
 }
 
 export async function getDestinationSchema(tableId: number): Promise<{
@@ -1971,7 +1949,7 @@ export async function getDestinationSchema(tableId: number): Promise<{
   physical_name: string;
   columns: { name: string; type: string; required: boolean }[];
 }> {
-  const { data } = await api.get(`/destinations/tables/${tableId}/schema`);
+  const { data } = await api.get(`/dados/catalogo/tabelas/${tableId}/esquema`);
   return data;
 }
 
@@ -2080,10 +2058,10 @@ export async function getCommitmentsDashboard(params: {
   end_period: string;
   source?: "all" | "azure-ti" | "azure-4p";
 }): Promise<CommitmentsDashboard> {
-  return (await api.get("/savings/commitments-dashboard", { params })).data;
+  return (await api.get("/otimizacao/painel-compromissos", { params })).data;
 }
 export async function getSavingActions(): Promise<SavingAction[]> {
-  return (await api.get("/savings/actions")).data;
+  return (await api.get("/otimizacao/acoes")).data;
 }
 export async function createSavingAction(
   body: Omit<
@@ -2097,34 +2075,34 @@ export async function createSavingAction(
     | "completed_at"
   >,
 ): Promise<SavingAction> {
-  return (await api.post("/savings/actions", body)).data;
+  return (await api.post("/otimizacao/acoes", body)).data;
 }
 export async function updateSavingAction(
   id: number,
   body: Record<string, unknown>,
 ): Promise<SavingAction> {
-  return (await api.put(`/savings/actions/${id}`, body)).data;
+  return (await api.put(`/otimizacao/acoes/${id}`, body)).data;
 }
 export async function cancelSavingAction(id: number): Promise<SavingAction> {
-  return (await api.post(`/savings/actions/${id}/cancel`)).data;
+  return (await api.post(`/otimizacao/acoes/${id}/cancelar`)).data;
 }
 export async function refreshSavingAction(id: number): Promise<SavingAction> {
-  return (await api.post(`/savings/actions/${id}/refresh`)).data;
+  return (await api.post(`/otimizacao/acoes/${id}/atualizar`)).data;
 }
 export async function getSavingMeasurements(
   id: number,
 ): Promise<SavingMeasurement[]> {
-  return (await api.get(`/savings/actions/${id}/measurements`)).data;
+  return (await api.get(`/otimizacao/acoes/${id}/medicoes`)).data;
 }
 export async function getSavingsDashboard(
   year?: number,
 ): Promise<SavingsDashboard> {
-  return (await api.get("/savings/dashboard", { params: { year } })).data;
+  return (await api.get("/otimizacao/painel", { params: { year } })).data;
 }
 export async function getSavingsMetadata(
   tableId: number,
 ): Promise<{ columns: Array<{ name: string; type: string }> }> {
-  return (await api.get(`/savings/metadata/${tableId}`)).data;
+  return (await api.get(`/otimizacao/metadados/${tableId}`)).data;
 }
 
 export interface ForecastMetadata {
@@ -2241,43 +2219,43 @@ export interface ForecastBusinessRule {
 export async function getForecastMetadata(
   tableId: number,
 ): Promise<ForecastMetadata> {
-  const { data } = await api.get(`/forecast/metadata/${tableId}`);
+  const { data } = await api.get(`/projecoes/metadados/${tableId}`);
   return data;
 }
 export async function getForecastConfigs(): Promise<ForecastConfig[]> {
-  const { data } = await api.get("/forecast/configs");
+  const { data } = await api.get("/projecoes/configuracoes");
   return data;
 }
 export async function createForecastConfig(
   body: Record<string, unknown>,
 ): Promise<ForecastConfig> {
-  const { data } = await api.post("/forecast/configs", body);
+  const { data } = await api.post("/projecoes/configuracoes", body);
   return data;
 }
 export async function updateForecastConfig(
   id: number,
   body: Record<string, unknown>,
 ): Promise<ForecastConfig> {
-  const { data } = await api.put(`/forecast/configs/${id}`, body);
+  const { data } = await api.put(`/projecoes/configuracoes/${id}`, body);
   return data;
 }
 export async function deleteForecastConfig(id: number): Promise<void> {
-  await api.delete(`/forecast/configs/${id}`);
+  await api.delete(`/projecoes/configuracoes/${id}`);
 }
 export async function validateForecastConfig(
   id: number,
 ): Promise<{ valid: boolean; errors: string[]; metadata: ForecastMetadata }> {
-  const { data } = await api.post(`/forecast/configs/${id}/validate`);
+  const { data } = await api.post(`/projecoes/configuracoes/${id}/validar`);
   return data;
 }
 export async function createForecastRun(
   configId: number,
 ): Promise<{ run_id: number; task_id: number; status: string }> {
-  const { data } = await api.post(`/forecast/runs?config_id=${configId}`);
+  const { data } = await api.post(`/projecoes/execucoes?config_id=${configId}`);
   return data;
 }
 export async function getForecastRuns(): Promise<ForecastRun[]> {
-  const { data } = await api.get("/forecast/runs");
+  const { data } = await api.get("/projecoes/execucoes");
   return data;
 }
 export interface ForecastRunsGridResponse {
@@ -2304,7 +2282,7 @@ export async function getForecastRunsGrid(
     }>;
   } = {},
 ): Promise<ForecastRunsGridResponse> {
-  const { data } = await api.get("/forecast/runs/grid", {
+  const { data } = await api.get("/projecoes/execucoes/grade", {
     params: {
       ...params,
       filters: params.filters?.length
@@ -2317,13 +2295,13 @@ export async function getForecastRunsGrid(
 export async function cancelForecastRun(
   runId: number,
 ): Promise<{ run_id: number; status: string }> {
-  const { data } = await api.post(`/forecast/runs/${runId}/cancel`);
+  const { data } = await api.post(`/projecoes/execucoes/${runId}/cancelar`);
   return data;
 }
 export async function getForecastHistoryMetadata(
   runId: number,
 ): Promise<ForecastHistoryMetadata> {
-  const { data } = await api.get(`/forecast/runs/${runId}/history/metadata`);
+  const { data } = await api.get(`/projecoes/execucoes/${runId}/historico/metadados`);
   return data;
 }
 export type HistoryFilter =
@@ -2344,7 +2322,7 @@ export async function runForecastHistoryPivot(
   },
 ): Promise<ForecastHistoryPivot> {
   const { data } = await api.post(
-    `/forecast/runs/${runId}/history/pivot`,
+    `/projecoes/execucoes/${runId}/historico/dinamica`,
     body,
   );
   return data;
@@ -2363,7 +2341,7 @@ export async function compareForecastHistory(
   },
 ): Promise<ForecastHistoryPivot> {
   const { data } = await api.post(
-    `/forecast/runs/${runId}/history/comparison`,
+    `/projecoes/execucoes/${runId}/historico/comparacao`,
     body,
   );
   return data;
@@ -2372,12 +2350,12 @@ export async function getForecastBusinessRules(
   configId: number,
 ): Promise<ForecastBusinessRule[]> {
   const { data } = await api.get(
-    `/forecast/configs/${configId}/business-rules`,
+    `/projecoes/configuracoes/${configId}/regras-negocio`,
   );
   return data;
 }
 
-// ── Acurácia de Forecast ──────────────────────────────────────────────────
+// ── Precisão da previsão ──────────────────────────────────────────────────
 export interface ForecastAccuracyMonth {
   run_id: number;
   config_id: number;
@@ -2439,7 +2417,7 @@ export async function getForecastAccuracyMonths(
   mode?: string,
   includeMetrics = true,
 ): Promise<ForecastAccuracyMonth[]> {
-  const { data } = await api.get("/forecast/accuracy/months", {
+  const { data } = await api.get("/projecoes/aderencia/meses", {
     params: { config_id: configId, department, mode, include_metrics: includeMetrics },
   });
   return data;
@@ -2450,7 +2428,7 @@ export async function getForecastAccuracySummary(
   department?: string,
   mode?: string,
 ): Promise<ForecastAccuracySummary> {
-  const { data } = await api.get("/forecast/accuracy/summary", {
+  const { data } = await api.get("/projecoes/aderencia/resumo", {
     params: { run_id: runId, target_month: targetMonth, department, mode },
   });
   return data;
@@ -2462,7 +2440,7 @@ export async function getForecastAccuracyDimensions(
   department?: string,
   mode?: string,
 ): Promise<ForecastAccuracyDimensions> {
-  const { data } = await api.get("/forecast/accuracy/dimensions", {
+  const { data } = await api.get("/projecoes/aderencia/dimensoes", {
     params: {
       run_id: runId,
       target_month: targetMonth,
@@ -2476,7 +2454,7 @@ export async function getForecastAccuracyDimensions(
 export async function getForecastAccuracyHistory(
   configId?: number,
 ): Promise<ForecastAccuracyHistory> {
-  const { data } = await api.get("/forecast/accuracy/history", {
+  const { data } = await api.get("/projecoes/aderencia/historico", {
     params: configId ? { config_id: configId } : {},
   });
   return data;
@@ -2510,7 +2488,7 @@ export async function getForecastAccuracyDelta(
   mode?: string,
   department?: string,
 ): Promise<ForecastAccuracyDelta> {
-  const { data } = await api.get("/forecast/accuracy/delta", {
+  const { data } = await api.get("/projecoes/aderencia/delta", {
     params: { run_id: runId, target_month: targetMonth, mode, department },
   });
   return data;
@@ -2543,7 +2521,7 @@ export async function getForecastAccuracyDeltaSeries(
   department?: string,
   subcategory?: string,
 ): Promise<ForecastAccuracyDeltaSeries> {
-  const { data } = await api.get("/forecast/accuracy/delta/series", {
+  const { data } = await api.get("/projecoes/aderencia/delta/series", {
     params: {
       run_id: runId,
       target_month: targetMonth,
@@ -2611,7 +2589,7 @@ export async function getForecastAccuracyDesvios(
   direction?: "positive" | "negative",
   limit = 5,
 ): Promise<ForecastDesvios> {
-  const { data } = await api.get("/forecast/accuracy/desvios", {
+  const { data } = await api.get("/projecoes/aderencia/desvios", {
     params: { run_id: runId, target_month: targetMonth, department, direction, limit },
     timeout: 60000,
   });
@@ -2623,7 +2601,7 @@ export async function getForecastAccuracyDesviosSubcategories(
   department?: string,
   scope?: string,
 ): Promise<{ records: ForecastDesvioSubcat[] }> {
-  const { data } = await api.get("/forecast/accuracy/desvios/subcategories", {
+  const { data } = await api.get("/projecoes/aderencia/desvios/subcategorias", {
     params: { run_id: runId, target_month: targetMonth, department, scope },
     timeout: 45000,
   });
@@ -2639,7 +2617,7 @@ export async function createForecastAck(body: {
   ordem?: number;
   registered_at?: string;
 }): Promise<ForecastAck> {
-  const { data } = await api.post("/forecast/accuracy/acks", body);
+  const { data } = await api.post("/projecoes/aderencia/reconhecimentos", body);
   return data;
 }
 export async function updateForecastAck(
@@ -2652,7 +2630,7 @@ export async function updateForecastAck(
     registered_at?: string;
   },
 ): Promise<ForecastAck> {
-  const { data } = await api.put(`/forecast/accuracy/acks/${ackId}`, body);
+  const { data } = await api.put(`/projecoes/aderencia/reconhecimentos/${ackId}`, body);
   return data;
 }
 export async function getForecastAcks(
@@ -2660,7 +2638,7 @@ export async function getForecastAcks(
   department?: string,
   active?: boolean,
 ): Promise<{ items: ForecastAck[] }> {
-  const { data } = await api.get("/forecast/accuracy/acks", {
+  const { data } = await api.get("/projecoes/aderencia/reconhecimentos", {
     params: { target_month: targetMonth, department, active },
   });
   return data;
@@ -2668,30 +2646,30 @@ export async function getForecastAcks(
 export async function getExecutiveManualAcks(monthFrom: string, monthTo: string, departmentPaths: string[] = []): Promise<{ items: ForecastAck[]; row_count: number }> {
   const params = new URLSearchParams({ month_from: monthFrom, month_to: monthTo });
   departmentPaths.forEach((path) => params.append("department_path", path));
-  const { data } = await api.get("/forecast/accuracy/acks/range", { params });
+  const { data } = await api.get("/projecoes/aderencia/reconhecimentos/intervalo", { params });
   return data;
 }
 export async function deactivateForecastAck(
   ackId: number,
 ): Promise<ForecastAck> {
   const { data } = await api.post(
-    `/forecast/accuracy/acks/${ackId}/deactivate`,
+    `/projecoes/aderencia/reconhecimentos/${ackId}/desativar`,
   );
   return data;
 }
 export async function activateForecastAck(ackId: number): Promise<ForecastAck> {
-  const { data } = await api.post(`/forecast/accuracy/acks/${ackId}/activate`);
+  const { data } = await api.post(`/projecoes/aderencia/reconhecimentos/${ackId}/ativar`);
   return data;
 }
 export async function deleteForecastAck(ackId: number): Promise<void> {
-  await api.delete(`/forecast/accuracy/acks/${ackId}`);
+  await api.delete(`/projecoes/aderencia/reconhecimentos/${ackId}`);
 }
 export async function createSimulatedForecastRun(
   configId: number,
   simulatedAsOf: string,
 ): Promise<{ run_id: number; task_id: number; status: string }> {
   const { data } = await api.post(
-    `/forecast/runs?config_id=${configId}&simulated_as_of=${simulatedAsOf}`,
+    `/projecoes/execucoes?config_id=${configId}&simulated_as_of=${simulatedAsOf}`,
   );
   return data;
 }
@@ -2703,7 +2681,7 @@ export interface ForecastAccuracyReprocessResult {
 export async function getForecastAccuracyAvailableMonths(
   configId?: number,
 ): Promise<string[]> {
-  const { data } = await api.get("/forecast/accuracy/available-months", {
+  const { data } = await api.get("/projecoes/aderencia/meses-disponiveis", {
     params: configId ? { config_id: configId } : {},
   });
   return data.months;
@@ -2712,7 +2690,7 @@ export async function reprocessForecastAccuracy(
   configId: number,
   months: string[],
 ): Promise<ForecastAccuracyReprocessResult> {
-  const { data } = await api.post("/forecast/accuracy/reprocess", {
+  const { data } = await api.post("/projecoes/aderencia/reprocessar", {
     config_id: configId,
     months,
   });
@@ -2743,7 +2721,7 @@ export interface ForecastConfigsGridResponse {
 export async function getForecastConfigsGrid(
   params: ForecastGridParams = {},
 ): Promise<ForecastConfigsGridResponse> {
-  const { data } = await api.get("/forecast/configs/grid", {
+  const { data } = await api.get("/projecoes/configuracoes/grade", {
     params: {
       ...params,
       filters: params.filters?.length
@@ -2762,7 +2740,7 @@ export async function getForecastBusinessRulesGrid(
   params: ForecastGridParams = {},
 ): Promise<ForecastRulesGridResponse> {
   const { data } = await api.get(
-    `/forecast/configs/${configId}/business-rules/grid`,
+    `/projecoes/configuracoes/${configId}/regras-negocio/grade`,
     {
       params: {
         ...params,
@@ -2779,7 +2757,7 @@ export async function createForecastBusinessRule(
   body: Record<string, unknown>,
 ): Promise<ForecastBusinessRule> {
   const { data } = await api.post(
-    `/forecast/configs/${configId}/business-rules`,
+    `/projecoes/configuracoes/${configId}/regras-negocio`,
     body,
   );
   return data;
@@ -2788,11 +2766,11 @@ export async function updateForecastBusinessRule(
   id: number,
   body: Record<string, unknown>,
 ): Promise<ForecastBusinessRule> {
-  const { data } = await api.put(`/forecast/business-rules/${id}`, body);
+  const { data } = await api.put(`/projecoes/regras-negocio/${id}`, body);
   return data;
 }
 export async function deleteForecastBusinessRule(id: number): Promise<void> {
-  await api.delete(`/forecast/business-rules/${id}`);
+  await api.delete(`/projecoes/regras-negocio/${id}`);
 }
 
 // ── Extraction History & Bronze DataGrid ──
@@ -2850,14 +2828,14 @@ export async function getExtractionHistory(
 ): Promise<ExtractionHistoryItem[]> {
   const params: Record<string, unknown> = { limit, offset };
   if (connectionId !== undefined) params.connection_id = connectionId;
-  const { data } = await api.get("/etl/history", { params });
+  const { data } = await api.get("/operacoes/execucoes/historico", { params });
   return data;
 }
 
 export async function getExtractionHistoryMetadata(
   taskId: number,
 ): Promise<ExtractionHistoryMetadata> {
-  const { data } = await api.get(`/etl/history/${taskId}/metadata`);
+  const { data } = await api.get(`/operacoes/execucoes/historico/${taskId}/metadados`);
   return data;
 }
 
@@ -2872,7 +2850,7 @@ export async function queryExtractionHistoryData(
     sort_direction?: "asc" | "desc";
   },
 ): Promise<ExtractionHistoryQueryResponse> {
-  const { data } = await api.post(`/etl/history/${taskId}/query`, body);
+  const { data } = await api.post(`/operacoes/execucoes/historico/${taskId}/consulta`, body);
   return data;
 }
 
@@ -3032,7 +3010,7 @@ export interface BudgetDefenseDepartment {
   cloud: string | null;
 }
 export async function getFinancialTypes(): Promise<FinancialType[]> {
-  return (await api.get("/planning/types")).data;
+  return (await api.get("/planejamento/tipos")).data;
 }
 export async function getPlanningGrid(
   type: string,
@@ -3043,7 +3021,7 @@ export async function getPlanningGrid(
   defenseRequestId?: number,
 ): Promise<PlanningGrid> {
   return (
-    await api.get(`/planning/${type}/${year}`, {
+    await api.get(`/planejamento/${type}/${year}`, {
       params: {
         version_id: versionId,
         scope_id_orcamento: scopeId || undefined,
@@ -3062,7 +3040,7 @@ export async function getBudgetAccuracy(
   scopeCloud?: string,
 ): Promise<BudgetAccuracyResponse> {
   return (
-    await api.get("/planning/budget-accuracy", {
+    await api.get("/planejamento/aderencia-orcamento", {
       params: {
         year,
         month,
@@ -3075,10 +3053,10 @@ export async function getBudgetAccuracy(
   ).data;
 }
 export async function getBudgetAccuracyAcks(targetMonth?: string, departmentId?: number | null): Promise<{ items: BudgetAccuracyAck[] }> {
-  return (await api.get("/planning/budget-accuracy/acks", { params: { target_month: targetMonth, department_id: departmentId || undefined } })).data;
+  return (await api.get("/planejamento/aderencia-orcamento/reconhecimentos", { params: { target_month: targetMonth, department_id: departmentId || undefined } })).data;
 }
 export async function getBudgetAccuracyDetail(year: number, departmentId: number): Promise<BudgetAccuracyDetail> {
-  return (await api.get("/planning/budget-accuracy/detail", { params: { year, department_id: departmentId } })).data;
+  return (await api.get("/planejamento/aderencia-orcamento/detalhe", { params: { year, department_id: departmentId } })).data;
 }
 export async function createBudgetAccuracyAck(body: {
   target_month: string;
@@ -3091,7 +3069,7 @@ export async function createBudgetAccuracyAck(body: {
   reason: string;
   severity?: string;
 }): Promise<BudgetAccuracyAck> {
-  return (await api.post("/planning/budget-accuracy/acks", body)).data;
+  return (await api.post("/planejamento/aderencia-orcamento/reconhecimentos", body)).data;
 }
 export async function savePlanningGrid(
   type: string,
@@ -3105,7 +3083,7 @@ export async function savePlanningGrid(
   defense_request?: BudgetDefenseRequest | null;
 }> {
   return (
-    await api.post(`/planning/${type}/${year}`, {
+    await api.post(`/planejamento/${type}/${year}`, {
       rows,
       ...publication,
       defense_request_id: options?.defenseRequestId,
@@ -3117,20 +3095,7 @@ export async function getPlanningVersions(
   type: string,
   year: number,
 ): Promise<PlanningVersion[]> {
-  return (await api.get(`/planning/${type}/${year}/versions`)).data;
-}
-export async function restorePlanningVersion(
-  type: string,
-  year: number,
-  id: number,
-  publication: PlanningPublication,
-): Promise<{ version: PlanningVersion }> {
-  return (
-    await api.post(
-      `/planning/${type}/${year}/versions/${id}/restore`,
-      publication,
-    )
-  ).data;
+  return (await api.get(`/planejamento/${type}/${year}/versoes`)).data;
 }
 export async function importPlanningExcel(
   type: string,
@@ -3147,31 +3112,31 @@ export async function importPlanningExcel(
   });
   if (defenseRequestId) data.append("defense_request_id", String(defenseRequestId));
   if (createMissingDepartments) data.append("create_missing_departments", JSON.stringify(createMissingDepartments));
-  return (await api.post(`/planning/${type}/${year}/import`, data)).data;
+  return (await api.post(`/planejamento/${type}/${year}/importar`, data)).data;
 }
 export async function downloadPlanningTemplate(year: number): Promise<Blob> {
   return (
-    await api.get("/planning/template", {
+    await api.get("/planejamento/modelo", {
       params: { year },
       responseType: "blob",
     })
   ).data;
 }
 export async function getPlanningYears(type: string): Promise<number[]> {
-  return (await api.get(`/planning/type-years/${type}`)).data;
+  return (await api.get(`/planejamento/anos-por-tipo/${type}`)).data;
 }
 export async function getPlanningTimeline(
   type: string,
   year: number,
 ): Promise<PlanningVersion[]> {
-  return (await api.get(`/planning/${type}/${year}/timeline`)).data;
+  return (await api.get(`/planejamento/${type}/${year}/linha-do-tempo`)).data;
 }
 export interface PlanningScope {
   id_orcamento: string;
   cloud: string | null;
 }
 export async function getPlanningScopes(): Promise<PlanningScope[]> {
-  return (await api.get("/planning/scopes/options")).data;
+  return (await api.get("/planejamento/escopos/opcoes")).data;
 }
 export async function publishDefenseToBudget(
   year: number,
@@ -3190,7 +3155,7 @@ export async function publishDefenseToBudget(
 }> {
   return (
     await api.post(
-      `/planning/defesa-orcamentaria/${year}/versions/${versionId}/publish-budget`,
+      `/planejamento/defesa-orcamentaria/${year}/versoes/${versionId}/publicar-orcamento`,
       body,
     )
   ).data;
@@ -3202,7 +3167,7 @@ export async function getDefenseRequests(
   status?: BudgetDefenseStatus[],
 ): Promise<BudgetDefenseRequest[]> {
   return (
-    await api.get("/planning/budget-defense/requests", {
+    await api.get("/planejamento/defesa-orcamentaria/solicitacoes", {
       params: { year, status: status?.length ? status.join(",") : undefined },
     })
   ).data;
@@ -3210,7 +3175,7 @@ export async function getDefenseRequests(
 export async function getDefenseDepartmentOptions(): Promise<
   BudgetDefenseDepartment[]
 > {
-  return (await api.get("/planning/budget-defense/departments")).data;
+  return (await api.get("/planejamento/defesa-orcamentaria/hierarquia")).data;
 }
 export async function createDefenseProject(body: {
   year: number;
@@ -3219,11 +3184,10 @@ export async function createDefenseProject(body: {
   id_orcamento: string;
   centro_custo?: string | null;
   ambiente?: string | null;
-  cloud_filter?: string | null;
   title?: string | null;
   description?: string | null;
 }): Promise<{ department: Department; request: BudgetDefenseRequest }> {
-  return (await api.post("/planning/budget-defense/projects", body)).data;
+  return (await api.post("/planejamento/defesa-orcamentaria/projetos", body)).data;
 }
 export async function createDefenseRequest(body: {
   year: number;
@@ -3233,7 +3197,7 @@ export async function createDefenseRequest(body: {
   title?: string | null;
   description?: string | null;
 }): Promise<BudgetDefenseRequest> {
-  return (await api.post("/planning/budget-defense/requests", body)).data;
+  return (await api.post("/planejamento/defesa-orcamentaria/solicitacoes", body)).data;
 }
 export async function updateDefenseRequest(
   id: number,
@@ -3244,13 +3208,13 @@ export async function updateDefenseRequest(
     description?: string | null;
   },
 ): Promise<BudgetDefenseRequest> {
-  return (await api.put(`/planning/budget-defense/requests/${id}`, body)).data;
+  return (await api.put(`/planejamento/defesa-orcamentaria/solicitacoes/${id}`, body)).data;
 }
 export async function submitDefenseRequest(
   id: number,
 ): Promise<BudgetDefenseRequest> {
   return (
-    await api.post(`/planning/budget-defense/requests/${id}/submit`)
+    await api.post(`/planejamento/defesa-orcamentaria/solicitacoes/${id}/enviar`)
   ).data;
 }
 export async function approveDefenseRequest(
@@ -3263,7 +3227,7 @@ export async function approveDefenseRequest(
   },
 ): Promise<BudgetDefenseRequest> {
   return (
-    await api.post(`/planning/budget-defense/requests/${id}/approve`, body)
+    await api.post(`/planejamento/defesa-orcamentaria/solicitacoes/${id}/aprovar`, body)
   ).data;
 }
 export async function rejectDefenseRequest(
@@ -3271,7 +3235,7 @@ export async function rejectDefenseRequest(
   body: { decision_note: string },
 ): Promise<BudgetDefenseRequest> {
   return (
-    await api.post(`/planning/budget-defense/requests/${id}/reject`, body)
+    await api.post(`/planejamento/defesa-orcamentaria/solicitacoes/${id}/rejeitar`, body)
   ).data;
 }
 export async function publishDefenseRequest(
@@ -3291,7 +3255,32 @@ export async function publishDefenseRequest(
   rows: number;
 }> {
   return (
-    await api.post(`/planning/budget-defense/requests/${id}/publish`, body)
+    await api.post(`/planejamento/defesa-orcamentaria/solicitacoes/${id}/publicar`, body)
+  ).data;
+}
+export interface PlanningAreaRow {
+  department_id: number;
+  name: string;
+  path: string[];
+  has_children: boolean;
+  carga_inicial: number;
+  vigente: number;
+  variacao: number;
+  monthly: number[];
+}
+export interface PlanningAreasResponse {
+  year: number;
+  parent: { id: number | null; path: string[] } | null;
+  areas: PlanningAreaRow[];
+}
+export async function getPlanningAreas(
+  year: number,
+  departmentId?: number | null,
+): Promise<PlanningAreasResponse> {
+  return (
+    await api.get("/planejamento/painel/areas", {
+      params: { year, department_id: departmentId ?? undefined },
+    })
   ).data;
 }
 export interface FinancialDashboardOverview {
@@ -3319,7 +3308,7 @@ export async function getFinancialDashboardOverview(
   departmentId?: number | null,
 ): Promise<FinancialDashboardOverview> {
   return (
-    await api.get("/planning/dashboard/overview", {
+    await api.get("/planejamento/painel/resumo", {
       params: { year, type_codes: typeCodes, department_id: departmentId ?? undefined },
     })
   ).data;
@@ -3332,7 +3321,7 @@ export async function downloadSimulatedBudget(
   cloud?: string,
 ): Promise<Blob> {
   return (
-    await api.get(`/planning/orcamento/${year}/simulado`, {
+    await api.get(`/planejamento/orcamento/${year}/simulado`, {
       params: {
         base_period: basePeriod,
         detailed,
@@ -3369,7 +3358,7 @@ export async function getCloneRules(
   destinationTableId?: number,
 ): Promise<CloneRule[]> {
   return (
-    await api.get("/clone-rules", {
+    await api.get("/dados/regras-clonagem", {
       params: destinationTableId
         ? { destination_table_id: destinationTableId }
         : {},
@@ -3379,22 +3368,22 @@ export async function getCloneRules(
 export async function createCloneRule(
   body: Record<string, unknown>,
 ): Promise<CloneRule> {
-  return (await api.post("/clone-rules", body)).data;
+  return (await api.post("/dados/regras-clonagem", body)).data;
 }
 export async function updateCloneRule(
   id: number,
   body: Record<string, unknown>,
 ): Promise<CloneRule> {
-  return (await api.put(`/clone-rules/${id}`, body)).data;
+  return (await api.put(`/dados/regras-clonagem/${id}`, body)).data;
 }
 export async function deleteCloneRule(id: number): Promise<void> {
-  await api.delete(`/clone-rules/${id}`);
+  await api.delete(`/dados/regras-clonagem/${id}`);
 }
 export async function getClonePendencies(
   destinationTableId?: number,
 ): Promise<Record<string, unknown>[]> {
   return (
-    await api.get("/clone-rules/price-pendencies", {
+    await api.get("/dados/regras-clonagem/pendencias-preco", {
       params: destinationTableId
         ? { destination_table_id: destinationTableId }
         : {},
@@ -3460,7 +3449,7 @@ export async function queryFact(params: {
   limit?: number;
   offset?: number;
 }): Promise<FactQueryResult> {
-  const { data } = await api.get("/fact/query", { params });
+  const { data } = await api.get("/dados/fato/consulta", { params });
   return data;
 }
 
@@ -3468,7 +3457,7 @@ export async function summaryFact(params: {
   connection_ids?: string;
   billing_period?: string;
 }): Promise<FactSummary> {
-  const { data } = await api.get("/fact/summary", { params });
+  const { data } = await api.get("/dados/fato/resumo", { params });
   return data;
 }
 export async function populateFact(
@@ -3481,7 +3470,7 @@ export async function populateFact(
   billing_period: string;
 }> {
   const params = billingPeriod ? { billing_period: billingPeriod } : {};
-  const { data } = await api.post(`/fact/populate/${connectionId}`, null, {
+  const { data } = await api.post(`/dados/fato/popular/${connectionId}`, null, {
     params,
   });
   return data;
@@ -3518,7 +3507,7 @@ export interface SchemaDiscovery {
 export async function discoverSchema(
   connectionId: number,
 ): Promise<SchemaDiscovery> {
-  const { data } = await api.get(`/schema/${connectionId}`);
+  const { data } = await api.get(`/dados/esquema/${connectionId}`);
   return data;
 }
 
@@ -3563,7 +3552,7 @@ export interface AnalysisStagingTable {
 }
 
 export async function getAnalysisTables(): Promise<AnalysisTableList> {
-  const { data } = await api.get("/analysis/tables");
+  const { data } = await api.get("/dados/explorador/tabelas");
   return data;
 }
 
@@ -3587,25 +3576,25 @@ export interface AnalysisTablePartitionResult {
 }
 
 export async function getAnalysisTablePartitions(layer: string, table: string): Promise<AnalysisTablePartitionResult> {
-  const { data } = await api.get(`/analysis/tables/${layer}/${table}/partitions`, { timeout: 90000 });
+  const { data } = await api.get(`/dados/explorador/tabelas/${layer}/${table}/particoes`, { timeout: 90000 });
   return data;
 }
 
 export async function getAnalysisStagingTables(): Promise<
   AnalysisStagingTable[]
 > {
-  const { data } = await api.get("/analysis/staging-tables");
+  const { data } = await api.get("/dados/explorador/tabelas-preparacao");
   return data.tables || [];
 }
 
 export async function deleteAnalysisStagingTable(
   tableName: string,
 ): Promise<void> {
-  await api.delete(`/analysis/staging-tables/${encodeURIComponent(tableName)}`);
+  await api.delete(`/dados/explorador/tabelas-preparacao/${encodeURIComponent(tableName)}`);
 }
 
 export async function runAnalysisQuery(sql: string): Promise<AnalysisQueryResult> {
-  const { data } = await api.post("/analysis/query", { sql });
+  const { data } = await api.post("/dados/explorador/consulta", { sql });
   return data;
 }
 
@@ -3614,7 +3603,7 @@ export async function getAnalysisSummary(
   billingPeriod?: string,
   layer: "bronze" | "silver" | "gold" = "gold",
 ): Promise<{ summary: AnalysisSummaryRow[] }> {
-  const { data } = await api.get("/analysis/summary", {
+  const { data } = await api.get("/dados/explorador/resumo", {
     params: {
       connection_code: connectionCode,
       billing_period: billingPeriod,
@@ -3625,7 +3614,7 @@ export async function getAnalysisSummary(
 }
 
 export async function getAnalysisHealth(): Promise<AnalysisHealth> {
-  const { data } = await api.get("/analysis/health");
+  const { data } = await api.get("/dados/explorador/saude");
   return data;
 }
 
@@ -3651,7 +3640,7 @@ export interface SourceDataResult {
 }
 
 export async function getAnalysisSources(): Promise<SourceAnalysis[]> {
-  const { data } = await api.get("/analysis/sources");
+  const { data } = await api.get("/dados/explorador/fontes");
   return data;
 }
 
@@ -3659,7 +3648,7 @@ export async function queryAnalysisSource(
   connectionId: number,
   options?: { limit?: number; offset?: number; billing_period?: string },
 ): Promise<SourceDataResult> {
-  const { data } = await api.get(`/analysis/sources/${connectionId}/data`, {
+  const { data } = await api.get(`/dados/explorador/fontes/${connectionId}/dados`, {
     params: options,
   });
   return data;
@@ -3691,7 +3680,7 @@ export interface DestinationDataResult {
 export async function getAnalysisDestinations(): Promise<
   DestinationAnalysis[]
 > {
-  const { data } = await api.get("/analysis/destinations");
+  const { data } = await api.get("/dados/explorador/destinos");
   return data;
 }
 
@@ -3700,7 +3689,7 @@ export async function queryAnalysisDestination(
   options?: { limit?: number; offset?: number },
 ): Promise<DestinationDataResult> {
   return cachedAnalytics(`gold-destination:${tableId}:${JSON.stringify(options || {})}`, async () => {
-    const { data } = await api.get(`/analysis/destinations/${tableId}/data`, {
+    const { data } = await api.get(`/dados/explorador/destinos/${tableId}/dados`, {
       params: options,
     });
     return data as DestinationDataResult;
@@ -3791,11 +3780,11 @@ export interface PivotView {
 export async function getPivotMetadata(
   tableId: number,
 ): Promise<PivotMetadata> {
-  return (await api.get(`/analysis/pivot/metadata/${tableId}`)).data;
+  return (await api.get(`/dados/explorador/dinamica/metadados/${tableId}`)).data;
 }
 export async function runPivot(body: PivotRequest): Promise<PivotResult> {
   return cachedAnalytics(`gold-pivot:${JSON.stringify(body)}`, async () =>
-    (await api.post("/analysis/pivot", body)).data as PivotResult,
+    (await api.post("/dados/explorador/dinamica", body)).data as PivotResult,
   );
 }
 
@@ -3821,7 +3810,7 @@ export interface PivotUnionResult extends PivotResult {
 export async function runPivotUnion(
   body: PivotUnionRequest,
 ): Promise<PivotUnionResult> {
-  return (await api.post("/analysis/pivot/union", body)).data;
+  return (await api.post("/dados/explorador/dinamica/uniao", body)).data;
 }
 export async function drillDownPivot(
   body: PivotRequest & {
@@ -3836,7 +3825,7 @@ export async function drillDownPivot(
   limit: number;
   offset: number;
 }> {
-  return (await api.post("/analysis/pivot/drill-down", body)).data;
+  return (await api.post("/dados/explorador/dinamica/detalhamento", body)).data;
 }
 export interface PivotSourceDetail {
   available: boolean;
@@ -3847,7 +3836,7 @@ export interface PivotSourceDetail {
   source_unmatched?: Record<string, unknown>;
 }
 export async function getPivotSourceDetail(destination_table_id: number, row: Record<string, unknown>): Promise<PivotSourceDetail> {
-  return (await api.post("/analysis/pivot/source-detail", {
+  return (await api.post("/dados/explorador/dinamica/detalhe-fonte", {
     destination_table_id,
     source_record_id: row.source_record_id ?? null,
     source_blob_path: row.source_blob_path ?? null,
@@ -3871,13 +3860,13 @@ export interface PivotRecordsResult {
 export async function getPivotRecords(
   body: PivotRecordRequest,
 ): Promise<PivotRecordsResult> {
-  return (await api.post("/analysis/pivot/records", body)).data;
+  return (await api.post("/dados/explorador/dinamica/linhas", body)).data;
 }
 export async function getPivotViews(
   destinationTableId?: number,
 ): Promise<PivotView[]> {
   return (
-    await api.get("/analysis/pivot/views", {
+    await api.get("/dados/explorador/dinamica/visoes", {
       params: { destination_table_id: destinationTableId },
     })
   ).data;
@@ -3887,7 +3876,7 @@ export async function savePivotView(
   config: PivotRequest & { perspective_config?: unknown },
 ): Promise<PivotView> {
   return (
-    await api.post("/analysis/pivot/views", {
+    await api.post("/dados/explorador/dinamica/visoes", {
       name,
       destination_table_id: config.destination_table_id,
       config,
@@ -3895,7 +3884,7 @@ export async function savePivotView(
   ).data;
 }
 export async function deletePivotView(viewId: number): Promise<void> {
-  await api.delete(`/analysis/pivot/views/${viewId}`);
+  await api.delete(`/dados/explorador/dinamica/visoes/${viewId}`);
 }
 export interface DataSearchResult {
   columns: string[];
@@ -3915,7 +3904,7 @@ export async function searchPivotTable(
   filters: PivotFilter[] = [],
 ): Promise<DataSearchResult> {
   return (
-    await api.post("/analysis/pivot/search", {
+    await api.post("/dados/explorador/dinamica/buscar", {
       destination_table_id: destinationTableId,
       term,
       limit,
@@ -3996,7 +3985,7 @@ export async function getExpectedView(
     trackAnalysisAbort(controller);
     const promise = api
       .post(
-        "/analysis/expected-view",
+        "/dados/explorador/visao-esperada",
         {
           director,
           year,
@@ -4072,12 +4061,12 @@ export interface ScheduledTask {
 }
 
 export async function getSchedules(): Promise<ScheduledTask[]> {
-  const { data } = await api.get("/etl/schedules");
+  const { data } = await api.get("/operacoes/extracoes/agendamentos");
   return data;
 }
 
 export async function getBackupSizeEstimates(): Promise<Record<"bronze" | "silver" | "gold", number>> {
-  const { data } = await api.get("/etl/schedules/backup-size-estimates");
+  const { data } = await api.get("/operacoes/extracoes/agendamentos/estimativas-backup");
   return data;
 }
 
@@ -4092,7 +4081,7 @@ export async function createSchedule(body: {
   config_json?: Record<string, unknown>;
   schedule_type?: "backup" | "collection" | "reprocess";
 }): Promise<ScheduledTask> {
-  const { data } = await api.post("/etl/schedules", body);
+  const { data } = await api.post("/operacoes/extracoes/agendamentos", body);
   return data;
 }
 
@@ -4100,12 +4089,12 @@ export async function updateSchedule(
   id: number,
   body: Partial<ScheduledTask>,
 ): Promise<ScheduledTask> {
-  const { data } = await api.put(`/etl/schedules/${id}`, body);
+  const { data } = await api.put(`/operacoes/extracoes/agendamentos/${id}`, body);
   return data;
 }
 
 export async function deleteSchedule(id: number): Promise<void> {
-  await api.delete(`/etl/schedules/${id}`);
+  await api.delete(`/operacoes/extracoes/agendamentos/${id}`);
 }
 
 export async function runScheduleNow(
@@ -4115,7 +4104,7 @@ export async function runScheduleNow(
   connection_ids: number[];
   schedule_name: string;
 }> {
-  const { data } = await api.post(`/etl/schedules/${id}/run`);
+  const { data } = await api.post(`/operacoes/extracoes/agendamentos/${id}/executar`);
   return data;
 }
 
@@ -4132,7 +4121,7 @@ export interface MappedConnection {
 export async function getConnectionsForDestination(
   destTableId: number,
 ): Promise<MappedConnection[]> {
-  const { data } = await api.get(`/etl/connections-for-dest/${destTableId}`);
+  const { data } = await api.get(`/operacoes/extracoes/fontes-por-destino/${destTableId}`);
   return data;
 }
 
@@ -4177,14 +4166,14 @@ export interface CsvIngestResult {
 export async function getCsvUploadConnections(): Promise<
   CsvUploadConnection[]
 > {
-  const { data } = await api.get("/csv-upload/connections");
+  const { data } = await api.get("/dados/upload-csv/fontes");
   return data;
 }
 
 export async function previewCsv(file: File): Promise<CsvPreview> {
   const formData = new FormData();
   formData.append("file", file);
-  const { data } = await api.post("/csv-upload/preview", formData, {
+  const { data } = await api.post("/dados/upload-csv/previa", formData, {
     headers: { "Content-Type": undefined },
   });
   return data;
@@ -4201,7 +4190,7 @@ export async function ingestCsv(
   formData.append("connection_id", String(connectionId));
   formData.append("billing_period", billingPeriod);
   formData.append("column_types_json", JSON.stringify(columnTypes));
-  const { data } = await api.post("/csv-upload/ingest", formData, {
+  const { data } = await api.post("/dados/upload-csv/ingerir", formData, {
     headers: { "Content-Type": undefined },
   });
   return data;
@@ -4210,7 +4199,7 @@ export async function ingestCsv(
 export async function getCsvUploadHistory(
   connectionId: number,
 ): Promise<IngestedBlob[]> {
-  const { data } = await api.get(`/csv-upload/history/${connectionId}`);
+  const { data } = await api.get(`/dados/upload-csv/historico/${connectionId}`);
   return data;
 }
 
@@ -4221,302 +4210,10 @@ export async function ingestCsvBatch(
   const formData = new FormData();
   files.forEach((f) => formData.append("files", f));
   formData.append("connection_id", String(connectionId));
-  const { data } = await api.post("/csv-upload/ingest-batch", formData, {
+  const { data } = await api.post("/dados/upload-csv/ingerir-lote", formData, {
     headers: { "Content-Type": undefined },
   });
   return data;
-}
-
-// ── AI Dashboards ──
-export type AIMetricKind = "tokens" | "cost";
-
-export interface AICostCoveragePct {
-  token: number;
-  license: number;
-  overall: number;
-}
-
-export interface AIDashboardFilter {
-  period?: string;
-  year?: number;
-  department_id?: number;
-  department_path?: string;
-  provider?: string;
-  metric?: AIMetricKind;
-}
-
-export interface AIOverviewResult {
-  metric: AIMetricKind;
-  cost_coverage_pct: AICostCoveragePct;
-  department_path?: string | null;
-  kpis: {
-    total_usage: number;
-    active_licenses: number;
-    utilization_rate: number;
-    usage_per_active_user: number;
-    estimated_waste: number;
-    mom_change_pct: number;
-  };
-  monthly_series: Array<{ period: string; provider: string; value: number }>;
-  license_utilization_by_dept: Array<{
-    department: string;
-    licenses: number;
-    active_users: number;
-    utilization_rate: number;
-  }>;
-  adoption_funnel: {
-    assigned: number;
-    logged_in: number;
-    used: number;
-    healthy: number;
-  };
-  provider_bubble: Array<{
-    provider: string;
-    licenses: number;
-    usage_value: number;
-  }>;
-}
-
-export interface AILicensesResult {
-  metric: AIMetricKind;
-  cost_coverage_pct: AICostCoveragePct;
-  summary: {
-    total_licenses: number;
-    never_used: number;
-    inactive_30d?: number;
-    inactive_60d?: number;
-    inactive_90d?: number;
-    total_allocated_cost: number;
-    reclaim_potential: number;
-    [key: string]: number | undefined;
-  };
-  items: Array<{
-    user_email: string;
-    provider: string;
-    product_name: string;
-    license_sku: string;
-    activity_status: string;
-    days_since_activity: number;
-    allocated_cost: number;
-    last_activity_at?: string | null;
-  }>;
-}
-
-export interface AIConsumptionResult {
-  metric: AIMetricKind;
-  cost_coverage_pct: AICostCoveragePct;
-  percentiles: { p10: number; p95: number };
-  pareto: Array<{ provider: string; value: number }>;
-  cost_per_million_tokens: Array<{
-    provider: string;
-    model_name: string;
-    cost_per_million: number;
-  }>;
-  outliers: Array<{
-    user_email: string;
-    provider: string;
-    metric_value: number;
-    usage_index: number;
-    percent_rank: number;
-  }>;
-  zombies: Array<{
-    user_email: string;
-    provider: string;
-    metric_value: number;
-    usage_index: number;
-    percent_rank: number;
-  }>;
-  ranked_users: Array<{
-    user_email: string;
-    provider: string;
-    metric_value: number;
-    total_tokens: number;
-    usage_index: number;
-    percent_rank: number;
-  }>;
-  heatmap: Array<{ usage_date: string; user_email: string; value: number }>;
-}
-
-export interface AIUserResult {
-  metric: AIMetricKind;
-  cost_coverage_pct: AICostCoveragePct;
-  user_email: string;
-  summary: {
-    total_usage: number;
-    total_cost: number;
-    total_tokens: number;
-    dept_percent_rank: number;
-    license_count: number;
-  };
-  licenses: Array<{
-    provider: string;
-    product_name: string;
-    license_status: string;
-    activity_status: string;
-    last_activity_at?: string | null;
-    days_since_activity: number;
-    allocated_cost: number;
-  }>;
-  consumption_by_model: Array<{
-    provider: string;
-    model_name: string;
-    usage_date: string;
-    total_tokens: number;
-    cost: number;
-    metric_value: number;
-  }>;
-}
-
-async function postAIDashboard<T>(
-  path: string,
-  body: unknown,
-  signal?: AbortSignal,
-): Promise<T> {
-  const { data } = await api.post(`/ai-dashboards/${path}`, body, {
-    signal,
-    timeout: 120000,
-  });
-  return data;
-}
-
-export async function getAIDashboardOverview(
-  body: AIDashboardFilter,
-  signal?: AbortSignal,
-): Promise<AIOverviewResult> {
-  return postAIDashboard("overview", body, signal);
-}
-
-export async function getAIDashboardLicenses(
-  body: AIDashboardFilter & {
-    limit?: number;
-    offset?: number;
-    reclaim_only?: boolean;
-  },
-  signal?: AbortSignal,
-): Promise<AILicensesResult> {
-  return postAIDashboard("licenses", body, signal);
-}
-
-export async function getAIDashboardConsumption(
-  body: AIDashboardFilter & {
-    limit?: number;
-    outliers_only?: boolean;
-    zombie_only?: boolean;
-  },
-  signal?: AbortSignal,
-): Promise<AIConsumptionResult> {
-  return postAIDashboard("consumption", body, signal);
-}
-
-export async function getAIDashboardUser(
-  body: AIDashboardFilter & { user_email: string },
-  signal?: AbortSignal,
-): Promise<AIUserResult> {
-  return postAIDashboard("user", body, signal);
-}
-
-// ── Visões por provedor de IA (Anthropic Claude / Google NotebookLM) ──
-export type AIProviderId = "anthropic" | "notebooklm";
-
-export interface AIProviderOverviewResult {
-  provider: AIProviderId;
-  provider_label: string;
-  provider_color: string;
-  primary_metric: "tokens" | "cost";
-  period: {
-    date_from: string;
-    date_to: string;
-    data_min_day: string;
-    data_max_day: string;
-    billing_period: string | null;
-    license_period: string | null;
-    period_count: number;
-  };
-  kpis: {
-    total_tokens: number;
-    input_tokens: number;
-    output_tokens: number;
-    source_total_tokens: number;
-    total_requests: number;
-    consumption_users: number;
-    total_licenses: number;
-    active_licenses: number;
-    logged_in: number;
-    never_used: number;
-    inactive_30d: number;
-    inactive_60d: number;
-    inactive_90d: number;
-    total_cost: number;
-    cost_per_million_tokens: number;
-    tokens_per_request: number;
-    tokens_per_user: number;
-  };
-  daily_series: Array<{
-    date: string;
-    input_tokens: number;
-    output_tokens: number;
-    total_tokens: number;
-    requests: number;
-    cost: number;
-    users: number;
-  }>;
-  model_breakdown: Array<{
-    model_name: string;
-    record_type: string;
-    rows: number;
-    input_tokens: number;
-    output_tokens: number;
-    total_tokens: number;
-    requests: number;
-    cost: number;
-    share_pct: number;
-  }>;
-  user_ranking: Array<{
-    user_email: string;
-    user_name: string;
-    input_tokens: number;
-    output_tokens: number;
-    tokens: number;
-    requests: number;
-    cost: number;
-    last_activity_at: string | null;
-    days_since_activity: number | null;
-    activity_status: string;
-    license_status: string;
-    logged_in: boolean;
-    has_consumption: boolean;
-    has_license: boolean;
-  }>;
-  license_table: Array<{
-    user_email: string;
-    user_name: string;
-    user_role: string;
-    license_status: string;
-    activity_status: string;
-    last_activity_at: string | null;
-    days_since_activity: number | null;
-    license_sku: string;
-    organization_id: string;
-    logged_in: boolean;
-  }>;
-  adoption_funnel: {
-    assigned: number;
-    logged_in: number;
-    used: number;
-    healthy: number;
-  };
-  data_quality: {
-    consumption_rows: number;
-    consumption_with_user: number;
-    consumption_with_tokens: number;
-    consumption_with_cost: number | null;
-    license_rows: number;
-    license_period: string | null;
-    primary_metric: "tokens" | "cost";
-    consumption_but_license_never: number;
-    consumption_without_license: number;
-    notes: string[];
-  };
 }
 
 export interface GoldCubeRuleSource {
@@ -4571,7 +4268,7 @@ export interface GoldCubeHistoryItem {
 }
 
 export async function getGoldCubeRules(): Promise<GoldCubeRule[]> {
-  const { data } = await api.get("/gold/rules");
+  const { data } = await api.get("/custos/regras");
   return data;
 }
 
@@ -4607,27 +4304,27 @@ export async function saveGoldCubeRule(
     }),
   };
   if (rule.id) {
-    const { data } = await api.put(`/gold/rules/${rule.id}`, body);
+    const { data } = await api.put(`/custos/regras/${rule.id}`, body);
     purgeExpectedViewCache();
     return data;
   }
-  const { data } = await api.post("/gold/rules", body);
+  const { data } = await api.post("/custos/regras", body);
   purgeExpectedViewCache();
   return data;
 }
 
 export async function getGoldTables(): Promise<GoldTable[]> {
-  const { data } = await api.get("/gold/gold-tables");
+  const { data } = await api.get("/custos/tabelas");
   return data.tables || [];
 }
 
 export async function deleteGoldCubeRule(ruleId: number): Promise<void> {
-  await api.delete("/gold/rules/" + ruleId);
+  await api.delete("/custos/regras/" + ruleId);
   purgeExpectedViewCache();
 }
 
 export async function deleteGoldTable(tableName: string): Promise<void> {
-  await api.delete("/gold/tables/" + encodeURIComponent(tableName));
+  await api.delete("/custos/tabelas/" + encodeURIComponent(tableName));
   purgeExpectedViewCache();
 }
 
@@ -4639,13 +4336,13 @@ export async function reprocessGoldCubes(
   message: string;
   rules: number;
 }> {
-  const { data } = await api.post("/gold/reprocess", { rule_ids: ruleIds });
+  const { data } = await api.post("/custos/reprocessar", { rule_ids: ruleIds });
   purgeExpectedViewCache();
   return data;
 }
 
 export async function getGoldCubeHistory(): Promise<GoldCubeHistoryItem[]> {
-  const { data } = await api.get("/gold/history");
+  const { data } = await api.get("/custos/historico");
   return data;
 }
 
@@ -4704,7 +4401,7 @@ export async function queryDimonTable(body: {
 }): Promise<GoldQueryResult> {
   const key = `gold-query:${JSON.stringify(body)}`;
   return cachedAnalytics(key, async () => {
-    const { data } = await api.post("/gold/query", body, { timeout: 180000 });
+    const { data } = await api.post("/custos/consulta", body, { timeout: 180000 });
     return data as GoldQueryResult;
   });
 }
@@ -4721,7 +4418,7 @@ export async function queryGoldDailyConsumption(body: GoldQueryRequestV2): Promi
   const pending = dailyConsumptionInflight.get(key);
   if (pending) return pending;
   // Share only active requests. The next request after completion reads fresh data.
-  const request = api.post<GoldDailyConsumptionResult>("/gold/daily-consumption", body, { timeout: 180000 })
+  const request = api.post<GoldDailyConsumptionResult>("/custos/consumo-diario", body, { timeout: 180000 })
     .then(({ data }) => data)
     .finally(() => dailyConsumptionInflight.delete(key));
   dailyConsumptionInflight.set(key, request);
@@ -4732,13 +4429,13 @@ export async function getGoldFilterOptions(body: {
   table: string; column: string; filters?: GoldQueryFilter[];
   filter_groups?: GoldQueryFilter[][]; search?: string; offset?: number; limit?: number;
 }): Promise<{ values: string[]; offset: number; limit: number; has_more: boolean }> {
-  const { data } = await api.post("/gold/filter-options", body, { timeout: 120000 });
+  const { data } = await api.post("/custos/opcoes-filtro", body, { timeout: 120000 });
   return data;
 }
 
 export async function getDimonInfo(table: string): Promise<GoldInfo> {
   return cachedAnalytics(`gold-info:${table}`, async () => {
-    const { data } = await api.get("/gold/info", { params: { table } });
+    const { data } = await api.get("/custos/informacoes", { params: { table } });
     return data as GoldInfo;
   });
 }
@@ -4752,7 +4449,7 @@ export async function getGoldSchema(
   goldTable: string,
 ): Promise<GoldColumn[]> {
   return cachedAnalytics(`gold-schema:${goldTable}`, async () => {
-    const { data } = await api.get("/gold/gold-schema", {
+    const { data } = await api.get("/custos/esquema", {
       params: { gold_table: goldTable },
     });
     return (data.columns || []) as GoldColumn[];
@@ -4769,7 +4466,7 @@ export interface ScheduledShutdownSetup {
 export async function setupScheduledShutdown(
   connection_id?: number,
 ): Promise<ScheduledShutdownSetup> {
-  const { data } = await api.post("/scheduled-shutdown/setup", {
+  const { data } = await api.post("/otimizacao/desligamento-agendado/configurar", {
     connection_id,
   });
   return data;
@@ -4819,7 +4516,7 @@ export interface SavingsResponse {
 export async function getShutdownSavings(
   filter: SavingsFilter = {},
 ): Promise<SavingsResponse> {
-  const { data } = await api.post("/scheduled-shutdown/savings", filter);
+  const { data } = await api.post("/otimizacao/desligamento-agendado/economias", filter);
   return data;
 }
 
@@ -4831,7 +4528,7 @@ export interface SavingsMonthlyRow {
 }
 
 export async function getSavingsMonthly(): Promise<SavingsMonthlyRow[]> {
-  const { data } = await api.get("/scheduled-shutdown/savings-monthly");
+  const { data } = await api.get("/otimizacao/desligamento-agendado/economias-mensais");
   return data.rows || [];
 }
 
@@ -4849,7 +4546,7 @@ export interface PadroesResponse {
 }
 
 export async function getPadroes(period?: string): Promise<PadroesResponse> {
-  const { data } = await api.get("/scheduled-shutdown/padroes", {
+  const { data } = await api.get("/otimizacao/desligamento-agendado/padroes", {
     params: period ? { period } : {},
   });
   return data;
@@ -4861,7 +4558,7 @@ export interface PadraoPeriodoItem {
 }
 
 export async function getPadroesPeriodos(): Promise<PadraoPeriodoItem[]> {
-  const { data } = await api.get("/scheduled-shutdown/padroes-periodos");
+  const { data } = await api.get("/otimizacao/desligamento-agendado/padroes-periodos");
   return data.periods || [];
 }
 
@@ -4885,7 +4582,7 @@ export async function getPadroesRecursos(
   period: string,
   padrao: string,
 ): Promise<PadraoRecursosResponse> {
-  const { data } = await api.get("/scheduled-shutdown/padroes-recursos", {
+  const { data } = await api.get("/otimizacao/desligamento-agendado/padroes-recursos", {
     params: { period, padrao },
   });
   return data;
@@ -4911,7 +4608,7 @@ export type SavingDepartamentoResponse = SavingOrganogramaResponse;
 export async function getSavingOrganograma(
   period?: string,
 ): Promise<SavingOrganogramaResponse> {
-  const { data } = await api.get("/scheduled-shutdown/saving-organograma", {
+  const { data } = await api.get("/otimizacao/desligamento-agendado/economia-organograma", {
     params: period ? { period } : {},
   });
   return data;
@@ -4956,7 +4653,7 @@ export async function getVmDailyUsage(
   resourceName: string,
   days = 30,
 ): Promise<VmDailyUsageResponse> {
-  const { data } = await api.get("/scheduled-shutdown/vm-usage-daily", {
+  const { data } = await api.get("/otimizacao/desligamento-agendado/uso-diario-vm", {
     params: { resource_name: resourceName, days },
   });
   return data;
@@ -4991,7 +4688,7 @@ export interface ScheduleDeltaResponse {
 }
 
 export async function getScheduleDelta(): Promise<ScheduleDeltaResponse> {
-  const { data } = await api.get("/scheduled-shutdown/schedule-delta");
+  const { data } = await api.get("/otimizacao/desligamento-agendado/agendar-delta");
   return data;
 }
 
@@ -5018,7 +4715,7 @@ export interface TagDeltaResponse {
 }
 
 export async function getTagDelta(): Promise<TagDeltaResponse> {
-  const { data } = await api.get("/scheduled-shutdown/tag-delta");
+  const { data } = await api.get("/otimizacao/desligamento-agendado/delta-tags");
   return data;
 }
 
@@ -5050,7 +4747,7 @@ export interface OpportunityResponse {
 export async function getOpportunity(
   filter: SavingsFilter,
 ): Promise<OpportunityResponse> {
-  const { data } = await api.post("/scheduled-shutdown/opportunity", filter);
+  const { data } = await api.post("/otimizacao/desligamento-agendado/oportunidade", filter);
   return data;
 }
 
@@ -5067,7 +4764,7 @@ export interface OpportunitySubscriptionsResponse {
 
 export async function getOpportunitySubscriptions(): Promise<OpportunitySubscriptionsResponse> {
   const { data } = await api.get(
-    "/scheduled-shutdown/opportunity-subscriptions",
+    "/otimizacao/desligamento-agendado/assinaturas-oportunidade",
   );
   return data;
 }
@@ -5089,7 +4786,7 @@ export interface ShutdownExceptionRule {
 export async function listShutdownExceptions(
   active_only = false,
 ): Promise<ShutdownExceptionRule[]> {
-  const { data } = await api.get("/scheduled-shutdown/exceptions", {
+  const { data } = await api.get("/otimizacao/desligamento-agendado/excecoes", {
     params: { active_only },
   });
   return data;
@@ -5100,17 +4797,17 @@ export async function saveShutdownException(
 ): Promise<ShutdownExceptionRule> {
   if (rule.id) {
     const { data } = await api.put(
-      "/scheduled-shutdown/exceptions/" + rule.id,
+      "/otimizacao/desligamento-agendado/excecoes/" + rule.id,
       rule,
     );
     return data;
   }
-  const { data } = await api.post("/scheduled-shutdown/exceptions", rule);
+  const { data } = await api.post("/otimizacao/desligamento-agendado/excecoes", rule);
   return data;
 }
 
 export async function deleteShutdownException(ruleId: number): Promise<void> {
-  await api.delete("/scheduled-shutdown/exceptions/" + ruleId);
+  await api.delete("/otimizacao/desligamento-agendado/excecoes/" + ruleId);
 }
 
 export interface ExceptionFromDeltaInput {
@@ -5125,7 +4822,7 @@ export async function createExceptionFromDelta(
   input: ExceptionFromDeltaInput,
 ): Promise<ShutdownExceptionRule> {
   const { data } = await api.post(
-    "/scheduled-shutdown/exceptions/from-delta",
+    "/otimizacao/desligamento-agendado/excecoes/a-partir-do-delta",
     input,
   );
   return data;
@@ -5188,7 +4885,7 @@ export async function getOrphanSummary(
   } = {},
   signal?: AbortSignal,
 ): Promise<OrphanSummary> {
-  const { data } = await api.get("/azure-resource-graph/summary", {
+  const { data } = await api.get("/governanca/grafo-recursos-azure/resumo", {
     params,
     signal,
   });
@@ -5208,7 +4905,7 @@ export async function getOrphans(
   } = {},
   signal?: AbortSignal,
 ): Promise<{ rows: OrphanRow[]; total: number; error?: string }> {
-  const { data } = await api.get("/azure-resource-graph/orphans", {
+  const { data } = await api.get("/governanca/grafo-recursos-azure/orfaos", {
     params,
     signal,
   });
@@ -5223,7 +4920,7 @@ export async function setOrphanAnnotation(body: {
   reason?: string;
   updated_by?: string;
 }): Promise<{ status: string; removed: boolean }> {
-  const { data } = await api.post("/azure-resource-graph/annotations", body);
+  const { data } = await api.post("/governanca/grafo-recursos-azure/anotacoes", body);
   return data;
 }
 
@@ -5265,7 +4962,7 @@ export async function getOrphanSavings(
   } = {},
   signal?: AbortSignal,
 ): Promise<OrphanSavings> {
-  const { data } = await api.get("/azure-resource-graph/orphan-savings", {
+  const { data } = await api.get("/governanca/grafo-recursos-azure/economia-orfaos", {
     params,
     signal,
   });
@@ -5331,7 +5028,7 @@ export async function getAzureSources(
   // Cada conexão tem as suas próprias fontes: sem este filtro o painel de uma
   // conexão listaria as fontes das outras.
   if (connectionId != null) params.connection_id = connectionId;
-  const { data } = await api.get("/azure-sources/", { params });
+  const { data } = await api.get("/dados/fontes-azure/", { params });
   return data;
 }
 
@@ -5341,7 +5038,7 @@ export async function testAzureSource(connectionId: number): Promise<{
   message: string;
   capability?: Record<string, unknown> | null;
 }> {
-  const { data } = await api.post(`/azure-sources/${connectionId}/test`, {}, { timeout: 180000 });
+  const { data } = await api.post(`/dados/fontes-azure/${connectionId}/testar`, {}, { timeout: 180000 });
   return data;
 }
 
@@ -5351,7 +5048,7 @@ export async function updateAzureSourceSelection(
   body: { enabled?: boolean; window_days?: number; metrics?: string[] | null; subscription_ids?: string[] | null },
 ): Promise<AzureSourceItem> {
   const { data } = await api.put(
-    `/azure-sources/${connectionId}/sources/${encodeURIComponent(sourceKey)}/selection`,
+    `/dados/fontes-azure/${connectionId}/fontes/${encodeURIComponent(sourceKey)}/selecao`,
     body,
   );
   return data;
@@ -5366,7 +5063,7 @@ export async function collectAzureEnvironment(
   skipped: { connection_id: number; code: string; source_key: string | null; reason: string }[];
   message: string;
 }> {
-  const { data } = await api.post(`/azure-sources/environments/${encodeURIComponent(environment)}/collect`, body, { timeout: 120000 });
+  const { data } = await api.post(`/dados/fontes-azure/ambientes/${encodeURIComponent(environment)}/coletar`, body, { timeout: 120000 });
   return data;
 }
 
@@ -5377,7 +5074,7 @@ export async function refreshAzurePriceSheet(): Promise<{
   source?: string;
   message?: string;
 }> {
-  const { data } = await api.post("/etl/azure-pricesheet/refresh", {}, { timeout: 120000 });
+  const { data } = await api.post("/operacoes/extracoes/tabela-precos-azure/atualizar", {}, { timeout: 120000 });
   return data;
 }
 
@@ -5405,7 +5102,7 @@ export interface IntegrationItem {
 }
 
 export async function getIntegrations(): Promise<{ items: IntegrationItem[] }> {
-  const { data } = await api.get("/integrations/");
+  const { data } = await api.get("/dados/integracoes/");
   return data;
 }
 
@@ -5419,17 +5116,17 @@ export async function saveIntegration(
     secret?: Record<string, unknown>;
   },
 ): Promise<IntegrationItem> {
-  const { data } = await api.put(`/integrations/${encodeURIComponent(code)}`, body);
+  const { data } = await api.put(`/dados/integracoes/${encodeURIComponent(code)}`, body);
   return data;
 }
 
 export async function deleteIntegration(code: string): Promise<void> {
-  await api.delete(`/integrations/${encodeURIComponent(code)}`);
+  await api.delete(`/dados/integracoes/${encodeURIComponent(code)}`);
 }
 
 export async function testIntegration(
   code: string,
 ): Promise<{ code: string; status: string; message: string }> {
-  const { data } = await api.post(`/integrations/${encodeURIComponent(code)}/test`);
+  const { data } = await api.post(`/dados/integracoes/${encodeURIComponent(code)}/testar`);
   return data;
 }

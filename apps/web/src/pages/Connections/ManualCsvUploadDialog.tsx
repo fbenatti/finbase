@@ -109,7 +109,7 @@ export default function ManualCsvUploadDialog({
       setColumnTypes(types);
       setBillingPeriod(data.suggested_billing_period || "");
     } catch (e) {
-      setError(formatApiError(e, "Falha ao ler o preview do CSV"));
+      setError(formatApiError(e, "Não foi possível ler a prévia do CSV"));
     } finally {
       setLoading(false);
     }
@@ -117,11 +117,11 @@ export default function ManualCsvUploadDialog({
 
   const handleIngest = async () => {
     if (!file || !billingPeriod) {
-      setError("Selecione o arquivo e informe o período de faturamento.");
+      setError("Escolha o arquivo e informe a competência de faturamento.");
       return;
     }
     if (!/^\d{6}$/.test(billingPeriod)) {
-      setError("Período deve estar no formato YYYYMM (ex: 202601).");
+      setError("A competência deve estar no formato AAAAMM (ex.: 202601).");
       return;
     }
 
@@ -136,7 +136,7 @@ export default function ManualCsvUploadDialog({
       setPreview(null);
       setColumnTypes({});
     } catch (e) {
-      setError(formatApiError(e, "Falha ao carregar CSV"));
+      setError(formatApiError(e, "Não foi possível importar o CSV"));
     } finally {
       setLoading(false);
     }
@@ -153,7 +153,7 @@ export default function ManualCsvUploadDialog({
       setBatchResult(res);
       loadHistory();
     } catch (e) {
-      setError(formatApiError(e, "Falha ao carregar múltiplos CSVs"));
+      setError(formatApiError(e, "Falha ao carregar vários CSVs"));
     } finally {
       setLoading(false);
     }
@@ -172,12 +172,12 @@ export default function ManualCsvUploadDialog({
 
   return (
     <Dialog open={open} onClose={onClose} maxWidth="xl" fullWidth>
-      <DialogTitle>Importar arquivos CSV<Typography variant="body2" color="text.secondary">{connectionName}</Typography></DialogTitle>
+      <DialogTitle>Carregar arquivos CSV<Typography variant="body2" color="text.secondary">{connectionName}</Typography></DialogTitle>
       <DialogContent>
         <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
 
           Carregue relatórios CSV locais diretamente na base de origem. Para carregar vários meses de uma
-          vez, use o botão "Importar vários arquivos"; o período é identificado pelas colunas de data/faturamento
+          vez, use o botão "Carregar vários arquivos"; o período é identificado pelas colunas de data/faturamento
           do CSV (com alternativa pelo nome do arquivo).
         </Typography>
 
@@ -227,7 +227,7 @@ export default function ManualCsvUploadDialog({
 
         {result && (
           <Alert severity={result.skip_gold_realizado ? "warning" : "success"} sx={{ mb: 3 }} onClose={() => setResult(null)}>
-            <strong>{result.skip_gold_realizado ? "CSV armazenado na base de origem (consolidação e projeção bloqueadas)." : "CSV carregado com sucesso."}</strong><br />
+            <strong>{result.skip_gold_realizado ? "CSV gravado na base de origem (consolidação e previsão bloqueadas)." : "CSV importado com sucesso."}</strong><br />
             {result.row_count.toLocaleString()} linhas gravadas em {result.table_name} para o período {result.billing_period}.
             {result.warning_message && (
               <>
@@ -246,13 +246,13 @@ export default function ManualCsvUploadDialog({
           >
             <strong>
               {batchResult.length} arquivo(s) gravados na base de origem
-              {batchResult.some(r => r.skip_gold_realizado) ? " (alguns com consolidação e projeção bloqueadas)." : "."}
+              {batchResult.some(r => r.skip_gold_realizado) ? " (alguns com consolidação e previsão bloqueadas)." : "."}
             </strong>
             <ul style={{ margin: "4px 0 0", paddingLeft: 18 }}>
               {batchResult.map((r, i) => (
                 <li key={i}>
                   {r.billing_period}: {r.row_count.toLocaleString()} linhas em {r.table_name}
-                  {r.skip_gold_realizado && " — não entra em realizado/forecast"}
+                  {r.skip_gold_realizado && " — não entra em efetivado nem em previsão"}
                   {r.warning_message && !r.skip_gold_realizado && ` — ${r.warning_message}`}
                 </li>
               ))}
@@ -268,15 +268,15 @@ export default function ManualCsvUploadDialog({
                   Preview: {preview.row_count.toLocaleString()} linhas · {preview.column_count} colunas
                 </Typography>
                 {preview.monthly_grain && (
-                  <Chip label="Granularidade mensal" size="small" color="warning" />
+                  <Chip label="Granularidade por mês" size="small" color="warning" />
                 )}
               </Stack>
               <TextField
-                label="Período de faturamento (YYYYMM)"
+                label="Competência de faturamento (AAAAMM)"
                 value={billingPeriod}
                 onChange={(e) => setBillingPeriod(e.target.value)}
                 sx={{ width: 240 }}
-                helperText="Inferido do CSV; tem prioridade sobre o nome do arquivo"
+                helperText="Identificado pelo CSV; tem prioridade sobre o nome do arquivo"
               />
             </Stack>
 
@@ -301,7 +301,7 @@ export default function ManualCsvUploadDialog({
               ))}
             </Stack>
 
-            <Typography variant="subtitle2" sx={{ mb: 1 }}>Amostra de dados</Typography>
+            <Typography variant="subtitle2" sx={{ mb: 1 }}>Prévia dos dados</Typography>
             <Box sx={{ height: 320 }}>
               <DataGrid rows={previewRows} columns={previewColumns} disableRowSelectionOnClick />
             </Box>
@@ -314,7 +314,7 @@ export default function ManualCsvUploadDialog({
                 onClick={handleIngest}
                 disabled={loading || !billingPeriod}
               >
-                {loading ? "Carregando..." : "Carregar na base de origem"}
+                {loading ? "Lendo..." : "Carregar na base de origem"}
               </Button>
             </Stack>
           </Paper>
@@ -322,18 +322,18 @@ export default function ManualCsvUploadDialog({
 
         {history.length > 0 && (
           <Box>
-            <Typography variant="h6" sx={{ mb: 2 }}>Histórico de importações</Typography>
+            <Typography variant="h6" sx={{ mb: 2 }}>Log de cargas</Typography>
             <SortableTable
               data={history}
               getRowKey={(b) => b.id}
               defaultSortKey="ingested_at"
               defaultSortDir="desc"
               columns={[
-                { key: "billing_period", label: "Período", width: 110 },
+                { key: "billing_period", label: "Competência", width: 110 },
                 { key: "blob_path", label: "Arquivo" },
                 { key: "row_count", label: "Linhas", width: 100, render: (b) => b.row_count?.toLocaleString() || "-" },
-                { key: "status", label: "Status", width: 120, render: (b) => <Chip label={b.status} size="small" color="success" /> },
-                { key: "ingested_at", label: "Carregado em", width: 170, render: (b) => new Date(b.ingested_at).toLocaleString() },
+                { key: "status", label: "Situação", width: 120, render: (b) => <Chip label={b.status} size="small" color="success" /> },
+                { key: "ingested_at", label: "Importado em", width: 170, render: (b) => new Date(b.ingested_at).toLocaleString() },
               ]}
             />
           </Box>

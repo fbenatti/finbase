@@ -2,7 +2,7 @@ import { Dialog, DialogTitle, DialogContent, DialogActions } from "../../compone
 import { dataDisplayText } from "../../utils/dataPresentation";
 import { useState, useEffect } from "react";
 import { Box, Typography, Button, IconButton, Chip, TextField, Select, MenuItem, FormControl, InputLabel, Switch, FormControlLabel, Alert, CircularProgress, Divider, Paper, Autocomplete } from "@mui/material";
-import { Add, Edit, Delete } from "@mui/icons-material";
+import { AddOutlined, EditOutlined, DeleteOutlined } from "@mui/icons-material";
 import {
   getBusinessRules, createBusinessRule, updateBusinessRule, deleteBusinessRule, BusinessRule,
   getDestinationTables, getDestinationSchema, DestinationTable, getFinancialContracts, FinancialContract,
@@ -15,8 +15,8 @@ const OPERATIONS: { value: string; label: string; symbol: string }[] = [
   { value: "*", label: "Multiplicar", symbol: "×" },
   { value: "+", label: "Somar valor", symbol: "+" },
   { value: "-", label: "Subtrair valor", symbol: "−" },
-  { value: "col+", label: "Somar coluna", symbol: "+" },
-  { value: "col-", label: "Subtrair coluna", symbol: "−" },
+  { value: "col+", label: "Somar a coluna", symbol: "+" },
+  { value: "col-", label: "Subtrair a coluna", symbol: "−" },
   { value: "=", label: "Valor Fixo", symbol: "=" },
 ];
 
@@ -39,7 +39,7 @@ interface CondRow {
 const isValidCondition = (c: CondRow) => c.field && (isValueLessOp(c.op) || Boolean(c.value));
 
 const CLOUD_SCOPE_FORM_OPTIONS = [
-  { value: "global", label: "Todas as nuvens (fallback)" },
+  { value: "global", label: "Qualquer nuvem (fallback)" },
   { value: "azure", label: "Azure" },
   { value: "gcp", label: "GCP" },
   { value: "atlas", label: "MongoDB Atlas" },
@@ -49,7 +49,7 @@ const CLOUD_SCOPE_FORM_OPTIONS = [
 ] as const;
 
 const cloudScopeLabel = (scope: string | null | undefined) => {
-  if (!scope) return "Todas as nuvens";
+  if (!scope) return "Qualquer nuvem";
   return CLOUD_SCOPE_FORM_OPTIONS.find((o) => o.value === scope)?.label ?? scope.toUpperCase();
 };
 
@@ -210,7 +210,7 @@ export default function Rules({ embedded = false }: { embedded?: boolean } = {})
       const destId = selectedDestId === "" ? undefined : selectedDestId as number;
       setRules(await getBusinessRules(undefined, destId));
     } catch (e: unknown) {
-      setError(e instanceof Error ? e.message : "Failed to load");
+      setError(e instanceof Error ? e.message : "Não foi possível carregar os ajustes");
     } finally { setLoading(false); }
   };
 
@@ -376,14 +376,14 @@ export default function Rules({ embedded = false }: { embedded?: boolean } = {})
       setDialogOpen(false);
       load();
     } catch (e: unknown) {
-      setError(e instanceof Error ? e.message : "Save failed");
+      setError(e instanceof Error ? e.message : "Não foi possível salvar o ajuste");
     }
   };
 
   const remove = async (id: number) => {
-    if (!confirm("Delete?")) return;
+    if (!confirm("Remover?")) return;
     try { await deleteBusinessRule(id); load(); } catch (e: unknown) {
-      setError(e instanceof Error ? e.message : "Delete failed");
+      setError(e instanceof Error ? e.message : "Não foi possível excluir o ajuste");
     }
   };
 
@@ -427,23 +427,23 @@ export default function Rules({ embedded = false }: { embedded?: boolean } = {})
   return (
     <Box>
       <Box sx={{ display: "flex", justifyContent: "space-between", alignItems: "center", mb: 2, gap: 2, flexWrap: "wrap" }}>
-        {!embedded && <Typography variant="h4">Regras de Negócio</Typography>}
+        {!embedded && <Typography variant="h4">Ajustes de custo</Typography>}
         <Button
-          variant="contained" startIcon={<Add />}
+          variant="contained" startIcon={<AddOutlined />}
           onClick={openNew}
           disabled={!selectedDestId}
         >
-          Nova
+          Novo ajuste
         </Button>
       </Box>
 
       {/* ── Primary: Tabela Destino (mandatory) ── */}
       <Box sx={{ display: "flex", gap: 2, mb: 2, flexWrap: "wrap", alignItems: "center" }}>
         <FormControl sx={{ minWidth: 260 }} size="small">
-          <InputLabel>Tabela Destino *</InputLabel>
+          <InputLabel>Tabela de destino *</InputLabel>
           <Select
             value={selectedDestId}
-            label="Tabela Destino *"
+            label="Tabela de destino *"
             onChange={(e) => {
               setSelectedDestId(e.target.value as number | "");
               setLoading(true);
@@ -457,7 +457,7 @@ export default function Rules({ embedded = false }: { embedded?: boolean } = {})
 
         {selectedDestName && (
           <Chip
-            label={`${rules.length} regras em ${selectedDestName}`}
+            label={`${rules.length} ajustes em ${selectedDestName}`}
             color="primary" size="small"
           />
         )}
@@ -467,12 +467,12 @@ export default function Rules({ embedded = false }: { embedded?: boolean } = {})
 
       {!selectedDestId ? (
         <Alert severity="info" sx={{ mb: 2 }}>
-          Selecione uma Tabela Destino acima para visualizar as regras de negócio.
+          Selecione uma Tabela Destino acima para visualizar os ajustes de custo.
         </Alert>
       ) : loading ? (
         <CircularProgress sx={{ display: "block", mx: "auto", mt: 5 }} />
       ) : rules.length === 0 ? (
-        <EmptyState message="Nenhuma regra de negócio para esta tabela destino. Clique em 'Nova' para começar." />
+        <EmptyState message="Nenhum ajuste de custo para esta tabela de destino. Clique em 'Novo ajuste' para começar." />
       ) : (
         <SortableTable
           data={rules}
@@ -490,7 +490,7 @@ export default function Rules({ embedded = false }: { embedded?: boolean } = {})
               ),
             },
             {
-              key: "_summary", label: "Regra", width: 350,
+              key: "_summary", label: "Ajuste", width: 350,
               render: (r: BusinessRule) => (
                 <Typography variant="body2" sx={{ fontFamily: "monospace", fontSize: "0.75rem" }}>
                   {formatRuleSummary(r)}
@@ -498,7 +498,7 @@ export default function Rules({ embedded = false }: { embedded?: boolean } = {})
               ),
             },
             {
-              key: "cloud_scope", label: "Cloud", width: 120,
+              key: "cloud_scope", label: "Nuvem", width: 120,
               render: (r: BusinessRule) => (
                 <Chip size="small" label={cloudScopeLabel(r.cloud_scope)} variant={r.cloud_scope ? "filled" : "outlined"} />
               ),
@@ -521,8 +521,8 @@ export default function Rules({ embedded = false }: { embedded?: boolean } = {})
               key: "_actions", label: "", width: 80, sortable: false,
               render: (r: BusinessRule) => (
                 <>
-                  <IconButton size="small" onClick={() => openEdit(r)}><Edit fontSize="small" /></IconButton>
-                  <IconButton size="small" onClick={() => remove(r.id)} color="error"><Delete fontSize="small" /></IconButton>
+                  <IconButton size="small" onClick={() => openEdit(r)}><EditOutlined fontSize="small" /></IconButton>
+                  <IconButton size="small" onClick={() => remove(r.id)} color="error"><DeleteOutlined fontSize="small" /></IconButton>
                 </>
               ),
             },
@@ -531,7 +531,7 @@ export default function Rules({ embedded = false }: { embedded?: boolean } = {})
       )}
 
       <Dialog open={dialogOpen} onClose={() => setDialogOpen(false)} maxWidth="md" fullWidth>
-        <DialogTitle>{editing ? "Editar" : "Nova"} Regra de Negócio</DialogTitle>
+        <DialogTitle>{editing ? "Editar" : "Novo"} ajuste de custo</DialogTitle>
         <DialogContent>
           <Box sx={{ display: "flex", flexDirection: "column", gap: 2.5, mt: 1 }}>
             {/* Context banner */}
@@ -541,36 +541,36 @@ export default function Rules({ embedded = false }: { embedded?: boolean } = {})
               </Alert>
             )}
 
-            <TextField label="Nome" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} />
-            <TextField label="Descrição (opcional)" value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} />
+            <TextField label="Nome do ajuste" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} />
+            <TextField label="Finalidade (opcional)" value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} />
 
             <FormControl fullWidth>
-              <InputLabel>Efeito financeiro</InputLabel>
+              <InputLabel>Efeito no custo</InputLabel>
               <Select
                 value={form.financial_effect}
-                label="Efeito financeiro"
+                label="Efeito no custo"
                 onChange={(e) => setForm({ ...form, financial_effect: e.target.value as typeof form.financial_effect, allocation_method: e.target.value === "MARKETPLACE_ALLOCATION" ? "MARKETPLACE_USD_SHARE" : "", financial_contract_id: e.target.value === "BUDGET_COMMITMENT" ? form.financial_contract_id : null })}
               >
-                <MenuItem value="NONE">Não participa do realizado</MenuItem>
-                <MenuItem value="DIRECT_REALIZED">Realizado direto — sem compromisso</MenuItem>
-                <MenuItem value="BUDGET_COMMITMENT">Compromisso orçamentário</MenuItem>
-                <MenuItem value="MARKETPLACE_ALLOCATION">Correlacionamento Marketplace</MenuItem>
+                <MenuItem value="NONE">Fora do efetivado</MenuItem>
+                <MenuItem value="DIRECT_REALIZED">Efetivado direto — sem compromisso</MenuItem>
+                <MenuItem value="BUDGET_COMMITMENT">Compromisso de orçamento</MenuItem>
+                <MenuItem value="MARKETPLACE_ALLOCATION">Correlação com Marketplace</MenuItem>
               </Select>
             </FormControl>
             {form.financial_effect === "BUDGET_COMMITMENT" && (
               <FormControl fullWidth required>
-                <InputLabel>Contrato financeiro</InputLabel>
-                <Select value={form.financial_contract_id ?? ""} label="Contrato financeiro" onChange={(e) => setForm({ ...form, financial_contract_id: Number(e.target.value) || null })}>
+                <InputLabel>Contrato de crédito</InputLabel>
+                <Select value={form.financial_contract_id ?? ""} label="Contrato de crédito" onChange={(e) => setForm({ ...form, financial_contract_id: Number(e.target.value) || null })}>
                   {contracts.filter((contract) => contract.active).map((contract) => <MenuItem key={contract.id} value={contract.id}>{contract.name} ({contract.code})</MenuItem>)}
                 </Select>
               </FormControl>
             )}
 
             <FormControl fullWidth>
-              <InputLabel>Cloud (escopo da regra)</InputLabel>
+              <InputLabel>Nuvem (abrangência do ajuste)</InputLabel>
               <Select
                 value={form.cloud_scope}
-                label="Cloud (escopo da regra)"
+                label="Nuvem (abrangência do ajuste)"
                 onChange={(e) => setForm({ ...form, cloud_scope: e.target.value })}
               >
                 {CLOUD_SCOPE_FORM_OPTIONS.map((s) => (
@@ -579,27 +579,27 @@ export default function Rules({ embedded = false }: { embedded?: boolean } = {})
               </Select>
             </FormControl>
             <Typography variant="caption" color="text.secondary" sx={{ mt: -1 }}>
-              Regras com escopo Azure/GCP/etc. só rodam no reprocessamento da nuvem correspondente.
-              Use &quot;Todas as nuvens&quot; para o fallback final (<code>realizado = BilledCost</code>).
+              Ajustes com abrangência Azure/GCP/etc. só rodam no reprocessamento da nuvem correspondente.
+              Use &quot;Qualquer nuvem&quot; para o fallback final (<code>efetivado = BilledCost</code>).
             </Typography>
 
             <Divider />
-            <Typography variant="subtitle2">Rateio Marketplace → Cloud</Typography>
+            <Typography variant="subtitle2">Rateio Marketplace → nuvem</Typography>
             <Typography variant="caption" color="text.secondary">
-              Preencha estes campos para criar uma regra de teste que distribui o realizado Cloud em BRL pela participação USD do Marketplace.
+              Preencha estes campos para criar um ajuste de teste que distribui o efetivado de nuvem em BRL pela participação USD do Marketplace.
             </Typography>
             {form.financial_effect === "MARKETPLACE_ALLOCATION" && <>
-              <TextField label="Conexão Marketplace" value={form.marketplace_connection_code} onChange={(e) => setForm({ ...form, marketplace_connection_code: e.target.value })} placeholder="mongodb-atlas-pro" />
-              <TextField label="Conexão Cloud" value={form.cloud_connection_code} onChange={(e) => setForm({ ...form, cloud_connection_code: e.target.value })} placeholder="azure-ti" />
-              <TextField label="Produto Cloud" value={form.cloud_product_name} onChange={(e) => setForm({ ...form, cloud_product_name: e.target.value })} placeholder="Private Offer..." />
-              <TextField label="SKU Cloud" value={form.cloud_sku} onChange={(e) => setForm({ ...form, cloud_sku: e.target.value })} />
-              <TextField label="Resource Group Cloud" value={form.cloud_resource_group} onChange={(e) => setForm({ ...form, cloud_resource_group: e.target.value })} />
+              <TextField label="Conexão de marketplace" value={form.marketplace_connection_code} onChange={(e) => setForm({ ...form, marketplace_connection_code: e.target.value })} placeholder="mongodb-atlas-pro" />
+              <TextField label="Conexão de nuvem" value={form.cloud_connection_code} onChange={(e) => setForm({ ...form, cloud_connection_code: e.target.value })} placeholder="azure-ti" />
+              <TextField label="Produto de nuvem" value={form.cloud_product_name} onChange={(e) => setForm({ ...form, cloud_product_name: e.target.value })} placeholder="Oferta privada..." />
+              <TextField label="SKU de nuvem" value={form.cloud_sku} onChange={(e) => setForm({ ...form, cloud_sku: e.target.value })} />
+              <TextField label="Resource Group de nuvem" value={form.cloud_resource_group} onChange={(e) => setForm({ ...form, cloud_resource_group: e.target.value })} />
             </>}
 
             <Divider />
 
-            <Box sx={{ bgcolor: "#e3f2fd", borderRadius: 2, p: 2, border: "1px solid #90caf9" }}>
-              <Typography variant="subtitle2" sx={{ fontWeight: 600, color: "#1565c0", mb: 1 }}>
+            <Box sx={{ bgcolor: "#EEF4FF", borderRadius: 2, p: 2, border: "1px solid #A9C8FF" }}>
+              <Typography variant="subtitle2" sx={{ fontWeight: 600, color: "#0EA5C6", mb: 1 }}>
                 Delimitador por linha (opcional)
               </Typography>
               <Typography variant="caption" color="text.secondary" sx={{ display: "block", mb: 1.5 }}>
@@ -614,7 +614,7 @@ export default function Rules({ embedded = false }: { embedded?: boolean } = {})
                   onInputChange={(_, v) => setForm({ ...form, scope_filter: { ...form.scope_filter, field: v } })}
                   onChange={(_, v) => setForm({ ...form, scope_filter: { ...form.scope_filter, field: v || "" } })}
                   renderInput={(params) => (
-                    <TextField {...params} label="Campo" sx={{ width: 220 }} />
+                    <TextField {...params} label="Coluna da base" sx={{ width: 220 }} />
                   )}
                 />
                 <Select
@@ -623,17 +623,17 @@ export default function Rules({ embedded = false }: { embedded?: boolean } = {})
                   onChange={(e) => setForm({ ...form, scope_filter: { ...form.scope_filter, op: e.target.value } })}
                   sx={{ minWidth: 140 }}
                 >
-                  <MenuItem value="=">= (igual)</MenuItem>
-                  <MenuItem value="!=">!= (diferente)</MenuItem>
-                  <MenuItem value="contains">contém</MenuItem>
-                  <MenuItem value="in">em lista (|)</MenuItem>
-                  <MenuItem value="not_empty">não vazio</MenuItem>
-                  <MenuItem value="empty">vazio</MenuItem>
+                  <MenuItem value="=">é igual a</MenuItem>
+                  <MenuItem value="!=">é diferente de</MenuItem>
+                  <MenuItem value="contains">inclui texto</MenuItem>
+                  <MenuItem value="in">em lista (separe por |)</MenuItem>
+                  <MenuItem value="not_empty">preenchido</MenuItem>
+                  <MenuItem value="empty">em branco</MenuItem>
                 </Select>
                 {!isValueLessOp(form.scope_filter.op) && (
                   <TextField
                     size="small"
-                    label="Valor"
+                    label="Valor comparado"
                     value={form.scope_filter.value}
                     onChange={(e) => setForm({ ...form, scope_filter: { ...form.scope_filter, value: e.target.value } })}
                     placeholder={form.scope_filter.op === "in" ? "valor1|valor2" : "valor"}
@@ -650,11 +650,11 @@ export default function Rules({ embedded = false }: { embedded?: boolean } = {})
             {/* ═══════════════════════════════════════════════════════ */}
             <Box sx={{ bgcolor: "#f3e5f5", borderRadius: 2, p: 2, border: "1px solid #ce93d8" }}>
               <Box sx={{ display: "flex", justifyContent: "space-between", alignItems: "center", mb: 1.5 }}>
-                <Typography variant="subtitle1" sx={{ fontWeight: 600, color: "#7b1fa2", display: "flex", alignItems: "center", gap: 1 }}>
+                <Typography variant="subtitle1" sx={{ fontWeight: 600, color: "#0B3FA8", display: "flex", alignItems: "center", gap: 1 }}>
                   <Chip label="SE" size="small" color="secondary" sx={{ fontWeight: 700 }} />
                   Condições
                 </Typography>
-                <Button size="small" startIcon={<Add />} onClick={addCondition} variant="outlined" color="secondary">
+                <Button size="small" startIcon={<AddOutlined />} onClick={addCondition} variant="outlined" color="secondary">
                   Adicionar Condição
                 </Button>
               </Box>
@@ -666,7 +666,7 @@ export default function Rules({ embedded = false }: { embedded?: boolean } = {})
               {form.conditions.length === 0 && (
                 <Box sx={{ textAlign: "center", py: 1.5, color: "text.secondary", bgcolor: "#fafafa", borderRadius: 1, border: "1px dashed #ddd" }}>
                   <Typography variant="body2" sx={{ fontStyle: "italic" }}>
-                    (sem condições — regra aplicada em todas as linhas)
+                    (sem condições — ajuste aplicado em todas as linhas)
                   </Typography>
                 </Box>
               )}
@@ -688,7 +688,7 @@ export default function Rules({ embedded = false }: { embedded?: boolean } = {})
                     </Box>
                   )}
 
-                  <Box sx={{ display: "flex", gap: 1, alignItems: "center", mb: 1, bgcolor: "#fff", p: 1, borderRadius: 1, border: "1px solid #E2E5EE" }}>
+                  <Box sx={{ display: "flex", gap: 1, alignItems: "center", mb: 1, bgcolor: "#fff", p: 1, borderRadius: 1, border: "1px solid #E1E8F0" }}>
                     <Autocomplete
                       freeSolo
                       size="small"
@@ -697,27 +697,27 @@ export default function Rules({ embedded = false }: { embedded?: boolean } = {})
                       onInputChange={(_, v) => updateCondition(i, "field", v)}
                       onChange={(_, v) => updateCondition(i, "field", v || "")}
                       renderInput={(params) => (
-                        <TextField {...params} label="Campo" sx={{ width: 240 }} />
+                        <TextField {...params} label="Coluna da base" sx={{ width: 240 }} />
                       )}
                     />
                     <Select size="small" value={cond.op}
                       onChange={(e) => updateCondition(i, "op", e.target.value)}
                       sx={{ minWidth: 140 }}>
-                      <MenuItem value="=">= (igual / exato)</MenuItem>
-                      <MenuItem value="!=">!= (diferente)</MenuItem>
-                      <MenuItem value="contains">contém (~)</MenuItem>
-                      <MenuItem value="in">em lista (|)</MenuItem>
-                      <MenuItem value="not_empty">não vazio</MenuItem>
-                      <MenuItem value="empty">vazio</MenuItem>
+                      <MenuItem value="=">é igual a (exato)</MenuItem>
+                      <MenuItem value="!=">é diferente de</MenuItem>
+                      <MenuItem value="contains">inclui texto (~)</MenuItem>
+                      <MenuItem value="in">em lista (separe por |)</MenuItem>
+                      <MenuItem value="not_empty">preenchido</MenuItem>
+                      <MenuItem value="empty">em branco</MenuItem>
                     </Select>
                     {!isValueLessOp(cond.op) && (
-                    <TextField size="small" label="Valor" value={cond.value}
+                    <TextField size="small" label="Valor comparado" value={cond.value}
                       onChange={(e) => updateCondition(i, "value", e.target.value)}
                       placeholder={cond.op === "in" ? "valor1|valor2|..." : "valor"}
                       sx={{ flex: 1, minWidth: 180 }} />
                     )}
                     <IconButton size="small" onClick={() => removeCondition(i)} color="error">
-                      <Delete fontSize="small" />
+                      <DeleteOutlined fontSize="small" />
                     </IconButton>
                   </Box>
                 </Box>
@@ -743,14 +743,14 @@ export default function Rules({ embedded = false }: { embedded?: boolean } = {})
                     onInputChange={(_, v) => setForm({ ...form, source_column: v })}
                     onChange={(_, v) => setForm({ ...form, source_column: v || "" })}
                     renderInput={(params) => (
-                      <TextField {...params} label="Coluna Origem" sx={{ width: 240 }}
-                        helperText="Somente colunas numéricas" />
+                      <TextField {...params} label="Coluna de origem" sx={{ width: 240 }}
+                        helperText="Apenas colunas numéricas" />
                     )}
                   />
                 )}
                 <FormControl size="small" sx={{ minWidth: 160 }}>
-                  <InputLabel>Operação</InputLabel>
-                  <Select value={form.operation} label="Operação"
+                  <InputLabel>Cálculo</InputLabel>
+                  <Select value={form.operation} label="Cálculo"
                     onChange={(e) => {
                       const operation = e.target.value;
                       setForm({
@@ -774,14 +774,14 @@ export default function Rules({ embedded = false }: { embedded?: boolean } = {})
                     onInputChange={(_, v) => setForm({ ...form, operand_column: v })}
                     onChange={(_, v) => setForm({ ...form, operand_column: v || "" })}
                     renderInput={(params) => (
-                      <TextField {...params} label="Coluna Operando" sx={{ width: 240 }}
-                        helperText="Segunda coluna numérica (ex.: CreditAmount)" />
+                      <TextField {...params} label="Coluna do segundo operando" sx={{ width: 240 }}
+                        helperText="Segundo termo numérico (ex.: CreditAmount)" />
                     )}
                   />
                 ) : (
                   <TextField
                     size="small"
-                    label={form.operation === "%" ? "Percentual" : form.operation === "=" ? "Valor Fixo" : "Taxa / Valor"}
+                    label={form.operation === "%" ? "Percentual" : form.operation === "=" ? "Valor Fixo" : "Taxa ou valor"}
                     value={form.rate}
                     onChange={(e) => setForm({ ...form, rate: e.target.value })}
                     type="number"
@@ -798,8 +798,8 @@ export default function Rules({ embedded = false }: { embedded?: boolean } = {})
                   onInputChange={(_, v) => setForm({ ...form, target_column: v })}
                   onChange={(_, v) => setForm({ ...form, target_column: v || "" })}
                   renderInput={(params) => (
-                    <TextField {...params} label="Coluna Destino" sx={{ width: 220 }}
-                      helperText="Onde escrever o resultado" />
+                    <TextField {...params} label="Coluna de destino" sx={{ width: 220 }}
+                      helperText="Onde gravar o resultado" />
                   )}
                 />
               </Box>
@@ -811,22 +811,22 @@ export default function Rules({ embedded = false }: { embedded?: boolean } = {})
             {(form.source_column || form.operation === "=" || ((form.operation === "col+" || form.operation === "col-") && form.operand_column))
               && (form.operation === "col+" || form.operation === "col-" || form.rate)
               && form.target_column && (
-              <Paper variant="outlined" sx={{ p: 1.5, bgcolor: "#fafafa", borderLeft: "4px solid #1976d2" }}>
+              <Paper variant="outlined" sx={{ p: 1.5, bgcolor: "#fafafa", borderLeft: "4px solid #0EA5C6" }}>
                 <Typography variant="caption" color="text.secondary" sx={{ display: "block", mb: 0.3 }}>
-                  Preview da regra
+                  Prévia do ajuste
                 </Typography>
                 <Typography variant="body2" sx={{ fontFamily: "monospace", fontSize: "0.82rem" }}>
                   {form.conditions.some(isValidCondition) ? (
                     <>
-                      <Box component="span" sx={{ color: "#7b1fa2", fontWeight: 600 }}>SE </Box>
+                      <Box component="span" sx={{ color: "#0B3FA8", fontWeight: 600 }}>SE </Box>
                       {form.conditions.filter(isValidCondition).map((c, i) => (
                         <Box component="span" key={i}>
                           {i > 0 && (
-                            <Box component="span" sx={{ color: "#9c27b0", fontWeight: 700, mx: 0.5 }}>
+                            <Box component="span" sx={{ color: "#BE185D", fontWeight: 700, mx: 0.5 }}>
                               {c.logic === "OR" ? "OU" : "E"}
                             </Box>
                           )}
-                          <Box component="span" sx={{ color: "#1565c0" }}>{c.field}</Box>
+                          <Box component="span" sx={{ color: "#0EA5C6" }}>{c.field}</Box>
                           <Box component="span" sx={{ color: "#666" }}> {conditionOpLabel(c.op)} </Box>
                           {!isValueLessOp(c.op) && (
                             <Box component="span" sx={{ color: "#e65100" }}>"{c.value}"</Box>
@@ -858,22 +858,22 @@ export default function Rules({ embedded = false }: { embedded?: boolean } = {})
               <TextField label="Prioridade" type="number" value={form.priority}
                 onChange={(e) => setForm({ ...form, priority: Number(e.target.value) })}
                 size="small" sx={{ width: 110 }}
-                helperText="Ordem de aplicação" />
-              <TextField label="Válido de (YYYYMM)" value={form.valid_from}
+                helperText="Ordem em que o ajuste é aplicado" />
+              <TextField label="Vigência inicial (AAAAMM)" value={form.valid_from}
                 onChange={(e) => setForm({ ...form, valid_from: e.target.value })} size="small" sx={{ width: 150 }} />
-              <TextField label="Válido até (YYYYMM)" value={form.valid_until}
+              <TextField label="Vigência final (AAAAMM)" value={form.valid_until}
                 onChange={(e) => setForm({ ...form, valid_until: e.target.value })} size="small" sx={{ width: 150 }} />
               <FormControlLabel
                 control={<Switch checked={form.active} onChange={(e) => setForm({ ...form, active: e.target.checked })} />}
-                label="Ativo"
+                label="Em uso"
               />
             </Box>
 
             {/* Cardinality hint for multi-rule strategy */}
             <Alert severity="info" sx={{ fontSize: "0.8rem" }}>
-              <strong>Ordem de prioridade:</strong> números menores rodam primeiro. Regras específicas por cloud
+              <strong>Ordem de aplicação:</strong> números menores rodam primeiro. Ajustes específicos por nuvem
               (ex.: Azure 20, 25) devem vir <strong>antes</strong> do fallback global (ex.: prioridade 100).
-              Cada regra só preenche linhas ainda vazias — por isso o fallback precisa ser o último.
+              Cada ajuste só preenche linhas ainda em branco — por isso o fallback precisa ser o último.
             </Alert>
           </Box>
         </DialogContent>

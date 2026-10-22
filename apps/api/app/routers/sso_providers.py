@@ -10,7 +10,7 @@ from app.core.sso_crypto import protect_config, sanitize_config, decrypt_config
 from app.database import get_db
 from app.models.identity import SsoProvider, User
 
-router = APIRouter(prefix="/sso/providers", tags=["sso"])
+router = APIRouter(prefix="/administracao/identidade/provedores", tags=["sso"])
 
 
 class ProviderCreate(BaseModel):
@@ -94,7 +94,7 @@ async def delete_provider(provider_id: int, db: AsyncSession = Depends(get_db), 
     return {"ok": True}
 
 
-@router.post("/{provider_id}/test")
+@router.post("/{provider_id}/testar")
 async def test_provider(provider_id: int, db: AsyncSession = Depends(get_db), user: User = Depends(require("auth", "update"))):
     provider = (await db.execute(select(SsoProvider).where(SsoProvider.id == provider_id))).scalar_one_or_none()
     if provider is None:

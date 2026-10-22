@@ -3,7 +3,7 @@ import { useCallback, useEffect, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { useMenuSearchParams as useSearchParams } from "../../navigation/useMenuSearchParams";
 import { Alert, Box, Button, CircularProgress, Paper, Stack, Typography } from "@mui/material";
-import { ArrowBack } from "@mui/icons-material";
+import { ArrowBackOutlined } from "@mui/icons-material";
 import HistoryGrid from "./HistoryGrid";
 import {
   ForecastHistoryMetadata,
@@ -59,12 +59,12 @@ export default function ForecastHistory() {
       <Box sx={{ px: 3, pt: 3, bgcolor: "background.paper", borderBottom: "1px solid", borderColor: "divider" }}>
         <Box sx={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 2, mb: 2 }}>
           <Box>
-            <Typography variant="h4">{comparison ? "Forecast × Realizado" : "Pivot do snapshot"}</Typography>
+            <Typography variant="h4">{comparison ? "Forecast × Efetivado" : "Pivot da versão salva"}</Typography>
             <Typography color="text.secondary" sx={{ mt: 0.5 }}>
               Execução {runId} · consulta server-side sobre o snapshot publicado.
             </Typography>
           </Box>
-          <Button size="small" startIcon={<ArrowBack />} onClick={() => navigate("/projecoes/historico")} sx={{ flexShrink: 0 }}>
+          <Button size="small" startIcon={<ArrowBackOutlined />} onClick={() => navigate("/projecoes/historico")} sx={{ flexShrink: 0 }}>
             Voltar para Forecast
           </Button>
         </Box>
@@ -84,14 +84,14 @@ export default function ForecastHistory() {
         {metadata && (
           <Paper elevation={0} sx={{ p: { xs: 1.5, md: 2 }, borderRadius: 2, bgcolor: "background.paper", border: "1px solid", borderColor: "divider" }}>
             <Box sx={{ mb: 1.5 }}>
-              <Typography variant="h6">{comparison ? "Forecast × Realizado" : "Resultado do snapshot"}</Typography>
+              <Typography variant="h6">{comparison ? "Forecast × Efetivado" : "Resultado da versão salva"}</Typography>
               <Typography variant="body2" color="text.secondary">
                 Dimensões: {metadata.default_rows.join(", ") || "nenhuma"} · período: {metadata.default_columns.join(", ") || "nenhum"}
               </Typography>
             </Box>
             {comparison && result && (
               <Alert severity="info" sx={{ mb: 2 }}>
-                WAPE: {result.wape == null ? "em acompanhamento" : (result.wape * 100).toFixed(2) + "%"}
+                WAPE: {result.wape == null ? "em apuração" : (result.wape * 100).toFixed(2) + "%"}
               </Alert>
             )}
             {result && (
@@ -99,7 +99,7 @@ export default function ForecastHistory() {
                 result={result}
                 loading={loading}
                 onQuery={(search, offset, filters = {}, sort) => void query(search, offset, filters, sort)}
-                measureLabel={comparison ? "Forecast × Realizado" : String(metadata?.snapshot?.measure_column || "Valor")}
+                measureLabel={comparison ? "Previsão × Efetivado" : String(metadata?.snapshot?.measure_column || "Valor")}
               />
             )}
           </Paper>

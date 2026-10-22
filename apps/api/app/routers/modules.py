@@ -24,6 +24,10 @@ class ModuleUpdate(BaseModel):
     enabled: bool
 
 
+class CatalogLabelUpdate(BaseModel):
+    label: str | None = Field(default=None, max_length=160)
+
+
 class MembershipUpdate(BaseModel):
     customer_id: int = Field(gt=0)
 
@@ -35,24 +39,24 @@ async def customer_or_404(db, customer_id):
     return customer
 
 
-@router.get("/navigation")
+@router.get("/navegacao")
 async def navigation(db: AsyncSession = Depends(get_db), user: User = Depends(get_current_user)):
     customer_id = await customer_for_user(db, user.id)
     customer = await customer_or_404(db, customer_id)
     return {"customer_id": customer_id, "customer_name": customer.name, "items": await module_snapshot(db, customer_id, user_id=user.id)}
 
 
-@router.get("/navigation/access/{code}")
+@router.get("/navegacao/acessos/{code}")
 async def access(code: str, db: AsyncSession = Depends(get_db), user: User = Depends(get_current_user)):
     return await require_module_access(db, user.id, code)
 
 
-@router.get("/modules/customers")
+@router.get("/administracao/modulos/clientes")
 async def customers(db: AsyncSession = Depends(get_db), user: User = Depends(require("modules", "read"))):
     return [{"id": c.id, "name": c.name, "slug": c.slug} for c in (await db.execute(select(NavigationCustomer).order_by(NavigationCustomer.name))).scalars()]
 
 
-@router.post("/modules/customers", status_code=201)
+@router.post("/administracao/modulos/clientes", status_code=201)
 async def create_customer(body: CustomerCreate, db: AsyncSession = Depends(get_db), user: User = Depends(require("modules", "create"))):
     name = body.name.strip()
     slug = body.slug.strip().lower()
@@ -66,13 +70,13 @@ async def create_customer(body: CustomerCreate, db: AsyncSession = Depends(get_d
     return {"id": customer.id, "name": customer.name, "slug": customer.slug}
 
 
-@router.get("/modules/customers/{customer_id}")
+@router.get("/administracao/modulos/clientes/{customer_id}")
 async def customer_modules(customer_id: int, db: AsyncSession = Depends(get_db), user: User = Depends(require("modules", "read"))):
     await customer_or_404(db, customer_id)
     return await module_snapshot(db, customer_id)
 
 
-@router.put("/modules/customers/{customer_id}/{code}")
+@router.put("/administracao/modulos/clientes/{customer_id}/{code}")
 async def update_module(customer_id: int, code: str, body: ModuleUpdate, db: AsyncSession = Depends(get_db), user: User = Depends(require("modules", "update"))):
     await customer_or_404(db, customer_id)
     module = await db.get(NavigationModule, code)
@@ -90,14 +94,27 @@ async def update_module(customer_id: int, code: str, body: ModuleUpdate, db: Asy
     return {"code": code, "enabled": body.enabled}
 
 
-@router.get("/modules/members")
+@router.put("/administracao/modulos/catalogo/{code}")
+async def update_catalog_label(code: str, body: CatalogLabelUpdate, db: AsyncSession = Depends(get_db), user: User = Depends(require("modules", "update"))):
+    module = await db.get(NavigationModule, code)
+    if module is None or not module.active:
+        raise HTTPException(status_code=404, detail="Módulo não encontrado")
+    label = (body.label or "").strip() or None
+    if label is not None and len(label) < 2:
+        raise HTTPException(status_code=422, detail="Informe pelo menos 2 caracteres.")
+    module.custom_label = label
+    await db.commit()
+    return {"code": code, "label": label or module.label}
+
+
+@router.get("/administracao/modulos/membros")
 async def members(db: AsyncSession = Depends(get_db), user: User = Depends(require("modules", "read"))):
     memberships = {m.user_id: m.customer_id for m in (await db.execute(select(NavigationMembership))).scalars()}
     default = (await db.execute(select(NavigationCustomer.id).where(NavigationCustomer.slug == "default"))).scalar_one()
     return [{"user_id": u.id, "username": u.username, "customer_id": memberships.get(u.id, default)} for u in (await db.execute(select(User).order_by(User.username))).scalars()]
 
 
-@router.put("/modules/members/{user_id}")
+@router.put("/administracao/modulos/membros/{user_id}")
 async def assign_member(user_id: int, body: MembershipUpdate, db: AsyncSession = Depends(get_db), user: User = Depends(require("modules", "update"))):
     await customer_or_404(db, body.customer_id)
     if await db.get(User, user_id) is None:

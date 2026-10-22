@@ -60,6 +60,24 @@ consumo calculado de R$ 600 mil no projeto A e R$ 400 mil no projeto B gera
 pesos de 60% e 40%. O `realizado` será R$ 1,2 milhão e R$ 800 mil,
 respectivamente.
 
+## Tela de uso de compromissos
+
+Rota: `/planejamento/consumo-de-compromissos` (componente
+`FinancialContractsDashboard`, subaba `executive=compromisso`).
+
+- Valor contratado: soma do orçamento mensal (`commitment`) de todas as
+  competências do contrato, entre `valid_from` e `valid_until`.
+- Consumido: soma de `consumption` nas competências publicadas.
+- Saldo a consumir: contratado menos consumido.
+- Projeção até o fim: consumido mais a média de `consumption` das últimas três
+  competências, multiplicada pelas competências restantes da vigência.
+- Situação por contrato: acima de 100% do contratado é "Estourado"; projeção
+  acima de 105% é "Risco de estouro"; projeção abaixo de 85% é "Risco de sobra".
+- Gráfico: acumulado real contra o planejado (orçamento acumulado por
+  competência) e a projeção a partir da última competência publicada.
+- Filtro de competência afeta os saldos de compensação, o acerto mensal e o
+  detalhamento; os indicadores do topo são do contrato inteiro.
+
 ## Materialização executiva
 
 O cubo `dest_dm_cost_visao_completa` materializa como medidas somáveis:

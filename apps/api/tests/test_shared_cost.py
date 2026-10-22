@@ -11,7 +11,7 @@ def test_allocation_uses_source_cloud_even_when_organogram_filter_is_stale():
         1: Department(id=1, name="Consumo Cloud", active=True),
         2: Department(id=2, parent_id=1, name="Showback", active=True),
         3: Department(id=3, parent_id=2, name="GCP", active=True),
-        4: Department(id=4, parent_id=3, name="DIR INFRA", cloud_filter="GCP-TI", active=True),
+        4: Department(id=4, parent_id=3, name="DIR INFRA", active=True),
         5: Department(id=5, parent_id=4, name="Networking", active=True),
         6: Department(id=6, parent_id=3, name="DIR DADOS", active=True),
         7: Department(id=7, parent_id=6, name="Projeto", active=True),
@@ -44,7 +44,7 @@ def test_expected_view_uses_provider_scope_when_organogram_filter_is_stale():
     from app.models.rules import Department
     from app.routers.analysis import _expected_view_cloud_filter
 
-    selected = Department(name="Networking", cloud_filter="GCP-TI")
+    selected = Department(name="Networking")
     scope = ["Consumo Cloud", "Showback", "GCP", "DIR INFRA", "Networking"]
     clause = _expected_view_cloud_filter(scope, selected, {"cloud_origem": "cloud_origem"})
     assert "gcp%" in clause
@@ -434,11 +434,11 @@ def test_same_cloud_leaves_shallow_marketplace_structure():
     )
 
     departments = {
-        1: Department(id=1, parent_id=None, name="Marketplace", active=True, cloud_filter="mongodb"),
-        2: Department(id=2, parent_id=1, name="Azure - MongoDB", active=True, cloud_filter="mongodb"),
+        1: Department(id=1, parent_id=None, name="Marketplace", active=True),
+        2: Department(id=2, parent_id=1, name="Azure - MongoDB", active=True),
         3: Department(id=3, parent_id=2, name="MongoDB - Condominio", active=True),
         4: Department(id=4, parent_id=2, name="MongoDB - ATMA", active=True),
-        5: Department(id=5, parent_id=2, name="MongoDB - Invoice", active=True, cloud_filter="Atlas-MongoDB"),
+        5: Department(id=5, parent_id=2, name="MongoDB - Invoice", active=True),
     }
     child_ids = children_map(departments)
     root = cloud_root_path_for(departments[3], ["Marketplace", "Azure - MongoDB", "MongoDB - Condominio"], departments)
@@ -489,8 +489,8 @@ def test_cloud_prefix_for_atlas_mongodb():
 
     departments = {
         1: Department(id=1, parent_id=None, name="Marketplace", active=True),
-        2: Department(id=2, parent_id=1, name="Azure - MongoDB", active=True, cloud_filter="mongodb"),
-        3: Department(id=3, parent_id=2, name="MongoDB - Invoice", active=True, cloud_filter="Atlas-MongoDB"),
+        2: Department(id=2, parent_id=1, name="Azure - MongoDB", active=True),
+        3: Department(id=3, parent_id=2, name="MongoDB - Invoice", active=True),
     }
     assert cloud_prefix_for(departments[3], ["Marketplace", "Azure - MongoDB", "MongoDB - Invoice"], departments) == "mongodb"
     assert cloud_prefix_for(departments[2], ["Marketplace", "Azure - MongoDB"], departments) == "mongodb"

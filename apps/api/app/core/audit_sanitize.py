@@ -1,4 +1,5 @@
 """Sanitização, serialização de snapshots e cálculo de diff para auditoria."""
+import re
 from datetime import date, datetime
 from decimal import Decimal
 
@@ -9,6 +10,13 @@ SECRET_KEYS = frozenset({
     "access_token", "token", "password", "password_hash", "refresh_token",
     "authorization", "current_password", "new_password", "clientSecret",
 })
+
+# Chaves fora da lista acima que ainda carregam credenciais (certificado privado
+# SAML, api_key, SAS). Casamento por padrão, não por lista exata.
+_SECRET_KEY_PATTERN = re.compile(
+    r"(secret|password|passwd|token|private_key|api_key|apikey|credential|cert_private|sas_)",
+    re.IGNORECASE,
+)
 
 TRUNCATE_LIMIT = 10_000
 DIFF_MAX_FIELDS = 200
@@ -21,7 +29,7 @@ def sanitize_dict(data):
     if isinstance(data, dict):
         out = {}
         for key, value in data.items():
-            if key in SECRET_KEYS:
+            if key in SECRET_KEYS or (isinstance(key, str) and _SECRET_KEY_PATTERN.search(key)):
                 out[key] = "***"
                 continue
             out[key] = sanitize_dict(value)

@@ -37,6 +37,7 @@ const SsoProviders = lazy(() => import("./pages/Admin/SsoProviders"));
 const Audit = lazy(() => import("./pages/Admin/Audit"));
 const Ideas = lazy(() => import("./pages/Ideas/Ideas"));
 const Anomalies = lazy(() => import("./pages/Anomalies/Anomalies"));
+const Connectors = lazy(() => import("./pages/Admin/Connectors"));
 function RequireAuth({ children }: { children: ReactElement }) {
   const { user, loading } = useAuth();
   const location = useLocation();
@@ -54,6 +55,13 @@ function RequireAuth({ children }: { children: ReactElement }) {
     return <ChangePassword onChanged={() => window.location.reload()} />;
   }
   return children;
+}
+
+/** Caminhos antigos "/projecoes/acuracia/..." seguem para a mesma aba em "/projecoes/precisao/...". */
+function ForecastAccuracyLegacyRedirect() {
+  const location = useLocation();
+  const rest = location.pathname.slice("/projecoes/acuracia".length).replace(/\/+$/, "") || "/visao";
+  return <Navigate to={{ pathname: `/projecoes/precisao${rest}`, search: location.search, hash: location.hash }} replace />;
 }
 
 function LegacyRedirect({ to }: { to: string }) {
@@ -89,7 +97,7 @@ function LegacyExplorer() {
   return <LegacyRedirect to={`/dados/fontes/${connectionId}/explorar`} />;
 }
 
-const CATALOG_RENDERERS = { Modules, GoldDashboard, Anomalies, FinancialPlanning, ForecastAccuracy, Forecast, Savings, Connections, Tables, PipelineBuilder, Reprocess, Analysis, Governance, Admin, Audit, SsoProviders };
+const CATALOG_RENDERERS = { Modules, Connectors, GoldDashboard, Anomalies, FinancialPlanning, ForecastAccuracy, Forecast, Savings, Connections, Tables, PipelineBuilder, Reprocess, Analysis, Governance, Admin, Audit, SsoProviders };
 
 function ApplicationRoutes() {
   const { user } = useAuth();
@@ -109,9 +117,12 @@ function ApplicationRoutes() {
         <Route path="custos" element={<CatalogLegacyRedirect />} />
         <Route path="custos/avancado" element={<GoldDashboardV2 />} />
         <Route path="alertas" element={<CatalogLegacyRedirect />} />
+        <Route path="alertas/visao-geral" element={<LegacyRedirect to="/alertas/painel" />} />
         <Route path="planejamento" element={<CatalogLegacyRedirect />} />
         <Route path="projecoes" element={<CatalogLegacyRedirect />} />
-        <Route path="projecoes/acuracia" element={<CatalogLegacyRedirect />} />
+        <Route path="projecoes/acuracia/*" element={<ForecastAccuracyLegacyRedirect />} />
+        <Route path="planejamento/acuracia-do-orcamento" element={<LegacyRedirect to="/planejamento/aderencia-orcamento" />} />
+        <Route path="operacoes/acuracia" element={<LegacyRedirect to="/operacoes/precisao" />} />
         <Route path="projecoes/execucoes/:runId" element={<ForecastHistory />} />
         <Route path="otimizacao" element={<CatalogLegacyRedirect />} />
         <Route path="dados/fontes/:connectionId/explorar" element={<Explorer />} />
@@ -145,7 +156,7 @@ function ApplicationRoutes() {
         <Route path="gold-dashboard-v2" element={<LegacyRedirect to="/custos/avancado" />} />
         <Route path="financial-planning" element={<LegacyRedirect to="/planejamento" />} />
         <Route path="forecast" element={<LegacyRedirect to="/projecoes" />} />
-        <Route path="forecast-accuracy" element={<LegacyRedirect to="/projecoes/acuracia" />} />
+        <Route path="forecast-accuracy" element={<LegacyRedirect to="/projecoes/precisao/visao" />} />
         <Route path="forecast/history/:runId" element={<LegacyForecastHistory />} />
         <Route path="savings" element={<LegacyRedirect to="/otimizacao" />} />
         <Route path="departments" element={<LegacyRedirect to="/governanca?tab=organization" />} />
@@ -167,7 +178,6 @@ function ApplicationRoutes() {
         <Route path="schedules" element={<LegacyRedirect to="/operacoes/execucoes?tab=schedules" />} />
         <Route path="expected-view" element={<LegacyRedirect to="/custos?tab=visao-executiva" />} />
         <Route path="reservations" element={<LegacyRedirect to="/governanca?tab=reservas" />} />
-        <Route path="ai-cost-origin" element={<LegacyRedirect to="/governanca?tab=cost-relationship" />} />
         <Route path="*" element={<DefaultModule />} />
         </Route>
       </Routes>

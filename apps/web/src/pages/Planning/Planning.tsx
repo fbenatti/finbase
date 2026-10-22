@@ -3,11 +3,7 @@ import DataGrid from "../../components/FinbaseDataGrid";
 import { dataDisplayText } from "../../utils/dataPresentation";
 import { ChangeEvent, useEffect, useMemo, useRef, useState } from "react";
 import { Alert, Box, Button, Chip, FormControl, InputLabel, InputAdornment, IconButton, Menu, MenuItem, Paper, Select, Stack, TextField, Tooltip, Typography } from "@mui/material";
-import {
-  AddOutlined as Add, FileDownloadOutlined as CloudDownload, EditOutlined as Edit, ExpandLessOutlined as ExpandLess,
-  ExpandMoreOutlined as ExpandMore, RestartAltOutlined as Restore, SaveOutlined as Save,
-  FileUploadOutlined as UploadFile, SearchOutlined as Search,
-} from "@mui/icons-material";
+import { AddOutlined as Add, FileDownloadOutlined as CloudDownload, ExpandLessOutlined as ExpandLess, ExpandMoreOutlined as ExpandMore, SaveOutlined as Save, FileUploadOutlined as UploadFile, SearchOutlined as Search } from "@mui/icons-material";
 import { GridColDef } from "@mui/x-data-grid";
 import * as XLSX from "xlsx";
 import {
@@ -30,12 +26,15 @@ import {
   PlanningVersion,
   PlanningMissingDepartment,
   publishDefenseToBudget,
-  restorePlanningVersion,
   savePlanningGrid,
 } from "../../services/api";
 import EmptyState from "../../components/EmptyState";
+import VersionTimeline from "../../components/VersionTimeline";
 import { useAuth } from "../../auth/AuthContext";
 import BudgetDefensePanel from "./BudgetDefensePanel";
+import { RowAction } from "../../components/RowAction";
+import VersionHistorySection from "../../components/VersionHistorySection";
+import MonthlyValuesDialog from "./MonthlyValuesDialog";
 
 const MONTHS = [
   "Jan",
@@ -116,7 +115,7 @@ type DisplayRow = {
   hasOwn: boolean;
   hasChild: boolean;
 };
-type PublishAction = "save" | "import" | "restore" | null;
+type PublishAction = "save" | "import" | null;
 
 export default function Planning({
   type,
@@ -150,14 +149,10 @@ export default function Planning({
     [message, setMessage] = useState(""),
     [error, setError] = useState(""),
     [edit, setEdit] = useState<DisplayRow | null>(null),
-    // Keep the transient "-" while a negative value is being typed. Parsing
-    // immediately with Number("-") produces NaN and makes the input lose it.
-    [editValues, setEditValues] = useState<Array<number | string>>([]),
     [addYearOpen, setAddYearOpen] = useState(false),
     [newYear, setNewYear] = useState(String(currentYear)),
     [publishAction, setPublishAction] = useState<PublishAction>(null),
-    [importFile, setImportFile] = useState<File | null>(null),
-    [restoreId, setRestoreId] = useState<number | null>(null);
+    [importFile, setImportFile] = useState<File | null>(null);
   const [missingDepartments, setMissingDepartments] = useState<PlanningMissingDepartment[]>([]);
   const [selectedMissing, setSelectedMissing] = useState<string[][]>([]);
   const [exportOpen, setExportOpen] = useState(false);
@@ -375,14 +370,9 @@ export default function Planning({
   ]);
   const openEdit = (row: DisplayRow) => {
     setEdit(row);
-    setEditValues([...row.values]);
   };
-  const applyEdit = () => {
+  const applyEdit = (values: number[]) => {
     if (!edit) return;
-    const values = editValues.map((value) => {
-      const numeric = Number(value);
-      return Number.isFinite(numeric) ? numeric : 0;
-    });
     setRows((previous) => {
       const updated: PlanningRow = {
         entity_type: "department",
@@ -400,17 +390,11 @@ export default function Planning({
     setDirtyDepartmentIds((previous) => new Set(previous).add(edit.department_id));
     setEdit(null);
   };
-  const startPublish = (action: PublishAction, restore?: number) => {
-    setRestoreId(restore || null);
+  const startPublish = (action: PublishAction) => {
     setPublication({
       title: "",
       description: "",
-      event_type:
-        action === "restore"
-          ? "RESTAURACAO"
-          : type === "defesa-orcamentaria"
-            ? "DEFESA"
-            : "CARGA_INICIAL",
+      event_type: type === "defesa-orcamentaria" ? "DEFESA" : "CARGA_INICIAL",
       effective_date: new Date().toISOString().slice(0, 10),
     });
     setPublishAction(action);
@@ -476,8 +460,7 @@ export default function Planning({
           scopedPublication,
           defenseOptions,
         );
-      } else if (publishAction === "restore" && restoreId)
-        await restorePlanningVersion(type, year, restoreId, scopedPublication);
+      }
       setMessage(
         isDefense
           ? "Defesa salva. Use Publicar no Orçamento na solicitação para efetivar o merge."
@@ -538,16 +521,14 @@ export default function Planning({
       renderCell: ({ row }: { row: DisplayRow }) => (
         <Tooltip title={editable ? "Editar valores" : "Versão somente leitura"}>
           <span>
-            <IconButton aria-label={`Editar valores de ${row.name}`} disabled={!editable || loading || saving} onClick={() => openEdit(row)}>
-              <Edit fontSize="small" />
-            </IconButton>
+            <RowAction kind="edit" label={`Editar valores de ${row.name}`} disabled={!editable || loading || saving} onClick={() => openEdit(row)} />
           </span>
         </Tooltip>
       ),
     },
     {
       field: "name",
-      headerName: "Hierarquia organizacional",
+      headerName: "Estrutura organizacional",
       minWidth: 320,
       flex: 1.2,
       cellClassName: "planning-hierarchy",
@@ -576,7 +557,7 @@ export default function Planning({
             </Typography>
           </Tooltip>
           {individualLineIds.has(row.department_id) && (
-            <Tooltip title="Projeto defendido em um ID Orçamento diferente do organograma. Ao publicar, ele passa a pertencer ao ID final.">
+            <Tooltip title="Projeto defendido em um código de orçamento diferente da estrutura. Ao publicar, ele passa a pertencer ao código final.">
               <Chip
                 size="small"
                 color="warning"
@@ -682,7 +663,7 @@ export default function Planning({
         <Paper variant="outlined" sx={{ overflow: "hidden" }}>
           <Box sx={{ px: { xs: 2, md: 3 }, py: 2, borderBottom: 1, borderColor: "divider" }}>
             <Typography variant="h6">Distribuição mensal</Typography>
-            <Typography variant="body2" color="text.secondary">Valores em reais por departamento. Expanda a hierarquia para consultar e editar cada nível.</Typography>
+            <Typography variant="body2" color="text.secondary">Valores em reais por unidade. Expanda a estrutura para consultar e editar cada nível.</Typography>
           </Box>
           <Stack direction={{ xs: "column", sm: "row" }} gap={2} flexWrap="wrap" sx={{ p: { xs: 2, md: 3 }, pb: 2 }}>
             <Stack direction="row" gap={0.5} alignItems="center">
@@ -692,13 +673,13 @@ export default function Planning({
                   {years.map(value => <MenuItem key={value} value={String(value)}>{value}</MenuItem>)}
                 </Select>
               </FormControl>
-              <Tooltip title="Adicionar ano">
-                <IconButton aria-label="Adicionar ano" onClick={() => { setNewYear(String(year + 1)); setAddYearOpen(true); }}><Add fontSize="small" /></IconButton>
+              <Tooltip title="Incluir ano">
+                <IconButton aria-label="Incluir ano" onClick={() => { setNewYear(String(year + 1)); setAddYearOpen(true); }}><Add fontSize="small" /></IconButton>
               </Tooltip>
             </Stack>
             <FormControl sx={{ minWidth: 240, flex: { xs: 1, md: "0 1 320px" } }}>
-              <InputLabel shrink id="planning-version-label">Versão do planejamento</InputLabel>
-              <Select labelId="planning-version-label" label="Versão do planejamento" notched value={snapshotId} onChange={e => setSnapshotId(String(e.target.value))} displayEmpty>
+              <InputLabel shrink id="planning-version-label">Versão do plano</InputLabel>
+              <Select labelId="planning-version-label" label="Versão do plano" notched value={snapshotId} onChange={e => setSnapshotId(String(e.target.value))} displayEmpty>
                 <MenuItem value="">Versão atual{currentVersion ? ` · v${currentVersion.version}` : ""}</MenuItem>
                 {versions.filter(version => !version.is_current).map(version => <MenuItem key={version.id} value={String(version.id)}>v{version.version} · {version.title || version.source}</MenuItem>)}
               </Select>
@@ -730,10 +711,10 @@ export default function Planning({
                 </Select>
               </FormControl>
               <FormControl sx={{ minWidth: 220, flex: { xs: 1, md: "0 1 320px" } }} disabled={!cloudFilter || Boolean(defenseRequest)}>
-                <InputLabel shrink id="planning-budget-label">ID do orçamento</InputLabel>
+                <InputLabel shrink id="planning-budget-label">Código do orçamento</InputLabel>
                 <Select
                   labelId="planning-budget-label"
-                  label="ID do orçamento"
+                  label="Código do orçamento"
                   notched
                   displayEmpty
                   value={idOrcamentoFilter}
@@ -774,7 +755,7 @@ export default function Planning({
                 </Stack>
               </Stack>
               <Menu id="planning-export-menu" anchorEl={exportAnchor} open={Boolean(exportAnchor)} onClose={() => setExportAnchor(null)}>
-                <MenuItem disabled={!gridReady || loading} onClick={() => { setExportAnchor(null); setExportYear(year); setExportOpen(true); }}>Exportar valores do orçamento</MenuItem>
+                <MenuItem disabled={!gridReady || loading} onClick={() => { setExportAnchor(null); setExportYear(year); setExportOpen(true); }}>Baixar valores do orçamento</MenuItem>
                 <MenuItem onClick={async () => {
                   setExportAnchor(null);
                   try {
@@ -814,8 +795,8 @@ export default function Planning({
                     columns={columns}
                     loading={loading}
                     aria-label={`${title} por departamento e mês`}
-                    pageSizeOptions={[25, 50, 100]}
-                    initialState={{ pagination: { paginationModel: { page: 0, pageSize: 25 } } }}
+                    pageSizeOptions={[50, 100, 500, 1000]}
+                    initialState={{ pagination: { paginationModel: { page: 0, pageSize: 50 } } }}
                     sx={{ border: 0, borderRadius: 0, "& .MuiDataGrid-cell:focus-within, & .MuiDataGrid-columnHeader:focus-within": { outline: "2px solid", outlineColor: "primary.main", outlineOffset: -2 } }}
                     getRowClassName={({ row }) => {
                       const item = row as DisplayRow;
@@ -832,13 +813,13 @@ export default function Planning({
             </>
           ) : (
             <Alert severity="info" sx={{ mb: 2 }}>
-              Selecione um <b>ID Orçamento</b> para listar os departamentos e editar a
+              Escolha um <b>código de orçamento</b> para listar os departamentos e editar a
               defesa. Você também pode escolher uma solicitação na lista acima.
             </Alert>
           )}
           <Stack direction="row" gap={2} flexWrap="wrap" sx={{ px: 2, py: 1.5, borderTop: 1, borderColor: "divider" }}>
             <Typography variant="caption" color="text.secondary">Composição dos valores</Typography>
-            {[{ color: "#E2E5EE", label: "Somente filhos" }, { color: "#24a148", label: "Valor próprio" }, { color: "#f1c21b", label: "Próprio + filhos" }].map(item => (
+            {[{ color: "#E1E8F0", label: "Somente filhos" }, { color: "#24a148", label: "Valor próprio" }, { color: "#f1c21b", label: "Próprio + filhos" }].map(item => (
               <Stack key={item.label} direction="row" alignItems="center" gap={0.75}>
                 <Box sx={{ width: 8, height: 8, bgcolor: item.color }} />
                 <Typography variant="caption" color="text.secondary">{item.label}</Typography>
@@ -846,147 +827,73 @@ export default function Planning({
             ))}
           </Stack>
         </Paper>
-        <Paper variant="outlined" sx={{ mt: 2, p: 2 }}>
-          <Typography variant="h6">Histórico de versões</Typography>
-          <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>Publicações e revisões do planejamento de {year}.</Typography>
-          {timeline.length === 0 ? (
-            <Typography color="text.secondary" sx={{ mt: 1 }}>
-              Ainda não há movimentações para {year}.
-            </Typography>
-          ) : (
-            timeline.map((version) => (
-              <Stack
-                key={version.id}
-                direction="row"
-                justifyContent="space-between"
-                gap={2}
-                sx={{ py: 1.25, borderBottom: 1, borderColor: "divider" }}
-              >
-                <Box>
-                  <Typography fontWeight={700}>
-                    {version.title || `Versão legada v${version.version}`}
-                  </Typography>
-                  <Typography variant="body2">
-                    {version.event_type || "OUTRO"} ·{" "}
-                    {String(version.effective_date || version.created_at).slice(
-                      0,
-                      10,
-                    )}{" "}
-                    · v{version.version}
-                  </Typography>
-                  <Typography variant="body2" color="text.secondary">
-                    {version.description ||
-                      "Snapshot sem narrativa cadastrada."}
-                  </Typography>
-                </Box>
-                <Stack alignItems="end">
-                  <Typography fontWeight={700}>
-                    {money(version.annual_total || 0)}
-                  </Typography>
+        <VersionHistorySection count={timeline.length}>
+          <Typography variant="body2" color="text.secondary" sx={{ mb: 1.5 }}>Publicações e revisões do planejamento de {year}. Somente leitura: versões antigas não podem ser restauradas.</Typography>
+          <VersionTimeline
+            emptyText={`Ainda não há movimentações para ${year}.`}
+            items={timeline.map((version) => ({
+              id: version.id,
+              title: version.title || `Versão legada v${version.version}`,
+              date: String(version.effective_date || version.created_at),
+              tag: { label: `${version.event_type || "OUTRO"} · v${version.version}`, tone: "primary" as const },
+              summary: version.description || "Snapshot sem narrativa cadastrada.",
+              metric: (
+                <>
+                  <Typography fontWeight={700}>{money(version.annual_total || 0)}</Typography>
                   {version.delta != null && (
-                    <Typography variant="caption">
-                      Δ {money(version.delta)}{" "}
-                      {version.delta_pct != null
-                        ? `(${version.delta_pct.toFixed(1)}%)`
-                        : ""}
+                    <Typography variant="caption" color="text.secondary">
+                      Δ {money(version.delta)}{version.delta_pct != null ? ` (${version.delta_pct.toFixed(1)}%)` : ""}
                     </Typography>
                   )}
-                  <Button
-                    size="small"
-                    startIcon={<Restore />}
-                    onClick={() => startPublish("restore", version.id)}
-                  >
-                    Restaurar
-                  </Button>
-                  {type === "defesa-orcamentaria" &&
-                    !version.published_to_budget_at &&
-                    !version.defense_request_id && (
-                      <Button
-                        size="small"
-                        variant="contained"
-                        onClick={() => {
-                          if (version.scope_id_orcamento)
-                            setIdOrcamentoFilter(version.scope_id_orcamento);
-                          setCloudFilter(version.scope_cloud || "");
-                          setApproveVersion(version);
-                          setApproval({
-                            title: `Orçamento aprovado ${year}`,
-                            description: "",
-                            effective_date: new Date()
-                              .toISOString()
-                              .slice(0, 10),
-                          });
-                        }}
-                      >
-                        Carregar no Orçamento
-                      </Button>
-                    )}
+                </>
+              ),
+              actions: (
+                <>
+                  {type === "defesa-orcamentaria" && !version.published_to_budget_at && !version.defense_request_id && (
+                    <Button
+                      size="small"
+                      variant="contained"
+                      onClick={() => {
+                        if (version.scope_id_orcamento) setIdOrcamentoFilter(version.scope_id_orcamento);
+                        setCloudFilter(version.scope_cloud || "");
+                        setApproveVersion(version);
+                        setApproval({
+                          title: `Meta aprovada ${year}`,
+                          description: "",
+                          effective_date: new Date().toISOString().slice(0, 10),
+                        });
+                      }}
+                    >
+                      Carregar no Orçamento
+                    </Button>
+                  )}
                   {type === "defesa-orcamentaria" && version.defense_request_id && (
                     <Typography variant="caption" color="primary.main">
                       Solicitação #{version.defense_request_id} — publique na lista de solicitações
                     </Typography>
                   )}
                   {version.published_to_budget_at && (
-                    <Typography variant="caption" color="success.main">
-                      Carregada no Orçamento
-                    </Typography>
+                    <Typography variant="caption" color="success.main">Carregada na meta</Typography>
                   )}
-                </Stack>
-              </Stack>
-            ))
-          )}
-        </Paper>
+                </>
+              ),
+            }))}
+          />
+        </VersionHistorySection>
       </Box>
-      <Dialog
-        open={Boolean(edit)}
-        onClose={() => setEdit(null)}
-        maxWidth="md"
-        fullWidth
-      >
-        <DialogTitle sx={{ pb: 1 }}>
-          <Typography variant="body2" color="text.secondary">Editar valores mensais</Typography>
-          <Typography variant="h6" fontWeight={800}>{edit?.name}</Typography>
-          <Typography variant="body2" color="text.secondary">Altere somente os valores próprios desta linha. Os totais dos níveis superiores são recalculados automaticamente.</Typography>
-        </DialogTitle>
-        <DialogContent dividers sx={{ py: 2.5 }}>
-          <Box sx={{ display: "flex", justifyContent: "space-between", alignItems: "center", p: 1.5, mb: 2.5, borderRadius: 1, bgcolor: "background.default", border: "1px solid", borderColor: "divider" }}>
-            <Box><Typography variant="caption" color="text.secondary">Centro de custo</Typography><Typography variant="body2" fontWeight={700}>{edit?.centro_custo || "Não informado"}</Typography></Box>
-            <Box textAlign="right"><Typography variant="caption" color="text.secondary">Total anual editado</Typography><Typography variant="h6" color="primary.main" fontWeight={800}>{money(editValues.reduce<number>((total, value) => total + Number(value || 0), 0))}</Typography></Box>
-          </Box>
-          <Typography variant="subtitle2" fontWeight={750} sx={{ mb: 1.25 }}>Distribuição mensal · {year}</Typography>
-          <Box sx={{ display: "grid", gridTemplateColumns: { xs: "repeat(2, minmax(0, 1fr))", sm: "repeat(3, minmax(0, 1fr))", md: "repeat(4, minmax(0, 1fr))" }, gap: 1.25 }}>
-            {MONTHS.map((month, i) => (
-              <TextField
-                key={month}
-                label={`${month} ${year}`}
-                type="number"
-                value={editValues[i] ?? 0}
-                onChange={(e) =>
-                  setEditValues((values) =>
-                    values.map((value, index) =>
-                      index === i
-                        ? (e.target.value === "" || e.target.value === "-"
-                          ? e.target.value
-                          : Number(e.target.value))
-                        : value,
-                    ),
-                  )
-                }
-                size="small"
-                sx={{ "& input": { fontWeight: 600 } }}
-              />
-            ))}
-          </Box>
-        </DialogContent>
-        <DialogActions sx={{ px: 3, py: 2 }}>
-          <Button onClick={() => setEdit(null)}>Cancelar</Button>
-          <Button variant="contained" onClick={applyEdit}>
-            Aplicar
-          </Button>
-        </DialogActions>
-      </Dialog>
+      {edit && (
+        <MonthlyValuesDialog
+          key={edit.department_id}
+          rowName={edit.name}
+          costCenter={edit.centro_custo}
+          year={year}
+          currentValues={edit.values}
+          onClose={() => setEdit(null)}
+          onApply={applyEdit}
+        />
+      )}
       <Dialog open={exportOpen} onClose={() => setExportOpen(false)}>
-        <DialogTitle>Exportar orçamento</DialogTitle>
+        <DialogTitle>Baixar orçamento</DialogTitle>
         <DialogContent>
           <FormControl fullWidth sx={{ mt: 1 }}>
             <InputLabel>Ano</InputLabel>
@@ -1011,7 +918,7 @@ export default function Planning({
                 exportBudget();
               } else {
                 setYear(exportYear);
-                setMessage(`Ano ${exportYear} carregado. Abra Exportar orçamento novamente para baixar os dados.`);
+                setMessage(`Ano ${exportYear} carregado. Abra Baixar orçamento novamente para baixar os dados.`);
               }
             }}
           >
@@ -1020,7 +927,7 @@ export default function Planning({
         </DialogActions>
       </Dialog>
       <Dialog open={addYearOpen} onClose={() => setAddYearOpen(false)}>
-        <DialogTitle>Adicionar ano</DialogTitle>
+        <DialogTitle>Incluir ano</DialogTitle>
         <DialogContent>
           <TextField
             autoFocus
@@ -1105,7 +1012,7 @@ export default function Planning({
         <DialogActions>
           <Button onClick={() => setPublishAction(null)}>Cancelar</Button>
       <Dialog open={missingDepartments.length > 0} maxWidth="md" fullWidth>
-        <DialogTitle>Departamentos ausentes no organograma</DialogTitle>
+        <DialogTitle>Unidades ausentes na estrutura</DialogTitle>
         <DialogContent dividers>
           <Typography variant="body2" sx={{ mb: 2 }}>
             Selecione os caminhos que devem ser criados antes da carga. Os caminhos desmarcados não serão importados.
@@ -1152,7 +1059,7 @@ export default function Planning({
         maxWidth="sm"
         fullWidth
       >
-        <DialogTitle>Carregar defesa no Orçamento</DialogTitle>
+        <DialogTitle>Carregar defesa na meta</DialogTitle>
         <DialogContent>
           <Stack gap={2} sx={{ pt: 1 }}>
             <Alert severity="warning">
@@ -1173,7 +1080,7 @@ export default function Planning({
               required
             />
             <TextField
-              label="Data da aprovação"
+              label="Data de aprovação"
               type="date"
               InputLabelProps={{ shrink: true }}
               value={approval.effective_date}

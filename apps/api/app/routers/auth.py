@@ -18,7 +18,7 @@ from app.models.identity import RefreshToken, User
 
 logger = logging.getLogger(__name__)
 
-router = APIRouter(prefix="/auth", tags=["auth"])
+router = APIRouter(prefix="/autenticacao", tags=["auth"])
 
 REFRESH_COOKIE_NAME = "refresh_token"
 _COOKIE_PATH = "/"  # "/" para funcionar também atrás do proxy /api do Vite em dev
@@ -69,12 +69,12 @@ def _validate_password_policy(password: str) -> None:
         raise HTTPException(status_code=422, detail=security.PASSWORD_POLICY_ERROR)
 
 
-@router.get("/login-config")
+@router.get("/configuracao-entrada")
 async def login_config():
     return {"allow_local_login": settings.allow_local_login}
 
 
-@router.post("/login")
+@router.post("/entrar")
 async def login(body: LoginBody, request: Request, response: Response, db: AsyncSession = Depends(get_db)):
     ip = request.client.host if request.client else "unknown"
     allowed, _ = rate_limit(f"login:{ip}", limit=10, window_seconds=60)
@@ -119,7 +119,7 @@ async def login(body: LoginBody, request: Request, response: Response, db: Async
     }
 
 
-@router.post("/refresh")
+@router.post("/atualizar")
 async def refresh(request: Request, response: Response, db: AsyncSession = Depends(get_db)):
     ip = request.client.host if request.client else "unknown"
     allowed, _ = rate_limit(f"refresh:{ip}", limit=60, window_seconds=60)
@@ -175,7 +175,7 @@ async def refresh(request: Request, response: Response, db: AsyncSession = Depen
     return {"access_token": access_token, "token_type": "bearer"}
 
 
-@router.post("/logout")
+@router.post("/sair")
 async def logout(request: Request, response: Response, db: AsyncSession = Depends(get_db)):
     token = request.cookies.get(REFRESH_COOKIE_NAME)
     user = None
@@ -195,7 +195,7 @@ async def logout(request: Request, response: Response, db: AsyncSession = Depend
     return {"ok": True}
 
 
-@router.post("/change-password")
+@router.post("/alterar-senha")
 async def change_password(
     body: ChangePasswordBody,
     db: AsyncSession = Depends(get_db),
@@ -220,7 +220,7 @@ async def change_password(
     return {"ok": True}
 
 
-@router.get("/me")
+@router.get("/meu-perfil")
 async def me(
     db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),

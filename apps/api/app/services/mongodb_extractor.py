@@ -71,6 +71,10 @@ class MongoAtlasExtractor:
         self.connection = connection
         self.config_json = connection.config_json or {}
         self.base_url = self.config_json.get("base_url", DEFAULT_BASE_URL).rstrip("/")
+        # Credenciais digest da Atlas só vão para a API oficial.
+        from app.core.outbound import MONGODB_ATLAS_HOSTS, ensure_allowed_url
+
+        ensure_allowed_url(self.base_url, MONGODB_ATLAS_HOSTS)
         # Invoices só existem na API v2 (org-level); a v1.0 retorna 404/406.
         self.billing_base_url = self.base_url.replace("/v1.0", "/v2")
         self.public_key = self.config_json.get("public_key", "")

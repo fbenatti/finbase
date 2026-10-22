@@ -95,7 +95,7 @@ export default function FinancialDashboard() {
     <Stack direction={{ xs: "column", md: "row" }} gap={2} alignItems={{ md: "center" }} justifyContent="space-between" sx={{ mb: 3 }}>
       <Stack direction="row" gap={1.5} alignItems="center" flexWrap="wrap">
         <FormControl size="small" sx={{ minWidth: 120 }}><InputLabel>Ano</InputLabel><Select label="Ano" value={String(year)} onChange={e => setYear(Number(e.target.value))}>{[2025, 2026, 2027].map(value => <MenuItem key={value} value={String(value)}>{value}</MenuItem>)}</Select></FormControl>
-        <Box sx={{ minWidth: 300 }}><DepartmentTreePicker departments={departments} value={departmentId} onChange={setDepartmentId} allowClear clearLabel="Visão global" label="Organograma" helperText="" /></Box>
+        <Box sx={{ minWidth: 300 }}><DepartmentTreePicker departments={departments} value={departmentId} onChange={setDepartmentId} allowClear clearLabel="Visão global" label="Hierarquia" helperText="" /></Box>
       </Stack>
       <Typography variant="body2" color="text.secondary">{scopeLabel}</Typography>
     </Stack>
@@ -110,14 +110,14 @@ export default function FinancialDashboard() {
       <Stat label="Aprovado" value={approved} color={colors.accent} caption={requested ? `${approvalPct}% do pedido` : "Sem aprovação registrada"} divider />
       <Stat label="Cortes" value={cut} color={chartSemantic.negative} caption={cut < 0 ? `${cutPct}% do pedido` : "Nenhum corte registrado"} divider />
       <Stat label="Vigente" value={current} color={colors.brand} caption={`${adjustments.length} ${countLabel} após a carga`} divider>
-        <Spark values={monthly} label={`Orçamento vigente por mês em ${year}`} />
+        <Spark values={monthly} label={`Meta vigente por mês em ${year}`} />
       </Stat>
     </Paper>
 
     <Paper variant="outlined" sx={{ overflow: "hidden", mb: 2 }}>
       <Box sx={{ px: 2, py: 1.5, borderBottom: `1px solid ${colors.border}` }}>
         <Typography fontWeight={800}>Áreas</Typography>
-        <Typography variant="body2" color="text.secondary">{areas.length ? "Orçamento vigente de cada área abaixo do nó selecionado, com a tendência mensal." : "Selecione uma diretoria no organograma para ver as áreas abaixo dela."}</Typography>
+        <Typography variant="body2" color="text.secondary">{areas.length ? "Meta vigente de cada área abaixo do nó selecionado, com a tendência mensal." : "Selecione uma diretoria na estrutura para ver as áreas abaixo dela."}</Typography>
       </Box>
       {!areas.length
         ? <Typography color="text.secondary" sx={{ p: 2 }}>Nenhuma área abaixo deste nó.</Typography>

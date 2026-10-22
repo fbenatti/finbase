@@ -12,7 +12,7 @@ from app.database import get_db
 from app.models.audit_log import AuditLog
 from app.models.identity import User
 
-router = APIRouter(prefix="/audit", tags=["audit"])
+router = APIRouter(prefix="/administracao/auditoria", tags=["audit"])
 
 
 def _timeline_item(row: AuditLog) -> dict:
@@ -49,7 +49,7 @@ def _detail(row: AuditLog) -> dict:
     }
 
 
-@router.get("/history/{module}/{entity_type}/{entity_id}")
+@router.get("/historico/{module}/{entity_type}/{entity_id}")
 async def record_history(
     module: str, entity_type: str, entity_id: str,
     db: AsyncSession = Depends(get_db),
@@ -76,7 +76,7 @@ async def record_history(
     return [_timeline_item(r) for r in result.scalars().all()]
 
 
-@router.get("/history/{module}/{entity_type}/{entity_id}/{event_id}")
+@router.get("/historico/{module}/{entity_type}/{entity_id}/{event_id}")
 async def record_history_detail(
     module: str, entity_type: str, entity_id: str, event_id: int,
     db: AsyncSession = Depends(get_db),
@@ -92,7 +92,7 @@ async def record_history_detail(
     return _detail(row)
 
 
-@router.get("/logs")
+@router.get("/registros")
 async def global_logs(
     from_: datetime | None = Query(None, alias="from"),
     to: datetime | None = Query(None),
@@ -192,7 +192,7 @@ async def global_logs(
     return {"items": [_timeline_item(r) for r in rows], "total": total, "limit": limit, "offset": offset}
 
 
-@router.get("/logs/{event_id}")
+@router.get("/registros/{event_id}")
 async def log_detail(
     event_id: int,
     db: AsyncSession = Depends(get_db),

@@ -12,7 +12,7 @@ from app.core.rbac import invalidate_permissions_cache, get_effective_permission
 from app.database import get_db
 from app.models.identity import Role, RolePermission, User, role_role
 
-router = APIRouter(prefix="/roles", tags=["roles"])
+router = APIRouter(prefix="/administracao/perfis", tags=["roles"])
 
 
 class RoleCreate(BaseModel):
@@ -159,7 +159,7 @@ async def delete_role(role_id: int, db: AsyncSession = Depends(get_db), user: Us
     return {"ok": True}
 
 
-@router.put("/{role_id}/permissions")
+@router.put("/{role_id}/permissoes")
 async def set_role_permissions(role_id: int, items: list[PermissionItem], db: AsyncSession = Depends(get_db), user: User = Depends(require("roles", "update"))):
     role = (await db.execute(select(Role).where(Role.id == role_id))).scalar_one_or_none()
     if role is None:
@@ -180,7 +180,7 @@ async def set_role_permissions(role_id: int, items: list[PermissionItem], db: As
     return {"ok": True, "count": len(seen)}
 
 
-@router.post("/{role_id}/inherits/{parent_id}")
+@router.post("/{role_id}/heranca/{parent_id}")
 async def add_inheritance(role_id: int, parent_id: int, db: AsyncSession = Depends(get_db), user: User = Depends(require("roles", "update"))):
     if role_id == parent_id:
         raise HTTPException(status_code=422, detail="Uma role não pode herdar de si mesma")
@@ -200,7 +200,7 @@ async def add_inheritance(role_id: int, parent_id: int, db: AsyncSession = Depen
     return {"ok": True}
 
 
-@router.delete("/{role_id}/inherits/{parent_id}")
+@router.delete("/{role_id}/heranca/{parent_id}")
 async def remove_inheritance(role_id: int, parent_id: int, db: AsyncSession = Depends(get_db), user: User = Depends(require("roles", "update"))):
     await db.execute(
         delete(role_role).where(role_role.c.role_id == role_id, role_role.c.parent_role_id == parent_id)
@@ -210,7 +210,7 @@ async def remove_inheritance(role_id: int, parent_id: int, db: AsyncSession = De
     return {"ok": True}
 
 
-@router.get("/{role_id}/tree")
+@router.get("/{role_id}/arvore")
 async def role_tree(role_id: int, db: AsyncSession = Depends(get_db), user: User = Depends(require("roles", "read"))):
     """Árvore de herança resolvida (pais transitivos com caminho)."""
     role = (await db.execute(select(Role).where(Role.id == role_id))).scalar_one_or_none()

@@ -8,13 +8,14 @@ from app.core.audit_sanitize import to_snapshot
 from app.core.deps import resolve_user_from_request
 from app.database import get_db
 from app.models.source_connection import SourceConnection
+from app.models.connector_visibility import ConnectorHidden
 from app.models.ingested_blob import IngestedBlob
 from app.models.etl_task import EtlTask
 from app.models.skipped_blob import SkippedBlob
 from app.models.period_status import PeriodStatus
 from app.schemas.schemas import SourceConnectionCreate, SourceConnectionUpdate, SourceConnectionOut
 
-router = APIRouter(prefix="/connections", tags=["connections"])
+router = APIRouter(prefix="/dados/fontes", tags=["connections"])
 
 _SECRET_CONFIG_KEYS = frozenset({
     "client_secret", "secret", "private_key", "oci_private_key", "pat_token",
@@ -119,7 +120,7 @@ async def list_connections(
     return [_connection_out(conn) for conn in result.scalars().all()]
 
 
-@router.get("/grid")
+@router.get("/grade")
 async def list_connections_grid(
     limit: int = Query(25, ge=1, le=100),
     offset: int = Query(0, ge=0),
@@ -136,6 +137,9 @@ async def list_connections_grid(
 ):
     """Server-side query used by the Connections DataGrid."""
     conditions = []
+    hidden_types = (await db.execute(select(ConnectorHidden.connector_type))).scalars().all()
+    if hidden_types:
+        conditions.append(SourceConnection.connector_type.not_in(sorted(hidden_types)))
     if provider:
         conditions.append(SourceConnection.cloud_scope == provider)
     if category == "provedor":

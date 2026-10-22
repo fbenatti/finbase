@@ -5,12 +5,12 @@ Consulta as tabelas Bronze coletadas pelo azure_reservation_service:
   - iceberg.bronze.azure_benefit_utilization
 
 Endpoints:
-  GET  /reservations/sources              → conexões com coleta habilitada
-  POST /reservations/connections/{id}/test → teste de conexão ARM
-  POST /reservations/collect              → dispara coleta (task na fila)
-  GET  /reservations/dashboard            → KPIs executivos (via Trino)
-  GET  /reservations/catalog              → catálogo de benefícios
-  GET  /reservations/utilization          → série de utilização
+  GET  /custos/reservas/sources              → conexões com coleta habilitada
+  POST /custos/reservas/connections/{id}/test → teste de conexão ARM
+  POST /custos/reservas/collect              → dispara coleta (task na fila)
+  GET  /custos/reservas/dashboard            → KPIs executivos (via Trino)
+  GET  /custos/reservas/catalog              → catálogo de benefícios
+  GET  /custos/reservas/utilization          → série de utilização
 """
 
 from __future__ import annotations
@@ -34,7 +34,7 @@ from app.services.azure_reservation_service import (
 from app.services.trino_service import execute as trino_execute
 from app.services import lakehouse_layers as layers
 
-router = APIRouter(prefix="/reservations", tags=["reservations"])
+router = APIRouter(prefix="/custos/reservas", tags=["reservations"])
 logger = logging.getLogger(__name__)
 
 # Base do nome: a conexão entra como sufixo (`raw_azure_4p_...`), como em todas
@@ -178,7 +178,7 @@ class DashboardFilter(BaseModel):
     days_to_expiry: int | None = Field(None, ge=0)
 
 
-@router.get("/sources")
+@router.get("/fontes")
 async def list_sources(db: AsyncSession = Depends(get_db)):
     """Conexões com coleta de reservas habilitada (flag collect_reservations)."""
     rows = (await db.execute(
@@ -191,7 +191,7 @@ async def list_sources(db: AsyncSession = Depends(get_db)):
     }
 
 
-@router.post("/connections/{connection_id}/test")
+@router.post("/fontes/{connection_id}/testar")
 async def test_connection_endpoint(connection_id: int, db: AsyncSession = Depends(get_db)):
     conn = await db.get(SourceConnection, connection_id)
     if not conn:
@@ -205,7 +205,7 @@ async def test_connection_endpoint(connection_id: int, db: AsyncSession = Depend
     return result
 
 
-@router.post("/collect", status_code=202)
+@router.post("/coletar", status_code=202)
 async def collect(body: CollectRequest, db: AsyncSession = Depends(get_db)):
     """Enfileira coleta de reservas para as conexões selecionadas (ou todas com flag)."""
     from app.models.etl_task import EtlTask
@@ -254,7 +254,7 @@ async def collect(body: CollectRequest, db: AsyncSession = Depends(get_db)):
     return {"queued": queued}
 
 
-@router.get("/dashboard")
+@router.get("/painel")
 async def dashboard(
     benefit_types: str | None = None,
     connection_id: int | None = None,
@@ -264,7 +264,7 @@ async def dashboard(
     if not await _table_exists(CATALOG_BASE):
         return {
             "available": False,
-            "message": "Nenhum dado de reservas coletado ainda. Use POST /reservations/collect.",
+            "message": "Nenhum dado de reservas coletado ainda. Use POST /custos/reservas/collect.",
             "catalog": [], "utilization": [], "kpis": {}, "expiring": [], "by_type": [],
         }
 
@@ -368,7 +368,7 @@ async def dashboard(
     }
 
 
-@router.get("/catalog")
+@router.get("/catalogo")
 async def catalog(
     benefit_type: str | None = None,
     status: str | None = None,
@@ -394,7 +394,7 @@ async def catalog(
     return {"available": True, "rows": rows}
 
 
-@router.get("/utilization")
+@router.get("/utilizacao")
 async def utilization(
     connection_id: int | None = None,
     benefit_id: str | None = None,
@@ -420,7 +420,7 @@ async def utilization(
     return {"available": True, "rows": rows}
 
 
-@router.get("/advisor")
+@router.get("/recomendador")
 async def advisor_recommendations(
     category: str | None = None,
     connection_id: int | None = None,
@@ -447,7 +447,7 @@ async def advisor_recommendations(
     return {"available": True, "rows": rows, "categories": cats}
 
 
-@router.get("/recommendations")
+@router.get("/recomendacoes")
 async def benefit_recommendations(
     kind: str | None = None,
     connection_id: int | None = None,

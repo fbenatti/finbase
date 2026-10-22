@@ -54,7 +54,7 @@ export default function ReprocessHistoryDataGrid({
   const apiRef = useGridApiRef();
   const [paginationModel, setPaginationModel] = useState<GridPaginationModel>({
     page: 0,
-    pageSize: 10,
+    pageSize: 50,
   });
   const [sortModel, setSortModel] = useState<GridSortModel>([]);
   const [filterModel, setFilterModel] = useState<GridFilterModel>({ items: [] });
@@ -78,7 +78,7 @@ export default function ReprocessHistoryDataGrid({
         {label}
       </Typography>
       {activeFilters[field] && (
-        <Tooltip title="Esta coluna possui um filtro ativo">
+        <Tooltip title="Esta coluna tem um filtro ativo">
           <FilterAlt fontSize="small" color="primary" />
         </Tooltip>
       )}
@@ -106,8 +106,8 @@ export default function ReprocessHistoryDataGrid({
     },
     {
       field: "table",
-      headerName: "Tabela destino",
-      renderHeader: () => filteredHeader("Tabela destino", "table"),
+      headerName: "Tabela de destino",
+      renderHeader: () => filteredHeader("Tabela de destino", "table"),
       minWidth: 200,
       flex: 1,
       renderCell: ({ row }: { row: ReprocessStatus }) => (
@@ -125,22 +125,22 @@ export default function ReprocessHistoryDataGrid({
     },
     {
       field: "phase",
-      headerName: "Fase / Mensagem",
-      renderHeader: () => filteredHeader("Fase / Mensagem", "phase"),
+      headerName: "Etapa / mensagem",
+      renderHeader: () => filteredHeader("Etapa / mensagem", "phase"),
       minWidth: 240,
       flex: 1.2,
       renderCell: ({ row }: { row: ReprocessStatus }) => (
-        <Tooltip title={String(row.phase || "Aguardando worker...")}>
+        <Tooltip title={String(row.phase || "Aguardando processamento...")}>
           <Typography noWrap variant="body2" color="text.secondary">
-            {row.phase || "Aguardando worker..."}
+            {row.phase || "Aguardando processamento..."}
           </Typography>
         </Tooltip>
       ),
     },
     {
       field: "started_at",
-      headerName: "Início",
-      renderHeader: () => filteredHeader("Início", "started_at"),
+      headerName: "Começo",
+      renderHeader: () => filteredHeader("Começo", "started_at"),
       minWidth: 165,
       type: "dateTime",
       valueGetter: (_, row: ReprocessStatus) =>
@@ -159,7 +159,7 @@ export default function ReprocessHistoryDataGrid({
     },
     {
       field: "actions",
-      headerName: "Ações",
+      headerName: "Opções",
       minWidth: 90,
       sortable: false,
       filterable: false,
@@ -167,7 +167,7 @@ export default function ReprocessHistoryDataGrid({
         const isActionDisabled = row.status === "RUNNING" || row.status === "QUEUED" || !onReprocess;
         const isFailed = row.status === "FAILED";
         return (
-          <Tooltip title={isFailed ? "Reprocessar carga com falha" : "Reprocessar esta execução"}>
+          <Tooltip title={isFailed ? "Refazer carga com falha" : "Refazer esta execução"}>
             <span>
               <IconButton
                 size="small"
@@ -311,7 +311,7 @@ export default function ReprocessHistoryDataGrid({
   };
 
   const exportDisplayed = () => {
-    const csvHeader = ["ID", "Status", "Tabela Destino", "Linhas", "Fase / Mensagem", "Início", "Fim"];
+    const csvHeader = ["ID", "Status", "Tabela de destino", "Linhas", "Etapa / mensagem", "Começo", "Fim"];
     const csvRows = rows.map((r) => [
       r.id,
       r.status,
@@ -358,11 +358,11 @@ export default function ReprocessHistoryDataGrid({
           sortingMode="server"
           filterMode="server"
           autoHeight
-          pageSizeOptions={[10, 25, 50]}
+          pageSizeOptions={[50, 100, 500, 1000]}
           paginationModel={paginationModel}
           sortModel={sortModel}
           filterModel={filterModel}
-          localeText={{ noRowsLabel: "Nenhum reprocessamento encontrado." }}
+          localeText={{ noRowsLabel: "Nenhuma execução encontrada." }}
           onPaginationModelChange={onPagination}
           onSortModelChange={onSort}
           onFilterModelChange={onFilter}

@@ -11,13 +11,13 @@ import Departments from "../Departments/Departments";
 import Reservations from "../Reservations/Reservations";
 
 const TABS = [
-  { id: "organization", label: "Organograma", perms: [{ module: "planning", scope: null }] },
-  { id: "classification", label: "Classificar projetos", perms: [{ module: "rules", scope: null }] },
-  { id: "rules", label: "Ajustes financeiros", perms: [{ module: "rules", scope: null }, { module: "reservations", scope: null }] },
-  { id: "financial-contracts", label: "Compromissos financeiros", perms: [{ module: "rules", scope: null }] },
-  { id: "cost-relationship", label: "Geração de Cubos", perms: [{ module: "gold", scope: null }] },
-  { id: "reservas", label: "Reservas Azure", perms: [{ module: "reservations", scope: null }] },
-  { id: "tags", label: "Tags Automatizadas", perms: [{ module: "azure_tag_policy", scope: null }] },
+  { id: "organization", label: "Estrutura organizacional", perms: [{ module: "planning", scope: null }] },
+  { id: "classification", label: "Classificação por projeto", perms: [{ module: "rules", scope: null }] },
+  { id: "rules", label: "Ajustes de custo", perms: [{ module: "rules", scope: null }, { module: "reservations", scope: null }] },
+  { id: "financial-contracts", label: "Contratos financeiros", perms: [{ module: "rules", scope: null }] },
+  { id: "cost-relationship", label: "Modelos analíticos", perms: [{ module: "gold", scope: null }] },
+  { id: "reservas", label: "Reservas de capacidade Azure", perms: [{ module: "reservations", scope: null }] },
+  { id: "tags", label: "Políticas de tags", perms: [{ module: "azure_tag_policy", scope: null }] },
 ] as const;
 
 type TabId = (typeof TABS)[number]["id"];
@@ -43,8 +43,8 @@ export default function Governance() {
       ? (requested as TabId)
       : fallback;
   const allowedRulesTabs = [
-    ...(hasPerm("rules", "read") ? [{ id: "adjustments" as const, label: "Regras de ajustes" }] : []),
-    ...(hasPerm("reservations", "read") ? [{ id: "clone-rules" as const, label: "Reservas e Savings Plans" }] : []),
+    ...(hasPerm("rules", "read") ? [{ id: "adjustments" as const, label: "Regras de alocação" }] : []),
+    ...(hasPerm("reservations", "read") ? [{ id: "clone-rules" as const, label: "Compromissos de tarifa" }] : []),
   ];
   const requestedRulesTab = searchParams.get("subtab");
   const rulesTab: RulesTabId | undefined = allowedRulesTabs.find((item) => item.id === requestedRulesTab)?.id ?? allowedRulesTabs[0]?.id;
@@ -54,9 +54,9 @@ export default function Governance() {
       {/* Faixa de contexto branca */}
       <Box sx={{ px: 3, pt: 3, bgcolor: "background.paper", borderBottom: "1px solid", borderColor: "divider" }}>
         <Box sx={{ mb: 2 }}>
-          <Typography variant="h4">Governança</Typography>
+          <Typography variant="h4">Políticas e governança</Typography>
           <Typography color="text.secondary" sx={{ mt: 0.5 }}>
-            Regras de negócio, reservas e Savings Plans, classificação organizacional e políticas de tags.
+            Regras de alocação de custo, compromissos de tarifa (RIs e Savings Plans), estrutura organizacional e políticas de tags.
           </Typography>
         </Box>
       </Box>
@@ -69,7 +69,7 @@ export default function Governance() {
       }}>
         {!tab && (
           <Typography color="text.secondary" sx={{ py: 6, textAlign: "center" }}>
-            Você não tem permissão de leitura para nenhuma aba desta página. Solicite acesso ao administrador.
+            Seu perfil não tem leitura em nenhuma aba desta página. Peça acesso ao administrador.
           </Typography>
         )}
         {tab === "organization" && <Departments embedded />}

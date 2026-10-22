@@ -50,7 +50,7 @@ from app.services.gold_materialization import GOLD
 
 logger = logging.getLogger(__name__)
 
-router = APIRouter(prefix="/analysis", tags=["analysis"])
+router = APIRouter(prefix="/dados/explorador", tags=["analysis"])
 
 
 class _ClientCancelScope:
@@ -333,7 +333,7 @@ class PivotSourceDetailRequest(BaseModel):
     source_row_offset: int | None = None
 
 
-@router.post("/pivot/source-detail")
+@router.post("/dinamica/detalhe-fonte")
 async def pivot_source_detail(req: PivotSourceDetailRequest, db: AsyncSession = Depends(get_db)) -> dict[str, Any]:
     """Resolve a Silver row to its immutable Bronze source using provenance ID."""
     from app.models.destination import SourceDestinationMapping
@@ -1047,7 +1047,7 @@ async def _declared_column_order(
     return [*declared, *extras]
 
 
-@router.get("/pivot/metadata/{destination_table_id}")
+@router.get("/dinamica/metadados/{destination_table_id}")
 async def pivot_metadata(destination_table_id: int, db: AsyncSession = Depends(get_db)):
     """Return the live Gold/Iceberg schema, ordered by destination column metadata."""
     _, schema = await _pivot_table_context(db, destination_table_id)
@@ -1113,7 +1113,7 @@ async def pivot_metadata(destination_table_id: int, db: AsyncSession = Depends(g
     }
 
 
-@router.post("/pivot/search")
+@router.post("/dinamica/buscar")
 async def search_pivot_table(req: LakehouseSearchRequest, request: Request, db: AsyncSession = Depends(get_db)):
     """Search a term across every textual column of a Gold table in Trino."""
     if not req.term.strip():
@@ -1370,7 +1370,7 @@ def _order_keys(
         return keys
 
 
-@router.post("/pivot")
+@router.post("/dinamica")
 async def run_pivot(req: PivotRequest, request: Request, db: AsyncSession = Depends(get_db)):
     """Aggregate a Gold destination table in Trino; no raw data is sent to the browser."""
     async with _ClientCancelScope(request) as scope:
@@ -1429,7 +1429,7 @@ async def _run_pivot_core(req: PivotRequest, db: AsyncSession, trino_kwargs: dic
     return result
 
 
-@router.post("/pivot/union")
+@router.post("/dinamica/uniao")
 async def run_pivot_union(req: PivotUnionRequest, request: Request, db: AsyncSession = Depends(get_db)):
     async with _ClientCancelScope(request, timeout_s=120) as scope:
         try:
@@ -1620,7 +1620,7 @@ async def _run_pivot_union_core(req: PivotUnionRequest, db: AsyncSession, trino_
     return result
 
 
-@router.post("/pivot/records")
+@router.post("/dinamica/linhas")
 async def pivot_records(req: PivotRecordRequest, request: Request, db: AsyncSession = Depends(get_db)):
     async with _ClientCancelScope(request) as scope:
         try:
@@ -1678,7 +1678,7 @@ async def _pivot_records_core(req: PivotRecordRequest, db: AsyncSession, trino_k
     return response
 
 
-@router.post("/pivot/drill-down")
+@router.post("/dinamica/detalhamento")
 async def pivot_drill_down(req: PivotDrillDownRequest, request: Request, db: AsyncSession = Depends(get_db)):
     async with _ClientCancelScope(request) as scope:
         try:
@@ -1811,7 +1811,7 @@ def _local_drilldown_rows(table_name: str, ordered: list[str], req: PivotDrillDo
     return emitted
 
 
-@router.get("/pivot/views")
+@router.get("/dinamica/visoes")
 async def list_pivot_views(destination_table_id: int | None = Query(None), db: AsyncSession = Depends(get_db)):
     statement = select(PivotView).order_by(PivotView.updated_at.desc())
     if destination_table_id:
@@ -1820,7 +1820,7 @@ async def list_pivot_views(destination_table_id: int | None = Query(None), db: A
     return [{"id": v.id, "name": v.name, "destination_table_id": v.destination_table_id, "config": v.config_json, "created_at": v.created_at, "updated_at": v.updated_at} for v in views]
 
 
-@router.post("/pivot/views", status_code=201)
+@router.post("/dinamica/visoes", status_code=201)
 async def save_pivot_view(body: PivotViewCreate, db: AsyncSession = Depends(get_db)):
     existing = (await db.execute(select(PivotView).where(PivotView.destination_table_id == body.destination_table_id, PivotView.name == body.name))).scalar_one_or_none()
     config = body.config
@@ -1833,7 +1833,7 @@ async def save_pivot_view(body: PivotViewCreate, db: AsyncSession = Depends(get_
     return {"id": view.id, "name": view.name, "destination_table_id": view.destination_table_id, "config": view.config_json}
 
 
-@router.delete("/pivot/views/{view_id}", status_code=204)
+@router.delete("/dinamica/visoes/{view_id}", status_code=204)
 async def delete_pivot_view(view_id: int, db: AsyncSession = Depends(get_db)):
     view = await db.get(PivotView, view_id)
     if not view:
@@ -1861,7 +1861,7 @@ def _widget_payload(item: DashboardWidget) -> dict[str, Any]:
     }
 
 
-@router.get("/dashboards")
+@router.get("/paineis")
 async def list_dashboards(db: AsyncSession = Depends(get_db)):
     dashboards = (await db.execute(select(Dashboard).order_by(Dashboard.updated_at.desc()))).scalars().all()
     return [{**_dashboard_payload(item), "widgets": [_widget_payload(widget) for widget in (
@@ -1869,7 +1869,7 @@ async def list_dashboards(db: AsyncSession = Depends(get_db)):
     ).scalars().all()]} for item in dashboards]
 
 
-@router.post("/dashboards", status_code=201)
+@router.post("/paineis", status_code=201)
 async def create_dashboard(body: DashboardCreate, db: AsyncSession = Depends(get_db)):
     item = Dashboard(name=body.name.strip(), pivot_view_id=body.pivot_view_id,
                      global_filters=body.global_filters, layout_json=body.layout)
@@ -1882,7 +1882,7 @@ async def create_dashboard(body: DashboardCreate, db: AsyncSession = Depends(get
     return _dashboard_payload(item)
 
 
-@router.put("/dashboards/{dashboard_id}")
+@router.put("/paineis/{dashboard_id}")
 async def update_dashboard(dashboard_id: int, body: DashboardCreate, db: AsyncSession = Depends(get_db)):
     item = await db.get(Dashboard, dashboard_id)
     if not item:
@@ -1893,7 +1893,7 @@ async def update_dashboard(dashboard_id: int, body: DashboardCreate, db: AsyncSe
     return _dashboard_payload(item)
 
 
-@router.delete("/dashboards/{dashboard_id}", status_code=204)
+@router.delete("/paineis/{dashboard_id}", status_code=204)
 async def delete_dashboard(dashboard_id: int, db: AsyncSession = Depends(get_db)):
     item = await db.get(Dashboard, dashboard_id)
     if not item:
@@ -1901,7 +1901,7 @@ async def delete_dashboard(dashboard_id: int, db: AsyncSession = Depends(get_db)
     await db.delete(item); await db.commit()
 
 
-@router.post("/dashboards/{dashboard_id}/widgets", status_code=201)
+@router.post("/paineis/{dashboard_id}/componentes", status_code=201)
 async def create_dashboard_widget(dashboard_id: int, body: DashboardWidgetCreate, db: AsyncSession = Depends(get_db)):
     if dashboard_id != body.dashboard_id or not await db.get(Dashboard, dashboard_id):
         raise HTTPException(status_code=404, detail="Dashboard não encontrado")
@@ -1912,7 +1912,7 @@ async def create_dashboard_widget(dashboard_id: int, body: DashboardWidgetCreate
     return _widget_payload(item)
 
 
-@router.put("/dashboards/{dashboard_id}/widgets/{widget_id}")
+@router.put("/paineis/{dashboard_id}/componentes/{widget_id}")
 async def update_dashboard_widget(dashboard_id: int, widget_id: int, body: DashboardWidgetCreate, db: AsyncSession = Depends(get_db)):
     item = await db.get(DashboardWidget, widget_id)
     if not item or item.dashboard_id != dashboard_id:
@@ -1923,7 +1923,7 @@ async def update_dashboard_widget(dashboard_id: int, widget_id: int, body: Dashb
     return _widget_payload(item)
 
 
-@router.delete("/dashboards/{dashboard_id}/widgets/{widget_id}", status_code=204)
+@router.delete("/paineis/{dashboard_id}/componentes/{widget_id}", status_code=204)
 async def delete_dashboard_widget(dashboard_id: int, widget_id: int, db: AsyncSession = Depends(get_db)):
     item = await db.get(DashboardWidget, widget_id)
     if not item or item.dashboard_id != dashboard_id:
@@ -1931,7 +1931,7 @@ async def delete_dashboard_widget(dashboard_id: int, widget_id: int, db: AsyncSe
     await db.delete(item); await db.commit()
 
 
-@router.post("/dashboard-widgets/query")
+@router.post("/componentes-painel/consulta")
 async def query_dashboard_widget(body: WidgetQueryRequest, http_request: Request, db: AsyncSession = Depends(get_db)):
     view = await db.get(PivotView, body.pivot_view_id)
     if not view:
@@ -2009,7 +2009,7 @@ def _expected_view_cloud_filter(
     return f" AND lower(CAST({cloud_column} AS VARCHAR)) LIKE {_quote_literal(prefix + '%')}"
 
 
-@router.post("/expected-view")
+@router.post("/visao-esperada")
 async def expected_view(body: ExpectedViewRequest, request: Request, db: AsyncSession = Depends(get_db)):
     """Executive view for any node of the seven-level organization tree."""
     async with _ClientCancelScope(request, timeout_s=120) as scope:
@@ -2135,7 +2135,7 @@ async def _expected_view_period_detail_core(
     }
 
 
-@router.post("/expected-view/period-detail")
+@router.post("/visao-esperada/detalhe-periodo")
 async def expected_view_period_detail(body: ExpectedViewPeriodDetailRequest, request: Request, db: AsyncSession = Depends(get_db)):
     """Dinâmica de um mês selecionado (clique na coluna): departamentos de
     todos os níveis, realizado ou forecast, no escopo do departamento."""
@@ -2581,7 +2581,7 @@ async def _expected_view_core(
             "period_column": "period", "value_column": "cumulative_value"}
 
 
-@router.get("/tables")
+@router.get("/tabelas")
 async def get_tables():
     """List all Iceberg tables across bronze, silver, gold and gold layers."""
     result: dict[str, list[str]] = {}
@@ -2599,7 +2599,7 @@ async def get_tables():
     return result
 
 
-@router.get("/tables/{layer}/{table_name}/partitions")
+@router.get("/tabelas/{layer}/{table_name}/particoes")
 async def get_table_partitions(layer: str, table_name: str, db: AsyncSession = Depends(get_db)):
     """Return partition metadata for one catalog table (loaded on demand)."""
     if layer not in {"bronze", "silver", "gold"} or not re.fullmatch(r"[a-zA-Z0-9_]+", table_name):
@@ -2710,7 +2710,7 @@ async def get_table_partitions(layer: str, table_name: str, db: AsyncSession = D
             ) from fallback_error
 
 
-@router.get("/staging-tables")
+@router.get("/tabelas-preparacao")
 async def get_staging_tables(db: AsyncSession = Depends(get_db)):
     """List generated Gold staging tables and protect active reprocesses."""
     prune_stale_catalog_entries(layers.detail_layer())
@@ -2739,7 +2739,7 @@ async def get_staging_tables(db: AsyncSession = Depends(get_db)):
     return {"tables": rows}
 
 
-@router.delete("/staging-tables/{table_name}")
+@router.delete("/tabelas-preparacao/{table_name}")
 async def delete_staging_table(table_name: str, db: AsyncSession = Depends(get_db)):
     """Drop only a system-generated, inactive Silver staging table.
 
@@ -2768,7 +2768,7 @@ async def delete_staging_table(table_name: str, db: AsyncSession = Depends(get_d
     return {"deleted": True, "table_name": table_name}
 
 
-@router.post("/query", response_model=QueryResponse)
+@router.post("/consulta", response_model=QueryResponse)
 async def run_query(req: QueryRequest, request: Request, db: AsyncSession = Depends(get_db)):
     """
     Execute a SQL query against Trino + Iceberg.
@@ -2894,7 +2894,7 @@ def _run_local_bronze_star_query(sql: str, trino_error: str) -> list[dict[str, A
 # ---------------------------------------------------------------------------
 # Pre-built analysis queries
 # ---------------------------------------------------------------------------
-@router.get("/summary")
+@router.get("/resumo")
 async def get_summary(
     connection_code: str | None = Query(None),
     billing_period: str | None = Query(None),
@@ -2950,7 +2950,7 @@ async def get_summary(
         raise HTTPException(status_code=502, detail=str(e))
 
 
-@router.get("/health")
+@router.get("/saude")
 async def health_check():
     """Check if Trino and the PostgreSQL-backed Iceberg catalog are reachable."""
     status = {"trino": "unknown", "iceberg_catalog": "unknown"}
@@ -2977,7 +2977,7 @@ async def health_check():
 # Source ingested data (normalized cost lines)
 # ═══════════════════════════════════════════════════════════════════════
 
-@router.get("/sources")
+@router.get("/fontes")
 async def list_sources_data(db: AsyncSession = Depends(get_db)):
     """List all source connections with their ingested data row counts."""
     sources = []
@@ -2998,7 +2998,7 @@ async def list_sources_data(db: AsyncSession = Depends(get_db)):
     return sorted(sources, key=lambda s: s["row_count"], reverse=True)
 
 
-@router.get("/sources/{connection_id}/data")
+@router.get("/fontes/{connection_id}/dados")
 async def query_source_data(
     connection_id: int,
     limit: int = Query(100, ge=1, le=10000),
@@ -3039,7 +3039,7 @@ async def query_source_data(
 # Destination table data (classified + business rules in Iceberg/Parquet)
 # ═══════════════════════════════════════════════════════════════════════
 
-@router.get("/destinations")
+@router.get("/destinos")
 async def list_destinations_data(db: AsyncSession = Depends(get_db)):
     """List destination tables with row counts (Trino with PyIceberg fallback)."""
     tables = (await db.execute(
@@ -3161,7 +3161,7 @@ async def list_destinations_data(db: AsyncSession = Depends(get_db)):
     return result
 
 
-@router.get("/destinations/{table_id}/data")
+@router.get("/destinos/{table_id}/dados")
 async def query_destination_data(
     table_id: int,
     limit: int = Query(100, ge=1, le=10000),

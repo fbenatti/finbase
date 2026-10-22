@@ -4,7 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useMenuSearchParams as useSearchParams } from "../../navigation/useMenuSearchParams";
 import { Alert, Box, Button, CircularProgress, FormControl, IconButton, InputAdornment, InputLabel, MenuItem, Paper, Select, Stack, TextField, Typography } from "@mui/material";
-import { Add, Refresh, Search } from "@mui/icons-material";
+import { AddOutlined, RefreshOutlined, SearchOutlined } from "@mui/icons-material";
 import {
   DestinationTable,
   ForecastBusinessRule,
@@ -40,7 +40,7 @@ type GridQuery = {
 export default function Forecast() {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
-  // Acurácia is the primary Forecast view; an explicit URL tab still wins.
+  // Precisão is the primary Forecast view; an explicit URL tab still wins.
   const requestedTab = searchParams.get("tab");
   const tab = ["accuracy", "config", "rules", "history"].includes(requestedTab || "") ? requestedTab! : "accuracy";
   const [tables, setTables] = useState<DestinationTable[]>([]);
@@ -104,7 +104,7 @@ export default function Forecast() {
       setConfigsGridRows(data.items);
       setConfigsGridTotal(data.total);
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Falha ao carregar configurações");
+      setError(e instanceof Error ? e.message : "Não foi possível carregar os perfis de previsão");
     } finally {
       setConfigsGridLoading(false);
     }
@@ -138,7 +138,7 @@ export default function Forecast() {
       setRulesGridRows(data.items);
       setRulesGridTotal(data.total);
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Falha ao carregar regras");
+      setError(e instanceof Error ? e.message : "Não foi possível carregar as regras");
     } finally {
       setRulesGridLoading(false);
     }
@@ -199,7 +199,7 @@ export default function Forecast() {
       setGridRows(data.items);
       setGridTotal(data.total);
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Falha ao carregar execuções de forecast");
+      setError(e instanceof Error ? e.message : "Não foi possível carregar as execuções de previsão");
     } finally {
       setGridLoading(false);
     }
@@ -229,9 +229,9 @@ export default function Forecast() {
     setError("");
     try {
       const result = await createForecastRun(config.id);
-      setMessage("Execução " + result.run_id + " enfileirada para " + config.name);
+      setMessage("Execução " + result.run_id + " entrou na fila para " + config.name);
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Falha ao enfileirar o forecast");
+      setError(e instanceof Error ? e.message : "Não foi possível enfileirar a previsão");
     } finally {
       setRunningConfigId(null);
     }
@@ -245,7 +245,7 @@ export default function Forecast() {
     setError("");
     try {
       await cancelForecastRun(run.id);
-      setMessage("Execução " + run.id + " cancelada");
+      setMessage("Execução " + run.id + " foi cancelada");
       setCancelRunPending(null);
       await load();
       void loadRuns(gridQueryRef.current);
@@ -261,7 +261,7 @@ export default function Forecast() {
     try {
       await deleteForecastConfig(deleteConfigPending.id);
       setDeleteConfigPending(null);
-      setMessage("Configuração excluída");
+      setMessage("Perfil excluído");
       await load();
       void loadConfigsGrid(configsQueryRef.current);
     } catch (e) {
@@ -274,7 +274,7 @@ export default function Forecast() {
     try {
       await deleteForecastBusinessRule(rulePendingDeletion.id);
       setRulePendingDeletion(null);
-      setMessage("Regra excluída");
+      setMessage("Regra removida");
       void loadRulesGrid(rulesConfigId, rulesQueryRef.current);
     } catch (e) {
       setError(String(e));
@@ -287,9 +287,9 @@ export default function Forecast() {
       {/* Faixa de contexto branca */}
       <Box sx={{ mb: 3 }}>
         <Box sx={{ mb: 2 }}>
-          <Typography variant="h4" component="h1">{tab === "rules" ? "Regras de projeção" : tab === "history" ? "Histórico de projeções" : tab === "accuracy" ? "Acurácia das projeções" : "Configuração e execução"}</Typography>
+          <Typography variant="h4" component="h1">{tab === "rules" ? "Regras de previsão" : tab === "history" ? "Histórico de previsões" : tab === "accuracy" ? "Precisão das previsões" : "Executar previsões"}</Typography>
           <Typography color="text.secondary" sx={{ mt: 0.5 }}>
-            Projeções de custo sobre as bases consolidadas, com regras de negócio e rateio por intervalo.
+            Previsões de custo sobre as bases consolidadas, com regras de negócio e alocação por intervalo.
           </Typography>
         </Box>
       </Box>
@@ -313,33 +313,45 @@ export default function Forecast() {
 
         {tab === "config" && (
           <Paper elevation={0} sx={{ p: { xs: 1.5, md: 2 }, borderRadius: 2, bgcolor: "background.paper", border: "1px solid", borderColor: "divider" }}>
-            <Stack direction="row" justifyContent="space-between" alignItems="center" sx={{ mb: 2, minHeight: 52, gap: 2, flexWrap: "wrap" }}>
+            <Stack direction={{ xs: "column", md: "row" }} justifyContent="space-between" alignItems={{ md: "flex-start" }} sx={{ mb: 2, gap: 2 }}>
               <Box>
-                <Typography variant="h6">Configurações e execução</Typography>
+                <Typography variant="h6">Perfis de previsão</Typography>
                 <Typography variant="body2" color="text.secondary">
-                  Perfis de projeção por base consolidada e execução do forecast.
+                  Cada perfil define como uma base consolidada é projetada. Rode um perfil quando quiser atualizar a previsão.
                 </Typography>
               </Box>
               <Stack direction="row" spacing={1} flexShrink={0}>
-                <Button size="small" startIcon={<Refresh />} onClick={() => { void load(); void loadConfigsGrid(configsQueryRef.current); }}>
+                <Button size="small" startIcon={<RefreshOutlined />} onClick={() => { void load(); void loadConfigsGrid(configsQueryRef.current); }}>
                   Atualizar
                 </Button>
-                <Button size="small" variant="contained" startIcon={<Add />} onClick={() => setConfigDialog({ open: true, initial: null })}>
-                  Novo Forecast
+                <Button size="small" variant="contained" startIcon={<AddOutlined />} onClick={() => setConfigDialog({ open: true, initial: null })}>
+                  Novo perfil
                 </Button>
               </Stack>
             </Stack>
+            <Box sx={{ display: "grid", gap: 1.5, mb: 2, gridTemplateColumns: { xs: "1fr 1fr", md: "repeat(3, minmax(0, 1fr))" } }}>
+              {[
+                { label: "Perfis criados", value: configsGridTotal },
+                { label: "Em execução", value: runningConfigId !== null ? 1 : 0 },
+                { label: "Bases sem perfil de previsão", value: Math.max(0, tables.length - configs.length) },
+              ].map((kpi) => (
+                <Paper key={kpi.label} variant="outlined" sx={{ p: 1.5, borderRadius: 2, bgcolor: "#FAFBFD" }}>
+                  <Typography variant="caption" color="text.secondary">{kpi.label}</Typography>
+                  <Typography variant="h5" fontWeight={700}>{kpi.value}</Typography>
+                </Paper>
+              ))}
+            </Box>
             <TextField
               fullWidth
               size="small"
-              placeholder="Buscar configurações (nome, tabela, medida ou modelo)"
+              placeholder="Buscar por nome, base, medida ou modelo"
               value={configsSearch}
               onChange={(event) => setConfigsSearch(event.target.value)}
               slotProps={{
                 input: {
                   startAdornment: (
                     <InputAdornment position="start">
-                      <Search fontSize="small" />
+                      <SearchOutlined fontSize="small" />
                     </InputAdornment>
                   ),
                   sx: { height: 40 },
@@ -350,7 +362,7 @@ export default function Forecast() {
             {!configsGridLoading && configsGridRows.length === 0 ? (
               <Box sx={{ py: 7 }}>
                 <EmptyState
-                  message={configsSearch ? "Nenhuma configuração corresponde à busca." : "Nenhuma configuração cadastrada. Crie uma para começar."}
+                  message={configsSearch ? "Nenhum perfil corresponde à busca." : "Nenhum perfil cadastrado. Crie um para começar."}
                 />
               </Box>
             ) : (
@@ -373,18 +385,18 @@ export default function Forecast() {
 
         {tab === "rules" && (
           <Paper elevation={0} sx={{ p: { xs: 1.5, md: 2 }, borderRadius: 2, bgcolor: "background.paper", border: "1px solid", borderColor: "divider" }}>
-            <Stack direction="row" justifyContent="space-between" alignItems="center" sx={{ mb: 2, minHeight: 52, gap: 2, flexWrap: "wrap" }}>
+            <Stack direction={{ xs: "column", md: "row" }} justifyContent="space-between" alignItems={{ md: "flex-start" }} sx={{ mb: 2, gap: 2 }}>
               <Box>
-                <Typography variant="h6">Regras de negócio do Forecast</Typography>
+                <Typography variant="h6">Ajustes do perfil</Typography>
                 <Typography variant="body2" color="text.secondary">
-                  Regras versionadas aplicadas após a projeção matemática.
+                  Cada regra corrige a previsão depois do cálculo matemático: exclui parcelas, troca valores ou suspende o escopo.
                 </Typography>
               </Box>
-              <Stack direction="row" spacing={1} alignItems="center" flexShrink={0}>
+              <Stack direction={{ xs: "column", sm: "row" }} spacing={1} alignItems={{ sm: "center" }} flexShrink={0}>
                 <FormControl sx={{ minWidth: 260 }}>
-                  <InputLabel>Configuração</InputLabel>
+                  <InputLabel>Perfil de previsão ativo</InputLabel>
                   <Select
-                    label="Configuração"
+                    label="Perfil de previsão"
                     value={rulesConfigId}
                     onChange={(e) => void selectRulesConfig(Number(e.target.value))}
                   >
@@ -396,31 +408,43 @@ export default function Forecast() {
                 <Button
                   size="small"
                   variant="contained"
-                  startIcon={<Add />}
+                  startIcon={<AddOutlined />}
                   disabled={!rulesConfigId}
                   onClick={() => setRuleDialog({ open: true, initial: null })}
                 >
-                  Adicionar regra
+                  Nova regra
                 </Button>
               </Stack>
             </Stack>
+            <Box sx={{ display: "grid", gap: 1.5, mb: 2, gridTemplateColumns: { xs: "1fr", md: "repeat(3, minmax(0, 1fr))" } }}>
+              {[
+                { label: "Regras do perfil", value: rulesConfigId ? rulesGridTotal : "—" },
+                { label: "Ativas nesta página", value: rulesGridRows.filter((r) => r.active).length },
+                { label: "Perfil em uso", value: rulesConfig?.name ?? "Nenhum" },
+              ].map((kpi) => (
+                <Paper key={kpi.label} variant="outlined" sx={{ p: 1.5, borderRadius: 2, bgcolor: "#FAFBFD", minWidth: 0 }}>
+                  <Typography variant="caption" color="text.secondary">{kpi.label}</Typography>
+                  <Typography variant="h5" fontWeight={700} noWrap>{kpi.value}</Typography>
+                </Paper>
+              ))}
+            </Box>
             {configs.length === 0 ? (
-              <Alert severity="info">Nenhuma configuração de forecast. Crie uma em Configurações e execução.</Alert>
+              <Alert severity="info">Nenhum perfil de previsão. Crie um em Perfis e execução.</Alert>
             ) : !rulesConfigId ? (
-              <Alert severity="info">Selecione uma configuração para ver suas regras.</Alert>
+              <Alert severity="info">Escolha um perfil para ver as regras.</Alert>
             ) : (
               <>
                 <TextField
                   fullWidth
                   size="small"
-                  placeholder="Buscar regras (nome, tipo, comportamento ou coluna)"
+                  placeholder="Buscar por nome, tipo, comportamento ou coluna"
                   value={rulesSearch}
                   onChange={(event) => setRulesSearch(event.target.value)}
                   slotProps={{
                     input: {
                       startAdornment: (
                         <InputAdornment position="start">
-                          <Search fontSize="small" />
+                          <SearchOutlined fontSize="small" />
                         </InputAdornment>
                       ),
                       sx: { height: 40 },
@@ -431,7 +455,7 @@ export default function Forecast() {
                 {!rulesGridLoading && rulesGridRows.length === 0 ? (
                   <Box sx={{ py: 7 }}>
                     <EmptyState
-                      message={rulesSearch ? "Nenhuma regra corresponde à busca." : "Nenhuma regra cadastrada para esta configuração."}
+                      message={rulesSearch ? "Nenhuma regra encontrada na busca." : "Nenhuma regra cadastrada para este perfil."}
                     />
                   </Box>
                 ) : (
@@ -455,7 +479,7 @@ export default function Forecast() {
           <Paper elevation={0} sx={{ p: { xs: 1.5, md: 2 }, borderRadius: 2, bgcolor: "background.paper", border: "1px solid", borderColor: "divider" }}>
             <Box sx={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 2, minHeight: 52, mb: 2 }}>
               <Box>
-                <Typography variant="h6">Histórico e resultados</Typography>
+                <Typography variant="h6">Histórico de execuções</Typography>
                 <Typography variant="body2" color="text.secondary">
                   Execuções de forecast, linhas geradas e acesso ao snapshot publicado.
                 </Typography>
@@ -464,14 +488,14 @@ export default function Forecast() {
             <TextField
               fullWidth
               size="small"
-              placeholder="Buscar execuções (status, fase, configuração, tabela ou erro)"
+              placeholder="Buscar por situação, fase, perfil, base ou erro"
               value={search}
               onChange={(event) => setSearch(event.target.value)}
               slotProps={{
                 input: {
                   startAdornment: (
                     <InputAdornment position="start">
-                      <Search fontSize="small" />
+                      <SearchOutlined fontSize="small" />
                     </InputAdornment>
                   ),
                   sx: { height: 40 },
@@ -482,7 +506,7 @@ export default function Forecast() {
             {!gridLoading && gridRows.length === 0 ? (
               <Box sx={{ py: 7 }}>
                 <EmptyState
-                  message={search ? "Nenhuma execução corresponde à busca." : "Nenhuma execução de forecast registrada."}
+                  message={search ? "Nenhuma execução encontrada na busca." : "Nenhuma execução de previsão registrada."}
                 />
               </Box>
             ) : (
@@ -536,7 +560,7 @@ export default function Forecast() {
 
       {/* Confirmações Material — nunca window.confirm */}
       <Dialog open={Boolean(deleteConfigPending)} onClose={() => setDeleteConfigPending(null)} maxWidth="xs" fullWidth>
-        <DialogTitle>Excluir configuração?</DialogTitle>
+        <DialogTitle>Remover perfil?</DialogTitle>
         <DialogContent>
           <Typography>
             Você está prestes a excluir a configuração <strong>{deleteConfigPending?.name}</strong>. Execuções já concluídas permanecem no histórico.
@@ -551,7 +575,7 @@ export default function Forecast() {
       </Dialog>
 
       <Dialog open={Boolean(rulePendingDeletion)} onClose={() => setRulePendingDeletion(null)} maxWidth="xs" fullWidth>
-        <DialogTitle>Excluir regra?</DialogTitle>
+        <DialogTitle>Remover regra?</DialogTitle>
         <DialogContent>
           <Typography>
             Você está prestes a excluir a regra <strong>{rulePendingDeletion?.name}</strong>. Esta ação não pode ser desfeita.
@@ -560,13 +584,13 @@ export default function Forecast() {
         <DialogActions sx={{ px: 3, pb: 2 }}>
           <Button onClick={() => setRulePendingDeletion(null)}>Cancelar</Button>
           <Button variant="contained" color="error" onClick={() => void removeRule()}>
-            Excluir regra
+            Remover regra
           </Button>
         </DialogActions>
       </Dialog>
 
       <Dialog open={Boolean(cancelRunPending)} onClose={() => setCancelRunPending(null)} maxWidth="xs" fullWidth>
-        <DialogTitle>Cancelar execução?</DialogTitle>
+        <DialogTitle>Interromper esta execução?</DialogTitle>
         <DialogContent>
           <Typography>
             Você está prestes a cancelar a execução <strong>{cancelRunPending?.id}</strong>. Use isso se o forecast estiver travado.
@@ -583,7 +607,7 @@ export default function Forecast() {
             startIcon={cancellingRunId !== null ? <CircularProgress size={16} /> : undefined}
             onClick={() => cancelRunPending && void cancelRun(cancelRunPending)}
           >
-            {cancellingRunId !== null ? "Cancelando..." : "Cancelar execução"}
+            {cancellingRunId !== null ? "Interrompendo..." : "Interromper execução"}
           </Button>
         </DialogActions>
       </Dialog>

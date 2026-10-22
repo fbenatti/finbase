@@ -138,7 +138,6 @@ class DepartmentCreate(BaseModel):
     centro_custo: str | None = None
     id_orcamento: str | None = None
     ambiente: str | None = None
-    cloud_filter: str | None = None
     custom_fields: dict[str, Any] | None = None
     active: bool = True
 
@@ -149,7 +148,6 @@ class DepartmentUpdate(BaseModel):
     centro_custo: str | None = None
     id_orcamento: str | None = None
     ambiente: str | None = None
-    cloud_filter: str | None = None
     custom_fields: dict[str, Any] | None = None
     active: bool | None = None
 
@@ -161,7 +159,6 @@ class DepartmentOut(BaseModel):
     centro_custo: str | None
     id_orcamento: str | None
     ambiente: str | None
-    cloud_filter: str | None
     custom_fields: dict[str, Any] | None
     active: bool
     created_at: datetime
