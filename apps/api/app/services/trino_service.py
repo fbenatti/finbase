@@ -10,6 +10,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import re
 import time
 import asyncio
 import contextlib
@@ -55,6 +56,16 @@ class TrinoError(Exception):
 
 class TrinoCancelled(TrinoError):
     """Raised when the caller aborts a running Trino statement."""
+
+
+def qualify_sql_catalog(sql: str, catalog: str | None = None) -> str:
+    """Route fully qualified Iceberg SQL through the configured Trino catalog."""
+    effective_catalog = catalog or TRINO_CATALOG
+    if not re.fullmatch(r"[A-Za-z0-9_]+", effective_catalog):
+        raise ValueError("Invalid Trino catalog name")
+    if effective_catalog == "iceberg":
+        return sql
+    return re.sub(r"(?<![A-Za-z0-9_])iceberg(?=\.)", effective_catalog, sql)
 
 
 def _is_retryable(exc: Exception) -> bool:
@@ -193,6 +204,7 @@ async def _execute_once(
     cancel_event: asyncio.Event | None = None,
 ) -> list[dict[str, Any]]:
     effective_catalog = catalog or TRINO_CATALOG
+    effective_sql = qualify_sql_catalog(sql, effective_catalog)
     headers = {
         "X-Trino-User": TRINO_USER,
         "X-Trino-Catalog": effective_catalog,
@@ -205,7 +217,7 @@ async def _execute_once(
         # 1 — Submit statement
         submit_url = urljoin(TRINO_URL, "/v1/statement")
         resp = await _request_with_cancel(
-            client, "POST", submit_url, headers, cancel_event, submit_url, content=sql,
+            client, "POST", submit_url, headers, cancel_event, submit_url, content=effective_sql,
         )
         if resp.status_code in (429, 502, 503) and "QUEUED" not in resp.text:
             raise TrinoError(f"Trino error {resp.status_code}: coordinator ocupado ou reiniciando")
