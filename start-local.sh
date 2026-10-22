@@ -1,718 +1,95 @@
 #!/usr/bin/env bash
-set -Eeuo pipefail
+# Sobe (ou reinicia) o stack Finbase em Docker: api, scheduler, worker,
+# supervisor, web e gateway (docker-compose.finbase.yml).
+# Usa o PostgreSQL e o Trino compartilhados do projeto OpenFinops.
+#
+# Uso:
+#   ./start-local.sh            # rebuild + reinicia tudo
+#   ./start-local.sh web        # rebuild + reinicia só o frontend
+#   ./start-local.sh api        # rebuild + reinicia só o backend (api, scheduler, worker, supervisor)
+#   ./start-local.sh stop       # para o stack Finbase
+#   ./start-local.sh logs [svc] # acompanha logs
+set -euo pipefail
 
-ROOT_DIR="$(cd "$(dirname "$0")" && pwd)"
-VENV="$ROOT_DIR/.venv/bin/activate"
-LOG_DIR="$ROOT_DIR/.runtime-logs"
-LOCK_FILE="$LOG_DIR/start-local.lock"
-mkdir -p "$LOG_DIR"
+ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+COMPOSE_FILE="$ROOT_DIR/docker-compose.finbase.yml"
+WEB_URL="http://localhost:5174"
+API_URL="http://localhost:8011"
 
-api_pid=""; worker_pid=""; supervisor_pid=""; web_pid=""
-worker_restarts=0
-
-# ── Infra validation: Trino must answer before the worker starts. ──
-# The worker queries Trino to run forecast/reprocess jobs; starting without it
-# leaves that work silently failing in the queue ("All connection attempts failed").
-TRINO_URL="${TRINO_URL:-http://localhost:8080}"
-TRINO_WAIT_SECONDS="${TRINO_WAIT_SECONDS:-30}"
-API_URL="${API_URL:-http://localhost:8001}"
-BACKEND_WAIT_SECONDS="${BACKEND_WAIT_SECONDS:-180}"
-OPENFINOPS_WORKER_RUNTIME_DIR="${OPENFINOPS_WORKER_RUNTIME_DIR:-/tmp/openfinops-worker}"
-OPENFINOPS_WORKER_CONCURRENCY="${OPENFINOPS_WORKER_CONCURRENCY:-2}"
-AZURE_EXTRACTION_WORKERS="${AZURE_EXTRACTION_WORKERS:-2}"
-OCI_EXTRACTION_WORKERS="${OCI_EXTRACTION_WORKERS:-2}"
-OPENFINOPS_INLINE_BRONZE_AUDIT="${OPENFINOPS_INLINE_BRONZE_AUDIT:-1}"
-ICEBERG_LOCAL_WAREHOUSE="${ICEBERG_LOCAL_WAREHOUSE:-$ROOT_DIR/apps/data/iceberg}"
-export OPENFINOPS_WORKER_RUNTIME_DIR OPENFINOPS_WORKER_CONCURRENCY AZURE_EXTRACTION_WORKERS OCI_EXTRACTION_WORKERS OPENFINOPS_INLINE_BRONZE_AUDIT ICEBERG_LOCAL_WAREHOUSE
-
-is_docker_pid() {
-  local pid="$1"
-  local cmd
-  cmd="$(cmdline_for_pid "$pid")"
-  [[ "$cmd" == *com.docker* || "$cmd" == *Docker.app* || "$cmd" == *docker-proxy* || "$cmd" == *vpnkit* || "$cmd" == *qemu-system* || "$cmd" == */bin/docker* ]]
+compose() {
+  docker compose -f "$COMPOSE_FILE" --project-directory "$ROOT_DIR" "$@"
 }
 
-kill_pids() {
-  local pids="$1"
-  [[ -z "$pids" ]] && return 0
-  local safe="" pid
-  for pid in $pids; do
-    [[ -z "$pid" ]] && continue
-    if is_docker_pid "$pid"; then
-      echo "Ignorando PID $pid (processo Docker Desktop; não será morto)" >&2
-      continue
-    fi
-    safe="$safe $pid"
-  done
-  [[ -z "$safe" ]] && return 0
-  # shellcheck disable=SC2086
-  kill $safe 2>/dev/null || true
-  sleep 1
-  local still=""
-  for pid in $safe; do
-    if kill -0 "$pid" 2>/dev/null; then
-      still="$still $pid"
-    fi
-  done
-  if [[ -n "$still" ]]; then
-    # shellcheck disable=SC2086
-    kill -9 $still 2>/dev/null || true
-    sleep 0.3
-  fi
-}
-
-wait_for_pid_exit() {
-  local pid="$1"
-  local max_wait="${2:-20}"
-  local waited=0
-  [[ -z "$pid" ]] && return 0
-  while kill -0 "$pid" 2>/dev/null; do
-    if (( waited >= max_wait )); then
-      return 1
-    fi
-    sleep 0.5
-    waited=$((waited + 1))
-  done
-}
-
-stop_start_local_pid() {
-  local pid="$1"
-  [[ -z "$pid" ]] && return 0
-  kill "$pid" 2>/dev/null || true
-  if ! wait_for_pid_exit "$pid" 20; then
-    echo "Sessão anterior não encerrou após o cleanup; forçando PID $pid" >&2
-    kill -9 "$pid" 2>/dev/null || true
-    sleep 0.3
-  fi
-}
-
-wait_for_port_free() {
-  local port="$1"
-  local max_wait="${2:-20}"
-  local waited=0
-  while [[ -n "$(non_docker_listeners_on_port "$port")" ]]; do
-    if (( waited >= max_wait )); then
-      echo "ERRO: porta $port ainda ocupada após ${max_wait}s." >&2
-      return 1
-    fi
-    sleep 0.5
-    waited=$((waited + 1))
-  done
-}
-
-listeners_on_port() {
-  lsof -t -nP -iTCP:"$1" -sTCP:LISTEN 2>/dev/null || true
-}
-
-non_docker_listeners_on_port() {
-  local pid
-  for pid in $(listeners_on_port "$1"); do
-    [[ -z "$pid" ]] && continue
-    is_docker_pid "$pid" && continue
-    echo "$pid"
-  done
-}
-
-cmdline_for_pid() {
-  ps -p "$1" -o args= 2>/dev/null || true
-}
-
-is_openfinops_cmd() {
-  local cmd="$1"
-  [[ "$cmd" == *"$ROOT_DIR"* ]]
-}
-
-is_openfinops_api_cmd() {
-  local cmd="$1"
-  [[ "$cmd" == *uvicorn* && "$cmd" == *app.main:app* && "$cmd" == *"port 8001"* ]] \
-    || [[ "$cmd" == *multiprocessing.spawn* && "$cmd" == *spawn_main* ]]
-}
-
-is_openfinops_web_cmd() {
-  local cmd="$1"
-  [[ "$cmd" == *vite* ]] && is_openfinops_cmd "$cmd"
-}
-
-collect_pids_on_port() {
-  local port="$1"
-  shift
-  local pid cmd result="" pattern
-  for pid in $(listeners_on_port "$port"); do
-    [[ -z "$pid" ]] && continue
-    is_docker_pid "$pid" && continue
-    cmd="$(cmdline_for_pid "$pid")"
-    [[ -z "$cmd" ]] && continue
-    if is_openfinops_cmd "$cmd"; then
-      result="$result $pid"
-      continue
-    fi
-    for pattern in "$@"; do
-      if [[ "$cmd" == *"$pattern"* ]]; then
-        result="$result $pid"
-        break
-      fi
-    done
-  done
-  # shellcheck disable=SC2086
-  echo $result
-}
-
-write_pid_file() {
+require_shared_container() {
   local name="$1"
-  local pid="$2"
-  [[ -n "$pid" ]] && echo "$pid" >"$LOG_DIR/$name.pid"
-}
-
-stop_pid_files() {
-  local f pid
-  shopt -s nullglob
-  for f in "$LOG_DIR"/*.pid; do
-    case "$(basename "$f")" in
-      api.pid|worker.pid|supervisor.pid|web.pid) ;;
-      *) continue ;;
-    esac
-    pid="$(tr -d '[:space:]' < "$f")"
-    [[ "$pid" =~ ^[0-9]+$ ]] || continue
-    if kill -0 "$pid" 2>/dev/null; then
-      echo "Encerrando processo registrado em $(basename "$f") (PID $pid)"
-      kill_pids "$pid"
-    fi
-    rm -f "$f"
-  done
-  shopt -u nullglob
-}
-
-stop_other_start_local() {
-  local pid cmd
-  while read -r pid; do
-    [[ -z "$pid" ]] && continue
-    [[ "$pid" -eq $$ ]] && continue
-    cmd="$(cmdline_for_pid "$pid")"
-    [[ "$cmd" != *start-local.sh* ]] && continue
-    echo "Encerrando sessão start-local.sh anterior (PID $pid)"
-    stop_start_local_pid "$pid"
-  done < <(pgrep -f "$ROOT_DIR/start-local.sh" 2>/dev/null || true)
-}
-
-acquire_session_lock() {
-  local old_pid cmd
-  if [[ -f "$LOCK_FILE" ]]; then
-    old_pid="$(tr -d '[:space:]' < "$LOCK_FILE")"
-    if [[ "$old_pid" =~ ^[0-9]+$ ]] && kill -0 "$old_pid" 2>/dev/null; then
-      cmd="$(cmdline_for_pid "$old_pid")"
-      if [[ "$cmd" == *start-local.sh* && "$old_pid" -ne $$ ]]; then
-        echo "Encerrando sessão start-local.sh anterior (PID $old_pid)"
-        stop_start_local_pid "$old_pid"
-      fi
-    fi
-    rm -f "$LOCK_FILE"
-  fi
-  stop_other_start_local
-  echo $$ >"$LOCK_FILE"
-  write_pid_file start-local "$$"
-}
-
-stop_compose_dev_conflicts() {
-  if ! docker_daemon_ready; then
-    return 0
-  fi
-  echo "Parando containers Docker api/web/gateway deste projeto (Docker Desktop permanece ativo)..."
-  compose_cmd stop -t 2 api web gateway scheduler >/dev/null 2>&1 || true
-  compose_cmd kill api web gateway scheduler >/dev/null 2>&1 || true
-}
-
-free_listeners_on_port() {
-  local port="$1"
-  local label="$2"
-  shift 2
-  local pids leftover
-  pids="$(collect_pids_on_port "$port" "$@")"
-  if [[ -n "$pids" ]]; then
-    echo "Liberando porta $port ($label, PIDs:$(echo "$pids" | sed 's/^/ /'))"
-    kill_pids "$pids"
-  fi
-  leftover="$(non_docker_listeners_on_port "$port" | tr '\n' ' ' | sed 's/ $//')"
-  if [[ -n "$leftover" ]]; then
-    echo "Liberando porta $port ($label, listeners restantes:$leftover)"
-    kill_pids "$leftover"
-  fi
-  wait_for_port_free "$port" 20
-}
-
-kill_orphan_api() {
-  local api_pids
-  api_pids="$(pgrep -f "uvicorn app.main:app.*port 8001" 2>/dev/null || true)"
-  if [[ -n "$api_pids" ]]; then
-    echo "Encerrando API uvicorn órfã (PIDs:$(echo "$api_pids" | tr '\n' ' ' | sed 's/ $//'))"
-    kill_pids "$api_pids"
-  fi
-}
-
-kill_orphan_workers() {
-  local worker_pids zombie_pids
-  worker_pids="$(OPENFINOPS_PROJECT_ROOT="$ROOT_DIR" "$ROOT_DIR/.venv/bin/python" - <<'PY'
-import os
-import psutil
-
-root = os.environ['OPENFINOPS_PROJECT_ROOT']
-for proc in psutil.process_iter(['pid', 'cmdline', 'cwd']):
-    try:
-        args = proc.info['cmdline'] or []
-        if (proc.info['cwd'] == root + '/apps/api' and args[-1:] == ['worker.py']):
-            print(proc.pid)
-    except (psutil.NoSuchProcess, psutil.AccessDenied):
-        continue
-PY
-)"
-  if [[ -n "$worker_pids" ]]; then
-    echo "Encerrando worker ETL órfão (PIDs:$(echo "$worker_pids" | tr '\n' ' ' | sed 's/ $//'))"
-    kill_pids "$worker_pids"
-  fi
-
-  # Only children from this project's worker that lost their parent. The API
-  # reload process also uses spawn_main and must never be killed here.
-  zombie_pids="$(OPENFINOPS_PROJECT_ROOT="$ROOT_DIR" "$ROOT_DIR/.venv/bin/python" - <<'PY'
-import os
-import psutil
-
-root = os.environ['OPENFINOPS_PROJECT_ROOT']
-for proc in psutil.process_iter(['pid', 'ppid', 'cmdline', 'cwd']):
-    try:
-        info = proc.info
-        command = ' '.join(info['cmdline'] or [])
-        if (info['ppid'] == 1 and 'multiprocessing.spawn import spawn_main' in command
-                and (info['cwd'] or '') == root + '/apps/api'
-                and info['cmdline']):
-            print(info['pid'])
-    except (psutil.NoSuchProcess, psutil.AccessDenied):
-        continue
-PY
-)"
-  if [[ -n "$zombie_pids" ]]; then
-    echo "Encerrando processos filho zumbis do worker (spawn_main, PIDs:$(echo "$zombie_pids" | tr '\n' ' ' | sed 's/ $//'))"
-    kill -9 $zombie_pids 2>/dev/null || true
-    sleep 1
-  fi
-  rm -f /tmp/openfinops-worker.lock /tmp/openfinops-worker.pid /tmp/openfinops-worker.heartbeat
-  rm -f "$OPENFINOPS_WORKER_RUNTIME_DIR"/worker-*.heartbeat "$OPENFINOPS_WORKER_RUNTIME_DIR"/worker-*.pid
-  rm -f "$OPENFINOPS_WORKER_RUNTIME_DIR"/supervisor.pid
-  rmdir "$OPENFINOPS_WORKER_RUNTIME_DIR" 2>/dev/null || true
-}
-
-free_stale_processes() {
-  local pids_8000
-
-  stop_compose_dev_conflicts
-  stop_pid_files
-
-  kill_orphan_api
-  free_listeners_on_port 8001 "API local" uvicorn app.main:app
-  # 8000 is the compose API mapping. Only stop the container (above); never kill Docker's proxy.
-  pids_8000="$(collect_pids_on_port 8000 uvicorn app.main:app)"
-  if [[ -n "$pids_8000" ]]; then
-    echo "Liberando porta 8000 (uvicorn local, PIDs: $pids_8000)"
-    kill_pids "$pids_8000"
-  fi
-  free_listeners_on_port 5173 "frontend Vite" vite
-
-  kill_orphan_workers
-
-
-  if [[ -n "$(non_docker_listeners_on_port 8001)" ]]; then
-    echo "ERRO: porta 8001 ainda ocupada após tentar liberar." >&2
-    exit 1
-  fi
-  if [[ -n "$(non_docker_listeners_on_port 5173)" ]]; then
-    echo "ERRO: porta 5173 ainda ocupada após tentar liberar." >&2
+  if ! docker ps --format '{{.Names}}' | grep -qx "$name"; then
+    echo "ERRO: container compartilhado '$name' não está rodando." >&2
+    echo "      Suba-o na pasta OpenFinops (veja infra/FINBASE.md)." >&2
     exit 1
   fi
 }
 
-sync_api_pid_from_port() {
-  local listener cmd
-  listener="$(listeners_on_port 8001 | head -1 | tr -d '[:space:]')"
-  [[ -z "$listener" ]] && return 1
-  cmd="$(cmdline_for_pid "$listener")"
-  is_openfinops_api_cmd "$cmd" || return 1
-  api_pid="$listener"
-  write_pid_file api "$api_pid"
-  return 0
-}
-
-recover_api_pid() {
-  if kill -0 "$api_pid" 2>/dev/null; then
-    return 0
-  fi
-  sync_api_pid_from_port
-}
-
-trino_alive() {
-  local payload
-  payload="$(http_get "$TRINO_URL/v1/info")"
-  [[ -n "$payload" ]] || return 1
-  python3 -c 'import json,sys; p=json.loads(sys.argv[1]); sys.exit(0 if p.get("state")=="ACTIVE" and not p.get("starting") else 1)' "$payload"
-}
-
-http_get() {
-  local url="$1"
-  if command -v curl >/dev/null 2>&1; then
-    curl -fsS --max-time 3 "$url" 2>/dev/null || true
-    return 0
-  fi
-  python3 - "$url" <<'PY' 2>/dev/null || true
-import sys
-from urllib.request import urlopen
-
-with urlopen(sys.argv[1], timeout=3) as response:
-    print(response.read().decode())
-PY
-}
-
-compose_cmd() {
-  docker compose --project-directory "$ROOT_DIR" "$@"
-}
-
-docker_daemon_ready() {
-  "$ROOT_DIR/.venv/bin/python" - "${DOCKER_CLI_TIMEOUT_SECONDS:-8}" <<'PY'
-import subprocess
-import sys
-
-try:
-    result = subprocess.run(
-        ["docker", "ps"],
-        stdin=subprocess.DEVNULL,
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
-        timeout=float(sys.argv[1]),
-    )
-except (OSError, subprocess.TimeoutExpired, ValueError):
-    sys.exit(1)
-
-sys.exit(result.returncode)
-PY
-}
-
-configure_docker_host() {
-  if docker_daemon_ready; then
-    return 0
-  fi
-  if [[ -S "${HOME}/.docker/run/docker.sock" ]]; then
-    export DOCKER_HOST="unix://${HOME}/.docker/run/docker.sock"
-  elif [[ -S "/var/run/docker.sock" ]]; then
-    export DOCKER_HOST="unix:///var/run/docker.sock"
-  fi
-  docker_daemon_ready
-}
-
-ensure_docker_daemon() {
-  if ! command -v docker >/dev/null 2>&1; then
-    echo "ERRO: comando docker não encontrado; Trino exige Docker." >&2
-    exit 1
-  fi
-
-  configure_docker_host || true
-
-  local waited=0
-  until docker_daemon_ready; do
-    if (( waited == 0 )); then
-      echo "Aguardando Docker daemon (somente leitura; o script não encerra o Docker Desktop)..."
+wait_http() {
+  local url="$1" label="$2" tries="${3:-60}"
+  for _ in $(seq 1 "$tries"); do
+    if curl -fs -o /dev/null --max-time 3 "$url"; then
+      echo "  $label OK ($url)"
+      return 0
     fi
-    if (( waited >= 60 )); then
-      echo "ERRO: Docker não respondeu em 60s." >&2
-      echo "  Confirme que o Docker Desktop está em execução e rode ./start-local.sh novamente." >&2
-      exit 1
-    fi
-    configure_docker_host || true
     sleep 2
-    waited=$((waited + 2))
   done
-  if (( waited > 0 )); then
-    echo "Docker daemon OK"
-  fi
-}
-
-start_infra() {
-  ensure_docker_daemon
-  # Nessie and MinIO belong to the legacy catalog and are not used by the
-  # current local SQL catalog. The Compose stack uses the local Iceberg
-  # catalog and exposes Trino workers as
-  # an optional service, so never request removed services here.
-  local infra_services=(trino)
-  if compose_cmd config --services 2>/dev/null | grep -qx 'trino-worker'; then
-    infra_services+=(trino-worker)
-  fi
-
-  echo "Subindo containers OpenFinops (${infra_services[*]}) — start, sem recriar..."
-  compose_cmd start "${infra_services[@]}" >/dev/null 2>&1 || true
-  if compose_cmd up -d "${infra_services[@]}"; then
-    return 0
-  fi
-  echo "ERRO: falha ao subir containers de infraestrutura." >&2
-  echo "  Veja: docker compose --project-directory \"$ROOT_DIR\" logs ${infra_services[*]}" >&2
+  echo "ERRO: $label não respondeu em $url" >&2
   return 1
 }
 
-wait_for_trino() {
-  local attempt_label="${1:-Aguardando Trino em $TRINO_URL}"
-  echo -n "$attempt_label"
-  local waited=0
-  until trino_alive; do
-    if (( waited >= TRINO_WAIT_SECONDS )); then
-      echo
-      return 1
-    fi
-    sleep 1
-    waited=$((waited + 1))
-    echo -n "."
-  done
-  echo " OK"
-  return 0
-}
-
-ensure_infra() {
-  ensure_docker_daemon
-
-  if trino_alive; then
-    echo "Trino já disponível em $TRINO_URL"
-    return 0
-  fi
-
-  echo "Trino não está respondendo em $TRINO_URL"
-  start_infra || exit 1
-
-  if wait_for_trino "Aguardando Trino em $TRINO_URL (até ${TRINO_WAIT_SECONDS}s)"; then
-    return 0
-  fi
-
-  echo "ERRO: Trino não ficou disponível após ${TRINO_WAIT_SECONDS}s." >&2
-  echo "  Os containers não foram recriados. Logs: docker compose --project-directory \"$ROOT_DIR\" logs trino trino-worker" >&2
-  exit 1
-}
-
-echo "Verificando instâncias anteriores do stack local OpenFinops..."
-acquire_session_lock
-ensure_docker_daemon
-free_stale_processes
-
-source "$VENV"
-
-echo "Validando sintaxe do backend..."
-if ! "$ROOT_DIR/.venv/bin/python" -m compileall -q "$ROOT_DIR/apps/api/app" "$ROOT_DIR/apps/api/worker.py"; then
-  echo "ERRO: backend contém erro de sintaxe; inicialização cancelada antes de abrir as portas." >&2
+if ! docker info >/dev/null 2>&1; then
+  echo "ERRO: Docker daemon indisponível. Abra o Docker Desktop." >&2
   exit 1
 fi
 
-ensure_infra
-
-backend_ready() {
-  local api_health worker_health listener
-  sync_api_pid_from_port || true
-  kill -0 "$api_pid" 2>/dev/null || return 1
-  listener="$(listeners_on_port 8001 | head -1 | tr -d '[:space:]')"
-  [[ -n "$listener" ]] || return 1
-  api_health="$(http_get "$API_URL/health")"
-  worker_health="$(http_get "$API_URL/etl/worker-health")"
-  [[ "$api_health" == *'"status":"ok"'* && "$worker_health" == *'"status":"ok"'* ]]
-}
-
-wait_for_backend() {
-  echo -n "Aguardando API e Worker ETL"
-  local waited=0
-  until backend_ready; do
-    if ! kill -0 "$api_pid" 2>/dev/null; then
-      echo
-      echo "ERRO: processo da API encerrou durante inicialização; veja $LOG_DIR/api.log" >&2
-      return 1
-    fi
-    if (( waited >= BACKEND_WAIT_SECONDS )); then
-      echo
-      echo "ERRO: API e Worker ETL não ficaram disponíveis após ${BACKEND_WAIT_SECONDS}s." >&2
-      echo "  API: $LOG_DIR/api.log" >&2
-      echo "  Worker: $LOG_DIR/worker.log" >&2
-      if [[ -n "$(listeners_on_port 8001)" ]]; then
-        echo "  Porta 8001 ouvindo em PID(s): $(listeners_on_port 8001 | tr '\n' ' ')" >&2
-        echo "  PID rastreado pela sessão: ${api_pid:-desconhecido}" >&2
-      fi
-      return 1
-    fi
-    sleep 2
-    waited=$((waited + 2))
-    echo -n "."
-  done
-  echo " OK"
-}
-
-stop_backend_processes() {
-  local process_pid
-  for process_pid in "$worker_pid" "$api_pid"; do
-    if [[ -n "$process_pid" ]] && kill -0 "$process_pid" 2>/dev/null; then
-      kill "$process_pid" 2>/dev/null || true
-    fi
-  done
-  sleep 1
-  for process_pid in "$worker_pid" "$api_pid"; do
-    if [[ -n "$process_pid" ]] && kill -0 "$process_pid" 2>/dev/null; then
-      kill -9 "$process_pid" 2>/dev/null || true
-    fi
-  done
-  rm -f "$LOG_DIR/api.pid" "$LOG_DIR/worker.pid"
-  api_pid=""
-  worker_pid=""
-}
-
-start_api_process() {
-  local attempt
-  for attempt in 1 2; do
-    if (( attempt > 1 )); then
-      echo "Reiniciando API após liberar porta 8001 (tentativa $attempt)..."
-      kill_orphan_api
-      free_listeners_on_port 8001 "API local" uvicorn app.main:app
-    fi
-    : >"$LOG_DIR/api.log"
-    (
-      cd "$ROOT_DIR/apps/api"
-      export OPENFINOPS_WORKER_RUNTIME_DIR OPENFINOPS_WORKER_CONCURRENCY ICEBERG_LOCAL_WAREHOUSE
-      exec "$ROOT_DIR/.venv/bin/python" -m uvicorn app.main:app --host 0.0.0.0 --port 8001 --reload
-    ) >>"$LOG_DIR/api.log" 2>&1 &
-    api_pid=$!
-    write_pid_file api "$api_pid"
-    sleep 0.5
-    if kill -0 "$api_pid" 2>/dev/null; then
-      sync_api_pid_from_port || true
-      return 0
-    fi
-    if (( attempt == 1 )) && grep -q "Address already in use" "$LOG_DIR/api.log" 2>/dev/null; then
-      continue
-    fi
-    echo "ERRO: processo da API encerrou ao iniciar; veja $LOG_DIR/api.log" >&2
-    return 1
-  done
-  echo "ERRO: processo da API encerrou ao iniciar; veja $LOG_DIR/api.log" >&2
-  return 1
-}
-
-start_worker_process() {
-  mkdir -p "$OPENFINOPS_WORKER_RUNTIME_DIR"
-  (
-    cd "$ROOT_DIR/apps/api"
-    export OPENFINOPS_WORKER_RUNTIME_DIR OPENFINOPS_WORKER_CONCURRENCY ICEBERG_LOCAL_WAREHOUSE
-    exec "$ROOT_DIR/.venv/bin/python" -u worker.py
-  ) >"$LOG_DIR/worker.log" 2>&1 &
-  worker_pid=$!
-  write_pid_file worker "$worker_pid"
-}
-
-# Let the API finish migrations before the worker starts querying the same
-# tables.  Starting both processes at once can leave an ETL transaction holding
-# a relation lock while the API is executing ALTER TABLE during startup.
-wait_for_api_startup() {
-  local waited=0
-  until [[ "$(http_get "$API_URL/health")" == *'"status":"ok"'* ]]; do
-    if ! kill -0 "$api_pid" 2>/dev/null; then
-      echo "ERRO: processo da API encerrou durante as migrações; veja $LOG_DIR/api.log" >&2
-      return 1
-    fi
-    if (( waited >= BACKEND_WAIT_SECONDS )); then
-      echo "ERRO: API não concluiu as migrações em ${BACKEND_WAIT_SECONDS}s; veja $LOG_DIR/api.log" >&2
-      return 1
-    fi
-    sleep 1
-    waited=$((waited + 1))
-  done
-}
-
-wait_for_backend_with_retry() {
-  if wait_for_backend; then
-    return 0
-  fi
-  echo "Reiniciando API/Worker após limpar workers órfãos e processos travados..."
-  stop_backend_processes
-  free_listeners_on_port 8001 "API local" uvicorn app.main:app
-  kill_orphan_workers
-  sleep 1
-  start_api_process || return 1
-  wait_for_api_startup || return 1
-  start_worker_process
-  if wait_for_backend; then
-    return 0
-  fi
-  echo "ERRO: API e Worker ETL não ficaram disponíveis após retry." >&2
-  return 1
-}
-
-cleanup() {
-  trap - INT TERM EXIT
-  rm -f "$LOCK_FILE" "$LOG_DIR/start-local.pid" "$LOG_DIR/api.pid" "$LOG_DIR/worker.pid" "$LOG_DIR/web.pid"
-  for process_pid in "$web_pid" "$worker_pid" "$supervisor_pid" "$api_pid"; do
-    if [[ -n "$process_pid" ]] && kill -0 "$process_pid" 2>/dev/null; then kill "$process_pid" 2>/dev/null || true; fi
-  done
-  for _ in {1..10}; do
-    alive=0
-    for process_pid in "$web_pid" "$worker_pid" "$supervisor_pid" "$api_pid"; do
-      if [[ -n "$process_pid" ]] && kill -0 "$process_pid" 2>/dev/null; then alive=1; fi
-    done
-    (( alive == 0 )) && break
-    sleep 0.5
-  done
-  for process_pid in "$web_pid" "$worker_pid" "$supervisor_pid" "$api_pid"; do
-    if [[ -n "$process_pid" ]] && kill -0 "$process_pid" 2>/dev/null; then kill -9 "$process_pid" 2>/dev/null || true; fi
-  done
-  wait 2>/dev/null || true
-}
-trap cleanup INT TERM EXIT
-
-start_api_process || exit 1
-wait_for_api_startup || exit 1
-start_worker_process
-
-(cd "$ROOT_DIR/apps/api" && DATABASE_URL_SYNC="${DATABASE_URL_SYNC:-postgresql://finops:finops@localhost:5433/finops}" DATABASE_URL="${DATABASE_URL:-postgresql+asyncpg://finops:finops@localhost:5433/finops}" exec "$ROOT_DIR/.venv/bin/python" -u supervisor.py) \
-  >"$LOG_DIR/supervisor.log" 2>&1 &
-supervisor_pid=$!
-write_pid_file supervisor "$supervisor_pid"
-
-(cd "$ROOT_DIR/apps/web" && exec npm run dev -- --host 0.0.0.0) \
-  >"$LOG_DIR/web.log" 2>&1 &
-web_pid=$!
-write_pid_file web "$web_pid"
-
-wait_for_backend_with_retry || exit 1
-
-echo "OpenFinops completo iniciado: API $API_URL | Web http://localhost:5173 | Worker ETL ativo"
-echo "Logs: $LOG_DIR"
-
-while true; do
-  sleep 2
-  if ! recover_api_pid; then
-    echo "API encerrou; veja $LOG_DIR/api.log" >&2
+target="${1:-all}"
+case "$target" in
+  stop)
+    compose down
+    exit 0
+    ;;
+  logs)
+    shift
+    compose logs -f --tail 100 "$@"
+    exit 0
+    ;;
+  web)
+    services=(web gateway)
+    ;;
+  api)
+    services=(scheduler api worker supervisor gateway)
+    ;;
+  all)
+    services=()
+    ;;
+  *)
+    echo "Uso: $0 [all|web|api|stop|logs [serviço]]" >&2
     exit 1
-  fi
-  if ! kill -0 "$web_pid" 2>/dev/null; then
-    echo "Frontend encerrou; veja $LOG_DIR/web.log" >&2
-    exit 1
-  fi
-  if ! kill -0 "$worker_pid" 2>/dev/null; then
-    wait "$worker_pid" 2>/dev/null
-    worker_exit=$?
-    if (( worker_exit == 0 )); then
-      echo "Worker reciclou o processo para liberar memória; seguindo a fila."
-    else
-      worker_restarts=$((worker_restarts + 1))
-      if (( worker_restarts > 3 )); then
-        echo "Worker encerrou após 3 tentativas; veja $LOG_DIR/worker.log" >&2
-        exit 1
-      fi
-      echo "Worker encerrou; reiniciando ($worker_restarts/3)"
-    fi
-    (cd "$ROOT_DIR/apps/api" && exec "$ROOT_DIR/.venv/bin/python" -u worker.py) \
-      >>"$LOG_DIR/worker.log" 2>&1 &
-    worker_pid=$!
-    write_pid_file worker "$worker_pid"
-  fi
-  if ! kill -0 "$supervisor_pid" 2>/dev/null; then
-    echo "Monitor da fila encerrou; reiniciando."
-    (cd "$ROOT_DIR/apps/api" && DATABASE_URL_SYNC="${DATABASE_URL_SYNC:-postgresql://finops:finops@localhost:5433/finops}" DATABASE_URL="${DATABASE_URL:-postgresql+asyncpg://finops:finops@localhost:5433/finops}" exec "$ROOT_DIR/.venv/bin/python" -u supervisor.py) \
-      >>"$LOG_DIR/supervisor.log" 2>&1 &
-    supervisor_pid=$!
-    write_pid_file supervisor "$supervisor_pid"
-  fi
-done
+    ;;
+esac
+
+if [[ ! -f "$ROOT_DIR/.env" || ! -f "$ROOT_DIR/.env-databriks" ]]; then
+  echo "ERRO: faltam .env e/ou .env-databriks na raiz (copie da pasta OpenFinops)." >&2
+  exit 1
+fi
+
+require_shared_container openfinops-postgres-1
+require_shared_container openfinops-trino-1
+
+echo "Build + subida do Finbase (${services[*]:-todos os serviços})..."
+compose up -d --build --remove-orphans "${services[@]}"
+# O gateway resolve api/web por DNS; reinicia para não reaproveitar IPs antigos.
+compose restart gateway >/dev/null
+
+echo "Aguardando serviços..."
+wait_http "$API_URL/saude" "API"
+wait_http "$WEB_URL/" "Web"
+
+echo
+echo "Finbase no ar: Web $WEB_URL | API $API_URL"
+echo "Logs: ./start-local.sh logs [api|web|worker|scheduler]"

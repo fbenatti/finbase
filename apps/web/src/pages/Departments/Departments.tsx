@@ -2,14 +2,13 @@ import { Dialog, DialogActions, DialogContent, DialogTitle } from "../../compone
 import { dataDisplayText } from "../../utils/dataPresentation";
 import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { Alert, Box, Breadcrumbs, Button, ButtonBase, Chip, CircularProgress, Divider, FormControl, FormControlLabel, FormLabel, IconButton, InputAdornment, Link, Menu, MenuItem, Paper, Radio, RadioGroup, Stack, Switch, TextField, Tooltip, Typography } from "@mui/material";
+import { Alert, Box, Breadcrumbs, Button, ButtonBase, Chip, CircularProgress, Divider, FormControl, FormControlLabel, FormLabel, IconButton, InputAdornment, Link, Paper, Radio, RadioGroup, Stack, Switch, TextField, Tooltip, Typography } from "@mui/material";
 import { AddOutlined, AccountBalanceOutlined, AccountTreeOutlined, BusinessOutlined, ChevronRightOutlined, DeleteOutlined, EditOutlined, ExpandMoreOutlined, SearchOutlined, UnfoldLessOutlined, UnfoldMoreOutlined, UploadFileOutlined } from "@mui/icons-material";
 import {
   getDepartments,
   createDepartment,
   updateDepartment,
   deleteDepartment,
-  bootstrapCloudOrganization,
   importCsvData,
   CsvImportResult,
   Department,
@@ -69,8 +68,6 @@ export default function Departments({ embedded = false }: { embedded?: boolean }
 
   // Import / organizacao
   const [importing, setImporting] = useState(false);
-  const [financialMenu, setFinancialMenu] = useState<HTMLElement | null>(null);
-  const [preparingOrganization, setPreparingOrganization] = useState(false);
 
   // Shared cost (dentro do dialogo de departamento)
   const [sharedEnabled, setSharedEnabled] = useState(false);
@@ -85,7 +82,6 @@ export default function Departments({ embedded = false }: { embedded?: boolean }
   const [deleteDeptPending, setDeleteDeptPending] = useState<Department | null>(
     null,
   );
-  const [prepareOrgPending, setPrepareOrgPending] = useState(false);
 
   const load = async () => {
     try {
@@ -107,33 +103,6 @@ export default function Departments({ embedded = false }: { embedded?: boolean }
   }, []);
 
   // ── Acoes de página ──
-  const prepareCloudOrganization = async () => {
-    setPrepareOrgPending(false);
-    setPreparingOrganization(true);
-    setError("");
-    setSuccess("");
-    try {
-      const result = await bootstrapCloudOrganization();
-      setSuccess(
-        result.message +
-          " " +
-          result.moved_directories.length +
-          " diretorias reposicionadas e " +
-          result.planning_entries_updated +
-          " entradas de orçamento atualizadas.",
-      );
-      await load();
-    } catch (e: unknown) {
-      setError(
-        e instanceof Error
-          ? e.message
-          : "Não foi possível preparar a hierarquia",
-      );
-    } finally {
-      setPreparingOrganization(false);
-    }
-  };
-
   const handleImport = async () => {
     setImporting(true);
     setError("");
@@ -817,65 +786,6 @@ export default function Departments({ embedded = false }: { embedded?: boolean }
             <Stack direction="row" spacing={1} flexWrap="wrap" flexShrink={0}>
               <Button
                 size="small"
-                startIcon={<AccountBalanceOutlined />}
-                onClick={(e) => setFinancialMenu(e.currentTarget)}
-              >
-                Cadastro financeiro
-              </Button>
-              <Menu
-                anchorEl={financialMenu}
-                open={Boolean(financialMenu)}
-                onClose={() => setFinancialMenu(null)}
-              >
-                <MenuItem
-                  onClick={() => {
-                    setFinancialMenu(null);
-                    navigate("/planejamento/orcamentos");
-                  }}
-                >
-                  Importar orçamento
-                </MenuItem>
-                <MenuItem
-                  onClick={() => {
-                    setFinancialMenu(null);
-                    navigate("/planejamento/projecoes-manuais");
-                  }}
-                >
-                  Importar forecast manual
-                </MenuItem>
-                <MenuItem
-                  onClick={() => {
-                    setFinancialMenu(null);
-                    navigate("/planejamento/historico-do-orcamento");
-                  }}
-                >
-                  Importar base line contratual
-                </MenuItem>
-                <MenuItem
-                  onClick={() => {
-                    setFinancialMenu(null);
-                    navigate("/planejamento/historico-do-orcamento");
-                  }}
-                >
-                  Download modelo e editar cadastro
-                </MenuItem>
-              </Menu>
-              <Button
-                size="small"
-                startIcon={
-                  preparingOrganization ? (
-                    <CircularProgress size={16} />
-                  ) : (
-                    <AccountTreeOutlined />
-                  )
-                }
-                onClick={() => setPrepareOrgPending(true)}
-                disabled={preparingOrganization}
-              >
-                Preparar hierarquia cloud
-              </Button>
-              <Button
-                size="small"
                 startIcon={
                   importing ? <CircularProgress size={16} /> : <UploadFileOutlined />
                 }
@@ -1315,31 +1225,6 @@ export default function Departments({ embedded = false }: { embedded?: boolean }
         </DialogActions>
       </Dialog>
 
-      <Dialog
-        open={prepareOrgPending}
-        onClose={() => setPrepareOrgPending(false)}
-        maxWidth="xs"
-        fullWidth
-      >
-        <DialogTitle>Preparar hierarquia cloud?</DialogTitle>
-        <DialogContent>
-          <Typography>
-            Preparar Consumo Cloud &gt; Showback/Chargeback &gt; Provedores e
-            mover as diretorias atuais para Showback &gt; Azure? Isso não
-            reprocessa os dados.
-          </Typography>
-        </DialogContent>
-        <DialogActions sx={{ px: 3, pb: 2 }}>
-          <Button onClick={() => setPrepareOrgPending(false)}>Cancelar</Button>
-          <Button
-            variant="contained"
-            color="warning"
-            onClick={() => void prepareCloudOrganization()}
-          >
-            Preparar hierarquia
-          </Button>
-        </DialogActions>
-      </Dialog>
     </Box>
   );
 }
