@@ -40,7 +40,7 @@ local é `apps/data/iceberg` nesta cópia, criado vazio e montado no Trino em
 ## Endereços locais
 
 - Aplicação: <http://localhost:5174>
-- API: <http://localhost:8001>
+- API: <http://localhost:8011>
 - Trino compartilhado: <http://localhost:8080>
 - PostgreSQL compartilhado: porta `5434` no host; banco `finbase`
 
