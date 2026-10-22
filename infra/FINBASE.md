@@ -10,12 +10,13 @@ economizar memória, usa o PostgreSQL e o Trino que já rodam no projeto
 1. Copie os arquivos locais de ambiente da pasta `OpenFinops` para esta pasta:
    `.env` e `.env-databriks`. Eles são ignorados pelo Git e não devem ser
    versionados.
-2. Confirme que os containers `openfinops-postgres-1` e `openfinops-trino-1`
-   estão ativos e saudáveis.
-3. Crie o banco vazio no PostgreSQL compartilhado:
+2. Confirme que o PostgreSQL compartilhado está escutando em `localhost:5433`
+   e que o container `openfinops-trino-1` está saudável.
+3. Crie o banco vazio no PostgreSQL compartilhado. O `psql` solicitará a senha
+   configurada em `.env`:
 
    ```bash
-   docker exec openfinops-postgres-1 psql -U finops -d postgres \
+   psql -h 127.0.0.1 -p 5433 -U finops -d postgres \
      -c 'CREATE DATABASE finbase OWNER finops'
    ```
 
@@ -23,7 +24,7 @@ economizar memória, usa o PostgreSQL e o Trino que já rodam no projeto
    mount do warehouse vazio. Execute na pasta `OpenFinops`:
 
    ```bash
-   docker compose up -d --no-deps trino trino-worker trino-worker-2
+   docker compose up -d --no-deps --force-recreate trino trino-worker trino-worker-2
    ```
 
 5. Execute na pasta `finbase`:
@@ -42,7 +43,7 @@ local é `apps/data/iceberg` nesta cópia, criado vazio e montado no Trino em
 - Aplicação: <http://localhost:5174>
 - API: <http://localhost:8011>
 - Trino compartilhado: <http://localhost:8080>
-- PostgreSQL compartilhado: porta `5434` no host; banco `finbase`
+- PostgreSQL compartilhado: porta `5433` no host; banco `finbase`
 
 ## Parar a cópia
 
