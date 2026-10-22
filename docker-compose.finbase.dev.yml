@@ -1,0 +1,40 @@
+# Modo DEV: usado junto com docker-compose.finbase.yml (./start-local.sh dev).
+# - web: Vite com recarga automática no lugar da build estática + nginx.
+# - api: uvicorn --reload lendo o código montado da máquina.
+# - worker/scheduler: também leem o código montado (reiniciam com ./start-local.sh dev).
+# O gateway continua em http://localhost:5174 e http://localhost:8011.
+
+services:
+  api:
+    command:
+      - sh
+      - -c
+      - exec uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload --reload-dir /app/app --proxy-headers --forwarded-allow-ips=$${FORWARDED_ALLOW_IPS:-172.16.0.0/12}
+    volumes: &finbase-dev-app-volumes
+      - ./apps/data/iceberg:/data/finbase-iceberg
+      - ./env:/run/finbase-env:ro
+      - ./backups/scheduled:/backups/scheduled
+      - worker_runtime:/run/openfinops-worker
+      - ./apps/api/app:/app/app
+
+  scheduler:
+    volumes: *finbase-dev-app-volumes
+
+  worker:
+    volumes: *finbase-dev-app-volumes
+
+  web:
+    build: !reset null
+    image: node:20-alpine
+    working_dir: /app
+    # Responde na porta 80 com o mesmo alias (finbase-web) que o gateway usa.
+    command: sh -c "yarn install --frozen-lockfile && exec yarn dev --host 0.0.0.0 --port 80 --strictPort"
+    environment:
+      VITE_APP_ENV: development
+    volumes:
+      - ./apps/web:/app
+      # node_modules fica num volume: dependências do Linux, não as do macOS.
+      - web_node_modules:/app/node_modules
+
+volumes:
+  web_node_modules:

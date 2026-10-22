@@ -4,7 +4,8 @@
 # Usa o PostgreSQL e o Trino compartilhados do projeto OpenFinops.
 #
 # Uso:
-#   ./start-local.sh            # rebuild + reinicia tudo
+#   ./start-local.sh            # rebuild + reinicia tudo (build de produção)
+#   ./start-local.sh dev        # modo DEV: Vite e API com recarga automática, sem rebuild
 #   ./start-local.sh web        # rebuild + reinicia só o frontend
 #   ./start-local.sh api        # rebuild + reinicia só o backend (api, scheduler, worker, supervisor)
 #   ./start-local.sh stop       # para o stack Finbase
@@ -13,11 +14,16 @@ set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 COMPOSE_FILE="$ROOT_DIR/docker-compose.finbase.yml"
+COMPOSE_DEV_FILE="$ROOT_DIR/docker-compose.finbase.dev.yml"
 WEB_URL="http://localhost:5174"
 API_URL="http://localhost:8011"
 
 compose() {
   docker compose -f "$COMPOSE_FILE" --project-directory "$ROOT_DIR" "$@"
+}
+
+compose_dev() {
+  docker compose -f "$COMPOSE_FILE" -f "$COMPOSE_DEV_FILE" --project-directory "$ROOT_DIR" "$@"
 }
 
 require_shared_container() {
@@ -67,8 +73,11 @@ case "$target" in
   all)
     services=()
     ;;
+  dev)
+    services=()
+    ;;
   *)
-    echo "Uso: $0 [all|web|api|stop|logs [serviço]]" >&2
+    echo "Uso: $0 [all|dev|web|api|stop|logs [serviço]]" >&2
     exit 1
     ;;
 esac
@@ -81,14 +90,21 @@ fi
 require_shared_container openfinops-postgres-1
 require_shared_container openfinops-trino-1
 
-echo "Build + subida do Finbase (${services[*]:-todos os serviços})..."
-compose up -d --build --remove-orphans "${services[@]}"
+if [[ "$target" == "dev" ]]; then
+  # Código montado da máquina: mudanças no front e na API valem sem rebuild.
+  echo "Subindo o Finbase em modo DEV (Vite + API com recarga automática)..."
+  compose_dev up -d --remove-orphans
+else
+  echo "Build + subida do Finbase (${services[*]:-todos os serviços})..."
+  compose up -d --build --remove-orphans "${services[@]}"
+fi
 # O gateway resolve api/web por DNS; reinicia para não reaproveitar IPs antigos.
 compose restart gateway >/dev/null
 
 echo "Aguardando serviços..."
 wait_http "$API_URL/saude" "API"
-wait_http "$WEB_URL/" "Web"
+# No modo DEV o primeiro start instala as dependências do front (pode levar alguns minutos).
+wait_http "$WEB_URL/" "Web" "$([[ "$target" == "dev" ]] && echo 300 || echo 60)"
 
 echo
 echo "Finbase no ar: Web $WEB_URL | API $API_URL"
