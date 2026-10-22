@@ -118,7 +118,8 @@ async def _analysis_physical_name(db: AsyncSession, table_id: int) -> str | None
 
 class QueryRequest(BaseModel):
     sql: str
-    catalog: str = "iceberg"
+    # Vazio = catálogo configurado (TRINO_CATALOG), ex.: iceberg_finbase.
+    catalog: str | None = None
 
 
 class QueryResponse(BaseModel):
@@ -2775,6 +2776,10 @@ async def run_query(req: QueryRequest, request: Request, db: AsyncSession = Depe
       SELECT SUM("BilledCost") AS total_billed FROM iceberg.silver.dest_modelo_focus WHERE "_billing_period" = '202504'
     """
     allowed = set((await db.execute(select(DestinationTable.physical_name).where(DestinationTable.active.is_(True)))).scalars().all())
+    # Bases de origem (bronze) das fontes cadastradas: bronze.raw_<identificador>.
+    from app.services.iceberg_service import _bronze_table_id
+    connection_codes = (await db.execute(select(SourceConnection.code))).scalars().all()
+    allowed.update(".".join(_bronze_table_id(code)) for code in connection_codes if code)
     try:
         check_read_only_select(req.sql, allowed)
     except SqlRejected as exc:
