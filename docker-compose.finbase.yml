@@ -44,7 +44,7 @@ services:
     restart: unless-stopped
     volumes: *finbase-app-volumes
     healthcheck:
-      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health', timeout=2).read()"]
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/saude', timeout=2).read()"]
       interval: 10s
       timeout: 5s
       retries: 12
