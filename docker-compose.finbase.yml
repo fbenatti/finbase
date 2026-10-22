@@ -8,6 +8,8 @@ services:
     env_file:
       - .env-databriks
     environment: &finbase-app-environment
+      ENV: development
+      AUTH_ENABLED: "false"
       DATABASE_URL: postgresql+asyncpg://finops:${POSTGRES_PASSWORD:?defina POSTGRES_PASSWORD no .env}@host.docker.internal:5433/finbase
       DATABASE_URL_SYNC: postgresql://finops:${POSTGRES_PASSWORD:?defina POSTGRES_PASSWORD no .env}@host.docker.internal:5433/finbase
       TRINO_URL: http://trino:8080
