@@ -1666,18 +1666,18 @@ def purge_gold_cube_snapshots(physical_name: str, *, namespace: str = layers.GOL
 def _trino_remove_orphan_files(namespace: str, safe_name: str, retention: str = "1s") -> bool:
     from urllib.parse import urljoin
     import httpx
-    from app.services.trino_service import TRINO_URL, TRINO_USER
+    from app.services.trino_service import TRINO_CATALOG, TRINO_URL, TRINO_USER, qualify_sql_catalog
 
     session_prop = (
         f"iceberg.remove_orphan_files_min_retention={retention}"
     )
     headers = {
         "X-Trino-User": TRINO_USER,
-        "X-Trino-Catalog": "iceberg",
+        "X-Trino-Catalog": TRINO_CATALOG,
         "X-Trino-Schema": namespace,
         "X-Trino-Session": session_prop,
     }
-    sql = (
+    sql = qualify_sql_catalog(
         f"ALTER TABLE iceberg.{namespace}.{safe_name} "
         f"EXECUTE remove_orphan_files(retention_threshold => '{retention}')"
     )
@@ -2376,7 +2376,7 @@ def expire_gold_snapshots(table_name: str = "dest_modelo_focus", retention_days:
     """Maintain historical snapshots only after proving the active table is safe."""
     from urllib.parse import urljoin
     import httpx
-    from app.services.trino_service import TRINO_URL, TRINO_USER
+    from app.services.trino_service import TRINO_CATALOG, TRINO_URL, TRINO_USER, qualify_sql_catalog
 
     # Never run maintenance against a broken/staging-backed table. Snapshot
     # age is not data age: the active snapshot remains authoritative forever.
@@ -2407,15 +2407,15 @@ def expire_gold_snapshots(table_name: str = "dest_modelo_focus", retention_days:
     session_prop = f"iceberg.expire_snapshots_min_retention={retention_str},iceberg.remove_orphan_files_min_retention={retention_str}"
     headers = {
         "X-Trino-User": TRINO_USER,
-        "X-Trino-Catalog": "iceberg",
+        "X-Trino-Catalog": TRINO_CATALOG,
         "X-Trino-Schema": layers.detail_layer(),
         "X-Trino-Session": session_prop,
     }
     submit_url = urljoin(TRINO_URL, "/v1/statement")
-    statements = [
+    statements = [qualify_sql_catalog(sql) for sql in [
         f"ALTER TABLE iceberg.{layers.detail_layer()}.{table_name} EXECUTE expire_snapshots(retention_threshold => '{retention_str}')",
         f"ALTER TABLE iceberg.gold.{table_name} EXECUTE remove_orphan_files(retention_threshold => '{retention_str}')",
-    ]
+    ]]
 
     try:
         with httpx.Client(timeout=300.0) as client:
