@@ -8,8 +8,8 @@ services:
     env_file:
       - .env-databriks
     environment: &finbase-app-environment
-      DATABASE_URL: postgresql+asyncpg://finops:${POSTGRES_PASSWORD:?defina POSTGRES_PASSWORD no .env}@postgres:5432/finbase
-      DATABASE_URL_SYNC: postgresql://finops:${POSTGRES_PASSWORD:?defina POSTGRES_PASSWORD no .env}@postgres:5432/finbase
+      DATABASE_URL: postgresql+asyncpg://finops:${POSTGRES_PASSWORD:?defina POSTGRES_PASSWORD no .env}@host.docker.internal:5433/finbase
+      DATABASE_URL_SYNC: postgresql://finops:${POSTGRES_PASSWORD:?defina POSTGRES_PASSWORD no .env}@host.docker.internal:5433/finbase
       TRINO_URL: http://trino:8080
       TRINO_CATALOG: iceberg_finbase
       ICEBERG_LOCAL_WAREHOUSE: /data/finbase-iceberg
@@ -18,6 +18,8 @@ services:
       BOOTSTRAP_ENABLED: "false"
       SCHEDULER_ENABLED: "false"
       FORWARDED_ALLOW_IPS: 172.16.0.0/12
+    extra_hosts: &finbase-host-mapping
+      - "host.docker.internal:host-gateway"
     restart: unless-stopped
     volumes: &finbase-app-volumes
       - ./apps/data/iceberg:/data/finbase-iceberg
@@ -41,6 +43,7 @@ services:
       <<: *finbase-app-environment
       BOOTSTRAP_ENABLED: "true"
       SCHEDULER_ENABLED: "true"
+    extra_hosts: *finbase-host-mapping
     restart: unless-stopped
     volumes: *finbase-app-volumes
     healthcheck:
@@ -73,6 +76,7 @@ services:
       REPROCESS_MEMORY_LIMIT_MB: ${REPROCESS_MEMORY_LIMIT_MB:-}
       REPROCESS_MEMORY_MIN_AVAILABLE_RATIO: ${REPROCESS_MEMORY_MIN_AVAILABLE_RATIO:-0.10}
       REPROCESS_WORKER_MAX_TASKS: ${REPROCESS_WORKER_MAX_TASKS:-6}
+    extra_hosts: *finbase-host-mapping
     restart: unless-stopped
     volumes: *finbase-app-volumes
     depends_on:
@@ -89,9 +93,10 @@ services:
     pid: "service:worker"
     restart: unless-stopped
     environment:
-      DATABASE_URL_SYNC: postgresql://finops:${POSTGRES_PASSWORD:?defina POSTGRES_PASSWORD no .env}@postgres:5432/finbase
+      DATABASE_URL_SYNC: postgresql://finops:${POSTGRES_PASSWORD:?defina POSTGRES_PASSWORD no .env}@host.docker.internal:5433/finbase
       OPENFINOPS_WORKER_RUNTIME_DIR: /run/openfinops-worker
       SUPERVISOR_INTERVAL_SECONDS: ${SUPERVISOR_INTERVAL_SECONDS:-15}
+    extra_hosts: *finbase-host-mapping
     volumes:
       - worker_runtime:/run/openfinops-worker
     depends_on:
