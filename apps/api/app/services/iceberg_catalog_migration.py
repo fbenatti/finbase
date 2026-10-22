@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import re
 from pathlib import Path
 from urllib.parse import unquote, urlparse
@@ -15,9 +16,12 @@ logger = logging.getLogger(__name__)
 _METADATA_VERSION = re.compile(r"^(\d+)-.*\.metadata\.json$")
 
 # Logical warehouse used in catalog metadata and Iceberg manifests. Physical
-# files live at ICEBERG_LOCAL_WAREHOUSE (host) or /data/iceberg (containers).
-CANONICAL_WAREHOUSE_URI = "file:///data/iceberg"
-CANONICAL_WAREHOUSE_PATH = "/data/iceberg"
+# files live at ICEBERG_LOCAL_WAREHOUSE; the logical path can differ when a
+# second application shares Trino but has an isolated warehouse.
+CANONICAL_WAREHOUSE_PATH = str(
+    Path(os.getenv("ICEBERG_CANONICAL_WAREHOUSE_PATH", "/data/iceberg")).expanduser().resolve()
+)
+CANONICAL_WAREHOUSE_URI = Path(CANONICAL_WAREHOUSE_PATH).as_uri()
 
 
 def file_uri(path: Path) -> str:
