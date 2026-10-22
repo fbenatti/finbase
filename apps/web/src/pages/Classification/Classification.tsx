@@ -8,7 +8,7 @@ import {
   getClassifications, createClassification, updateClassification,
   deleteClassification, ClassificationRule, getClassificationsGrid,
   getClassificationFieldValues, refreshClassificationFieldValues, ClassificationFieldValue,
-  getDepartments, Department,
+  getDepartments, Department, getConnections,
   getDestinationTables, getDestinationSchema,
   DestinationTable,
   getAzureTenants, getAzurePolicySubscriptions, exportAzureTagPolicy, downloadText, getAzureTagMappings, createAzureTagMapping, updateAzureTagMapping,
@@ -52,7 +52,7 @@ const cloudScopeLabel = (scope: string | null | undefined) => {
 
 
 const emptyForm = {
-  name: "", target_field: "organograma",
+  name: "", target_field: "hierarquia",
   department_id: null as number | null,
   cloud_scope: "global" as string,
   conditions: [{ field: "", operator: "=", values: "", logic: "AND" }] as CondEntry[],
@@ -74,6 +74,23 @@ export default function Classification() {
   );
 }
 
+/** Regras antigas guardam o critério em source_field + pattern em vez de conditions. */
+function legacyCondition(r: ClassificationRule): CondEntry | null {
+  if (!r.source_field || !r.pattern) return null;
+  if (r.pattern_type === "exact") {
+    let values: string[] = [r.pattern];
+    try {
+      const parsed = JSON.parse(r.pattern);
+      if (Array.isArray(parsed)) values = parsed.map(String);
+    } catch { /* valor único */ }
+    return { field: r.source_field, operator: "=", values: values.join(" | "), logic: "AND" };
+  }
+  if (r.pattern_type === "regex" || r.pattern_type === "contains") {
+    return { field: r.source_field, operator: "~", values: r.pattern, logic: "AND" };
+  }
+  return null;
+}
+
 function formFromRule(r: ClassificationRule | null) {
   if (!r) {
     return { ...emptyForm, conditions: [{ field: "", operator: "=", values: "", logic: "AND" }] };
@@ -84,7 +101,10 @@ function formFromRule(r: ClassificationRule | null) {
     values: Array.isArray(c.values) ? c.values.join(" | ") : String(c.values || ""),
     logic: String(c.logic || "AND"),
   }));
-  if (conds.length === 0) conds.push({ field: "", operator: "=", values: "", logic: "AND" });
+  if (conds.length === 0) {
+    const legacy = legacyCondition(r);
+    conds.push(legacy ?? { field: "", operator: "=", values: "", logic: "AND" });
+  }
   return {
     name: r.name,
     target_field: r.target_field,
@@ -102,6 +122,7 @@ const ClassificationRuleDialog = memo(function ClassificationRuleDialog({
   cloning,
   selectedDestName,
   destColumns,
+  cloudScopes,
   departments,
   destinationTableId,
   onClose,
@@ -113,6 +134,7 @@ const ClassificationRuleDialog = memo(function ClassificationRuleDialog({
   cloning: ClassificationRule | null;
   selectedDestName: string | null;
   destColumns: string[];
+  cloudScopes: string[];
   departments: Department[];
   destinationTableId: number | null;
   onClose: () => void;
@@ -209,7 +231,7 @@ const ClassificationRuleDialog = memo(function ClassificationRuleDialog({
       destination_table_id: editing?.destination_table_id ?? cloning?.destination_table_id ?? destinationTableId,
       department_id: form.department_id,
       name: form.name,
-      target_field: "organograma",
+      target_field: "hierarquia",
       priority: form.priority,
       active: form.active,
       cloud_scope: form.cloud_scope === "global" ? null : form.cloud_scope,
@@ -275,9 +297,11 @@ const ClassificationRuleDialog = memo(function ClassificationRuleDialog({
               label="Nuvem (abrangência do ajuste)"
               onChange={(e) => setForm((prev) => ({ ...prev, cloud_scope: e.target.value }))}
             >
-              {CLOUD_SCOPE_FORM_OPTIONS.map((s) => (
-                <MenuItem key={s.value} value={s.value}>{s.label}</MenuItem>
-              ))}
+              {CLOUD_SCOPE_FORM_OPTIONS
+                .filter((s) => s.value === "global" || s.value === form.cloud_scope || cloudScopes.includes(s.value))
+                .map((s) => (
+                  <MenuItem key={s.value} value={s.value}>{s.label}</MenuItem>
+                ))}
             </Select>
           </FormControl>
           <Typography variant="caption" color="text.secondary" sx={{ mt: -1 }}>
@@ -425,15 +449,22 @@ export function ClassificationRulesTab() {
   const [selectedRuleIds, setSelectedRuleIds] = useState<number[]>([]);
   const [bulkDeleteOpen, setBulkDeleteOpen] = useState(false);
   const [destColumns, setDestColumns] = useState<string[]>([]);
+  // Nuvens com conexão cadastrada: só elas aparecem na abrangência da regra.
+  const [cloudScopes, setCloudScopes] = useState<string[]>([]);
 
   useEffect(() => {
     getDepartments(false).then(setDepartments).catch(() => {});
     getDestinationTables(true).then(setDestTables).catch(() => {});
+    getConnections()
+      .then((connections) => setCloudScopes([...new Set(connections.map((c) => c.cloud_scope).filter((v): v is string => !!v))]))
+      .catch(() => setCloudScopes([]));
   }, []);
 
   useEffect(() => {
-    const focusTable = destTables.find(table => `${table.name} ${table.physical_name}`.toLowerCase().includes("focus"));
-    const schemaTableId = focusTable?.id || selectedDestId;
+    const schemaTableId = selectedDestId
+      || editing?.destination_table_id
+      || cloning?.destination_table_id
+      || (destTables.length === 1 ? destTables[0].id : null);
     if (schemaTableId) {
       getDestinationSchema(schemaTableId as number)
         .then(schema => setDestColumns(schema.columns.map(c => c.name)))
@@ -441,7 +472,7 @@ export function ClassificationRulesTab() {
     } else {
       setDestColumns([]);
     }
-  }, [selectedDestId, destTables]);
+  }, [selectedDestId, destTables, editing, cloning]);
 
   // cloud/dest sao passados explicitamente: setState e assincrono, entao ler do
   // estado em load usaria valores antigos no mesmo tick (stale closure).
@@ -672,6 +703,7 @@ export function ClassificationRulesTab() {
         cloning={cloning}
         selectedDestName={selectedDestName ?? null}
         destColumns={destColumns}
+        cloudScopes={cloudScopes}
         departments={departments}
         destinationTableId={selectedDestId === "" ? null : (selectedDestId as number)}
         onClose={() => setDialogOpen(false)}

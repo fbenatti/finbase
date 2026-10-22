@@ -16,10 +16,8 @@ financeiro do dashboard com a separação correta de capacidade PTU:
 O consumo diário/horário da capacidade (meter ``Provisioned Managed*``,
 ``1/Hour``) não é retornado: ele já está incluído no custo da compra mensal.
 
-Os projetos são classificados no ``hierarquia_5``. O Vivo Mais
-publica a reserva PTU como ``Vivo+`` na Gold (subconta de faturamento);
-o dashboard normaliza para o rótulo ``Vivo Mais``. Aura Brain usa o
-mesmo nome na Gold.
+Os projetos são classificados no ``hierarquia_5``; sem filtro de projeto,
+todos os projetos com custo no período entram.
 """
 
 from __future__ import annotations
@@ -37,31 +35,6 @@ logger = logging.getLogger(__name__)
 FOCUS_TABLE = "dest_billing_cloud"
 PLANNING_TABLE = "dest_billing_cloud_planning"
 DETAIL_NAMESPACE = f"iceberg.{layers.detail_layer()}"
-PROJECTS = ("Vivo Mais", "Aura Brain")
-
-# Chaves de projeto usadas pelo dashboard (filtro de projeto) -> rótulo exibido.
-PROJECT_KEY_TO_GOLD = {
-    "vivo-mais": "Vivo Mais",
-    "aura-brain": "Aura Brain",
-}
-
-# Nomes publicados na Gold FOCUS por rótulo do dashboard (Vivo Mais -> Vivo+).
-GOLD_PROJECT_NAMES: dict[str, tuple[str, ...]] = {
-    "Vivo Mais": ("Vivo Mais", "Vivo+"),
-    "Aura Brain": ("Aura Brain",),
-}
-
-_PROJECT_SQL = (
-    "CASE WHEN COALESCE(NULLIF(hierarquia_5, ''), organograma) = 'Vivo+' "
-    "THEN 'Vivo Mais' "
-    "ELSE COALESCE(NULLIF(hierarquia_5, ''), organograma) END"
-)
-_PLANNING_PROJECT_SQL = (
-    "CASE WHEN COALESCE(NULLIF(hierarquia_5, ''), hierarquia_5) = 'Vivo+' "
-    "THEN 'Vivo Mais' "
-    "ELSE COALESCE(NULLIF(hierarquia_5, ''), hierarquia_5) END"
-)
-
 # Classificação dos meters PTU na Gold FOCUS.
 RESERVATION_SERVICE = "Microsoft.Capacity"           # compra da reserva
 RESERVATION_CHARGES = ("Purchase", "Refund", "Return")
@@ -118,24 +91,13 @@ def _periods_in_window(date_from: str, date_to: str) -> list[str]:
     return out
 
 
-def _resolve_projects(project_keys: list[str] | None) -> list[str]:
-    """Mapeia as chaves do dashboard (vivo-mais/aura-brain) para o rótulo exibido."""
-    resolved: list[str] = []
-    for key in (project_keys or []):
-        name = PROJECT_KEY_TO_GOLD.get(str(key or ""), str(key or ""))
-        if name in PROJECTS and name not in resolved:
-            resolved.append(name)
-    return resolved or list(PROJECTS)
-
-
-def _gold_project_names(project_labels: list[str]) -> list[str]:
-    """Expande rótulos do dashboard para os valores literais na Gold."""
-    names: list[str] = []
-    for label in project_labels:
-        for gold_name in GOLD_PROJECT_NAMES.get(label, (label,)):
-            if gold_name not in names:
-                names.append(gold_name)
-    return names
+def _project_filter(project_keys: list[str] | None, column: str = "hierarquia_5") -> str:
+    """Filtro SQL dos projetos pedidos pelo dashboard (vazio = todos)."""
+    projects = list(dict.fromkeys(str(key) for key in (project_keys or []) if key))
+    if not projects:
+        return ""
+    names = ", ".join("'" + name.replace("'", "''") + "'" for name in projects)
+    return f"AND {column} IN ({names})"
 
 
 async def _load_realized_rows(
@@ -144,14 +106,12 @@ async def _load_realized_rows(
     cancel_event: asyncio.Event | None,
 ) -> list[dict[str, Any]]:
     """Agregação única sobre a Gold (realizado) por (período, projeto)."""
-    selected_projects = _resolve_projects(project_keys)
-    gold_projects = _gold_project_names(selected_projects)
-    project_list = ", ".join(f"'{p}'" for p in gold_projects)
+    project_filter = _project_filter(project_keys)
     period_list = ", ".join(f"'{p}'" for p in periods)
     reservation_charges = ", ".join(f"'{c}'" for c in RESERVATION_CHARGES)
     sql = f"""
         SELECT _billing_period AS periodo,
-               {_PROJECT_SQL} AS projeto,
+               hierarquia_5 AS projeto,
                MAX(hierarquia_4) AS hierarquia_4,
                SUM(COALESCE(TRY_CAST(realizado AS DOUBLE), 0))     AS realizado,
                SUM(COALESCE(TRY_CAST(billedcost AS DOUBLE), 0))    AS billedcost,
@@ -177,7 +137,7 @@ async def _load_realized_rows(
                                  AND commitmentdiscounttype = 'OnDemand') AS ondemand_rows
         FROM {DETAIL_NAMESPACE}.{FOCUS_TABLE}
         WHERE _billing_period IN ({period_list})
-          AND COALESCE(NULLIF(hierarquia_5, ''), organograma) IN ({project_list})
+          {project_filter}
         GROUP BY 1, 2
         ORDER BY 1, 2
     """
@@ -196,18 +156,16 @@ async def _load_forecast_rows(
     Microsoft.Capacity (Purchase). Expoe também esses dois valores previstos
     para completar o mês corrente quando o realizado ainda não chegou.
     """
-    selected_projects = _resolve_projects(project_keys)
-    gold_projects = _gold_project_names(selected_projects)
-    project_list = ", ".join(f"'{p}'" for p in gold_projects)
+    project_filter = _project_filter(project_keys)
     period_list = ", ".join(f"'{p}'" for p in periods)
     sql = f"""
         SELECT period AS periodo,
-               {_PLANNING_PROJECT_SQL} AS projeto,
+               hierarquia_5 AS projeto,
                MAX(hierarquia_4) AS hierarquia_4,
                SUM(COALESCE(TRY_CAST(realizado AS DOUBLE), 0)) AS realizado
         FROM {DETAIL_NAMESPACE}.{PLANNING_TABLE}
         WHERE period IN ({period_list})
-          AND COALESCE(NULLIF(hierarquia_5, ''), hierarquia_5) IN ({project_list})
+          {project_filter}
         GROUP BY 1, 2
         ORDER BY 1, 2
     """
@@ -291,7 +249,7 @@ def _carry_forward_reservation_purchase(monthly: list[dict[str, Any]]) -> None:
     """Mantém visível a última compra positiva da reserva nos meses seguintes.
 
     Microsoft.Capacity não necessariamente publica uma nova linha Purchase em
-    todo mês. Ausência da linha não significa que as 100 PTUs do Vivo Mais
+    todo mês. Ausência da linha não significa que as PTUs da reserva
     desapareceram; o dashboard deve mostrá-las como referência da última
     compra, sem classificá-las como novo realizado do mês.
     """
@@ -378,19 +336,19 @@ async def _load_gold_ptu_costs(
     candidates = [p for p in window_periods if p in realized_periods] or realized_periods
     current = candidates[-1] if candidates else current_period
 
-    # A reserva do Vivo Mais continua contratada mesmo quando Microsoft.Capacity
+    # A reserva continua contratada mesmo quando Microsoft.Capacity
     # não publica uma nova linha Purchase no mês do filtro.
     _carry_forward_reservation_purchase(monthly)
 
-    # On-demand é uma compra fixa de 100 PTUs/mês (ex.: Aura Brain). Quando o
+    # On-demand é uma compra fixa de PTUs por mês. Quando o
     # mês corrente ainda não recebeu a linha na Gold (ex.: ago/2026), estima
     # pelo ÚLTIMO REALIZADO da compra — "OnDemand = só o valor da compra; o
     # resto (consumo diário/horário) é ignorado". O forecast do planejamento
-    # não é usado: no Aura Brain ele espelha o consumo horário ('Azure OpenAI'
+    # não é usado: ele espelha o consumo horário ('Azure OpenAI'
     # Usage), não a compra. Vale SOMENTE para projetos com histórico real de
     # on-demand — nunca fabrica unidades para projetos cobertos pela reserva.
     for row in monthly:
-        if int(row.get("ondemand_rows") or 0) == 0 and row["project"] in PROJECTS:
+        if int(row.get("ondemand_rows") or 0) == 0 and row["project"]:
             previous = next(
                 (r for r in reversed(monthly)
                  if r["project"] == row["project"] and r["period"] < row["period"]

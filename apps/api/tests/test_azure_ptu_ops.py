@@ -141,11 +141,11 @@ def test_recommendation_peak_risk():
 
 def test_recommendation_load_imbalance():
     imbalance = [{
-        "project_key": "vivo-mais",
+        "project_key": "projeto-alfa",
         "severity": "high",
         "message": "spread 40 p.p.",
     }]
-    recs = build_ops_recommendations([], [{"deployment_name": "a", "project_key": "vivo-mais"}], imbalance)
+    recs = build_ops_recommendations([], [{"deployment_name": "a", "project_key": "projeto-alfa"}], imbalance)
     assert any(r["code"] == "LOAD_IMBALANCE" for r in recs)
 
 

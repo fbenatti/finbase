@@ -156,11 +156,11 @@ def test_breakdown_keeps_organogram_and_subscription_path():
         ("resourcename", "resource_name", "Recurso"),
     ]
     rows = [
-        {"hierarquia_1": "TI", "subaccountname": "Aura", "resource_name": "disk-a", "observed_cloud": 300},
-        {"hierarquia_1": "TI", "subaccountname": "Aura", "resource_name": "disk-b", "observed_cloud": 120},
+        {"hierarquia_1": "TI", "subaccountname": "Beta", "resource_name": "disk-a", "observed_cloud": 300},
+        {"hierarquia_1": "TI", "subaccountname": "Beta", "resource_name": "disk-b", "observed_cloud": 120},
     ]
     dimensions, items, common = breakdown_from_rows(rows, specs)
     assert [item["key"] for item in dimensions] == ["hierarquia_1", "subaccountname", "resource_name"]
-    assert common == {"hierarquia_1": "TI", "subaccountname": "Aura"}
+    assert common == {"hierarquia_1": "TI", "subaccountname": "Beta"}
     assert len(items) == 2
     assert {item["dimensions"]["resource_name"] for item in items} == {"disk-a", "disk-b"}

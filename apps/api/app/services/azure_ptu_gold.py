@@ -255,7 +255,7 @@ async def load_project_token_totals(
     periods: list[str] | None,
     cancel_event: asyncio.Event | None = None,
 ) -> dict[str, dict[str, float]]:
-    """Tokens por mês para a correlação financeira Aura Brain/Vivo Mais."""
+    """Tokens por mês para a correlação financeira por projeto."""
     period_filter = ""
     if periods:
         safe_periods = ", ".join("'" + p.replace("'", "''") + "'" for p in periods)

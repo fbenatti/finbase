@@ -172,7 +172,7 @@ def _normalize_condition_entry(raw: dict) -> dict | None:
 
 
 def _parse_json_array_pattern(pattern: str) -> list[str]:
-    """Parse pattern like '["vivo-ti-vicky-hml"]' into value list."""
+    """Parse pattern like '["projeto-a", "projeto-b"]' into value list."""
     text = str(pattern or "").strip()
     if not text.startswith("["):
         return []
@@ -337,9 +337,6 @@ def _build_department_path(
     for i, dept in enumerate(visited, start=1):
         info[f"hierarquia_{i}"] = dept.name or ""
 
-    if visited:
-        info["organograma"] = visited[-1].name or ""
-
     # Add custom fields as flat keys
     for k, v in custom_fields.items():
         key_lower = k.lower().replace(" ", "_")
@@ -383,7 +380,7 @@ async def apply_classification_rules(
     dept_map = await _load_department_tree(db)
 
     # Initialize target columns if they don't exist
-    default_targets = {"organograma", "centro_custo", "ambiente"}
+    default_targets = {"centro_custo", "ambiente"}
     for col in default_targets:
         if col not in df.columns:
             df[col] = ""
@@ -402,13 +399,6 @@ async def apply_classification_rules(
         applicable_mask = match_mask & ~classified_mask
         if not applicable_mask.any():
             continue
-
-        # Apply classification value
-        target_field = rule.target_field or rule.match_value or "organograma"
-        if target_field not in df.columns:
-            df[target_field] = ""
-
-        df.loc[applicable_mask, target_field] = rule.match_value
 
         # Apply department inheritance if rule has a department
         if rule.department_id and rule.department_id in dept_map:

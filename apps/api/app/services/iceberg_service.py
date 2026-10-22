@@ -2477,8 +2477,6 @@ def rename_legacy_organograma_columns(namespace: str) -> dict[str, list[tuple[st
             new_name = legacy_to_hierarchy(old_name)
             if new_name != old_name and new_name not in field_names:
                 pairs.append((old_name, new_name))
-        if "departamento" in field_names and "organograma" not in field_names:
-            pairs.append(("departamento", "organograma"))
         if not pairs:
             continue
         with tbl.update_schema() as schema_update:

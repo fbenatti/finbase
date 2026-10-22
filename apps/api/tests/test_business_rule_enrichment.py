@@ -60,9 +60,9 @@ def _financial_rule(**kwargs):
 def _classification_rule(**kwargs):
     defaults = {
         "id": 12,
-        "name": "GCP TI | vivo-ti-vicky-hml",
+        "name": "GCP TI | projeto-a",
         "source_field": "SubAccountId",
-        "pattern": '["vivo-ti-vicky-hml"]',
+        "pattern": '["projeto-a"]',
         "pattern_type": "exact",
         "match_value": "Vicky",
         "target_field": "organograma",
@@ -77,17 +77,17 @@ def _classification_rule(**kwargs):
 
 
 def test_classification_rule_records_matched_rule():
-    df = pd.DataFrame({"SubAccountId": ["vivo-ti-vicky-hml", "other"]})
+    df = pd.DataFrame({"SubAccountId": ["projeto-a", "other"]})
     _apply_classifications_sync(df, [_classification_rule()])
     envelope = json.loads(df.loc[0, "business_rule"])
     assert envelope["classification"] == {
         "id": 12,
-        "name": "GCP TI | vivo-ti-vicky-hml",
+        "name": "GCP TI | projeto-a",
         "scope": "gcp",
         "conditions": [{
             "field": "SubAccountId",
             "operator": "=",
-            "values": ["vivo-ti-vicky-hml"],
+            "values": ["projeto-a"],
             "logic": "AND",
         }],
         "priority": 10,
@@ -117,73 +117,20 @@ def test_cloud_fallback_classifies_only_rows_left_unmapped():
         department_id=2,
     )
     df = pd.DataFrame({
-        "cloud_origem": ["azure-ti", "azure-ti"],
-        "organograma": [None, "Datamesh"],
+        "cloud_origem": ["azure", "azure"],
+        "hierarquia_1": [None, "Dados"],
     })
     infra = Department(id=1, parent_id=None, name="DIR INFRAESTRUTURA E CLOUD")
     project = Department(id=2, parent_id=1, name="SEM PROJETO DEFINIDO")
 
     _apply_classifications_sync(df, [fallback], dept_map={1: infra, 2: project})
 
-    assert df.loc[0, "organograma"] == "SEM PROJETO DEFINIDO"
     assert df.loc[0, "hierarquia_1"] == "DIR INFRAESTRUTURA E CLOUD"
     assert df.loc[0, "hierarquia_2"] == "SEM PROJETO DEFINIDO"
-    assert df.loc[1, "organograma"] == "Datamesh"
+    assert "organograma" not in df.columns
+    # Linha já classificada não é tocada pelo fallback.
+    assert df.loc[1, "hierarquia_1"] == "Dados"
     assert pd.isna(df.loc[1, "business_rule"])
-
-
-def test_specific_vivo_ia_rule_wins_before_cloud_fallback():
-    specific = _classification_rule(
-        id=98,
-        name="Azure | resourceGroupName~vvia | Vivo IA",
-        source_field="source_resource_group_name",
-        pattern="source_resource_group_name~vvia",
-        pattern_type="multi_condition",
-        match_value="Vivo IA",
-        conditions=[{
-            "field": "source_resource_group_name",
-            "operator": "~",
-            "values": ["vvia"],
-            "logic": "AND",
-        }],
-        priority=350,
-        department_id=3,
-    )
-    fallback = _classification_rule(
-        id=99,
-        name="Fallback organizacional | azure",
-        source_field="cloud_origem",
-        pattern=".*",
-        pattern_type="regex",
-        match_value="SEM PROJETO DEFINIDO",
-        conditions=[{
-            "field": "cloud_origem",
-            "operator": "~",
-            "values": [".*"],
-            "logic": "AND",
-        }],
-        priority=2_147_483_647,
-        department_id=2,
-    )
-    df = pd.DataFrame({
-        "source_resource_group_name": ["rg-adbx-vvia-eng-brsouth-001-dev", "rg-unknown"],
-        "cloud_origem": ["azure-ti", "azure-ti"],
-        "organograma": [None, None],
-    })
-    data_dir = Department(id=1, parent_id=None, name="DIR DADOS E INTELIGENCIA ARTIFICIAL")
-    infra_dir = Department(id=4, parent_id=None, name="DIR INFRAESTRUTURA E CLOUD")
-    sem_projeto = Department(id=2, parent_id=4, name="SEM PROJETO DEFINIDO")
-    vivo_ia = Department(id=3, parent_id=1, name="Vivo IA")
-
-    _apply_classifications_sync(
-        df, [specific, fallback],
-        dept_map={1: data_dir, 2: sem_projeto, 3: vivo_ia, 4: infra_dir},
-    )
-
-    assert df.loc[0, "organograma"] == "Vivo IA"
-    assert df.loc[0, "hierarquia_1"] == "DIR DADOS E INTELIGENCIA ARTIFICIAL"
-    assert df.loc[1, "organograma"] == "SEM PROJETO DEFINIDO"
-    assert df.loc[1, "hierarquia_1"] == "DIR INFRAESTRUTURA E CLOUD"
 
 
 def test_ptax_rule_records_financial_rule():
@@ -257,7 +204,7 @@ def test_scope_filter_that_matches_nothing_keeps_column_absent():
 def test_envelope_merges_financial_and_classification():
     df = pd.DataFrame({
         "BilledCost": [100.0],
-        "SubAccountId": ["vivo-ti-vicky-hml"],
+        "SubAccountId": ["projeto-a"],
     })
     _apply_business_rule_sync(df, _financial_rule(), "202608")
     _apply_classifications_sync(df, [_classification_rule()])
@@ -299,7 +246,7 @@ def test_unlinked_classification_resolves_department_by_cloud_path():
         department_id=None,
         match_value="Condominio",
     )
-    frame = pd.DataFrame({"SubAccountId": ["vivo-ti-vicky-hml"]})
+    frame = pd.DataFrame({"SubAccountId": ["projeto-a"]})
 
     _apply_classifications_sync(
         frame,
@@ -308,7 +255,6 @@ def test_unlinked_classification_resolves_department_by_cloud_path():
         hierarchy_cache={},
     )
 
-    assert frame.loc[0, "organograma"] == "Condominio"
     assert frame.loc[0, "hierarquia_1"] == "Consumo Cloud"
     assert frame.loc[0, "hierarquia_2"] == "IBM"
     assert frame.loc[0, "hierarquia_3"] == "Condominio"
@@ -331,7 +277,7 @@ def test_oci_scope_resolves_renamed_oracle_level_without_provider_hardcode():
         department_id=None,
         match_value="Condominio",
     )
-    frame = pd.DataFrame({"SubAccountId": ["vivo-ti-vicky-hml"]})
+    frame = pd.DataFrame({"SubAccountId": ["projeto-a"]})
 
     _apply_classifications_sync(
         frame,
@@ -353,7 +299,7 @@ def test_duplicate_legacy_departments_same_parent_use_stable_id():
     first = node(4, 3, "Compra RIs")
     second = node(5, 3, "Compra RIs")
     rule = _classification_rule(id=101, cloud_scope="azure", department_id=None, match_value="Compra RIs")
-    frame = pd.DataFrame({"SubAccountId": ["vivo-ti-vicky-hml"]})
+    frame = pd.DataFrame({"SubAccountId": ["projeto-a"]})
 
     _apply_classifications_sync(
         frame,

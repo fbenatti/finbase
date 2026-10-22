@@ -77,10 +77,10 @@ def test_bronze_inventory_aggregation_uses_stored_tags_and_tag_support():
     rows = [
         {"subscription_id": "sub-a", "resource_name": "rg-app",
          "resource_type": "Microsoft.Resources/subscriptions/resourceGroups",
-         "tags": '{"Projeto":"Datamesh","diretoria":"Dados"}', "taggable": True},
+         "tags": '{"Projeto":"Dados","diretoria":"Dados"}', "taggable": True},
         {"subscription_id": "sub-a", "resource_name": "vm-1",
          "resource_type": "Microsoft.Compute/virtualMachines",
-         "tags": '{"projeto":"Datamesh"}', "taggable": True},
+         "tags": '{"projeto":"Dados"}', "taggable": True},
         {"subscription_id": "sub-a", "resource_name": "sql-1/master",
          "resource_type": "Microsoft.Sql/servers/databases", "tags": "{}", "taggable": False},
         {"subscription_id": "sub-a", "resource_name": "opaque",
@@ -108,7 +108,7 @@ def test_executive_summary_reads_snapshot_and_does_not_call_resource_graph(monke
             "subscription_id": "sub-a", "subscription_name": "Azure Dev",
             "resource_id": "/subscriptions/sub-a/resourceGroups/rg-app",
             "resource_name": "rg-app", "resource_type": "Microsoft.Resources/subscriptions/resourceGroups",
-            "tags": '{"projeto":"Datamesh","diretoria":"Dados"}', "taggable": True,
+            "tags": '{"projeto":"Dados","diretoria":"Dados"}', "taggable": True,
         }], SimpleNamespace(blob_path="arg/inventory/2026-10-15.csv", last_modified=datetime.now(timezone.utc)))
     async def forbidden_names(_connection_id): raise AssertionError("dashboard should use subscription names stored in Bronze")
     async def forbidden(*_args, **_kwargs): raise AssertionError("dashboard load must not query Azure Resource Graph")
@@ -205,7 +205,7 @@ def test_resource_details_mark_alias_keys_as_managed_when_silver_expectation_is_
     async def inventory(_connection, subscription_id=None):
         return ([{
             "subscription_id": subscription_id,
-            "subscription_name": "Fundação Telefônica",
+            "subscription_name": "Fundação Exemplo",
             "resource_id": resource_id,
             "resource_name": "PCCAgentlessScanResourceGroup",
             "resource_type": "Microsoft.Resources/subscriptions/resourceGroups",

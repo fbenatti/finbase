@@ -19,7 +19,7 @@ import pandas as pd
 from sqlalchemy import select, or_, update as sa_update
 from sqlalchemy.orm import Session
 
-from app.core.hierarchy import depth_from_departments, hierarchy_columns
+from app.core.hierarchy import depth_from_departments, hierarchy_column, hierarchy_columns, hierarchy_columns_in
 from app.database import async_session, SyncSession
 from app.models.source_connection import SourceConnection
 from app.models.etl_task import EtlTask
@@ -585,14 +585,32 @@ def _apply_business_rule_sync(df: pd.DataFrame, rule: BusinessRule, billing_peri
             df.loc[assign_contract, "financial_contract_id"] = getattr(rule, "financial_contract_id", None)
 
 
+def _leaf_from_levels(row: pd.Series, levels: list[str], children: dict) -> object | None:
+    """Departamento folha do caminho ``hierarquia_1 > ... > hierarquia_N`` da linha."""
+    leaf, parent_id = None, None
+    for column in levels:
+        name = str(row.get(column) or "").strip().casefold()
+        if not name or name in {"nan", "none"}:
+            break
+        node = children.get((parent_id, name))
+        if node is None:
+            return None
+        leaf, parent_id = node, getattr(node, "id", None)
+    return leaf
+
+
 def fill_inherited_org_fields(df: pd.DataFrame, dept_map: dict | None = None) -> None:
     """Fill inherited budget/cost-center fields for already identified leaves."""
-    if df.empty or not dept_map or "organograma" not in df.columns:
+    levels = hierarchy_columns_in(df.columns)
+    if df.empty or not dept_map or not levels:
         return
-    by_name = {str(getattr(item, "name", "")).strip().casefold(): item for item in dept_map.values()}
+    children = {
+        (getattr(item, "parent_id", None), str(getattr(item, "name", "")).strip().casefold()): item
+        for item in dept_map.values()
+    }
     by_id = {int(getattr(item, "id")): item for item in dept_map.values() if getattr(item, "id", None) is not None}
-    for index, value in df["organograma"].items():
-        leaf = by_name.get(str(value or "").strip().casefold())
+    for index, row in df[levels].iterrows():
+        leaf = _leaf_from_levels(row, levels, children)
         if not leaf:
             continue
         chain = []
@@ -622,8 +640,9 @@ def _apply_classifications_sync(df: pd.DataFrame, class_rules: list[Classificati
     When session is provided and caches are None, loads from DB (backward compat).
 
     For each rule that matches, populates:
-    - target_field (e.g., 'organograma') with match_value
-    - department hierarchy fields: centro_custo, ambiente, custom_fields
+    - with a department: the path in hierarquia_1..N plus the inherited
+      centro_custo, id_orcamento, ambiente and custom_fields
+    - without a department (legacy rules): target_field with match_value
     """
     from app.models.rules import Department
     from app.services.classification_engine import (
@@ -726,7 +745,7 @@ def _apply_classifications_sync(df: pd.DataFrame, class_rules: list[Classificati
         return resolved
 
     # ── Ensure ALL hierarchy columns exist BEFORE rule application ──
-    for col in ['organograma', 'centro_custo', 'id_orcamento', 'ambiente',
+    for col in ['centro_custo', 'id_orcamento', 'ambiente',
                 'custom_fields',
                 *hierarchy_columns(depth_from_departments(dept_map.values())),
                 'business_rule']:
@@ -757,7 +776,11 @@ def _apply_classifications_sync(df: pd.DataFrame, class_rules: list[Classificati
         if mask is None or not mask.any():
             continue
 
-        target = rule.target_field
+        # Resolve department hierarchy from pre-built cache (zero DB queries!)
+        dept_id = resolve_department_id(rule)
+        # Com departamento, a classificação é o caminho em hierarquia_N; sem
+        # ele (regras legadas), o valor vai para o target_field da regra.
+        target = hierarchy_column(1) if dept_id else rule.target_field
         if target not in df.columns:
             df[target] = None
         # First-match-wins: only fill rows where target is still empty
@@ -766,10 +789,8 @@ def _apply_classifications_sync(df: pd.DataFrame, class_rules: list[Classificati
         if not effective_mask.any():
             continue
 
-        df.loc[effective_mask, target] = rule.match_value
-
-        # Resolve department hierarchy from pre-built cache (zero DB queries!)
-        dept_id = resolve_department_id(rule)
+        if not dept_id:
+            df.loc[effective_mask, target] = rule.match_value
 
         if dept_id:
             leaf, root, chain = get_hierarchy(dept_id)
@@ -792,7 +813,6 @@ def _apply_classifications_sync(df: pd.DataFrame, class_rules: list[Classificati
                         ambiente_val = d.ambiente
 
                 for col_name, col_val in [
-                    ('organograma', leaf.name),
                     ('centro_custo', centro_custo_val),
                     ('id_orcamento', id_orcamento_val),
                     ('ambiente', ambiente_val),

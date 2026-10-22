@@ -371,13 +371,13 @@ def _infer_resource_from_schedule(schedule_name: str, runbook_name: str) -> dict
         result["action"] = "Mask"
     
     # Inferir recurso e tipo do nome do schedule
-    # Padrão TI: StartVM_BRTAZLTB0003CO -> VM BRTAZLTB0003CO
+    # Ex.: StartVM_<nome> -> VM <nome>
     if "vm_" in name_lower or "startvm_" in name_lower or "stopvm_" in name_lower:
         parts = schedule_name.split("_")
         if len(parts) >= 2:
             result["resource_name"] = parts[-1]
             result["resource_type"] = "VirtualMachine"
-    # Padrão TI: StartMongoDBSingleVM_hlg-mongo01-az -> MongoDB hlg-mongo01-az
+    # Ex.: StartMongoDBSingleVM_<nome> -> MongoDB <nome>
     elif "mongodb" in name_lower:
         parts = schedule_name.split("_")
         if len(parts) >= 2:
@@ -398,98 +398,6 @@ def _infer_resource_from_schedule(schedule_name: str, runbook_name: str) -> dict
         if len(parts) >= 2:
             result["resource_name"] = parts[-1]
             result["resource_type"] = "Oracle"
-    # Padrão 4P: StartAura, stopaura -> Aura
-    elif "aura" in name_lower and "aks" not in name_lower:
-        result["resource_name"] = "Aura"
-        result["resource_type"] = "VirtualMachine"
-    elif "noronha" in name_lower:
-        result["resource_name"] = "Noronha"
-        result["resource_type"] = "VirtualMachine"
-    elif "cassandra" in name_lower:
-        result["resource_name"] = "Cassandra"
-        result["resource_type"] = "VirtualMachine"
-    elif "baikal" in name_lower:
-        result["resource_name"] = "Baikal"
-        result["resource_type"] = "VirtualMachine"
-    elif "sftp" in name_lower:
-        result["resource_name"] = "SFTP"
-        result["resource_type"] = "VirtualMachine"
-    elif "callcenter" in name_lower:
-        result["resource_name"] = "CallCenter"
-        result["resource_type"] = "VirtualMachine"
-    elif "ccc" in name_lower:
-        result["resource_name"] = "CCC"
-        result["resource_type"] = "VirtualMachine"
-    elif "sig" in name_lower and "pre" in name_lower:
-        result["resource_name"] = "SigPre"
-        result["resource_type"] = "VirtualMachine"
-    elif "sig" in name_lower and "dev" in name_lower:
-        result["resource_name"] = "SigDev"
-        result["resource_type"] = "VirtualMachine"
-    elif "framework" in name_lower and "brasil" in name_lower:
-        result["resource_name"] = "FrameworkBrasil"
-        result["resource_type"] = "AKS"
-    elif "digital" in name_lower and "analytics" in name_lower:
-        result["resource_name"] = "DigitalAnalytics"
-        result["resource_type"] = "VirtualMachine"
-    elif "proxy" in name_lower:
-        result["resource_name"] = "Proxy"
-        result["resource_type"] = "AKS"
-    elif "fastdata" in name_lower:
-        result["resource_name"] = "FastData"
-        result["resource_type"] = "AKS"
-    elif "next" in name_lower:
-        result["resource_name"] = "Next"
-        result["resource_type"] = "VirtualMachine"
-    elif "portal-dq" in name_lower or "portaldq" in name_lower:
-        result["resource_name"] = "PortalDQ"
-        result["resource_type"] = "VirtualMachine"
-    elif "covid" in name_lower:
-        result["resource_name"] = "Covid"
-        result["resource_type"] = "VirtualMachine"
-    elif "projetos" in name_lower:
-        result["resource_name"] = "Projetos"
-        result["resource_type"] = "AKS"
-    elif "vidav" in name_lower:
-        result["resource_name"] = "VidaV"
-        result["resource_type"] = "AKS"
-    elif "security" in name_lower:
-        result["resource_name"] = "Security"
-        result["resource_type"] = "VirtualMachine"
-    elif "bastion" in name_lower:
-        result["resource_name"] = "Bastion"
-        result["resource_type"] = "VirtualMachine"
-    elif "datalabs" in name_lower:
-        result["resource_name"] = "DataLabs"
-        result["resource_type"] = "VirtualMachine"
-    elif "gis" in name_lower:
-        result["resource_name"] = "GIS"
-        result["resource_type"] = "VirtualMachine"
-    # Padrões TI específicos
-    elif "powerbi" in name_lower:
-        result["resource_name"] = "PowerBI"
-        result["resource_type"] = "VirtualMachine"
-    elif "syndp" in name_lower:
-        result["resource_name"] = "Syndp"
-        result["resource_type"] = "VirtualMachine"
-    elif "sinfonia" in name_lower:
-        result["resource_name"] = "Sinfonia"
-        result["resource_type"] = "VirtualMachine"
-    elif "vivomais" in name_lower:
-        result["resource_name"] = "VivoMais"
-        result["resource_type"] = "VirtualMachine"
-    elif "adf" in name_lower:
-        result["resource_name"] = "ADF"
-        result["resource_type"] = "DataFactory"
-    elif "sentinel" in name_lower:
-        result["resource_name"] = "Sentinel"
-        result["resource_type"] = "Sentinel"
-    elif "tax-one" in name_lower or "taxone" in name_lower:
-        result["resource_name"] = "TaxOneInstaller"
-        result["resource_type"] = "VirtualMachine"
-    elif "hana" in name_lower:
-        result["resource_name"] = "HANA"
-        result["resource_type"] = "VirtualMachine"
     # Fallback: usar nome do schedule como recurso
     else:
         result["resource_name"] = schedule_name

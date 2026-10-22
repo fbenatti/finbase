@@ -85,11 +85,11 @@ const PREBUILT: Record<string, { label: string; sql: string }[]> = {
   silver: [],
   gold: [
     { label: "Top 10 serviços por custo faturado", sql: 'SELECT "ServiceName", SUM("BilledCost") AS total_billed, COUNT(*) AS rows FROM iceberg.gold.dest_billing_cloud GROUP BY "ServiceName" ORDER BY total_billed DESC LIMIT 10' },
-    { label: "Custo por unidade", sql: 'SELECT "organograma", SUM("BilledCost") AS total_billed, SUM("EffectiveCost") AS total_effective, COUNT(*) AS rows FROM iceberg.gold.dest_billing_cloud GROUP BY "organograma" ORDER BY total_billed DESC LIMIT 20' },
+    { label: "Custo por unidade", sql: 'SELECT "hierarquia_1", SUM("BilledCost") AS total_billed, SUM("EffectiveCost") AS total_effective, COUNT(*) AS rows FROM iceberg.gold.dest_billing_cloud GROUP BY "hierarquia_1" ORDER BY total_billed DESC LIMIT 20' },
     { label: "Custo por competência", sql: 'SELECT "_billing_period", SUM("BilledCost") AS total_billed, SUM("EffectiveCost") AS total_effective, COUNT(*) AS rows FROM iceberg.gold.dest_billing_cloud GROUP BY "_billing_period" ORDER BY "_billing_period" DESC' },
     { label: "Custo por localização", sql: 'SELECT "RegionName", SUM("BilledCost") AS total_billed, COUNT(*) AS rows FROM iceberg.gold.dest_billing_cloud GROUP BY "RegionName" ORDER BY total_billed DESC LIMIT 20' },
     { label: "Custo por fonte e mês", sql: 'SELECT "cloud_origem", "_billing_period", SUM("BilledCost") AS total_billed, COUNT(*) AS rows FROM iceberg.gold.dest_billing_cloud GROUP BY "cloud_origem", "_billing_period" ORDER BY "_billing_period" DESC, total_billed DESC' },
-    { label: "Unidade / fonte por mês", sql: 'SELECT "organograma", "cloud_origem", "_billing_period", SUM("BilledCost") AS total_billed, SUM("EffectiveCost") AS total_effective, COUNT(*) AS rows FROM iceberg.gold.dest_billing_cloud GROUP BY "organograma", "cloud_origem", "_billing_period" ORDER BY "_billing_period" DESC, total_billed DESC LIMIT 500' },
+    { label: "Unidade / fonte por mês", sql: 'SELECT "hierarquia_1", "cloud_origem", "_billing_period", SUM("BilledCost") AS total_billed, SUM("EffectiveCost") AS total_effective, COUNT(*) AS rows FROM iceberg.gold.dest_billing_cloud GROUP BY "hierarquia_1", "cloud_origem", "_billing_period" ORDER BY "_billing_period" DESC, total_billed DESC LIMIT 500' },
   ],
 };
 

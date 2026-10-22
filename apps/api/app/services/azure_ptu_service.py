@@ -91,16 +91,7 @@ def _is_ptu(deployment: dict[str, Any]) -> bool:
 
 
 def _project_hint(account: dict[str, Any], deployment: dict[str, Any]) -> str | None:
-    tags = {str(k).lower(): str(v).lower() for k, v in (account.get("tags") or {}).items()}
-    if tags.get("reserva") == "reserva":
-        return "vivo-mais"
-    text = " ".join(str(x or "") for x in (
-        account.get("name"), account.get("resourceGroup"), deployment.get("name"),
-    )).lower()
-    if "vivo" in text:
-        return "vivo-mais"
-    if "aura" in text:
-        return "aura-brain"
+    """Projeto vem do mapeamento cadastrado (project-mappings), não do nome."""
     return None
 
 

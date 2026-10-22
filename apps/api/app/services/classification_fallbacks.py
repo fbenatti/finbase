@@ -2,7 +2,7 @@
 
 The fallback is deliberately scoped to cloud providers and is applied only by
 the classifier's existing first-match-wins behavior to rows whose
-``organograma`` is still empty after all specific rules have run.
+the hierarchy (``hierarquia_1``) is still empty after all specific rules have run.
 """
 
 from __future__ import annotations
@@ -44,70 +44,6 @@ _LEGACY_FALLBACK_RULE_NAMES = {
 
 def _canon(value: str | None) -> str:
     return "".join(char for char in (value or "").casefold() if char.isalnum())
-
-
-def _is_descendant(department: Department, ancestor_id: int, by_id: dict[int, Department]) -> bool:
-    current = department
-    seen: set[int] = set()
-    while current.parent_id and current.parent_id not in seen:
-        if current.parent_id == ancestor_id:
-            return True
-        seen.add(current.parent_id)
-        parent = by_id.get(current.parent_id)
-        if parent is None:
-            break
-        current = parent
-    return False
-
-
-async def _ensure_azure_vivo_ia_rule(
-    db: AsyncSession,
-    destination_id: int,
-    provider: Department,
-    departments: list[Department],
-) -> None:
-    """Restore the source-defined Azure resource-group mapping before catch-all."""
-    by_id = {item.id: item for item in departments if item.id is not None}
-    candidates = [
-        item for item in departments
-        if _canon(item.name) == _canon("Vivo IA")
-        and _is_descendant(item, provider.id, by_id)
-    ]
-    if not candidates:
-        logger.warning("Azure Vivo IA classification not provisioned: project department is missing")
-        return
-
-    project = max(candidates, key=lambda item: sum(
-        1 for node in departments if node.id and _is_descendant(item, node.id, by_id)
-    ))
-    name = "Azure | resourceGroupName~vvia | Vivo IA"
-    rule = (await db.execute(
-        select(ClassificationRule).where(ClassificationRule.name == name)
-    )).scalars().first()
-    values = {
-        "connection_id": None,
-        "destination_table_id": destination_id,
-        "department_id": project.id,
-        "source_field": "source_resource_group_name",
-        "pattern": "source_resource_group_name~vvia",
-        "pattern_type": "multi_condition",
-        "match_value": "Vivo IA",
-        "target_field": "organograma",
-        "conditions": [{
-            "field": "source_resource_group_name",
-            "operator": "~",
-            "values": ["vvia"],
-            "logic": "AND",
-        }],
-        "priority": 350,
-        "cloud_scope": "azure",
-        "active": True,
-    }
-    if rule is None:
-        db.add(ClassificationRule(name=name, **values))
-    else:
-        for key, value in values.items():
-            setattr(rule, key, value)
 
 
 async def ensure_cloud_classification_fallbacks(db: AsyncSession) -> int:
@@ -165,9 +101,6 @@ async def ensure_cloud_classification_fallbacks(db: AsyncSession) -> int:
             by_parent_name[(category.id, _canon(provider.name))] = provider
             by_id[provider.id] = provider
 
-        if scope == "azure":
-            await _ensure_azure_vivo_ia_rule(db, destination.id, provider, departments)
-
         directory = by_parent_name.get((provider.id, _canon(FALLBACK_DIRECTORY)))
         if directory is None:
             directory = Department(parent_id=provider.id, name=FALLBACK_DIRECTORY)
@@ -208,7 +141,7 @@ async def ensure_cloud_classification_fallbacks(db: AsyncSession) -> int:
             "pattern": ".*",
             "pattern_type": "regex",
             "match_value": fallback_project,
-            "target_field": "organograma",
+            "target_field": "hierarquia",
             "conditions": [{
                 "field": "cloud_origem",
                 "operator": "~",

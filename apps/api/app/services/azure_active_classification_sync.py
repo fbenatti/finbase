@@ -65,7 +65,6 @@ class SyncReport:
     fallback_departments_created: int = 0
     divergences: list[dict[str, Any]] = field(default_factory=list)
     unmapped_projects: list[str] = field(default_factory=list)
-    vivo_mais: dict[str, int] = field(default_factory=dict)
 
     def as_dict(self) -> dict[str, Any]:
         return {
@@ -80,7 +79,6 @@ class SyncReport:
             "fallback_departments_created": self.fallback_departments_created,
             "divergences": self.divergences,
             "unmapped_projects": self.unmapped_projects,
-            "vivo_mais": self.vivo_mais,
         }
 
 
@@ -331,7 +329,7 @@ async def sync_active_azure_classifications(
             pattern_type="multi_condition",
             pattern=("source_resource_group_name=" + "|".join(uncovered_values))[:500],
             match_value=department.name[:200],
-            target_field="organograma",
+            target_field="hierarquia",
             conditions=[
                 {"field": "source_resource_group_name", "operator": "=", "values": uncovered_values, "logic": "AND"},
             ],
@@ -344,12 +342,6 @@ async def sync_active_azure_classifications(
         report.rules_created += 1
 
     report.unmapped_projects = sorted(unmapped, key=canon)
-    vivo_active = [candidate for candidate in active_candidates if canon(candidate.project) == canon("VIVO+")]
-    report.vivo_mais = {
-        "active_pairs": len(vivo_active),
-        "active_resource_groups": len({canon(candidate.resource_group) for candidate in vivo_active}),
-        "department_id": 69,
-    }
     if apply:
         await db.commit()
     else:

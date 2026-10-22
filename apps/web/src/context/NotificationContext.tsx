@@ -1,8 +1,8 @@
-import { Dialog, DialogContent, DialogTitle } from "../components/FinbaseDialog";
+import { NotificationPanel, NotificationToast, type NotificationKind, type NotificationView } from "../components/NotificationCenter";
 import { dataDisplayText } from "../utils/dataPresentation";
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
-import { Alert, AlertColor, Badge, Box, Button, Chip, CircularProgress, Divider, IconButton, LinearProgress, Snackbar, Stack, Typography } from "@mui/material";
-import { CloseOutlined, DeleteOutlineOutlined, NotificationsOutlined, StopOutlined } from "@mui/icons-material";
+import { AlertColor, Badge, IconButton, Tooltip } from "@mui/material";
+import { NotificationsOutlined } from "@mui/icons-material";
 import {
   cancelEtl,
   cancelForecastRun,
@@ -14,8 +14,6 @@ import {
   SourceConnection,
   TaskStatus,
 } from "../services/api";
-
-type NotificationKind = "extraction" | "reprocess" | "forecast" | "shared_cost" | "backup" | "other";
 
 export interface NotificationItem {
   id: number;
@@ -478,7 +476,33 @@ export function NotificationProvider({ children }: { children: React.ReactNode }
   );
 
   const unreadCount = useMemo(() => items.filter((i) => !i.read).length, [items]);
-  const orderedItems = useMemo(() => sortNotifications(items), [items]);
+  const views = useMemo<NotificationView[]>(() => sortNotifications(items).map((item) => ({
+    id: item.id,
+    kind: item.kind,
+    title: dataDisplayText(item.title),
+    status: item.status,
+    progress: item.progress,
+    indeterminate: item.kind === "backup" ? item.totalBytes === 0 : item.total <= 0,
+    stage: dataDisplayText(reprocessStageLabel(item)),
+    caption: progressCaption({
+      id: item.id,
+      status: item.status,
+      total_blobs: item.total,
+      processed_blobs: item.processed,
+      rows_destination: item.rows,
+      forecast_total_series: item.forecastTotalSeries,
+      forecast_processed_series: item.forecastProcessedSeries,
+      task_type: item.kind === "backup" ? "backup" : item.kind === "forecast" ? "forecast" : undefined,
+      downloaded_bytes_total: item.bytesWritten,
+      started_at: new Date(item.startedAt).toISOString(),
+      total_download_bytes: item.totalBytes,
+      phase: item.phase,
+      connector_type: item.connectorType,
+    } as TaskStatus),
+    scope: item.scope ? dataDisplayText(item.scope) : "",
+    startedAt: item.startedAt,
+    timestamp: item.timestamp,
+  })), [items]);
 
   const value = useMemo(
     () => ({
@@ -500,106 +524,24 @@ export function NotificationProvider({ children }: { children: React.ReactNode }
   return (
     <NotificationContext.Provider value={value}>
       {children}
-      <Dialog open={dialogOpen} onClose={closeDialog} fullWidth maxWidth="sm">
-        <DialogTitle>
-          <Box sx={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-            <span>Avisos</span>
-            <IconButton size="small" onClick={closeDialog}>
-              <CloseOutlined fontSize="small" />
-            </IconButton>
-          </Box>
-        </DialogTitle>
-        <DialogContent dividers>
-          {orderedItems.length === 0 && (
-            <Typography color="text.secondary" sx={{ py: 2, textAlign: "center" }}>
-              Nenhuma notificação no momento.
-            </Typography>
-          )}
-          <Stack spacing={1.5}>
-            {orderedItems.map((item) => {
-              const isActive = item.status === "QUEUED" || item.status === "RUNNING";
-              const color = item.status === "COMPLETED" ? "success" : item.status === "FAILED" || item.status === "CANCELLED" ? "error" : "info";
-              return (
-                <Box key={item.id} sx={{ p: 1.5, bgcolor: "#FAFBFD", borderRadius: 1, border: "1px solid #E1E8F0" }}>
-                  <Box sx={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 1 }}>
-                    <Box sx={{ flex: 1, minWidth: 0 }}>
-                      <Typography variant="body2" fontWeight={600} noWrap>
-                        {dataDisplayText(item.title)}
-                      </Typography>
-                      {item.scope && (
-                        <Typography variant="caption" color="text.primary" sx={{ display: "block" }}>
-                          {dataDisplayText(item.scope)}
-                        </Typography>
-                      )}
-                      <Typography variant="caption" color="text.secondary">
-                        {dataDisplayText(reprocessStageLabel(item))}
-                        {isActive && item.kind === "reprocess" ? ` · ${item.progress}%` : ""}
-                        {item.kind !== "backup" && item.kind !== "reprocess" && item.current && item.current !== item.phase ? " · " + dataDisplayText(item.current) : ""}
-                      </Typography>
-                    </Box>
-                    <Box sx={{ display: "flex", alignItems: "center", gap: 0.5 }}>
-                      <Chip
-                        size="small"
-                        color={color}
-                        label={isActive ? (item.kind === "backup" && item.totalBytes === 0 ? "EM CURSO" : item.progress + "%") : item.status}
-                      />
-                      {isActive && (
-                        <IconButton size="small" color="error" onClick={() => void doCancel(item)}>
-                          <StopOutlined fontSize="small" />
-                        </IconButton>
-                      )}
-                      <IconButton size="small" onClick={() => remove(item.id)}>
-                        <DeleteOutlineOutlined fontSize="small" />
-                      </IconButton>
-                    </Box>
-                  </Box>
-                  {isActive && (
-                    <LinearProgress
-                      variant={item.kind === "backup" && item.totalBytes === 0 ? "indeterminate" : item.total > 0 ? "determinate" : "indeterminate"}
-                      value={item.progress}
-                      sx={{ height: 5, borderRadius: 2, mt: 1 }}
-                    />
-                  )}
-                  <Typography variant="caption" color="text.secondary" sx={{ display: "block", mt: 0.5 }}>
-                    {progressCaption({
-                      id: item.id,
-                      status: item.status,
-                      total_blobs: item.total,
-                      processed_blobs: item.processed,
-                      rows_destination: item.rows,
-                      forecast_total_series: item.forecastTotalSeries,
-                      forecast_processed_series: item.forecastProcessedSeries,
-                      task_type: item.kind === "backup" ? "backup" : item.kind === "forecast" ? "forecast" : undefined,
-                      downloaded_bytes_total: item.bytesWritten,
-                      started_at: new Date(item.startedAt).toISOString(),
-                      total_download_bytes: item.totalBytes,
-                      phase: item.phase,
-                      connector_type: item.connectorType,
-                    } as TaskStatus)}
-                  </Typography>
-                </Box>
-              );
-            })}
-          </Stack>
-        </DialogContent>
-        {orderedItems.length > 0 && (
-          <Box sx={{ p: 1.5, display: "flex", justifyContent: "flex-end" }}>
-            <Button size="small" variant="outlined" onClick={clearAll} startIcon={<DeleteOutlineOutlined fontSize="small" />}>
-              Limpar notificações
-            </Button>
-          </Box>
-        )}
-      </Dialog>
-      <Snackbar
+      <NotificationPanel
+        open={dialogOpen}
+        items={views}
+        onClose={closeDialog}
+        onCancel={(id) => {
+          const item = items.find((candidate) => candidate.id === id);
+          return item ? doCancel(item) : undefined;
+        }}
+        onRemove={remove}
+        onClearAll={clearAll}
+      />
+      <NotificationToast
         open={snackbar.open}
-        autoHideDuration={6000}
+        message={dataDisplayText(snackbar.message)}
+        severity={snackbar.severity}
         onClose={closeSnackbar}
-        anchorOrigin={{ vertical: "bottom", horizontal: "center" }}
-      >
-        <Alert severity={snackbar.severity} onClose={closeSnackbar} sx={{ width: "100%" }}>
-          {dataDisplayText(snackbar.message)}
-        </Alert>
-      </Snackbar>
+        onOpenPanel={openDialog}
+      />
     </NotificationContext.Provider>
   );
 }
@@ -613,10 +555,12 @@ export function useNotifications(): NotificationContextValue {
 export function NotificationBell(): React.JSX.Element {
   const { unreadCount, openDialog } = useNotifications();
   return (
-    <IconButton color="inherit" onClick={openDialog}>
-      <Badge badgeContent={unreadCount} color="error">
-        <NotificationsOutlined />
-      </Badge>
-    </IconButton>
+    <Tooltip title="Avisos">
+      <IconButton color="inherit" onClick={openDialog} aria-label={unreadCount ? `Avisos (${unreadCount} novos)` : "Avisos"}>
+        <Badge badgeContent={unreadCount} color="error">
+          <NotificationsOutlined />
+        </Badge>
+      </IconButton>
+    </Tooltip>
   );
 }

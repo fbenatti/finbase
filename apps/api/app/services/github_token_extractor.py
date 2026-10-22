@@ -62,7 +62,7 @@ class GithubTokenExtractor:
         self.config_json = connection.config_json or {}
         self.enterprise_slug = self.config_json.get("enterprise_slug", "")
         self.pat_token = self.config_json.get("pat_token", "") or self.config_json.get("client_secret", "")
-        self.email_domain = self.config_json.get("email_domain", "telefonica.com.br")
+        self.email_domain = self.config_json.get("email_domain", "")
         self._headers = {
             "Authorization": f"Bearer {self.pat_token}",
             "Accept": "application/vnd.github+json",

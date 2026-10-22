@@ -1774,24 +1774,25 @@ def _reprocess_destination_sync(
             )
         # Só colunas de classificação e do resultado financeiro; colunas que
         # uma regra de negócio grava (ex.: CostBRL) entram pela regra abaixo.
-        output_cols = {'organograma', 'centro_custo', 'id_orcamento',
+        output_cols = {'centro_custo', 'id_orcamento',
                        'ambiente', 'custom_fields',
                        'realizado_cloud', 'consumo_realizado', 'ajuste_contratual',
                        'financial_effect', 'financial_contract_id'}
-        # These columns are part of the Gold technical contract even when a
-        # batch generates no synthetic rows.  Without a stable contract the
-        # first no-clone batch created a narrower staging schema and the next
-        # clone-enabled batch failed with ``Mismatch in fields``.
-        internal_col_types = {
-            "source_record_id": "TEXT",
-            "source_blob_path": "TEXT",
-            "source_row_offset": "BIGINT",
+        # Colunas de clonagem são enriquecimento: só entram na tabela quando há
+        # regra de clonagem ativa (ver clone_engines). Dentro de uma execução o
+        # conjunto é estável, para todos os batches terem o mesmo schema.
+        clone_col_types = {
             "clone_source_record_id": "TEXT",
             "is_synthetic": "BOOLEAN",
             "clone_rule_id": "BIGINT",
             "clone_rule_version": "BIGINT",
             "ondemand_reference_price": "DOUBLE",
             "ondemand_reference_period": "TEXT",
+        }
+        internal_col_types = {
+            "source_record_id": "TEXT",
+            "source_blob_path": "TEXT",
+            "source_row_offset": "BIGINT",
             "cloud_origem": "TEXT",
             "source_connection_id": "BIGINT",
             "_billing_period": "TEXT",
@@ -1809,6 +1810,7 @@ def _reprocess_destination_sync(
         }
         internal_cols_all = list(internal_col_types)
         dest_col_types.update(internal_col_types)
+        dest_col_types.update(clone_col_types)
 
         for cid in unique_cids:
             conn = session.get(SourceConnection, cid)
@@ -1899,8 +1901,10 @@ def _reprocess_destination_sync(
                 for condition in (rule.conditions or []):
                     if isinstance(condition, dict) and condition.get("then_field"):
                         output_cols.add(condition["then_field"])
+            # Regras com departamento gravam só hierarquia_N; o target_field
+            # vira coluna apenas nas regras legadas sem departamento.
             for rule in _crules:
-                if rule.target_field and rule.target_field not in {"diretoria", "projeto_nome"}:
+                if rule.target_field and not rule.department_id and rule.target_field not in {"diretoria", "projeto_nome"}:
                     output_cols.add(rule.target_field)
 
             _dept_cache: dict = {}
@@ -1985,6 +1989,8 @@ def _reprocess_destination_sync(
             c for c in sorted(output_cols)
             if c not in stable_stage_cols
         )
+        if clone_engines:
+            internal_cols_all.extend(clone_col_types)
         stable_stage_cols.extend(
             c for c in internal_cols_all
             if c not in stable_stage_cols
@@ -2388,7 +2394,6 @@ def _reprocess_destination_sync(
                     chain.append(current)
                     current = dept_cache.get(current.parent_id) if current.parent_id else None
                 chain.reverse()
-                contractual.at[index, "organograma"] = chain[-1].name
                 for column, name in path_to_levels([node.name for node in chain], hierarchy_depth_of(contractual.columns)).items():
                     contractual.at[index, column] = name or None
                 for field in ("centro_custo", "ambiente"):
@@ -2501,25 +2506,33 @@ def _reprocess_destination_sync(
                     expected_row_count=staged_rows,
                 )
 
-            # Marketplace MongoDB is published from USD source rows, but its
-            # financial effect must be allocated from the matching Azure pool
-            # in BRL after the normal Silver publication succeeds.
-            if (
-                int(connection_ids[0]) in {5, 11}
-                and phys_name == "dest_billing_cloud"
-                and len(billing_periods) == 1
-            ):
+            # Rateio de Marketplace (regra de negócio MARKETPLACE_ALLOCATION):
+            # depois da publicação normal, distribui o pool em BRL da nuvem nas
+            # linhas do Marketplace pela participação em USD.
+            if len(connection_ids) == 1 and len(billing_periods) == 1:
+                from app.database import SyncSession as _AllocationSession
                 from app.services.marketplace_allocation_reprocess import (
-                    apply_mongodb_marketplace_allocation,
+                    apply_marketplace_allocation,
+                    marketplace_allocation_rules,
                 )
-                allocation = apply_mongodb_marketplace_allocation(
-                    str(billing_periods[0]), connection_id=int(connection_ids[0])
-                )
-                _append_reprocess_log(
-                    task_id,
-                    "Rateio Marketplace MongoDB aplicado: "
-                    f"{allocation['allocated_brl']:.2f} BRL em {allocation['rows']:,} linhas",
-                )
+                _allocation_session = _AllocationSession()
+                try:
+                    _market_conn = _allocation_session.get(SourceConnection, int(connection_ids[0]))
+                    _market_rules = (
+                        marketplace_allocation_rules(_allocation_session, _market_conn) if _market_conn else []
+                    )
+                finally:
+                    _allocation_session.close()
+                for _market_rule in _market_rules:
+                    allocation = apply_marketplace_allocation(
+                        phys_name, str(billing_periods[0]), _market_conn, _market_rule,
+                    )
+                    _append_reprocess_log(
+                        task_id,
+                        f"Rateio Marketplace aplicado ({_market_rule.name}): "
+                        f"{allocation['allocated_brl']:.2f} BRL em {allocation['rows']:,} linhas",
+                    )
+
         except Exception as stage_err:
             status["current_blob"] = f"Falha na escrita Iceberg ({stage_err}), revertendo..."
             _sync_db()
@@ -2788,8 +2801,8 @@ def _reclassify_destination_sync(task_id: int, destination_table_id: int, connec
                     # Never erase fields on rows owned only by business rules.
                     # Rows with prior classification (or empty dimensions) are
                     # safe to recompute from the current classification rules.
-                    reset_mask = was_classified | frame.get("organograma", pd.Series(None, index=frame.index)).isna()
-                    for col in ("organograma", "centro_custo", "id_orcamento", "ambiente", "custom_fields", *hierarchy_columns_in(frame.columns)):
+                    reset_mask = was_classified | frame.get("hierarquia_1", pd.Series(None, index=frame.index)).isna()
+                    for col in ("centro_custo", "id_orcamento", "ambiente", "custom_fields", *hierarchy_columns_in(frame.columns)):
                         if col in frame.columns:
                             frame.loc[reset_mask, col] = None
                     _apply_classifications_sync(frame, rules, None, dept_map=depts, hierarchy_cache=hierarchy_cache)

@@ -700,9 +700,6 @@ async def lifespan(app: FastAPI):
                 UPDATE destination_column
                 SET column_name = REPLACE(column_name, 'departamento_nivel_', 'hierarquia_')
                 WHERE column_name LIKE 'departamento_nivel_%';
-                UPDATE destination_column
-                SET column_name = 'organograma'
-                WHERE column_name = 'departamento';
               END IF;
 
               IF to_regclass('source_destination_mapping') IS NOT NULL THEN
@@ -712,13 +709,6 @@ async def lifespan(app: FastAPI):
                   destination_column = REPLACE(destination_column, 'departamento_nivel_', 'hierarquia_')
                 WHERE source_column LIKE 'departamento_nivel_%'
                    OR destination_column LIKE 'departamento_nivel_%';
-                UPDATE source_destination_mapping
-                SET
-                  source_column = 'organograma'
-                WHERE source_column = 'departamento';
-                UPDATE source_destination_mapping
-                SET destination_column = 'organograma'
-                WHERE destination_column = 'departamento';
               END IF;
 
               IF to_regclass('etl_mapping') IS NOT NULL THEN
@@ -728,21 +718,12 @@ async def lifespan(app: FastAPI):
                   target_column = REPLACE(target_column, 'departamento_nivel_', 'hierarquia_')
                 WHERE source_column LIKE 'departamento_nivel_%'
                    OR target_column LIKE 'departamento_nivel_%';
-                UPDATE etl_mapping
-                SET source_column = 'organograma'
-                WHERE source_column = 'departamento';
-                UPDATE etl_mapping
-                SET target_column = 'organograma'
-                WHERE target_column = 'departamento';
               END IF;
 
               IF to_regclass('classification_field_value') IS NOT NULL THEN
                 UPDATE classification_field_value
                 SET field = REPLACE(field, 'departamento_nivel_', 'hierarquia_')
                 WHERE field LIKE 'departamento_nivel_%';
-                UPDATE classification_field_value
-                SET field = 'organograma'
-                WHERE field = 'departamento';
               END IF;
 
               IF to_regclass('classification_rule') IS NOT NULL THEN
@@ -752,21 +733,12 @@ async def lifespan(app: FastAPI):
                   target_field = REPLACE(target_field, 'departamento_nivel_', 'hierarquia_')
                 WHERE source_field LIKE 'departamento_nivel_%'
                    OR target_field LIKE 'departamento_nivel_%';
-                UPDATE classification_rule
-                SET source_field = 'organograma'
-                WHERE source_field = 'departamento';
-                UPDATE classification_rule
-                SET target_field = 'organograma'
-                WHERE target_field = 'departamento';
               END IF;
 
               IF to_regclass('business_rule') IS NOT NULL THEN
                 UPDATE business_rule
                 SET target_column = REPLACE(target_column, 'departamento_nivel_', 'hierarquia_')
                 WHERE target_column LIKE 'departamento_nivel_%';
-                UPDATE business_rule
-                SET target_column = 'organograma'
-                WHERE target_column = 'departamento';
               END IF;
 
               IF to_regclass('gold_rule') IS NOT NULL THEN
@@ -774,10 +746,6 @@ async def lifespan(app: FastAPI):
                 SET sql_template = REPLACE(sql_template, 'departamento_nivel_', 'hierarquia_')
                 WHERE sql_template IS NOT NULL
                   AND sql_template LIKE '%departamento_nivel_%';
-                UPDATE gold_rule
-                SET sql_template = REPLACE(sql_template, '"departamento"', '"organograma"')
-                WHERE sql_template IS NOT NULL
-                  AND sql_template LIKE '%"departamento"%';
               END IF;
 
               FOR rec IN
@@ -844,70 +812,6 @@ async def lifespan(app: FastAPI):
                 END IF;
               END LOOP;
 
-              FOR rec IN
-                SELECT *
-                FROM (VALUES
-                  ('gold_rule', 'filter_json', 'json'),
-                  ('gold_rule', 'dimensions', 'json'),
-                  ('gold_rule', 'measure_columns', 'json'),
-                  ('gold_rule_source', 'filter_json', 'json'),
-                  ('forecast_config', 'dimensions', 'json'),
-                  ('forecast_config', 'filters', 'json'),
-                  ('forecast_config', 'connection_allocation_rules', 'json'),
-                  ('forecast_business_rule', 'scope', 'json'),
-                  ('forecast_business_rule', 'identification_clauses', 'json'),
-                  ('forecast_business_rule', 'reference_values', 'json'),
-                  ('forecast_run', 'config_snapshot', 'json'),
-                  ('classification_rule', 'conditions', 'json'),
-                  ('business_rule', 'conditions', 'json'),
-                  ('saving_action', 'filters', 'json'),
-                  ('shutdown_exception_rule', 'filter_json', 'json'),
-                  ('pivot_view', 'config_json', 'json'),
-                  ('dashboard', 'global_filters', 'json'),
-                  ('dashboard_widget', 'config_json', 'json'),
-                  ('ai_cost_link', 'filter_json', 'json'),
-                  ('ai_cost_link_source', 'filter_json', 'json'),
-                  ('clone_rule', 'conditions', 'json'),
-                  ('scheduled_task', 'config_json', 'json'),
-                  ('etl_task', 'result_json', 'json'),
-                  ('audit_log', 'before_json', 'jsonb'),
-                  ('audit_log', 'after_json', 'jsonb'),
-                  ('audit_log', 'changes_json', 'jsonb')
-                ) AS payload(table_name, column_name, storage_type)
-              LOOP
-                IF to_regclass(rec.table_name) IS NOT NULL
-                   AND EXISTS (
-                     SELECT 1
-                     FROM information_schema.columns
-                     WHERE table_schema = current_schema()
-                       AND table_name = rec.table_name
-                       AND column_name = rec.column_name
-                   ) THEN
-                  IF rec.storage_type = 'jsonb' THEN
-                    EXECUTE format(
-                      'UPDATE %I SET %I = replace(replace(replace(replace(%I::text,
-                        ''"column": "departamento"'', ''"column": "organograma"''),
-                        ''"field": "departamento"'', ''"field": "organograma"''),
-                        ''"target_field": "departamento"'', ''"target_field": "organograma"''),
-                        ''"rows": ["departamento"'', ''"rows": ["organograma"'')::jsonb
-                       WHERE %I IS NOT NULL AND %I::text LIKE ''%%"departamento"%%''',
-                      rec.table_name, rec.column_name, rec.column_name,
-                      rec.column_name, rec.column_name
-                    );
-                  ELSE
-                    EXECUTE format(
-                      'UPDATE %I SET %I = replace(replace(replace(replace(%I::text,
-                        ''"column": "departamento"'', ''"column": "organograma"''),
-                        ''"field": "departamento"'', ''"field": "organograma"''),
-                        ''"target_field": "departamento"'', ''"target_field": "organograma"''),
-                        ''"rows": ["departamento"'', ''"rows": ["organograma"'')::json
-                       WHERE %I IS NOT NULL AND %I::text LIKE ''%%"departamento"%%''',
-                      rec.table_name, rec.column_name, rec.column_name,
-                      rec.column_name, rec.column_name
-                    );
-                  END IF;
-                END IF;
-              END LOOP;
             END $$
         """
         # Configurações salvas (regras, filtros, dashboards) com nomes antigos de nível.

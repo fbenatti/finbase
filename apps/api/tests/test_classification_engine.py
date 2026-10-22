@@ -61,14 +61,14 @@ class TestNormalizeRuleConditions:
     def test_json_array_pattern_derives_exact_match(self):
         rule = _rule(
             source_field="resourceGroupName",
-            pattern='["vivo-ti-vicky-hml"]',
+            pattern='["projeto-a-hml"]',
             pattern_type="exact",
             match_value="Vicky",
         )
         normalized = normalize_rule_conditions(rule)
         assert normalized[0]["field"] == "source_resource_group_name"
         assert normalized[0]["operator"] == "="
-        assert normalized[0]["values"] == ["vivo-ti-vicky-hml"]
+        assert normalized[0]["values"] == ["projeto-a-hml"]
 
     def test_regex_catch_all_becomes_contains_star(self):
         rule = _rule(
@@ -88,13 +88,13 @@ class TestNormalizeRuleConditions:
 class TestEvaluateRuleConditions:
     def test_focus_field_matches(self):
         df = pd.DataFrame({
-            "source_resource_group_name": ["vivo-ti-vicky-hml", "other-project"],
+            "source_resource_group_name": ["projeto-a-hml", "other-project"],
             "organograma": ["", ""],
         })
         rule = _rule(conditions=[{
             "field": "source_resource_group_name",
             "operator": "=",
-            "values": ["vivo-ti-vicky-hml"],
+            "values": ["projeto-a-hml"],
             "logic": "AND",
         }], match_value="Vicky")
         mask = evaluate_rule_conditions(df, rule)
@@ -102,13 +102,13 @@ class TestEvaluateRuleConditions:
 
     def test_legacy_resource_group_name_does_not_match_focus_column(self):
         df = pd.DataFrame({
-            "source_resource_group_name": ["vivo-ti-vicky-hml"],
+            "source_resource_group_name": ["projeto-a-hml"],
             "organograma": [""],
         })
         rule = _rule(conditions=[{
             "field": "resourceGroupName",
             "operator": "=",
-            "values": ["vivo-ti-vicky-hml"],
+            "values": ["projeto-a-hml"],
             "logic": "AND",
         }])
         # map_legacy_field maps it, so it should still match after normalization
@@ -159,7 +159,7 @@ class TestMapLegacyField:
 class TestGcpClassification:
     def test_sub_account_id_matches_project_id(self):
         df = pd.DataFrame({
-            "SubAccountId": ["vivo-ti-vicky-hml", "seguranca-patrimonial-385514"],
+            "SubAccountId": ["projeto-a-hml", "seguranca-patrimonial-385514"],
             "organograma": ["", ""],
         })
         rule = _rule(conditions=[{

@@ -271,7 +271,7 @@ def _normalize_github_login_key(value: str) -> str:
 
 
 class GitHubEnterpriseClient:
-    def __init__(self, pat_token: str, enterprise_slug: str, email_domain: str = "telefonica.com.br"):
+    def __init__(self, pat_token: str, enterprise_slug: str, email_domain: str = ""):
         if not pat_token:
             raise ValueError("GitHub PAT token is required")
         if not enterprise_slug:

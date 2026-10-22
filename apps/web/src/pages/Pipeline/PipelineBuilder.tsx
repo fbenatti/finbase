@@ -326,7 +326,7 @@ export default function PipelineBuilder() {
         newEdges.push(newEdge("e-" + gId + "-in", "foc-" + focusCol, gId, "#4caf50"));
 
         // Saida para colunas de destino (quando existem no schema)
-        for (const outCol of ["diretoria", "organograma", "centro_custo", "ambiente"]) {
+        for (const outCol of ["centro_custo", "ambiente"]) {
           if (focusY.has(outCol)) {
             newEdges.push(newEdge("e-" + gId + "-to-" + outCol, gId, "foc-" + outCol, "#4caf50", "4 2"));
           }

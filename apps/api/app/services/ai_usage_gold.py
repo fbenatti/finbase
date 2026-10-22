@@ -88,7 +88,7 @@ async def _source_levels(table: str) -> list[str]:
 def _consumption_select(levels: list[str]) -> str:
     dimensions = [
         "provider", "productname", "modelname", "recordtype", "useremail", "userlogin",
-        "aggregationlevel", "editor", "language", "organograma",
+        "aggregationlevel", "editor", "language",
         *levels,
     ]
     dim_select = ",\n        ".join(f"CAST({name} AS VARCHAR) AS {name}" for name in dimensions)
@@ -137,7 +137,7 @@ def _license_select(levels: list[str]) -> str:
         CAST(activitystatus AS VARCHAR) AS activitystatus,
         TRY_CAST(allocatedlicensecost AS DOUBLE) AS allocatedlicensecost,
         TRY_CAST(listcost AS DOUBLE) AS listcost,
-        CAST(organograma AS VARCHAR) AS organograma,{level_select}
+        {level_select}
         CAST(snapshotdate AS VARCHAR) AS snapshotdate,
         CAST(_billing_period AS VARCHAR) AS _billing_period
       FROM (

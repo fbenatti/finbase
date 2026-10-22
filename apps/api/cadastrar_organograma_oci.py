@@ -116,12 +116,19 @@ def main() -> None:
         # Por último: pega qualquer compartment que nenhuma regra acima cobriu.
         regras.append((f"OCI › {NAO_CLASSIFICADO}", sem_regra, ".*", "regex"))
 
-        for prioridade, (nome, folha, padrao, tipo) in enumerate(regras, start=1):
+        # Todas na ordem 100; o desempate é pelo id, então "Não classificado"
+        # (criada por último) é avaliada por último.
+        for nome, folha, padrao, tipo in regras:
+            if tipo == "exact":
+                condicao = {"field": "SubAccountName", "operator": "=", "values": json.loads(padrao), "logic": "AND"}
+            else:
+                condicao = {"field": "SubAccountName", "operator": "~", "values": [padrao], "logic": "AND"}
             session.add(ClassificationRule(
                 connection_id=conexao.id, destination_table_id=FOCUS_DESTINATION_ID,
                 department_id=folha.id, name=nome, source_field="SubAccountName",
                 pattern=padrao, pattern_type=tipo, match_value=folha.name,
-                target_field="organograma", priority=prioridade, active=True,
+                target_field="hierarquia", conditions=[condicao], cloud_scope="oci",
+                priority=100, active=True,
             ))
         session.commit()
         print(f"Organograma {' > '.join(CAMINHO_RAIZ)}: {len(PROJETOS)} projetos + {NAO_CLASSIFICADO}.")

@@ -383,11 +383,11 @@ def test_rule_without_identification_or_scope_is_not_applied_globally():
 
 def test_source_exclusion_prefix_uses_gold_field_without_forecast_dimension():
     rule = _rule(
-        name="Excluir consumo horario PTU Aura Brain",
+        name="Excluir consumo horario PTU Projeto Beta",
         identification_column="skumeter",
         identification_values=["Provisioned Managed"],
         behavior="SOURCE_EXCLUDE_PREFIX",
-        scope={"hierarquia_5": "Aura Brain", "servicename": "Microsoft.CognitiveServices"},
+        scope={"hierarquia_5": "Projeto Beta", "servicename": "Microsoft.CognitiveServices"},
         start_period="202512",
     )
     sql_filter, applied = _source_exclusion_filter(
@@ -401,7 +401,7 @@ def test_source_exclusion_prefix_uses_gold_field_without_forecast_dimension():
     assert applied == [rule.name]
     assert 'CAST("skumeter" AS VARCHAR)' in sql_filter
     assert "Provisioned Managed" in sql_filter
-    assert 'CAST("hierarquia_5" AS VARCHAR) = \'Aura Brain\'' in sql_filter
+    assert 'CAST("hierarquia_5" AS VARCHAR) = \'Projeto Beta\'' in sql_filter
     assert 'CAST("_billing_period" AS VARCHAR) >= \'202512\'' in sql_filter
 
 

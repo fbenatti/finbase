@@ -12,11 +12,11 @@ async def test_project_tokens_are_read_from_ptu_gold(monkeypatch):
         return [{"period": "202608", "input_tokens": 800, "output_tokens": 200, "total_tokens": 1000}]
 
     monkeypatch.setattr(gold_mart, "trino_execute", fake_execute)
-    result = await gold_mart.load_project_token_totals("vivo-mais", ["202608"], None)
+    result = await gold_mart.load_project_token_totals("projeto-alfa", ["202608"], None)
 
     assert result["202608"]["total_tokens"] == 1000
     assert gold_mart.GOLD_SQL in captured[0]
-    assert "lower(CAST(project_hint AS VARCHAR)) = 'vivo-mais'" in captured[0]
+    assert "lower(CAST(project_hint AS VARCHAR)) = 'projeto-alfa'" in captured[0]
 
 
 @pytest.mark.asyncio
@@ -28,10 +28,10 @@ async def test_project_tokens_can_load_all_available_periods(monkeypatch):
         return []
 
     monkeypatch.setattr(gold_mart, "trino_execute", fake_execute)
-    await gold_mart.load_project_token_totals("aura-brain", None, None)
+    await gold_mart.load_project_token_totals("projeto-beta", None, None)
 
     assert "replace(_billing_period, '-', '') IN" not in captured[0]
-    assert "lower(CAST(project_hint AS VARCHAR)) = 'aura-brain'" in captured[0]
+    assert "lower(CAST(project_hint AS VARCHAR)) = 'projeto-beta'" in captured[0]
 
 
 @pytest.mark.asyncio
@@ -49,7 +49,7 @@ async def test_dashboard_metrics_do_not_fallback_to_gold(monkeypatch):
         return []
 
     monkeypatch.setattr(gold_mart, "trino_execute", fake_execute)
-    await gold_mart.load_gold_metrics(hours=720, project_hints=["aura-brain"], grain="day")
+    await gold_mart.load_gold_metrics(hours=720, project_hints=["projeto-beta"], grain="day")
 
     assert len(captured) == 1
     assert f"FROM iceberg.{gold_mart.GOLD}.dest_dm_azure_ptu_daily" in captured[0]
@@ -77,11 +77,11 @@ async def test_project_tokens_last_30d_uses_rolling_window(monkeypatch):
                  "date_from": "2026-08-02", "date_to": "2026-09-01"}]
 
     monkeypatch.setattr(gold_mart, "trino_execute", fake_execute)
-    result = await gold_mart.load_project_tokens_last_30d("aura-brain")
+    result = await gold_mart.load_project_tokens_last_30d("projeto-beta")
 
     assert result["total_tokens"] == 1000
     assert "current_date - INTERVAL '30' DAY" in captured[0]
-    assert "project_hint AS VARCHAR)) = 'aura-brain'" in captured[0]
+    assert "project_hint AS VARCHAR)) = 'projeto-beta'" in captured[0]
 
 
 @pytest.mark.asyncio

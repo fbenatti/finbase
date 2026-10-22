@@ -183,8 +183,8 @@ def test_driver_name_uses_child_of_scope():
 
 def test_path_matches_ignores_trailing_whitespace():
     from app.services.shared_cost import path_matches
-    assert path_matches(["Sinfonia - Watson"], ["Sinfonia - Watson "])
-    assert path_matches(["Sinfonia - Watson "], ["Sinfonia - Watson"])
+    assert path_matches(["Gama - Omega"], ["Gama - Omega "])
+    assert path_matches(["Gama - Omega "], ["Gama - Omega"])
 
 
 def test_rateio_rows_are_positive_on_consumer_negative_on_donor():
@@ -452,8 +452,8 @@ def test_same_cloud_leaves_shallow_marketplace_structure():
 def test_consumption_splits_parent_project_and_sibling_leaf():
     from app.services.shared_cost import ResolvedSharedCost, build_rateio_rows
 
-    watson = ["Consumo Cloud", "Showback", "IBM", "DIR IA", "Sinfonia - Watson "]
-    vivo = ["Consumo Cloud", "Showback", "IBM", "DIR IA", "Sinfonia - VivoCog"]
+    omega = ["Consumo Cloud", "Showback", "IBM", "DIR IA", "Gama - Omega "]
+    alfa = ["Consumo Cloud", "Showback", "IBM", "DIR IA", "Gama - Delta"]
     donor = ["Consumo Cloud", "Showback", "IBM", "Condominio"]
     config = ResolvedSharedCost(
         donor_id=9,
@@ -463,23 +463,23 @@ def test_consumption_splits_parent_project_and_sibling_leaf():
         donor_subtree={9},
         target_leaves=[10, 11, 12],
         leaf_paths={
-            10: watson,
-            11: [*watson, "env"],
-            12: vivo,
+            10: omega,
+            11: [*omega, "env"],
+            12: alfa,
         },
     )
     rows = build_rateio_rows(
         [config],
         [
             {"period": "202601", "path": donor, "value": 100.0},
-            {"period": "202601", "path": ["Consumo Cloud", "Showback", "IBM", "DIR IA", "Sinfonia - Watson"], "value": 50.0},
-            {"period": "202601", "path": vivo, "value": 50.0},
+            {"period": "202601", "path": ["Consumo Cloud", "Showback", "IBM", "DIR IA", "Gama - Omega"], "value": 50.0},
+            {"period": "202601", "path": alfa, "value": 50.0},
         ],
         [],
     )
     consumers = {(row["hierarquia_5"] or "").strip(): row["realizado"] for row in rows if row["realizado"] > 0}
-    assert consumers["Sinfonia - Watson"] == 50
-    assert consumers["Sinfonia - VivoCog"] == 50
+    assert consumers["Gama - Omega"] == 50
+    assert consumers["Gama - Delta"] == 50
     assert "env" not in consumers
 
 

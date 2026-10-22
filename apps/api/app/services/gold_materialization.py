@@ -96,16 +96,7 @@ _FOCUS_FIELD_ALIASES = {
 
 def _alias_for_missing(schema: dict[str, str], requested: str) -> str | None:
     # Resolve a filter field that a table lacks onto an equivalent column.
-    # Gold and its *_planning mirror share the same normalized structure except
-    # for small naming differences: the Gold exposes organograma (folha) while the
-    # planning mirror only keeps hierarquia_1, hierarquia_2, ... When a source unites
-    # both tables, a filter on organograma must apply on the planning side
-    # as hierarquia_1 so the union stays a single clean dataset.
     key = str(requested or "").strip().lower()
-    if key == "organograma":
-        candidate = schema.get("hierarquia_1")
-        if candidate:
-            return candidate
     if is_hierarchy_column(key):
         candidate = schema.get(key)
         if candidate:
@@ -321,7 +312,6 @@ _ANALYTIC_DIMENSIONS = (
     "period",
     "tipo",
     "cloud_origem",
-    "organograma",
     _ALL_HIERARCHY_LEVELS,
     "servicecategory",
     "servicename",

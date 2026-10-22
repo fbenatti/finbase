@@ -6,6 +6,7 @@ import { AddOutlined, EditOutlined, DeleteOutlined } from "@mui/icons-material";
 import {
   getBusinessRules, createBusinessRule, updateBusinessRule, deleteBusinessRule, BusinessRule,
   getDestinationTables, getDestinationSchema, DestinationTable, getFinancialContracts, FinancialContract,
+  getConnections,
 } from "../../services/api";
 import EmptyState from "../../components/EmptyState";
 import SortableTable from "../../components/SortableTable";
@@ -200,9 +201,15 @@ export default function Rules({ embedded = false }: { embedded?: boolean } = {})
   const [contracts, setContracts] = useState<FinancialContract[]>([]);
   const scopeColumnOptions = [...INTERNAL_SCOPE_COLUMNS, ...sourceColumns.filter((c) => !INTERNAL_SCOPE_COLUMNS.includes(c))];
 
+  // Nuvens com conexão cadastrada: só elas aparecem na abrangência do ajuste.
+  const [cloudScopes, setCloudScopes] = useState<string[]>([]);
+
   useEffect(() => {
     getDestinationTables(true).then(setDestTables).catch(() => {});
     getFinancialContracts().then(setContracts).catch(() => {});
+    getConnections()
+      .then((connections) => setCloudScopes([...new Set(connections.map((c) => c.cloud_scope).filter((v): v is string => !!v))]))
+      .catch(() => setCloudScopes([]));
   }, []);
 
   const load = async () => {
@@ -322,7 +329,6 @@ export default function Rules({ embedded = false }: { embedded?: boolean } = {})
         cloud_product_name: form.cloud_product_name,
         cloud_sku: form.cloud_sku,
         cloud_resource_group: form.cloud_resource_group,
-        test_period: "202608",
       });
     }
     if (form.operation === "col+" || form.operation === "col-") {
@@ -573,9 +579,11 @@ export default function Rules({ embedded = false }: { embedded?: boolean } = {})
                 label="Nuvem (abrangência do ajuste)"
                 onChange={(e) => setForm({ ...form, cloud_scope: e.target.value })}
               >
-                {CLOUD_SCOPE_FORM_OPTIONS.map((s) => (
-                  <MenuItem key={s.value} value={s.value}>{s.label}</MenuItem>
-                ))}
+                {CLOUD_SCOPE_FORM_OPTIONS
+                  .filter((s) => s.value === "global" || s.value === form.cloud_scope || cloudScopes.includes(s.value))
+                  .map((s) => (
+                    <MenuItem key={s.value} value={s.value}>{s.label}</MenuItem>
+                  ))}
               </Select>
             </FormControl>
             <Typography variant="caption" color="text.secondary" sx={{ mt: -1 }}>
@@ -589,7 +597,7 @@ export default function Rules({ embedded = false }: { embedded?: boolean } = {})
               Preencha estes campos para criar um ajuste de teste que distribui o efetivado de nuvem em BRL pela participação USD do Marketplace.
             </Typography>
             {form.financial_effect === "MARKETPLACE_ALLOCATION" && <>
-              <TextField label="Conexão de marketplace" value={form.marketplace_connection_code} onChange={(e) => setForm({ ...form, marketplace_connection_code: e.target.value })} placeholder="mongodb-atlas-pro" />
+              <TextField label="Conexão de marketplace" value={form.marketplace_connection_code} onChange={(e) => setForm({ ...form, marketplace_connection_code: e.target.value })} placeholder="código da conexão" />
               <TextField label="Conexão de nuvem" value={form.cloud_connection_code} onChange={(e) => setForm({ ...form, cloud_connection_code: e.target.value })} />
               <TextField label="Produto de nuvem" value={form.cloud_product_name} onChange={(e) => setForm({ ...form, cloud_product_name: e.target.value })} placeholder="Oferta privada..." />
               <TextField label="SKU de nuvem" value={form.cloud_sku} onChange={(e) => setForm({ ...form, cloud_sku: e.target.value })} />

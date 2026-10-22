@@ -317,7 +317,7 @@ export default function Connections() {
         ...emptyForm,
         code: conn.code, name: conn.name,
         connector_type: conn.connector_type,
-        cloud_name: conn.cloud_name || "Azure-4P",
+        cloud_name: conn.cloud_name || "",
         cloud_scope: conn.cloud_scope || "azure",
         credential_profile: cfg.credential_profile || "",
         tenant_id: cfg.tenant_id || "",
@@ -408,7 +408,7 @@ export default function Connections() {
         connector_type: conn.connector_type,
         cloud_name: conn.cloud_name || "notebooklm-license",
         cloud_scope: conn.cloud_scope || "gemini",
-        tenant_id: cfg.project_id || "telefonica-notebook-lm",
+        tenant_id: cfg.project_id || "",
         client_id: cfg.project_number || "198880944469",
         client_secret: cfg.api_key || cfg.client_secret || "",
         gcp_token: typeof cfg.service_account_json === "string" ? cfg.service_account_json : (cfg.service_account_json ? JSON.stringify(cfg.service_account_json, null, 2) : ""),
@@ -422,7 +422,7 @@ export default function Connections() {
         connector_type: conn.connector_type,
         cloud_name: conn.cloud_name || "notebooklm-token",
         cloud_scope: conn.cloud_scope || "gemini",
-        tenant_id: cfg.project_id || "telefonica-notebook-lm",
+        tenant_id: cfg.project_id || "",
         client_id: cfg.project_number || "198880944469",
         client_secret: cfg.api_key || cfg.client_secret || "",
         gcp_token: typeof cfg.service_account_json === "string" ? cfg.service_account_json : (cfg.service_account_json ? JSON.stringify(cfg.service_account_json, null, 2) : ""),
@@ -436,7 +436,7 @@ export default function Connections() {
         connector_type: conn.connector_type,
         cloud_name: conn.cloud_name || (conn.connector_type === "gemini_license" ? "gemini-license" : "gemini-token"),
         cloud_scope: conn.cloud_scope || "gemini",
-        tenant_id: cfg.project_id || "telefonica-notebook-lm",
+        tenant_id: cfg.project_id || "",
         client_id: cfg.project_number || "198880944469",
         client_secret: cfg.api_key || cfg.client_secret || "",
         gcp_token: typeof cfg.service_account_json === "string" ? cfg.service_account_json : (cfg.service_account_json ? JSON.stringify(cfg.service_account_json, null, 2) : ""),
@@ -450,7 +450,7 @@ export default function Connections() {
         connector_type: conn.connector_type,
         cloud_name: conn.cloud_name || (conn.connector_type === "claude_license" ? "claude-license" : "claude-token"),
         cloud_scope: conn.cloud_scope || "claude",
-        tenant_id: cfg.org_id || "telefonica",
+        tenant_id: cfg.org_id || "",
         client_secret: cfg.api_token || cfg.api_key || cfg.client_secret || "",
       });
     } else if (conn.connector_type === "databricks") {
@@ -1044,7 +1044,7 @@ export default function Connections() {
               <>
                 {form.connector_type === "azure_pricesheet" && (
                   <Alert severity="info">
-                    Conexão independente do Azure 4P Cost Management. As credenciais ficam gravadas nesta conexão;
+                    Conexão independente do Azure Cost Management. As credenciais ficam gravadas nesta conexão;
                     o snapshot vai para a base de origem <code>raw_azure_pricesheet</code> pelo prefixo próprio.
                   </Alert>
                 )}
@@ -1083,7 +1083,7 @@ export default function Connections() {
                   helperText="Identificador do projeto GCP (ex: billing-344820)" />
                 <TextField label="Conjunto de dados (dataset)" value={form.client_id}
                   onChange={(e) => setForm({ ...form, client_id: e.target.value })}
-                  helperText="Dataset do BigQuery (ex: billingVivo)" />
+                  helperText="Dataset do BigQuery (ex: billing_export)" />
                 <TextField label="Tabela-fonte" value={form.table_name}
                   onChange={(e) => setForm({ ...form, table_name: e.target.value })}
                   helperText="Nome completo da tabela (ex: gcp_billing_export_resource_v1_...)" />
@@ -1190,7 +1190,7 @@ export default function Connections() {
                 </FormControl>
                 <TextField label="Identificador do projeto Google Cloud" value={form.tenant_id}
                   onChange={(e) => setForm({ ...form, tenant_id: e.target.value })}
-                  helperText="Project ID no GCP (ex: telefonica-notebook-lm)" />
+                  helperText="Project ID no GCP (ex: meu-projeto)" />
                 <TextField label="Número do projeto (Google)" value={form.client_id}
                   onChange={(e) => setForm({ ...form, client_id: e.target.value })}
                   helperText="Número do projeto (Google) no Google Cloud." />
@@ -1226,7 +1226,7 @@ export default function Connections() {
                 </FormControl>
                 <TextField label="Identificador do projeto Google Cloud" value={form.tenant_id}
                   onChange={(e) => setForm({ ...form, tenant_id: e.target.value })}
-                  helperText="Project ID no GCP (ex: telefonica-notebook-lm)" />
+                  helperText="Project ID no GCP (ex: meu-projeto)" />
                 <TextField label="Número do projeto (Google)" value={form.client_id}
                   onChange={(e) => setForm({ ...form, client_id: e.target.value })}
                   helperText="Número do projeto (Google) no Google Cloud." />
@@ -1262,7 +1262,7 @@ export default function Connections() {
                 </FormControl>
                 <TextField label="Organização (identificador)" value={form.tenant_id}
                   onChange={(e) => setForm({ ...form, tenant_id: e.target.value })}
-                  helperText="Organização (identificador) (ex: telefonica)" />
+                  helperText="Organização (identificador) (ex: minha-organizacao)" />
                 <TextField label="Chave de API de administrador" type="password" value={form.client_secret}
                   onChange={(e) => setForm({ ...form, client_secret: e.target.value })}
                   helperText="Chave de API de admin com read:members (licenças) e api:admin (consumo/tokens). Sem api:admin a licença funciona e o token falha. O arquivo .env-cloude local não alimenta a conexão — cole aqui e salve." />

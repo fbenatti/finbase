@@ -87,22 +87,6 @@ def test_source_gold_tables_list_kept_in_order():
     assert "servicename" in clause
 
 
-def test_alias_for_missing_organograma_on_planning():
-    """A filter on 'organograma' applies to planning as hierarquia_1."""
-    from app.services.gold_materialization import _normalized_conditions
-    planning_schema = {
-        "hierarquia_1": "hierarquia_1",
-        "servicename": "servicename",
-        "realizado": "realizado",
-    }
-    conds, missing = _normalized_conditions(
-        planning_schema,
-        [{"column": "organograma", "operator": "NOT_EMPTY", "values": []}],
-    )
-    assert missing == []
-    assert conds[0]["column"] == "hierarquia_1"
-
-
 def test_desligue_validation_dates_last_14_days_of_month():
     start, end = _desligue_validation_dates("202608")
     assert start == "2026-08-18"

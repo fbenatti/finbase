@@ -65,8 +65,8 @@ def test_tag_policy_subscription_selector_reads_tenant_subscriptions_from_arm(mo
     async def fake_discover(config):
         calls.append(config)
         return [
-            {"subscription_id": "63dbc6fc-93d8-4ac1-9745-253f6b502240", "subscription_name": "Fundação Telefônica"},
-            {"subscription_id": "63DBC6FC-93D8-4AC1-9745-253F6B502240", "subscription_name": "Fundação Telefônica duplicada"},
+            {"subscription_id": "63dbc6fc-93d8-4ac1-9745-253f6b502240", "subscription_name": "Fundação Exemplo"},
+            {"subscription_id": "63DBC6FC-93D8-4AC1-9745-253F6B502240", "subscription_name": "Fundação Exemplo duplicada"},
             {"subscription_id": "not-a-subscription", "subscription_name": "Linha inválida"},
             {"subscription_id": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", "subscription_name": "Terra Dev"},
         ]
@@ -75,7 +75,7 @@ def test_tag_policy_subscription_selector_reads_tenant_subscriptions_from_arm(mo
     result = asyncio.run(AzureTagPolicyService(FakeDB()).list_subscriptions(2))
 
     assert result == [
-        {"subscription_id": "63dbc6fc-93d8-4ac1-9745-253f6b502240", "name": "Fundação Telefônica"},
+        {"subscription_id": "63dbc6fc-93d8-4ac1-9745-253f6b502240", "name": "Fundação Exemplo"},
         {"subscription_id": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", "name": "Terra Dev"},
     ]
     assert calls == [{"tenant_id": "tenant"}]
@@ -157,7 +157,7 @@ def test_explicit_subscription_expands_historical_silver_rg_to_rg_scoped_policy(
     service = AzureTagPolicyService(db=FakeDB())
     rule = _rule(id=52, priority=90, department_id=10,
                  conditions=[{"field": "SubAccountName", "operator": "=", "values": ["Fundação"]}])
-    department = Department(id=10, name="Fundação Telefônica", parent_id=None, centro_custo="29TN161700")
+    department = Department(id=10, name="Fundação Exemplo", parent_id=None, centro_custo="29TN161700")
 
     async def load_departments():
         return {10: department}
@@ -236,9 +236,9 @@ def test_selected_subscription_preserves_contains_exact_and_subscription_predica
     prisma = _rule(id=78, priority=9, department_id=234, name="Classifica → Prisma",
                    conditions=[{"field": "source_resource_group_name", "operator": "~",
                                 "values": ["PCCAGENTLESSSCANRESOURCEGROUP", "dig-security-rg"]}])
-    foundation = _rule(id=52, priority=90, department_id=73, name="Classifica → Fundação Telefônica",
+    foundation = _rule(id=52, priority=90, department_id=73, name="Classifica → Fundação Exemplo",
                        conditions=[{"field": "SubAccountName", "operator": "=",
-                                    "values": ["Fundação Telefonica"]}])
+                                    "values": ["Fundação Exemplo"]}])
     other_subscription = _rule(
         id=5460, priority=0, department_id=216, name="Framework Brasil - outras subscriptions",
         conditions=[
@@ -254,12 +254,12 @@ def test_selected_subscription_preserves_contains_exact_and_subscription_predica
         conditions=[{"field": "source_resource_group_name", "operator": "=", "values": ["rg-common"]}],
     )
     other_contains_rule = _rule(
-        id=67, priority=15, department_id=216, name="Classifica → Datamesh CB2C",
+        id=67, priority=15, department_id=216, name="Classifica → Dados CB2C",
         conditions=[{"field": "source_resource_group_name", "operator": "~", "values": ["CB2C"]}],
     )
     departments = {
-        1: Department(id=1, name="DIR FUNDACAO TELEFONICA", parent_id=None),
-        73: Department(id=73, name="fundacao telefonica", parent_id=1, centro_custo="29TN161700"),
+        1: Department(id=1, name="DIR FUNDACAO EXEMPLO", parent_id=None),
+        73: Department(id=73, name="fundacao exemplo", parent_id=1, centro_custo="29TN161700"),
         234: Department(id=234, name="Prisma", parent_id=1, centro_custo="29TN161700"),
         216: Department(id=216, name="Framework Brasil", parent_id=1, centro_custo="29TN161700"),
     }
@@ -267,7 +267,7 @@ def test_selected_subscription_preserves_contains_exact_and_subscription_predica
         {"subscription_id": selected, "resource_group_name": name, "resource_name": name,
          "resource_type": "Microsoft.Resources/subscriptions/resourceGroups",
          "resource_id": f"/subscriptions/{selected}/resourceGroups/{name}"}
-        for name in ["PCCAgentlessScanResourceGroup", "dig-security-rg", "rg-common", "rg-datamesh-CB2C"]
+        for name in ["PCCAgentlessScanResourceGroup", "dig-security-rg", "rg-common", "rg-dados-CB2C"]
     ]
 
     async def load_departments(): return departments
@@ -280,13 +280,13 @@ def test_selected_subscription_preserves_contains_exact_and_subscription_predica
         ]
     async def home_tenants(_conn): return {selected: "tenant"}
     async def subscription_catalog(_conn):
-        return ({"Fundação Telefônica": [selected]}, [selected], None)
+        return ({"Fundação Exemplo": [selected]}, [selected], None)
     async def azure_targets(_conn, _subscription): return (targets, None)
     async def billed_rg_evidence(_conn, _subscription, _mappings):
         return ([
             {"rule_id": 52, "subscription_id": selected, "resource_group_name": "rg-common", "evidence_count": 4},
             {"rule_id": 66, "subscription_id": selected, "resource_group_name": "rg-common", "evidence_count": 1},
-            {"rule_id": 67, "subscription_id": selected, "resource_group_name": "rg-datamesh-CB2C", "evidence_count": 1},
+            {"rule_id": 67, "subscription_id": selected, "resource_group_name": "rg-dados-CB2C", "evidence_count": 1},
             {"rule_id": 78, "subscription_id": selected,
              "resource_group_name": "PCCAgentlessScanResourceGroup", "evidence_count": 2},
             {"rule_id": 78, "subscription_id": selected,
@@ -329,8 +329,8 @@ def test_selected_subscription_preserves_contains_exact_and_subscription_predica
         assert prisma_policy["observed"]["resource_group_name"] == "PCCAGENTLESSSCANRESOURCEGROUP · dig-security-rg"
         assert len(policies) == 4
         assert foundation_policy["tags"] == {
-            "projeto": "fundacao telefonica",
-            "diretoria": "DIR FUNDACAO TELEFONICA",
+            "projeto": "fundacao exemplo",
+            "diretoria": "DIR FUNDACAO EXEMPLO",
             "centro-de-custos": "29TN161700",
         }
         assert "contains" in json.dumps(prisma_policy["base_selector"], ensure_ascii=False)
@@ -363,13 +363,13 @@ def test_subscription_only_policy_requires_billed_current_resource_group():
 def test_resource_contains_keeps_future_rg_coverage_in_selected_subscription():
     service = AzureTagPolicyService(db=None)
     sid = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
-    terms = [{"scope": SCOPE_RESOURCE, "field": "name", "operator": "~", "values": ["datamesh"]},
+    terms = [{"scope": SCOPE_RESOURCE, "field": "name", "operator": "~", "values": ["dados"]},
              {"scope": SCOPE_SUBSCRIPTION, "field": "subscriptionId", "operator": "=", "values": [sid]}]
     evidence = [{"subscription_id": sid, "resource_group_name": rg,
-                 "resource_id": f"/subscriptions/{sid}/resourceGroups/{rg}/providers/Microsoft.Compute/virtualMachines/datamesh-1",
+                 "resource_id": f"/subscriptions/{sid}/resourceGroups/{rg}/providers/Microsoft.Compute/virtualMachines/dados-1",
                  "evidence_count": 1} for rg in ("rg-old", "rg-second")]
     def compile(source_terms):
-        return service._concrete_items(_rule(), source_terms, evidence, {"organograma": "Datamesh"},
+        return service._concrete_items(_rule(), source_terms, evidence, {"organograma": "Dados"},
             [{"tag_key": "projeto", "focus_field": "organograma"}], True, [], force_resource_group_scope=True)
     rows = compile(terms)
     assert len(rows) == 1
@@ -456,15 +456,15 @@ def test_lower_priority_rule_contains_explicit_exception():
 
 def test_rules_in_different_observed_subscriptions_are_not_exceptions():
     service = AzureTagPolicyService(db=None)
-    assert service._scopes_disjoint(["sub-terra-brasil"], ["sub-datamesh"])
+    assert service._scopes_disjoint(["sub-terra-brasil"], ["sub-dados"])
     assert not service._scopes_disjoint(["sub-shared"], ["sub-shared", "sub-mexico"])
 
 
 def test_disjoint_rg_terms_are_not_exceptions():
     service = AzureTagPolicyService(db=None)
     terra = [{"scope": SCOPE_RG, "field": "name", "operator": "=", "values": ["rg-terra-brasil"]}]
-    datamesh = [{"scope": SCOPE_RG, "field": "name", "operator": "~", "values": ["DTMN"]}]
-    assert service._is_disjoint_by_arm_terms(terra, datamesh)
+    dados = [{"scope": SCOPE_RG, "field": "name", "operator": "~", "values": ["DTMN"]}]
+    assert service._is_disjoint_by_arm_terms(terra, dados)
 
 
 def test_different_arm_dimensions_remain_conservative_exception_candidates():
@@ -807,19 +807,19 @@ def test_policy_definition_has_stable_content_hash():
 def test_tag_drift_condition_only_selects_missing_or_exact_value_mismatch():
     region = {"field": "type", "equals": "Microsoft.Compute/virtualMachines"}
     condition = _tag_drift_condition(region, {
-        "projeto": "Fundação Telefonica",
-        "diretoria": "DIR FUNDACAO TELEFONICA",
+        "projeto": "Fundação Exemplo",
+        "diretoria": "DIR FUNDACAO EXEMPLO",
     })
     assert condition["allOf"][0] == region
     drift = condition["allOf"][1]["anyOf"]
     assert drift[0]["anyOf"][0] == {"field": "tags['projeto']", "exists": "false"}
-    assert drift[0]["anyOf"][1]["notMatch"] == base64.b64encode("Fundação Telefonica".encode()).decode()
+    assert drift[0]["anyOf"][1]["notMatch"] == base64.b64encode("Fundação Exemplo".encode()).decode()
     assert drift[0]["anyOf"][1]["value"] == "[base64(string(field('tags[''projeto'']')))]"
     assert drift[1]["anyOf"][0]["field"] == "tags['diretoria']"
 
 
 def test_tag_drift_condition_escapes_apostrophes_in_dynamic_field():
-    condition = _tag_drift_condition({"field": "type", "equals": "T"}, {"owner's team": "Vivo's"})
+    condition = _tag_drift_condition({"field": "type", "equals": "T"}, {"owner's team": "Alfa's"})
     encoded_field = condition["allOf"][1]["anyOf"][0]["anyOf"][1]["value"]
     assert encoded_field == "[base64(string(field('tags[''owner''s team'']')))]"
 
@@ -840,12 +840,12 @@ def test_rg_assignment_does_not_embed_other_rg_exclusions():
     service = AzureTagPolicyService(db=None)
     assigned = {
         "assignment_scope_kind": "resource_group",
-        "assignment_resource_group": "azure-ti-test-fundacao-telefonica-1",
-        "tags": {"projeto": "fundacao telefonica"},
-        "observed": {"resource_group_name": "azure-ti-test-fundacao-telefonica-1"},
+        "assignment_resource_group": "azure-ti-test-fundacao-exemplo-1",
+        "tags": {"projeto": "fundacao exemplo"},
+        "observed": {"resource_group_name": "azure-ti-test-fundacao-exemplo-1"},
         "terms": [
             {"scope": SCOPE_SUBSCRIPTION, "field": "subscriptionId", "operator": "=", "values": ["aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"]},
-            {"scope": SCOPE_RG, "field": "name", "operator": "=", "values": ["azure-ti-test-fundacao-telefonica-1"]},
+            {"scope": SCOPE_RG, "field": "name", "operator": "=", "values": ["azure-ti-test-fundacao-exemplo-1"]},
         ],
     }
     prisma = {
@@ -866,7 +866,7 @@ def test_subscription_policy_still_subtracts_prisma_contains():
     subscription_rule = {
         "assignment_scope_kind": "subscription",
         "assignment_resource_group": None,
-        "tags": {"projeto": "fundacao telefonica"},
+        "tags": {"projeto": "fundacao exemplo"},
         "observed": {},
         "terms": [{"scope": SCOPE_SUBSCRIPTION, "field": "subscriptionId", "operator": "=", "values": ["aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"]}],
     }
@@ -886,7 +886,7 @@ def test_prior_rule_exclusion_uses_active_rule_without_recent_billing_evidence()
                    conditions=[{"field": "source_resource_group_name", "operator": "~",
                                 "values": ["PCCAGENTLESSSCANRESOURCEGROUP", "dig-security-rg"]}])
     departments = {
-        73: Department(id=73, name="fundacao telefonica", parent_id=None, centro_custo="29TN161700"),
+        73: Department(id=73, name="fundacao exemplo", parent_id=None, centro_custo="29TN161700"),
         234: Department(id=234, name="Prisma", parent_id=None, centro_custo="29TN161700"),
     }
     item = {
@@ -894,7 +894,7 @@ def test_prior_rule_exclusion_uses_active_rule_without_recent_billing_evidence()
         "scope_subscriptions": ["aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"],
         "terms": [{"scope": SCOPE_SUBSCRIPTION, "field": "subscriptionId", "operator": "=",
                    "values": ["aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"]}],
-        "tags": {"projeto": "fundacao telefonica"}, "observed": {},
+        "tags": {"projeto": "fundacao exemplo"}, "observed": {},
     }
     exclusions = service._prior_rule_exclusions(item, [prisma, foundation], departments, {},
                                                  [{"tag_key": "projeto", "focus_field": "hierarquia_5"}], [])
@@ -1143,13 +1143,13 @@ def test_billing_observations_do_not_prune_overlapping_rg_patterns():
     service = AzureTagPolicyService(db=None)
     pdv = {"tags": {"projeto": "PDV"}, "observed": {"resource_group_name": "rg-pdv"},
            "terms": [{"scope": SCOPE_RG, "field": "name", "operator": "~", "values": ["pdv"]}]}
-    vivo = {"tags": {"projeto": "Vivo+"}, "observed": {"resource_group_name": "rg-channels-pdv-app"},
+    alfa = {"tags": {"projeto": "Alfa+"}, "observed": {"resource_group_name": "rg-channels-pdv-app"},
             "terms": [{"scope": SCOPE_RG, "field": "name", "operator": "=", "values": ["rg-channels-pdv-app"]}]}
-    assert service._observed_targets_disjoint(pdv["observed"], vivo["observed"])
-    assert service._previous_overlap_reason(pdv, vivo) is None
+    assert service._observed_targets_disjoint(pdv["observed"], alfa["observed"])
+    assert service._previous_overlap_reason(pdv, alfa) is None
     # Full selectors, including the previous assignment's RG boundary, must
     # be used as exclusions from a policy evaluated at subscription scope.
-    selector = service._selector(vivo["terms"], "resource_group")
+    selector = service._selector(alfa["terms"], "resource_group")
     assert {"field": "name", "equals": "rg-channels-pdv-app"} in selector["allOf"]
 
 
@@ -1159,7 +1159,7 @@ def test_subscription_pattern_excludes_higher_priority_rg_with_its_full_selector
     class DB:
         async def get(self, *_): return connection
     service = AzureTagPolicyService(DB())
-    vivo = _rule(id=5217, priority=100, department_id=10, conditions=[
+    alfa = _rule(id=5217, priority=100, department_id=10, conditions=[
         {'field': 'source_resource_group_name', 'operator': '=', 'values': ['rg-channels-pdv']}])
     pdv = _rule(id=3629, priority=350, department_id=20, conditions=[
         {'field': 'source_resource_group_name', 'operator': '~', 'values': ['pdv']}])
@@ -1174,8 +1174,8 @@ def test_subscription_pattern_excludes_higher_priority_rg_with_its_full_selector
         async def run(*_): return value
         return run
     for name,value in {
-        '_load_departments': {10: Department(id=10,name='Vivo+',parent_id=None),20: Department(id=20,name='PDV',parent_id=None)},
-        '_load_classification_rules': [vivo,pdv],
+        '_load_departments': {10: Department(id=10,name='Alfa+',parent_id=None),20: Department(id=20,name='PDV',parent_id=None)},
+        '_load_classification_rules': [alfa,pdv],
         '_tag_mappings': [{'tag_key':'projeto','focus_field':'hierarquia_1'}],
         '_subscription_home_tenants': {subscription:'tenant'},
         '_subscription_catalog': ({'Test':[subscription]},[subscription],None),

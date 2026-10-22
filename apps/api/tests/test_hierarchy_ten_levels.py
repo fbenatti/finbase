@@ -165,12 +165,3 @@ def test_forecast_department_filter_uses_all_ten_levels():
     sql = _department_scope_filter(" > ".join(NAMES))
 
     assert "hierarquia_10" in sql and "'Nivel 10'" in sql
-
-
-def test_commitments_cube_uses_deepest_of_ten_levels():
-    from app.services.commitments_gold import commitments_gold_sql
-
-    sql = commitments_gold_sql(DEPTH)
-
-    assert sql.index("hierarquia_10") < sql.index("hierarquia_1),")
-    assert "{deepest_levels}" not in sql

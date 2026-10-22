@@ -163,9 +163,9 @@ def same_cloud_leaf_ids(
 ) -> list[int]:
     """Same-cloud departments that can receive rateio, excluding the donor subtree.
 
-    Project folders (non-leaves) are included. Cost often sits on
-    ``Sinfonia - Watson`` while a sibling leaf such as VivoCog is the only
-    org-chart leaf — counting only leaves would give VivoCog 100%.
+    Project folders (non-leaves) are included. Cost often sits on a project
+    folder while a sibling leaf is the only org-chart leaf — counting only
+    leaves would give that sibling 100%.
     Cloud roots (Consumo Cloud / Showback / provider) are skipped via the
     ``donor_depth`` floor: ancestors of the donor always sit above it, and
     same-cloud targets live at the donor's level or below. This also supports

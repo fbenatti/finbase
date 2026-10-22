@@ -14,7 +14,7 @@ from app.services.mapping_transforms import (
 def _sample_df() -> pd.DataFrame:
     return pd.DataFrame({
         "project": [
-            json.dumps({"id": "vivo-ti-vicky-hml", "name": "vivo-ti-vicky-hml"}),
+            json.dumps({"id": "projeto-a-hml", "name": "projeto-a-hml"}),
             json.dumps({"id": "seguranca-patrimonial-385514", "name": "Seguranca-Patrimonial"}),
         ],
         "cost": ["10.5", "20.0"],
@@ -64,7 +64,7 @@ class TestApplyMappingTransform:
     def test_rename_dotted_source_column(self):
         df = _sample_df()
         result = apply_mapping_transform(df, "project.name", "RENAME", None)
-        assert result.tolist() == ["vivo-ti-vicky-hml", "Seguranca-Patrimonial"]
+        assert result.tolist() == ["projeto-a-hml", "Seguranca-Patrimonial"]
 
     def test_json_path_with_config(self):
         df = _sample_df()
@@ -74,12 +74,12 @@ class TestApplyMappingTransform:
             "JSON_PATH",
             {"path": "id"},
         )
-        assert result.tolist() == ["vivo-ti-vicky-hml", "seguranca-patrimonial-385514"]
+        assert result.tolist() == ["projeto-a-hml", "seguranca-patrimonial-385514"]
 
     def test_json_path_dotted_source_column(self):
         df = _sample_df()
         result = apply_mapping_transform(df, "project.id", "JSON_PATH", None)
-        assert result.tolist() == ["vivo-ti-vicky-hml", "seguranca-patrimonial-385514"]
+        assert result.tolist() == ["projeto-a-hml", "seguranca-patrimonial-385514"]
 
     def test_missing_root_returns_nulls(self):
         df = _sample_df()

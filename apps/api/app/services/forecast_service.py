@@ -1958,7 +1958,6 @@ async def _enrich_planning_snapshot(
 
     records: list[dict[str, Any]] = []
     dimension_aliases = {
-        "organograma": "organograma", "department": "organograma",
         "id_orcamento": "id_orcamento", "budgetid": "id_orcamento",
         "cloud_origem": "cloud_origem", "cloud": "cloud_origem",
     }
@@ -1976,7 +1975,6 @@ async def _enrich_planning_snapshot(
             "period": period,
             "tipo": type_ids[version.financial_type_id],
             "value": float(entry.value or 0),
-            "organograma": path[-1] if path else "",
             "id_orcamento": version.scope_id_orcamento,
             "cloud_origem": version.scope_cloud,
         }

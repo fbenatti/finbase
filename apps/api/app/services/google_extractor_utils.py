@@ -252,8 +252,8 @@ def list_discovery_user_licenses(project_id: str, project_number: str = "") -> l
                                 last_error = str(exc)
     raise RuntimeError(
         "Discovery Engine userLicenses (API correta do NotebookLM Enterprise) falhou. "
-        "A chave AIza não autentica essa API. Configure o ADC local com a conta "
-        "fernando.benatti@telefonica.com.br; credenciais de billing não são usadas. "
+        "A chave AIza não autentica essa API. Configure o ADC local com uma conta "
+        "com acesso ao NotebookLM; credenciais de billing não são usadas. "
         f"Último erro: {last_error}"
     )
 

@@ -154,7 +154,6 @@ const DIM_LABELS: Record<string, string> = {
   hierarquia_4: "Diretoria",
   hierarquia_5: ORG.level5,
   hierarquia_6: "Unidade",
-  organograma: "Área",
   centro_custo: "Centro de custo",
   ambiente: "Ambiente",
   servicecategory: "Categoria",
@@ -1078,7 +1077,6 @@ function Organizacao({ table, filters, filterKey }: { table: string; filters: Fi
         { id: "n3", rows: ["hierarquia_3"], measures: [{ column: measureFor(filters), aggregation: "SUM" }], filters: filtersOf(filters), row_limit: 10 },
         { id: "n5", rows: ["hierarquia_5"], measures: [{ column: measureFor(filters), aggregation: "SUM" }], filters: filtersOf(filters), row_limit: 12 },
         { id: "n6", rows: ["hierarquia_6"], measures: [{ column: measureFor(filters), aggregation: "SUM" }], filters: filtersOf(filters), row_limit: 12 },
-        { id: "dept", rows: ["organograma"], measures: [{ column: measureFor(filters), aggregation: "SUM" }], filters: filtersOf(filters), row_limit: 12 },
         { id: "cc", rows: ["centro_custo"], measures: [{ column: measureFor(filters), aggregation: "SUM" }], filters: filtersOf(filters), row_limit: 10 },
         { id: "cloud", rows: ["cloud_origem"], measures: [{ column: measureFor(filters), aggregation: "SUM" }], filters: filtersOf(filters), row_limit: 10 },
         { id: "hier", rows: [...VISAO_DIRETORIA_LEVELS], measures: [{ column: measureFor(filters), aggregation: "SUM" }], filters: filtersOf(filters), row_limit: 200 },
@@ -1089,7 +1087,6 @@ function Organizacao({ table, filters, filterKey }: { table: string; filters: Fi
       { id: "n3", rows: ["hierarquia_3"], measures: [{ column: measureFor(filters), aggregation: "SUM" }], filters: filtersOf(filters), row_limit: 10 },
       { id: "n4", rows: ["hierarquia_4"], measures: [{ column: measureFor(filters), aggregation: "SUM" }], filters: filtersOf(filters), row_limit: 12 },
       { id: "n5", rows: ["hierarquia_5"], measures: [{ column: measureFor(filters), aggregation: "SUM" }], filters: filtersOf(filters), row_limit: 12 },
-      { id: "dept", rows: ["organograma"], measures: [{ column: measureFor(filters), aggregation: "SUM" }], filters: filtersOf(filters), row_limit: 12 },
       { id: "cc", rows: ["centro_custo"], measures: [{ column: measureFor(filters), aggregation: "SUM" }], filters: filtersOf(filters), row_limit: 10 },
       { id: "cloud", rows: ["cloud_origem"], measures: [{ column: measureFor(filters), aggregation: "SUM" }], filters: filtersOf(filters), row_limit: 10 },
       { id: "hier", rows: ["hierarquia_1", "hierarquia_2", "hierarquia_3", "hierarquia_4", "hierarquia_5"], measures: [{ column: measureFor(filters), aggregation: "SUM" }], filters: filtersOf(filters), row_limit: 200 },
@@ -1138,7 +1135,6 @@ function Organizacao({ table, filters, filterKey }: { table: string; filters: Fi
             <Grid item xs={12} md={4}><RankBars title={`${ORG.level5} (Nível 5)`} rows={rowsOf(results.n5)} measure="realizado" limit={12} color={GREEN} /></Grid>
           </>
         )}
-        <Grid item xs={12} md={4}><RankBars title="Áreas (legado)" rows={rowsOf(results.dept)} measure="realizado" limit={12} color={ORANGE} /></Grid>
         <Grid item xs={12} md={4}><RankBars title="Centros de custo" rows={rowsOf(results.cc)} measure="realizado" limit={10} color={YELLOW} /></Grid>
         <Grid item xs={12} md={4}><RankBars title="Nuvens" rows={rowsOf(results.cloud)} measure="realizado" limit={10} color="#64748B" /></Grid>
         <Grid item xs={12}>

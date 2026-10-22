@@ -59,10 +59,10 @@ def test_invalid_billing_account_is_rejected():
 
 def test_profile_display_names_are_indexed_case_insensitively():
     profiles = [
-        {"name": "HPDD-DXDZ-BG7-PGB", "properties": {"displayName": "Telefonica Brasil"}},
+        {"name": "HPDD-DXDZ-BG7-PGB", "properties": {"displayName": "Exemplo Brasil"}},
         {"name": "missing-name", "properties": {}},
     ]
-    assert _profile_name_map(profiles) == {"hpdd-dxdz-bg7-pgb": "Telefonica Brasil"}
+    assert _profile_name_map(profiles) == {"hpdd-dxdz-bg7-pgb": "Exemplo Brasil"}
     assert _profile_display_name({"properties": {"displayName": "Historico MCA"}}) == "Historico MCA"
     assert _profile_display_name({"properties": {}}) is None
 

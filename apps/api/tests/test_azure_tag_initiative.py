@@ -28,7 +28,7 @@ def evaluate(region, obj):
 
 
 def test_scoped_rg_regions_are_merged_without_leaking_to_other_rgs():
-    tags = {'projeto': 'Vivo+'}
+    tags = {'projeto': 'Alfa+'}
     originals = [item(5217, {'field': 'type', 'equals': RG_TYPE}, tags, rg) for rg in ['rg-a', 'rg-b']]
     tenant = {'connection_id': 2, 'layers': {'resource_groups': originals, 'resources': []}}
     bundles = compile_initiatives([tenant], _definition)
@@ -55,11 +55,11 @@ def test_foundation_subscription_and_prisma_exceptions_survive_initiative():
     prisma = {'anyOf': [{'field': 'name', 'contains': 'PCCAgentlessScanResourceGroup'},
                         {'field': 'name', 'contains': 'dig-security-rg'}]}
     foundation = {'allOf': [{'field': 'type', 'equals': RG_TYPE}, {'not': prisma}]}
-    original = [item(52, foundation, {'projeto': 'fundacao telefonica'}),
+    original = [item(52, foundation, {'projeto': 'fundacao exemplo'}),
                 item(78, {'allOf': [{'field': 'type', 'equals': RG_TYPE}, prisma]}, {'projeto': 'Prisma'})]
     tenant = {'connection_id': 2, 'layers': {'resource_groups': original, 'resources': []}}
     bundle = compile_initiatives([tenant], _definition)[0]
-    for name, expected in [('rg-common', ['fundacao telefonica']), ('PCCAgentlessScanResourceGroup', ['Prisma']),
+    for name, expected in [('rg-common', ['fundacao exemplo']), ('PCCAgentlessScanResourceGroup', ['Prisma']),
                            ('dig-security-rg-123', ['Prisma'])]:
         obj = {'name': name, 'type': RG_TYPE}
         matches = [d['definition']['policyRule']['then']['details']['operations'][0]['value']

@@ -55,7 +55,7 @@ REGRA_REALIZADO = {
     "expression": "EffectiveCost",
     "financial_effect": "DIRECT_REALIZED",
     "config_json": {},
-    "priority": 1,
+    "priority": 100,
 }
 
 # coluna FOCUS: (coluna da origem OCI, transformação, configuração)

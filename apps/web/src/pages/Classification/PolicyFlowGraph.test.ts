@@ -141,11 +141,11 @@ describe("groupFlowTargets", () => {
     const targets = groupFlowTargets([
       policy("resource_groups"),
       policy("resources"),
-    ], "Fundação Telefônica");
+    ], "Cliente Exemplo");
     expect(targets).toHaveLength(1);
     expect(targets[0]).toMatchObject({
       key: "subscription",
-      title: "Fundação Telefônica",
+      title: "Cliente Exemplo",
       detail: "All (RG) + Indexed (recursos)",
     });
   });
@@ -181,11 +181,11 @@ describe("groupFlowTargets", () => {
   });
 
   it("mostra só a camada presente quando não há All e Indexed juntos", () => {
-    const targets = groupFlowTargets([policy("resource_groups")], "Fundação Telefônica");
+    const targets = groupFlowTargets([policy("resource_groups")], "Cliente Exemplo");
     expect(targets).toHaveLength(1);
     expect(targets[0]).toMatchObject({
-      title: "Resource Groups · Fundação Telefônica",
-      detail: "Fundação Telefônica",
+      title: "Resource Groups · Cliente Exemplo",
+      detail: "Cliente Exemplo",
     });
   });
 
@@ -193,9 +193,9 @@ describe("groupFlowTargets", () => {
     const targets = groupFlowTargets([
       policy("resource_groups"),
       policy("resource_groups", { observed: { resource_group_name: "rg-a" } }),
-    ], "Fundação Telefônica");
+    ], "Cliente Exemplo");
     expect(targets.map((target) => target.key)).toEqual(["subscription", "rg-a"]);
-    expect(targets[0].detail).toBe("Fundação Telefônica");
+    expect(targets[0].detail).toBe("Cliente Exemplo");
   });
 });
 

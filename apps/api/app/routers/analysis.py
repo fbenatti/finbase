@@ -608,7 +608,7 @@ def shared_cost_base_destination_id(destination_id: int) -> int:
 
 _FORECAST_MANUAL_PIVOT_NAME = "forecast_manual_planning"
 _FORECAST_MANUAL_SCHEMA = {
-    "period": "varchar", "tipo": "varchar", "organograma": "varchar",
+    "period": "varchar", "tipo": "varchar", "hierarquia_1": "varchar",
     "id_orcamento": "varchar", "cloud_origem": "varchar", "value": "double",
 }
 
@@ -929,7 +929,7 @@ def _dimension_order_by(row_count: int, column_count: int) -> str:
     """Order the outer pivot by positional aliases ``d0..dn``.
 
     After ``_apply_pivot_axis_limits`` the result set only exposes those
-    aliases, so ``ORDER BY "organograma"`` 503s in Trino.
+    aliases, so ``ORDER BY "hierarquia_1"`` 503s in Trino.
     """
     total = row_count + column_count
     if total <= 0:
@@ -1075,12 +1075,14 @@ async def pivot_metadata(destination_table_id: int, db: AsyncSession = Depends(g
     if financial_rules:
         financial_columns.add("business_rule")
     org_columns = ({
-        "organograma", "centro_custo", "id_orcamento", "ambiente", "custom_fields",
+        "centro_custo", "id_orcamento", "ambiente", "custom_fields",
     } if classification_rules else set())
+    # Regras com departamento gravam só hierarquia_N; o target_field só é
+    # coluna nas regras legadas sem departamento.
     org_columns.update(
         str(rule.target_field).lower()
         for rule in classification_rules
-        if rule.target_field
+        if rule.target_field and not rule.department_id
     )
     if classification_rules:
         org_columns.add("business_rule")
@@ -1167,7 +1169,7 @@ async def _search_pivot_table_core(
             name for name in (
                 "servicename", "resourcename", "tags", "custom_fields",
                 "chargedescription", "invoicedetaildescription",
-                "source_resource_group_name", "organograma",
+                "source_resource_group_name",
                 *hierarchy_columns_in(text_columns), "cloud_origem",
             ) if name in text_columns
         ]
@@ -2837,7 +2839,7 @@ def _run_local_gold_query(sql: str) -> list[dict[str, Any]] | None:
         if not generic:
             return None
         fields = [f.strip().strip('"') for f in generic.group(2).split(",")]
-        allowed = {"organograma", "projeto_nome", "_billing_period", "RegionName", "cloud_origem", "ServiceName"}
+        allowed = {"hierarquia_1", "projeto_nome", "_billing_period", "RegionName", "cloud_origem", "ServiceName"}
         if not fields or any(f not in allowed for f in fields):
             return None
         table = get_catalog().load_table((layers.detail_layer(), "dest_billing_cloud"))

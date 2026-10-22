@@ -147,7 +147,7 @@ def test_rastro_textual_vira_referencia_estruturada():
         "business_rules": [
             "Return simulado",
             "Marketplace ONESHOT zera forecast (sem séries correspondentes)",
-            "Aura Brain - PTU Azure OpenAI mensal (não aplicada: campo fora das dimensões)",
+            "Projeto Beta - PTU Azure OpenAI mensal (não aplicada: campo fora das dimensões)",
             "Azure-4P - suspender após 30 dias sem dados (suspensas 26 linhas; validade 30 dias)",
         ]
     }
@@ -155,7 +155,7 @@ def test_rastro_textual_vira_referencia_estruturada():
     by_name = {r.name: r for r in refs}
     assert by_name["Return simulado"].status == APPLIED
     assert by_name["Marketplace ONESHOT zera forecast"].status == SERIES_NOT_FOUND
-    assert by_name["Aura Brain - PTU Azure OpenAI mensal"].status == OUT_OF_DIMENSIONS
+    assert by_name["Projeto Beta - PTU Azure OpenAI mensal"].status == OUT_OF_DIMENSIONS
     assert by_name["Azure-4P - suspender após 30 dias sem dados"].status == APPLIED
     assert source == "RUN_METRICS"
     assert declares_current is False

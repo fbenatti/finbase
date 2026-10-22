@@ -53,10 +53,6 @@ from app.services.azure_ptu_ops import (
 )
 from app.services.azure_ptu_cost import load_gold_ptu_costs
 from app.services.azure_ptu_gold import load_gold_metrics, refresh_azure_ptu_gold
-from app.services.aura_brain_vivo_mais import load_project_cost_dashboard
-from app.services.sinfonia_dashboard import load_sinfonia_dashboard
-from app.services.datamesh_dashboard import load_datamesh_dashboard
-from app.services.wisper_dashboard import load as load_wisper_dashboard
 from app.services.trino_service import execute as trino_execute
 from app.services import lakehouse_layers as layers
 
@@ -170,35 +166,25 @@ async def _query_focus_dashboard_costs(
     *,
     cancel_event: asyncio.Event | None = None,
 ) -> dict[str, Any]:
-    """PTU vs IA OnDemand (Foundry/tokens) vs VM/Storage/Network for Aura Brain and Vivo Mais."""
+    """PTU vs IA OnDemand (Foundry/tokens) vs VM/Storage/Network da Azure no período."""
     category = focus_category_sql_expr()
-    dept = "lower(CAST(\"organograma\" AS VARCHAR))"
     empty = {
         "ptu_capacity_cost": 0.0,
         "billed": 0.0,
-        "ia_ondemand": {"aura-brain": 0.0, "vivo-mais": 0.0},
-        "shared_infra": {
-            "aura-brain": {"vm": 0.0, "storage": 0.0, "network": 0.0, "other_infra": 0.0, "total": 0.0},
-            "vivo-mais": {"vm": 0.0, "storage": 0.0, "network": 0.0, "other_infra": 0.0, "total": 0.0},
-        },
+        "ia_ondemand": 0.0,
+        "shared_infra": {"vm": 0.0, "storage": 0.0, "network": 0.0, "other_infra": 0.0, "total": 0.0},
         "cost_rows": [],
         "cost_composition": {"ptu_capacity": 0.0, "ia_ondemand_total": 0.0, "shared_infra_total": 0.0, "total_ia": 0.0},
     }
     sql = f"""
       SELECT
-        CASE
-          WHEN {dept} LIKE '%aura brain%' THEN 'aura-brain'
-          WHEN {dept} LIKE '%vivo mais%' THEN 'vivo-mais'
-          ELSE 'other'
-        END AS project_key,
         {category} AS cost_class,
         CAST("servicename" AS VARCHAR) AS service_name,
         COALESCE(SUM(TRY_CAST("realizado" AS DOUBLE)), 0) AS realized
       FROM iceberg.{layers.detail_layer()}.dest_billing_cloud
       WHERE lower(CAST("cloud_origem" AS VARCHAR)) LIKE 'azure%'
         AND {_focus_date_predicate(date_from, date_to)}
-        AND ({dept} LIKE '%aura brain%' OR {dept} LIKE '%vivo mais%')
-      GROUP BY 1, 2, 3
+      GROUP BY 1, 2
     """
     try:
         rows = await trino_execute(
@@ -210,30 +196,22 @@ async def _query_focus_dashboard_costs(
         logger.warning("FOCUS dashboard costs query failed: %s", exc, exc_info=True)
         return empty
 
-    ia_ondemand = {"aura-brain": 0.0, "vivo-mais": 0.0}
-    shared_infra = {
-        "aura-brain": {"vm": 0.0, "storage": 0.0, "network": 0.0, "other_infra": 0.0, "total": 0.0},
-        "vivo-mais": {"vm": 0.0, "storage": 0.0, "network": 0.0, "other_infra": 0.0, "total": 0.0},
-    }
+    ia_ondemand = 0.0
+    shared_infra = dict(empty["shared_infra"])
     ptu_capacity = 0.0
     cost_rows: list[dict[str, Any]] = []
     for row in rows or []:
-        project = str(row.get("project_key") or "other")
         klass = str(row.get("cost_class") or "other_infra")
         amount = float(row.get("realized") or 0)
         service = str(row.get("service_name") or "—")
-        if project not in ("aura-brain", "vivo-mais"):
-            continue
-        cost_rows.append({"project_key": project, "cost_class": klass, "service_name": service, "realized": amount})
+        cost_rows.append({"cost_class": klass, "service_name": service, "realized": amount})
         if klass == "ptu":
             ptu_capacity += amount
         elif klass == "ia_ondemand":
-            ia_ondemand[project] += amount
+            ia_ondemand += amount
         elif klass in ("vm", "storage", "network", "other_infra"):
-            shared_infra[project][klass] += amount
-            shared_infra[project]["total"] += amount
-    ondemand_total = sum(ia_ondemand.values())
-    infra_total = sum(v["total"] for v in shared_infra.values())
+            shared_infra[klass] += amount
+            shared_infra["total"] += amount
     return {
         "ptu_capacity_cost": ptu_capacity,
         "billed": ptu_capacity,
@@ -242,9 +220,9 @@ async def _query_focus_dashboard_costs(
         "cost_rows": cost_rows,
         "cost_composition": {
             "ptu_capacity": ptu_capacity,
-            "ia_ondemand_total": ondemand_total,
-            "shared_infra_total": infra_total,
-            "total_ia": ptu_capacity + ondemand_total,
+            "ia_ondemand_total": ia_ondemand,
+            "shared_infra_total": shared_infra["total"],
+            "total_ia": ptu_capacity + ia_ondemand,
         },
     }
 
@@ -1300,7 +1278,7 @@ async def dashboard_overview(body: OverviewRequest, request: Request, db: AsyncS
             focus_costs = {
                 "ptu_capacity_cost": 0.0,
                 "billed": 0.0,
-                "ia_ondemand": {"aura-brain": 0.0, "vivo-mais": 0.0},
+                "ia_ondemand": 0.0,
                 "shared_infra": {},
                 "cost_rows": [],
                 "cost_composition": {"ptu_capacity": 0.0, "ia_ondemand_total": 0.0, "shared_infra_total": 0.0, "total_ia": 0.0},
@@ -1311,7 +1289,7 @@ async def dashboard_overview(body: OverviewRequest, request: Request, db: AsyncS
 
         ptu_capacity_cost = focus_costs["ptu_capacity_cost"]
         billed = focus_costs["billed"]
-        ia_ondemand = focus_costs.get("ia_ondemand") or {"aura-brain": 0.0, "vivo-mais": 0.0}
+        ia_ondemand = float(focus_costs.get("ia_ondemand") or 0)
         shared_infra = focus_costs.get("shared_infra") or {}
         cost_rows = focus_costs.get("cost_rows") or []
         cost_composition = focus_costs.get("cost_composition") or {}
@@ -1320,13 +1298,6 @@ async def dashboard_overview(body: OverviewRequest, request: Request, db: AsyncS
         imbalance = _deployment_imbalance(deployment_stats)
         utilization_series = _build_utilization_series(metrics, body.grain)
         projects = _build_project_stats(inventory, metrics, deployment_stats)
-
-        for key, ondemand_amount in ia_ondemand.items():
-            if key in projects:
-                ptu_origin = float(projects[key].get("origin_cost") or 0)
-                projects[key]["ia_ondemand_cost"] = ondemand_amount
-                projects[key]["ptu_capacity_cost"] = ptu_origin or ptu_capacity_cost
-                projects[key]["total_ia_cost"] = (ptu_origin or 0) + ondemand_amount
 
         kpis = _enrich_kpis(metrics, inventory, ptu_capacity_cost)
         kpis["billed_cost"] = billed
@@ -1555,75 +1526,6 @@ async def dashboard_ops_overview(body: OverviewRequest, request: Request, db: As
 async def dashboard_executive_overview(body: OverviewRequest, request: Request, db: AsyncSession = Depends(get_db)):
     """Independent operational payload. Cost joins are defined separately over Gold layers."""
     return await dashboard_ops_overview(body, request, db)
-
-
-class ProjectCostRequest(BaseModel):
-    project_key: str = Field(..., pattern="^(aura-brain|vivo-mais)$")
-    period_range: str = Field("current_year", pattern="^(current_year|all)$")
-
-
-@router.post("/dashboard/project-costs")
-async def dashboard_project_costs(body: ProjectCostRequest, request: Request):
-    """Dashboard executivo de custo de um projeto (Aura Brain | Vivo Mais).
-
-    Lê a Gold específica do projeto (incluindo
-    ``dest_dm_cost_custo_vivo_mais`` para Vivo Mais) e decompõe o custo
-    mensal em PTUs (compra mensal: realizada se existir, senão forecast),
-    tokens on-demand e infra (por servicesubcategory), com a série mensal
-    realizado + forecast e a distribuição por subconta. O consumo diário/horário
-    de capacidade (Provisioned Managed*, 1/Hour) é excluído — já está na compra.
-    """
-    async with _ClientCancelScope(request) as scope:
-        try:
-            return await load_project_cost_dashboard(
-                project_key=body.project_key,
-                period_range=body.period_range,
-                cancel_event=scope.cancel_event,
-            )
-        except Exception as exc:
-            logger.warning("Project cost dashboard failed (%s): %s", body.project_key, exc, exc_info=exc)
-            raise HTTPException(
-                status_code=502,
-                detail=f"Falha ao consultar o custo do projeto {body.project_key}: {exc}",
-            ) from exc
-
-
-@router.post("/dashboard/sinfonia")
-async def dashboard_sinfonia(request: Request):
-    """Visão executiva consolidada IBM + Azure/Fábrica de Agentes."""
-    async with _ClientCancelScope(request) as scope:
-        try:
-            return await load_sinfonia_dashboard(cancel_event=scope.cancel_event)
-        except Exception as exc:
-            logger.warning("Sinfonia dashboard failed: %s", exc, exc_info=exc)
-            raise HTTPException(status_code=502, detail=f"Falha ao consultar o dashboard Sinfonia: {exc}") from exc
-
-
-@router.post("/dashboard/datamesh")
-async def dashboard_datamesh(request: Request):
-    """Visão executiva Datamesh: Databricks, dados associados e infraestrutura."""
-    async with _ClientCancelScope(request) as scope:
-        try:
-            return await load_datamesh_dashboard(cancel_event=scope.cancel_event)
-        except Exception as exc:
-            logger.warning("Datamesh dashboard failed: %s", exc, exc_info=exc)
-            raise HTTPException(status_code=502, detail=f"Falha ao consultar o dashboard Datamesh: {exc}") from exc
-
-@router.post("/dashboard/wisper")
-async def dashboard_wisper(request: Request):
-    async with _ClientCancelScope(request) as scope:
-        return await load_wisper_dashboard(cancel_event=scope.cancel_event)
-
-
-async def _dashboard_data(body: DashboardFilter, db: AsyncSession) -> dict[str, Any]:
-    payload = body.model_dump()
-    hours = int(payload.get("hours") or _dashboard_hours(str(payload.get("grain") or "day")))
-    raw = await dashboard_overview(
-        OverviewRequest(**{**payload, "hours": hours}),
-        Request({"type": "http", "headers": []}),
-        db,
-    )
-    return raw
 
 
 @router.post("/dashboard/projects")

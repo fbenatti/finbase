@@ -1136,8 +1136,8 @@ async def dashboard_overview(year: int, type_codes: str | None = None, departmen
                 event_total = event_amount
                 event_delta = None if previous_total is None else event_total - previous_total
             # Eventos de inclusão, aporte ou corte só são relevantes para um
-            # nó quando mudam seu orçamento. Isso esconde a inclusão de Aura
-            # Pessoas ao navegar por uma diretoria sem esse projeto.
+            # nó quando mudam seu orçamento. Isso esconde a inclusão de um
+            # projeto ao navegar por uma diretoria sem esse projeto.
             if event_delta is not None and abs(event_delta) < 0.005 and event.get("event_type") in {"CORTE", "INCLUSAO_PROJETO", "AJUSTE", "REALOCACAO"}:
                 continue
             scoped_event = {
