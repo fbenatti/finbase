@@ -28,6 +28,10 @@ def test_series_identity_includes_provider_connection_region_resource_and_labels
     assert base != _series(connection_id=8)
     assert base != _series(region="us-ashburn-1")
     assert base != _series(provider="aws")
+    assert base != _series(namespace="oci_blockstore", metric_scope="volume")
+    assert base != _series(source_owner="other_source")
+    assert base != _series(cloud_partition="oc2")
+    assert base != _series(sub_account_id="compartment-b")
 
 
 def test_dimension_hash_is_independent_of_mapping_insertion_order():
