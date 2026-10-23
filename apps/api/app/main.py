@@ -204,6 +204,8 @@ async def lifespan(app: FastAPI):
         await _execute_migration(conn, "ALTER TABLE user_account ADD COLUMN IF NOT EXISTS failed_attempts INTEGER NOT NULL DEFAULT 0")
         await _execute_migration(conn, "ALTER TABLE user_account ADD COLUMN IF NOT EXISTS locked_until TIMESTAMPTZ")
         await _execute_migration(conn, "ALTER TABLE navigation_module ADD COLUMN IF NOT EXISTS custom_label VARCHAR(160)")
+        await _execute_migration(conn, "ALTER TABLE navigation_module ADD COLUMN IF NOT EXISTS custom_position INTEGER")
+        await _execute_migration(conn, "ALTER TABLE navigation_module ADD COLUMN IF NOT EXISTS custom_parent_code VARCHAR(60)")
         await _execute_migration(conn, "ALTER TABLE role_permission ADD COLUMN IF NOT EXISTS scope VARCHAR(60)")
         await _execute_migration(conn, "ALTER TABLE user_grant ADD COLUMN IF NOT EXISTS scope VARCHAR(60)")
         await _execute_migration(conn, "ALTER TABLE role_permission DROP CONSTRAINT IF EXISTS uq_role_permission")
@@ -271,6 +273,7 @@ async def lifespan(app: FastAPI):
             "ALTER TABLE scheduled_task ADD COLUMN IF NOT EXISTS connection_ids JSONB NOT NULL DEFAULT '[]'::jsonb",
             "ALTER TABLE scheduled_task ADD COLUMN IF NOT EXISTS schedule_type VARCHAR(30) NOT NULL DEFAULT 'collection'",
             "ALTER TABLE scheduled_task ALTER COLUMN connection_id DROP NOT NULL",
+            "ALTER TABLE pivot_view ALTER COLUMN destination_table_id DROP NOT NULL",
             "ALTER TABLE forecast_config ADD COLUMN IF NOT EXISTS period_allocation VARCHAR(30) NOT NULL DEFAULT 'none'",
             "ALTER TABLE forecast_config ADD COLUMN IF NOT EXISTS recent_weight DOUBLE PRECISION NOT NULL DEFAULT 0.7",
             "ALTER TABLE forecast_config ADD COLUMN IF NOT EXISTS minimum_daily_points INTEGER NOT NULL DEFAULT 7",

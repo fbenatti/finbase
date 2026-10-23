@@ -5,8 +5,8 @@
  *
  * Organização, pensada para quem decide a troca:
  * 1. leitura guiada e checklist (o que os números significam e se é seguro);
- * 2. consumo no tempo em dois painéis empilhados — hoje e após — com a mesma
- *    escala, agregados por hora para não esconder uma série atrás da outra;
+ * 2. consumo no tempo num painel só, agregado por hora: barras para hoje e
+ *    linha para o recomendado, na mesma escala, para o delta saltar aos olhos;
  * 3. curva de permanência em seção própria;
  * 4. mapa de picos por dia e hora em seção própria.
  *
@@ -215,6 +215,9 @@ export default function OpportunityCharts({ opportunityId, from, to, targets, co
   const afterPeak = view.hourPeak.map((value) => value * view.ratio);
   const afterP95 = view.hourP95.map((value) => value * view.ratio);
   const yMax = Math.max(110, Math.ceil(Math.max(...afterPeak) / 10) * 10 + 10);
+  // The timeline scales to the hourly P95 (peaks start hidden): an idle resource
+  // would otherwise be a flat line on 0–110% and the delta would vanish.
+  const timelineMax = Math.min(yMax, Math.max(5, Math.ceil(Math.max(...afterP95, ...todayP95) * 1.3 / 5) * 5));
   const zoneShapes = (yref: "y" | "y2") => [
     { type: "rect", xref: "paper", yref, x0: 0, x1: 1, y0: 0, y1: view.target, fillcolor: ZONES.ok, line: { width: 0 }, layer: "below" },
     { type: "rect", xref: "paper", yref, x0: 0, x1: 1, y0: view.target, y1: 100, fillcolor: ZONES.attention, line: { width: 0 }, layer: "below" },
@@ -294,6 +297,7 @@ export default function OpportunityCharts({ opportunityId, from, to, targets, co
     <Paper variant="outlined" sx={{ p: 2.5 }}>
       <Typography variant="subtitle1" fontWeight={700}>{view.hasAfter ? "Consumo no tempo — hoje × recomendado" : "Consumo no tempo — tamanho atual"}</Typography>
       <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>
+<<<<<<< Updated upstream
         {view.hasAfter ? "Mesma demanda nos dois painéis, em % da capacidade de cada um. " : "Em % da capacidade atual. "}Linha = P95 de cada hora; faixa clara = até o pico daquela hora.
         Fundo verde: folga; amarelo: acima do alvo de {view.target.toFixed(0)}%; vermelho: acima da capacidade.
       </Typography>
@@ -308,6 +312,36 @@ export default function OpportunityCharts({ opportunityId, from, to, targets, co
         ...commonLayout, height: view.hasAfter ? 540 : 320, margin: { l: 72, r: 20, t: 36, b: 50 }, hovermode: "x unified", showlegend: false,
         xaxis: {
           type: "date", showgrid: false, anchor: view.hasAfter ? "y2" : "y", hoverformat: "%d/%m %H:%M",
+=======
+        Mesma demanda, em % da capacidade de cada tamanho. Barras = P95 de cada hora hoje ({view.capacityNow} {view.unit});
+        linha = o mesmo uso no tamanho recomendado ({view.capacityAfter} {view.unit}). O pico de cada hora após a mudança
+        (maior: {pct(stats.peakAfter)}) liga pela legenda.
+        A distância entre a barra e a linha é a folga que a troca consome. Fundo verde: folga; amarelo: acima do alvo de {view.target.toFixed(0)}%; vermelho: acima da capacidade.
+      </Typography>
+      <Plot data={[
+        {
+          type: "bar", name: `Hoje — ${view.capacityNow} ${view.unit}`, x: view.hourKeys, y: todayP95,
+          marker: { color: COLORS.today, opacity: 0.55 },
+          customdata: todayPeak.map((peak, index) => [peak, afterP95[index] - todayP95[index]]),
+          hovertemplate: "Hoje: P95 %{y:.1f}% · pico %{customdata[0]:.1f}%<extra></extra>",
+        },
+        {
+          type: "scatter", mode: "lines", name: `Após — ${view.capacityAfter} ${view.unit}`, x: view.hourKeys, y: afterP95,
+          line: { color: COLORS.after, width: 2.5 },
+          customdata: afterP95.map((value, index) => value - todayP95[index]),
+          hovertemplate: "Após: P95 %{y:.1f}% (+%{customdata:.1f} p.p.)<extra></extra>",
+        },
+        {
+          type: "scatter", mode: "lines", name: "Pico após a mudança", x: view.hourKeys, y: afterPeak,
+          line: { color: COLORS.after, width: 1, dash: "dot" }, visible: "legendonly",
+          hovertemplate: "Pico após: %{y:.1f}%<extra></extra>",
+        },
+      ] as never} layout={{
+        ...commonLayout, height: 440, margin: { l: 64, r: 20, t: 16, b: 50 }, hovermode: "x unified",
+        bargap: 0, barmode: "overlay", showlegend: true, legend: { orientation: "h", y: -0.16, x: 0 },
+        xaxis: {
+          type: "date", showgrid: false, hoverformat: "%d/%m %H:%M",
+>>>>>>> Stashed changes
           // Mais zoom, mais detalhe: dia → dia e hora → hora e minuto.
           tickformatstops: [
             { dtickrange: [null, 3_600_000], value: "%d/%m %H:%M" },
@@ -315,6 +349,7 @@ export default function OpportunityCharts({ opportunityId, from, to, targets, co
             { dtickrange: [86_400_000, null], value: "%d/%m" },
           ],
         },
+<<<<<<< Updated upstream
         yaxis: { domain: view.hasAfter ? [0.56, 1] : [0, 1], range: [0, yMax], ticksuffix: "%", gridcolor: COLORS.grid, title: { text: capacityText(view.capacityNow) } },
         ...(view.hasAfter ? { yaxis2: { domain: [0, 0.44], range: [0, yMax], ticksuffix: "%", gridcolor: COLORS.grid, title: { text: `${view.capacityAfter} ${view.unit}` } } } : {}),
         shapes: [...zoneShapes("y"), ...(view.hasAfter ? zoneShapes("y2") : [])],
@@ -323,6 +358,15 @@ export default function OpportunityCharts({ opportunityId, from, to, targets, co
           view.hasAfter
             ? { xref: "paper", yref: "paper", x: 0, y: 0.49, xanchor: "left", showarrow: false, text: `<b>Após a mudança</b> · ${view.capacityAfter} ${view.unit} · P95 ${pct(stats.p95After)}`, font: { color: COLORS.after, size: 13 } }
             : { xref: "paper", yref: "paper", x: 1, y: 1.1, xanchor: "right", showarrow: false, text: "sem mudança recomendada", font: { color: COLORS.muted, size: 12 } },
+=======
+        // Fixed to the P95: turning the peak on clips it (its value stays on hover) instead of flattening the delta.
+        yaxis: { range: [0, timelineMax], ticksuffix: "%", gridcolor: COLORS.grid, title: { text: `Uso de ${name}` } },
+        shapes: zoneShapes("y"),
+        annotations: [
+          { xref: "paper", yref: "paper", x: 1, y: 1, xanchor: "right", yanchor: "top", showarrow: false, align: "right",
+            text: `P95 <span style="color:${COLORS.today}">hoje ${pct(stats.p95Now)}</span> → <b style="color:${COLORS.after}">após ${pct(stats.p95After)}</b>`,
+            font: { size: 13, color: COLORS.ink }, bgcolor: "rgba(255,255,255,0.85)" },
+>>>>>>> Stashed changes
         ],
       } as never} />
     </Paper>
