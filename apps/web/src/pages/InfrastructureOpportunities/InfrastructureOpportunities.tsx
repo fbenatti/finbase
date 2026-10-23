@@ -23,7 +23,7 @@ import {
 } from "../../services/infraOpportunitiesApi";
 import OpportunityDrawer from "./OpportunityDrawer";
 import {
-  ACTION_COLOR, ACTION_LABEL, CONFIDENCE_COLOR, CONFIDENCE_LABEL, READINESS_LABEL, STATE_LABEL, money, pct, sizeLabel,
+  ACTION_COLOR, ACTION_LABEL, AGGRESSIVENESS_LABEL, CONFIDENCE_COLOR, CONFIDENCE_LABEL, READINESS_LABEL, STATE_LABEL, money, pct, sizeLabel,
 } from "./opportunityLabels";
 
 const TABS = ["Visão geral", "Oportunidades", "Execuções do motor"];
@@ -124,6 +124,9 @@ export default function InfrastructureOpportunities() {
   ];
 
   const run = summary?.run;
+  const policyLabel = run ? `${AGGRESSIVENESS_LABEL[run.policy_aggressiveness ?? "BALANCED"]} · ${run.policy_revision ? `revisão ${run.policy_revision}` : "padrão do motor"}` : null;
+  const policyParams = run?.policy_params;
+  const share = (value: number | undefined, fallback: number) => `${Math.round((value ?? fallback) * 100)}%`;
   return (
     <Box sx={{ p: { xs: 1.5, md: 3 }, maxWidth: 1600, mx: "auto", width: "100%", minWidth: 0, boxSizing: "border-box" }}>
       <Box sx={{ display: "flex", alignItems: { xs: "stretch", md: "center" }, justifyContent: "space-between", gap: 2, mb: 2, flexWrap: "wrap" }}>
@@ -170,7 +173,7 @@ export default function InfrastructureOpportunities() {
         <Paper variant="outlined" sx={{ p: 2, mb: 2, borderColor: "success.light", background: "linear-gradient(110deg,#f5fbf8,#fff)" }}>
           <Typography variant="subtitle2">Impacto financeiro das oportunidades</Typography>
           <Typography variant="caption" color="text.secondary">
-            Análise #{run.id} · janela {run.window_start_utc.slice(0, 10)} a {run.window_end_utc.slice(0, 10)} (UTC) · base de {run.resolution_seconds / 60} min · saving projetado com o preço efetivo do billing de cada recurso, não economia realizada auditada.
+            Análise #{run.id} · política {policyLabel} · janela {run.window_start_utc.slice(0, 10)} a {run.window_end_utc.slice(0, 10)} (UTC) · base de {run.resolution_seconds / 60} min · saving projetado com o preço efetivo do billing de cada recurso, não economia realizada auditada.
           </Typography>
           <Stack direction="row" spacing={2} flexWrap="wrap" useFlexGap sx={{ mt: 1.5 }}>
             {[
@@ -230,8 +233,10 @@ export default function InfrastructureOpportunities() {
             </TableBody>
           </Table>
           <Alert severity="info" sx={{ mt: 2 }}>
-            Política {run.policy_version}: CPU P95 ≤ 70% e P99 ≤ 90%; memória P95 ≤ 80% e P99 ≤ 90% no tamanho recomendado.
-            Reduções menores que 15% são ignoradas. Prontidão: {Object.entries(summary.by_readiness ?? {}).map(([key, count]) => `${READINESS_LABEL[key] ?? key}: ${count}`).join(" · ") || "—"}.
+            Política {policyLabel} ({run.policy_version}): CPU P95 ≤ {share(policyParams?.cpu_target_p95, 0.7)} e P99 ≤ {share(policyParams?.cpu_target_p99, 0.9)};
+            memória P95 ≤ {share(policyParams?.memory_target_p95, 0.8)} e P99 ≤ {share(policyParams?.memory_target_p99, 0.9)} no tamanho recomendado;
+            picos de CPU no P{String(policyParams?.cpu_peak_quantile ?? 99.5).replace(".", ",")} até {share(policyParams?.cpu_peak_limit, 1)} da capacidade.
+            Reduções menores que {share(policyParams?.min_change_ratio, 0.15)} são ignoradas. Prontidão: {Object.entries(summary.by_readiness ?? {}).map(([key, count]) => `${READINESS_LABEL[key] ?? key}: ${count}`).join(" · ") || "—"}.
           </Alert>
         </Paper>
       </Box>}
@@ -257,7 +262,7 @@ export default function InfrastructureOpportunities() {
           <TableHead><TableRow>
             <TableCell>#</TableCell><TableCell>Situação</TableCell><TableCell>Concluída em</TableCell><TableCell>Janela (UTC)</TableCell><TableCell>Base</TableCell>
             <TableCell align="right">Recursos</TableCell><TableCell align="right">Oportunidades</TableCell>
-            <TableCell align="right">Saving total / mês</TableCell><TableCell align="right">Saving médio / oportunidade</TableCell><TableCell>Motor</TableCell>
+            <TableCell align="right">Saving total / mês</TableCell><TableCell align="right">Saving médio / oportunidade</TableCell><TableCell>Política</TableCell><TableCell>Motor</TableCell>
           </TableRow></TableHead>
           <TableBody>
             {runs.map((item) => <TableRow key={item.id}>
@@ -270,9 +275,10 @@ export default function InfrastructureOpportunities() {
               <TableCell align="right">{item.opportunities_count}</TableCell>
               <TableCell align="right">{money(item.total_monthly_saving, item.currency ?? currency)}</TableCell>
               <TableCell align="right">{money(item.avg_monthly_saving, item.currency ?? currency)}</TableCell>
+              <TableCell>{AGGRESSIVENESS_LABEL[item.policy_aggressiveness ?? "BALANCED"]}{item.policy_revision ? ` · rev. ${item.policy_revision}` : ""}</TableCell>
               <TableCell>{item.engine_version}</TableCell>
             </TableRow>)}
-            {runs.length === 0 && <TableRow><TableCell colSpan={10}><Typography variant="body2" color="text.secondary">Nenhuma execução registrada.</Typography></TableCell></TableRow>}
+            {runs.length === 0 && <TableRow><TableCell colSpan={11}><Typography variant="body2" color="text.secondary">Nenhuma execução registrada.</Typography></TableCell></TableRow>}
           </TableBody>
         </Table>
       </Paper>}
