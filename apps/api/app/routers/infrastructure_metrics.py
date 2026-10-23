@@ -176,6 +176,7 @@ async def collection_task_status(
         key: result[key] for key in (
             "resource_count", "metric_count", "resolution_seconds", "estimated_api_calls",
             "completed_query_count", "failed_query_count", "raw_rows_persisted", "persisted_by_day",
+            "coverage_rows_prepared", "coverage_persisted_by_day",
         ) if key in result
     }
     return {
