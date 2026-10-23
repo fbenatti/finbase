@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { DATA_LAYER_LABELS, dataDisplayText, moduleDisplayName } from "./dataPresentation";
+import { DATA_LAYER_LABELS, DATA_SERVICE_LABELS, dataDisplayText, moduleDisplayName } from "./dataPresentation";
 
 describe("data presentation boundaries", () => {
   it("translates operational messages returned by services", () => {
@@ -26,5 +26,17 @@ describe("data presentation boundaries", () => {
     expect(dataDisplayText(null)).toBe("");
     expect(dataDisplayText("Origem: iceberg.silver")).toBe("Origem: Base preparada");
     expect(dataDisplayText("Falha no Treno")).toBe("Falha no serviço de consultas");
+  });
+
+  it("hides customer and infrastructure clues in user-facing messages", () => {
+    const message = dataDisplayText("Falha no Iceberg para 4P (ibm-ti / dimon): Vivo TLF Telefónica; PostgreSQL e Trino indisponíveis.");
+    expect(message).not.toMatch(/iceberg|4p|ibm-ti|dimon|vivo|tlf|telef[oó]nica|postgres|trino/i);
+    expect(message).toContain("ambiente configurado");
+    expect(message).toContain("serviço de consultas");
+    expect(message).toContain("banco de dados");
+  });
+
+  it("uses a customer-facing label for the Iceberg catalog health key", () => {
+    expect(DATA_SERVICE_LABELS.iceberg_catalog).toBe("Catálogo de dados");
   });
 });

@@ -3,7 +3,7 @@ import { dataDisplayText } from "../../utils/dataPresentation";
 import { useState, useEffect, useRef } from "react";
 import { useMenuSearchParams as useSearchParams } from "../../navigation/useMenuSearchParams";
 import { Box, Typography, Button, TextField, Divider, Select, MenuItem, FormControl, InputLabel, Alert, CircularProgress, FormControlLabel, Checkbox, Paper, InputAdornment, Stack, Snackbar, Chip } from "@mui/material";
-import { Add, AutoAwesome, Cloud, Dataset, Download, MenuBook, Psychology, Search, SmartToy, Storage, Storefront, Refresh, Validate, Save } from "./ConnectionIcons";
+import { Add, AutoAwesome, Cloud, Dataset, MenuBook, Psychology, Search, SmartToy, Storage, Storefront, Validate, Save } from "./ConnectionIcons";
 import {
   getConnections, createConnection, updateConnection,
   deleteConnection, getConnectionsGrid, testConnection, testConnectionConfig, SourceConnection,
@@ -16,7 +16,7 @@ import SourceSetupWizard from "./SourceSetupWizard";
 import { CONNECTOR_TYPES, SOURCE_PROVIDERS, SourceProvider, kindOf, providerOf, visibleKinds } from "./sourceCatalog";
 
 export { CONNECTOR_TYPES };
-import ConnectionsDataGrid, { ConnectionTestMessage, getProviderLabel, getConnectorLabel } from "./ConnectionsDataGrid";
+import ConnectionsDataGrid, { ConnectionTestMessage } from "./ConnectionsDataGrid";
 import RecordHistory from "../../components/RecordHistory";
 import AzureSourcesPanel from "./AzureSourcesPanel";
 import IntegrationsPanel from "./IntegrationsPanel";
@@ -59,6 +59,7 @@ const emptyForm = {
   gcp_token: "", table_name: "",
   mongo_group_id: "", mongo_contract_type: "", marketplace: false,
   oci_fingerprint: "", oci_region: "sa-saopaulo-1", oci_private_key: "", oci_genai_compartments: "",
+  mon_credentials_code: "", mon_compartment: "", mon_discovery: false, mon_resource_ids: "", mon_resolution: "5m", mon_history_days: "30",
   github_extraction_type: "token" as "billing" | "license" | "token",
   gemini_extraction_type: "token" as "license" | "token",
   admin_email: "",
@@ -351,6 +352,21 @@ export default function Connections() {
         oci_genai_compartments: (Array.isArray(cfg.generative_ai_compartment_ids) ? cfg.generative_ai_compartment_ids : []).join("\n"),
         blob_prefixes: prefixesToText(conn.blob_prefixes),
       });
+    } else if (conn.connector_type === "oci_monitoring") {
+      setForm({
+        ...emptyForm,
+        code: conn.code, name: conn.name,
+        connector_type: conn.connector_type,
+        cloud_name: conn.cloud_name || "",
+        cloud_scope: conn.cloud_scope || "oci",
+        oci_region: cfg.region || "sa-saopaulo-1",
+        mon_credentials_code: cfg.credentials_connection_code || "",
+        mon_compartment: cfg.compartment_id || "",
+        mon_discovery: cfg.discovery === "compartment",
+        mon_resource_ids: (Array.isArray(cfg.resource_ids) ? cfg.resource_ids : []).join("\n"),
+        mon_resolution: cfg.resolution || "5m",
+        mon_history_days: String(cfg.history_days || 30),
+      });
     } else if (conn.connector_type === "mongodb_atlas") {
       setForm({
         ...emptyForm,
@@ -542,6 +558,16 @@ export default function Connections() {
       if (form.oci_region) configJson.region = form.oci_region;
       if (form.oci_private_key) configJson.private_key = form.oci_private_key;
       configJson.generative_ai_compartment_ids = form.oci_genai_compartments.split("\n").map(s => s.trim()).filter(Boolean);
+    } else if (form.connector_type === "oci_monitoring") {
+      configJson.credentials_connection_code = form.mon_credentials_code;
+      configJson.region = form.oci_region;
+      configJson.compartment_id = form.mon_compartment.trim();
+      configJson.discovery = form.mon_discovery ? "compartment" : "";
+      configJson.resource_ids = form.mon_resource_ids.split("\n").map(id => id.trim()).filter(Boolean);
+      configJson.namespace = "oci_computeagent";
+      configJson.resolution = form.mon_resolution;
+      configJson.history_days = Number(form.mon_history_days) || 30;
+      configJson.statistics = ["mean", "max", "p95", "p99", "count"];
     } else if (form.connector_type === "mongodb_atlas") {
       if (form.tenant_id) configJson.base_url = form.tenant_id;
       if (form.client_id) configJson.public_key = form.client_id;
@@ -617,6 +643,13 @@ export default function Connections() {
 
   const save = async () => {
     if (savingConnection) return;
+    if (form.connector_type === "oci_monitoring") {
+      const resourceIds = form.mon_resource_ids.split("\n").map(id => id.trim()).filter(Boolean);
+      if (!form.mon_credentials_code || !form.mon_compartment.trim() || (!form.mon_discovery && resourceIds.length < 1)) {
+        setError("Escolha a conexão OCI das credenciais, informe o compartimento e ative a descoberta ou liste ao menos uma instância.");
+        return;
+      }
+    }
     setSavingConnection(true);
     setError("");
     try {
@@ -760,27 +793,6 @@ export default function Connections() {
     }
   };
 
-  const exportConnections = () => {
-    const escape = (value: unknown) => `"${String(value ?? "").replace(/"/g, '""')}"`;
-    const csv = [
-      ["Nome", "Identificador", "Provedor", "Tipo", "Última atualização", "Resultado do último teste"],
-      ...connections.map((connection) => [
-        connection.name,
-        connection.code,
-        getProviderLabel(connection.cloud_scope),
-        getConnectorLabel(connection.connector_type),
-        connection.updated_at,
-        connection.last_test_status || "",
-      ]),
-    ].map((row) => row.map(escape).join(",")).join("\n");
-    const url = URL.createObjectURL(new Blob([csv], { type: "text/csv;charset=utf-8" }));
-    const link = document.createElement("a");
-    link.href = url;
-    link.download = "conexoes.csv";
-    link.click();
-    URL.revokeObjectURL(url);
-  };
-
   if (loading || !tabsReady) return <Stack direction="row" gap={1} alignItems="center" sx={{ p: 3 }}><CircularProgress size={20} /><Typography variant="body2">Carregando origens de dados…</Typography></Stack>;
 
   return (
@@ -801,10 +813,6 @@ export default function Connections() {
           </Stack>
           <Stack direction={{ xs: "column", lg: "row" }} justifyContent="space-between" gap={2} sx={{ p: 2, bgcolor: "background.default", borderTop: 1, borderBottom: 1, borderColor: "divider" }}>
             <TextField label="Localizar conexão" placeholder="Nome, identificador ou origem" value={search} onChange={event => setSearch(event.target.value)} slotProps={{ input: { startAdornment: <InputAdornment position="start"><Search fontSize="small" /></InputAdornment> } }} sx={{ width: { xs: "100%", lg: 340 }, bgcolor: "background.paper" }} />
-            <Stack direction="row" gap={1} flexWrap="wrap">
-              <Button variant="outlined" startIcon={<Refresh />} disabled={gridLoading} onClick={() => { void load(); void loadGrid(); }}>Recarregar lista</Button>
-              <Button variant="outlined" startIcon={<Download />} onClick={exportConnections} disabled={gridLoading || connections.length === 0}>Baixar esta página</Button>
-            </Stack>
           </Stack>
           <ConnectionsDataGrid
             key={search}
@@ -1058,6 +1066,57 @@ export default function Connections() {
                   onChange={(e) => setForm({ ...form, oci_private_key: e.target.value })}
                   placeholder={savedSecrets ? "•••••• chave já cadastrada" : undefined}
                   helperText={savedSecrets ? "Chave privada já cadastrada no servidor. Deixe em branco para manter ou cole uma nova para trocar." : "Cole o conteúdo completo do arquivo de chave privada (.pem)."} />
+              </>
+            )}
+
+            {form.connector_type === "oci_monitoring" && (
+              <>
+                <Alert severity="info" sx={{ gridColumn: "1 / -1" }}>
+                  Coleta CPU, memória, disco e rede pelo OCI Monitoring. A Bronze guarda os pontos exatamente como a API devolve;
+                  os nomes genéricos vêm dos mapeamentos em <strong>Catálogo de dados → Relações entre tabelas</strong> e a Silver
+                  <code> compute_usage_metrics</code> é materializada pelo Reprocessar. A OCI só entrega buckets de 5/15 minutos dos últimos 30 dias.
+                </Alert>
+                <FormControl sx={{ gridColumn: "1 / -1" }}>
+                  <InputLabel>Credenciais (conexão OCI)</InputLabel>
+                  <Select label="Credenciais (conexão OCI)" value={form.mon_credentials_code}
+                    onChange={(e) => setForm({ ...form, mon_credentials_code: String(e.target.value) })}>
+                    {connectionCatalog.filter((item) => item.connector_type === "oci").map((item) => (
+                      <MenuItem key={item.id} value={item.code}>{item.name} ({item.code})</MenuItem>
+                    ))}
+                  </Select>
+                </FormControl>
+                <TextField label="Região da nuvem" value={form.oci_region}
+                  onChange={(e) => setForm({ ...form, oci_region: e.target.value })} />
+                <TextField label="OCID do compartimento das métricas" value={form.mon_compartment}
+                  onChange={(e) => setForm({ ...form, mon_compartment: e.target.value })} />
+                <FormControlLabel sx={{ gridColumn: "1 / -1" }}
+                  control={<Checkbox checked={form.mon_discovery} onChange={(e) => setForm({ ...form, mon_discovery: e.target.checked })} />}
+                  label="Todas as instâncias do compartimento (descobertas a cada coleta)" />
+                {!form.mon_discovery && <TextField label="OCIDs das instâncias (uma por linha)" multiline minRows={2} value={form.mon_resource_ids}
+                  onChange={(e) => setForm({ ...form, mon_resource_ids: e.target.value })}
+                  helperText="Sem a descoberta, a coleta consulta somente estas instâncias." sx={{ gridColumn: "1 / -1" }} />}
+                <FormControl>
+                  <InputLabel>Resolução</InputLabel>
+                  <Select label="Resolução" value={form.mon_resolution}
+                    onChange={(e) => setForm({ ...form, mon_resolution: String(e.target.value) })}>
+                    <MenuItem value="5m">5 minutos</MenuItem>
+                    <MenuItem value="15m">15 minutos</MenuItem>
+                    <MenuItem value="1m">1 minuto</MenuItem>
+                  </Select>
+                </FormControl>
+                <TextField label="Histórico (dias)" type="number" value={form.mon_history_days}
+                  onChange={(e) => setForm({ ...form, mon_history_days: e.target.value })}
+                  helperText="Janela coletada a cada execução (até 60 dias; 5/15 min limitados a 30)." />
+                <Alert severity="warning" sx={{ gridColumn: "1 / -1" }}>
+                  <strong>Policies OCI necessárias</strong> para o grupo do usuário da chave API da conexão de credenciais:
+                  <Box component="code" sx={{ display: "block", mt: 1, whiteSpace: "normal", overflowWrap: "anywhere" }}>
+                    Allow group &lt;grupo&gt; to read metrics in compartment &lt;compartimento&gt; where target.metrics.namespace='oci_computeagent'
+                  </Box>
+                  <Box component="code" sx={{ display: "block", mt: 0.5, whiteSpace: "normal", overflowWrap: "anywhere" }}>
+                    Allow group &lt;grupo&gt; to read instances in compartment &lt;compartimento&gt;
+                  </Box>
+                  A primeira lê as métricas; a segunda lista as instâncias (descoberta) e lê shape, OCPU e memória usados pelo motor de rightsizing. Nenhuma das duas permite alterar recursos.
+                </Alert>
               </>
             )}
 

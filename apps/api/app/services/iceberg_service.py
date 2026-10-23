@@ -16,7 +16,7 @@ import logging
 import os
 import re
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any, Optional, Iterable
 
 import pandas as pd
 import pyarrow as pa
@@ -55,6 +55,23 @@ _LOCAL_WAREHOUSE = Path(os.getenv("ICEBERG_LOCAL_WAREHOUSE", str(_LOCAL_DEFAULT)
 _LOCAL_WAREHOUSE.mkdir(parents=True, exist_ok=True)
 
 _catalog: Optional[Catalog] = None
+
+#: Propriedades de toda tabela criada por este serviço. ``write.target-file-size-bytes``
+#: é o alvo que PyIceberg usa ao gravar e que o ``ALTER TABLE EXECUTE optimize`` do
+#: Trino usa ao compactar. Os arquivos pequenos de hoje não vêm de um alvo baixo
+#: (o padrão do PyIceberg é 512 MB) e sim de appends pequenos — um por blob; o
+#: alvo explícito garante que a compactação os junte em arquivos de tamanho útil.
+_DEFAULT_TABLE_PROPERTIES: dict[str, str] = {"write.target-file-size-bytes": str(128 * 1024 * 1024)}
+
+
+def _request_maintenance(namespace: str, table: str) -> None:
+    """Pede manutenção pós-publicação (plano por padrão; ver iceberg_maintenance)."""
+    try:
+        from app.services.iceberg_maintenance import request_maintenance_after_publish
+
+        request_maintenance_after_publish(namespace, table)
+    except Exception:  # noqa: BLE001 — nunca derruba uma publicação
+        logger.debug("Falha ao pedir manutenção de %s.%s", namespace, table, exc_info=True)
 _initialized_namespaces: set[str] = set()
 _legacy_path_patch_installed = False
 
@@ -603,7 +620,7 @@ def write_bronze(
                 raise append_exc from exc
 
     try:
-        tbl = cat.create_table(table_id, schema=iceberg_schema, partition_spec=partition_spec)
+        tbl = cat.create_table(table_id, schema=iceberg_schema, partition_spec=partition_spec, properties=_DEFAULT_TABLE_PROPERTIES)
     except Exception as create_exc:
         # Parallel workers can race on the first month for a connection.
         if _namespace_has_table(cat, table_id[0], table_id[1]) or "already exists" in str(create_exc).lower():
@@ -697,6 +714,93 @@ def delete_bronze_slice(
         "Deleted Bronze slice from %s.%s (blob_path=%s, billing_period=%s)",
         table_id[0], table_id[1], blob_path, billing_period,
     )
+
+
+def replace_bronze_slices(
+    connection_code: str,
+    slices: list[tuple[pd.DataFrame, str, str]],
+) -> int:
+    """Substitui várias fatias ``(frame, período, blob_path)`` em **uma** transação.
+
+    O coletor OCI Monitoring chamava ``replace_bronze_slice`` por janela, e a
+    Bronze acumulou 389 parquet em 390 commits: cada commit é um snapshot, um
+    manifest e um arquivo pequeno que o Trino relê no planejamento de toda query.
+    Aqui as fatias de um lote viram um ``delete`` com a união das proveniências e
+    um ``append`` só, mantendo a idempotência por blob e a atomicidade: ou o lote
+    inteiro entra, ou nada.
+    """
+    from pyiceberg.expressions import Or
+    from pyiceberg.io.pyarrow import pyarrow_to_schema
+
+    slices = [(df, str(period), blob_path) for df, period, blob_path in slices if df is not None and not df.empty]
+    if not slices:
+        return 0
+    table_id = _bronze_table_id(connection_code)
+    try:
+        table = _get_catalog().load_table(table_id)
+    except Exception:
+        # Primeira carga: cria a tabela com a primeira fatia e segue com o resto.
+        first_df, first_period, first_blob = slices[0]
+        written = write_bronze(connection_code, first_df, first_period, first_blob)
+        return written + replace_bronze_slices(connection_code, slices[1:])
+    if _schema_has_case_collisions(table.schema()):
+        raise RuntimeError(
+            f"Bronze schema {table_id[0]}.{table_id[1]} has case-colliding columns; "
+            "repair the schema before replacing a slice"
+        )
+
+    frames = []
+    ingested_at = pd.Timestamp.utcnow().isoformat()
+    for df, period, blob_path in slices:
+        frame = _fold_case_insensitive_columns(df.copy())
+        frame = _align_columns_to_existing_schema(frame, table.schema())
+        frame["_billing_period"] = period
+        frame["_blob_path"] = blob_path
+        frame["_ingested_at"] = ingested_at
+        frames.append(frame)
+    combined = pd.concat(frames, ignore_index=True, sort=False)
+    bronze_types = {
+        col: "TEXT" for col in combined.columns
+        if col not in {"_billing_period", "_blob_path", "_ingested_at"}
+    }
+    arrow_table = _df_to_arrow(combined, column_types=bronze_types)
+    incoming_schema = pyarrow_to_schema(arrow_table.schema)
+    existing_names = {field.name for field in table.schema().fields}
+    incoming_names = {field.name for field in incoming_schema.fields}
+    if not incoming_names.issubset(existing_names):
+        with table.update_schema() as schema_update:
+            schema_update.union_by_name(incoming_schema)
+        table = _get_catalog().load_table(table_id)
+    filters = [_bronze_slice_filter(blob_path=blob_path, billing_period=period) for _df, period, blob_path in slices]
+    slice_filter = filters[0]
+    for part in filters[1:]:
+        slice_filter = Or(slice_filter, part)
+    from app.services.write_lock import exclusive_write_lock
+
+    with exclusive_write_lock():
+        last_exc: Exception | None = None
+        for attempt in range(5):
+            table = _get_catalog().load_table(table_id)
+            arrow_table = _df_to_arrow(combined, column_types=bronze_types, target_schema=table.schema())
+            try:
+                tx = table.transaction()
+                tx.delete(slice_filter)
+                tx.append(arrow_table)
+                tx.commit_transaction()
+                logger.info(
+                    "Replaced %d Bronze slices of %s in one commit (%d rows)",
+                    len(slices), connection_code, len(combined),
+                )
+                return len(combined)
+            except Exception as exc:
+                last_exc = exc
+                if attempt < 4 and "branch main has changed" in str(exc):
+                    logger.warning("Bronze batch commit conflict %s attempt %s/5, retrying", connection_code, attempt + 1)
+                    continue
+                raise
+        if last_exc:
+            raise last_exc
+    return len(combined)
 
 
 def replace_bronze_slice(
@@ -1071,7 +1175,7 @@ def write_silver(
     tbl = cat.create_table(
         table_name,
         schema=iceberg_schema,
-        partition_spec=partition_spec,
+        partition_spec=partition_spec, properties=_DEFAULT_TABLE_PROPERTIES,
     )
     tbl.append(arrow_table)
     logger.info("Created %s with %d rows", table_name, rows)
@@ -1151,33 +1255,51 @@ def write_gold(df: pd.DataFrame) -> int:
 # ---------------------------------------------------------------------------
 # Destination tables — dynamic Iceberg tables in the gold namespace
 # ---------------------------------------------------------------------------
-def read_destination(physical_name: str, namespace: str = "silver") -> pd.DataFrame:
-    """Read all data from an existing Iceberg destination table.
+def read_destination(
+    physical_name: str,
+    namespace: str = "silver",
+    *,
+    billing_periods: Iterable[str] | None = None,
+    columns: Iterable[str] | None = None,
+    row_filter: Any | None = None,
+    allow_full_scan: bool = False,
+) -> pd.DataFrame:
+    """Lê um destino Iceberg com poda de partição e projeção de colunas.
 
-    Loads the gold.{physical_name} table and returns its contents as a pandas
-    DataFrame. Returns an empty DataFrame if the table does not exist.
+    A versão anterior fazia ``table.scan().to_pandas()`` da tabela inteira:
+    372 k linhas × 130 colunas em memória para qualquer uso. Agora a leitura
+    exige um recorte (``billing_periods`` na partição, ou ``row_filter``) ou o
+    pedido explícito ``allow_full_scan=True``, e só materializa ``columns``.
+    Tabela inexistente devolve um DataFrame vazio, como antes.
     """
+    from pyiceberg.expressions import In
+
     safe_name = physical_name.replace("-", "_").replace(".", "_")
     tid = _table_id(namespace, safe_name)
-    cat = _get_catalog()
-
-    # Check if table exists first — avoids blowing up the caller
+    filters = []
+    if billing_periods:
+        filters.append(In("_billing_period", [str(period) for period in billing_periods]))
+    if row_filter is not None:
+        filters.append(row_filter)
+    if not filters and not allow_full_scan:
+        raise ValueError(
+            f"read_destination({namespace}.{safe_name}) sem billing_periods/row_filter leria a tabela "
+            "inteira; passe allow_full_scan=True se for isso mesmo"
+        )
     try:
-        existing = cat.list_tables(tid[0])
-        existing_names = [t[1] if isinstance(t, tuple) and len(t) > 1 else t for t in existing]
-        if safe_name not in existing_names:
-            logger.info(f"Table gold.{safe_name} does not exist — returning empty DataFrame")
-            return pd.DataFrame()
-    except Exception:
-        logger.info(f"Unable to list tables in namespace {tid[0]} — returning empty DataFrame")
+        table = _get_catalog().load_table(tid)
+    except Exception as exc:  # noqa: BLE001 — tabela ausente é um caso esperado
+        logger.info("Table %s.%s unavailable (%s) — returning empty DataFrame", namespace, safe_name, exc)
         return pd.DataFrame()
-
-    # Table exists — load and return its contents
+    scan_kwargs: dict[str, Any] = {}
+    if filters:
+        scan_kwargs["row_filter"] = _combine_filters(*filters)
+    if columns:
+        scan_kwargs["selected_fields"] = tuple(columns)
     try:
-        table = cat.load_table(tid)
-        return table.scan().to_pandas()
+        return table.scan(**scan_kwargs).to_pandas()
     except Exception as e:
-        logger.warning(f"Failed to read gold.{safe_name}: {e} — returning empty DataFrame")
+        logger.warning(f"Failed to read {namespace}.{safe_name}: {e} — returning empty DataFrame")
         return pd.DataFrame()
 
 
@@ -1344,9 +1466,10 @@ def publish_dataframe_atomic(
     arrow = _df_to_arrow(df, column_types=column_types,
                          target_schema=table.schema() if table is not None else None)
     if table is None:
-        table = cat.create_table(tid, schema=pyarrow_to_schema(arrow.schema))
+        table = cat.create_table(tid, schema=pyarrow_to_schema(arrow.schema), properties=_DEFAULT_TABLE_PROPERTIES)
     table.overwrite(arrow)
     snapshot = table.current_snapshot()
+    _request_maintenance(namespace, safe_name)
     return {"table": f"{namespace}.{safe_name}", "rows": len(df),
             "snapshot_id": snapshot.snapshot_id if snapshot else None}
 
@@ -1428,13 +1551,13 @@ def write_destination_staged(
     if not partition_spec.fields:
         partition_field_idx = arrow_table.schema.get_field_index(partition_col)
         if partition_field_idx < 0:
-            tbl = cat.create_table(tid, schema=iceberg_schema)
+            tbl = cat.create_table(tid, schema=iceberg_schema, properties=_DEFAULT_TABLE_PROPERTIES)
             tbl.append(arrow_table)
             return temp_safe_name
 
         part_iceberg_field = iceberg_schema.find_field(partition_col)
         if part_iceberg_field is None:
-            tbl = cat.create_table(tid, schema=iceberg_schema)
+            tbl = cat.create_table(tid, schema=iceberg_schema, properties=_DEFAULT_TABLE_PROPERTIES)
             tbl.append(arrow_table)
             return temp_safe_name
 
@@ -1455,7 +1578,7 @@ def write_destination_staged(
     except Exception:
         pass
 
-    tbl = cat.create_table(tid, schema=iceberg_schema, partition_spec=partition_spec)
+    tbl = cat.create_table(tid, schema=iceberg_schema, partition_spec=partition_spec, properties=_DEFAULT_TABLE_PROPERTIES)
     tbl.append(arrow_table)
     logger.info("Staged %d rows to gold.%s", len(df), temp_safe_name)
     return temp_safe_name
@@ -1541,11 +1664,11 @@ def _merge_staged_into_canonical_table(
             raise
         if _namespace_has_table(cat, namespace, safe_name):
             cat.drop_table(main_tid)
-        target = cat.create_table(main_tid, schema=staged.schema(), partition_spec=staged.spec())
+        target = cat.create_table(main_tid, schema=staged.schema(), partition_spec=staged.spec(), properties=_DEFAULT_TABLE_PROPERTIES)
 
     if _is_staging_location(target):
         cat.drop_table(main_tid)
-        target = cat.create_table(main_tid, schema=staged.schema(), partition_spec=staged.spec())
+        target = cat.create_table(main_tid, schema=staged.schema(), partition_spec=staged.spec(), properties=_DEFAULT_TABLE_PROPERTIES)
 
     _replace_incompatible_columns(target, staged)
     target = cat.load_table(main_tid)
@@ -1815,6 +1938,7 @@ def publish_staged_partition(
     *,
     billing_period: str | None = None,
     snapshot_date: str | None = None,
+    metric_day: str | None = None,
     connection_id: int,
     namespace: str = "silver",
     partition_spec_json: dict | None = None,
@@ -1849,6 +1973,7 @@ def publish_staged_partition(
         connection_id=connection_id,
         billing_period=billing_period,
         snapshot_date=snapshot_date,
+        metric_day=metric_day,
         expected_row_count=expected_row_count if expected_row_count is not None else row_count,
     )
 
@@ -1875,7 +2000,7 @@ def publish_staged_partition(
         # SQLCatalog preserves its ``*_stg_*`` filesystem location on rename.
         if _namespace_has_table(cat, namespace, safe_name):
             cat.drop_table(target_id)
-        target = cat.create_table(target_id, schema=staged.schema(), partition_spec=staged.spec())
+        target = cat.create_table(target_id, schema=staged.schema(), partition_spec=staged.spec(), properties=_DEFAULT_TABLE_PROPERTIES)
 
     if _is_staging_location(target):
         # A one-slice write must never drop other slices merely to repair a
@@ -1905,6 +2030,7 @@ def publish_staged_partition(
         connection_id=connection_id,
         billing_period=billing_period,
         snapshot_date=snapshot_date,
+        metric_day=metric_day,
     )
     batches = [batch for batch in staged.scan().to_arrow_batch_reader() if batch.num_rows]
     last_exc: Exception | None = None
@@ -1933,7 +2059,11 @@ def publish_staged_partition(
     # The native write above created new target files, so staging can be safely
     # removed with all of its now-unreferenced files.
     _force_delete_table(staging_id, temp_safe_name)
-    slice_label = snapshot_date if slice_config.grain == "snapshot_date" else billing_period
+    slice_label = (
+        billing_period if slice_config.grain == "billing_period"
+        else snapshot_date if slice_config.grain == "snapshot_date"
+        else metric_day
+    )
     logger.info(
         "Published %d rows for %s/%s into %s.%s",
         row_count,
@@ -1942,6 +2072,7 @@ def publish_staged_partition(
         namespace,
         safe_name,
     )
+    _request_maintenance(namespace, safe_name)
     return int(row_count)
 
 
@@ -1952,6 +2083,7 @@ def publish_silver_dataframe_slice(
     connection_id: int,
     billing_period: str | None = None,
     snapshot_date: str | None = None,
+    metric_day: str | None = None,
     column_types: Optional[dict[str, str]] = None,
     partition_spec_json: dict | None = None,
     namespace: str = "silver",
@@ -1976,6 +2108,7 @@ def publish_silver_dataframe_slice(
         connection_id=connection_id,
         billing_period=billing_period,
         snapshot_date=snapshot_date,
+        metric_day=metric_day,
     )
     temp_name = write_destination_staged(
         physical_name,
@@ -1990,6 +2123,7 @@ def publish_silver_dataframe_slice(
         temp_name,
         billing_period=billing_period,
         snapshot_date=snapshot_date,
+        metric_day=metric_day,
         connection_id=connection_id,
         namespace=namespace,
         partition_spec_json=partition_spec_json,
@@ -2099,14 +2233,14 @@ def write_destination(
             return rows
         except Exception:
             pass
-        tbl = cat.create_table(tid, schema=iceberg_schema)
+        tbl = cat.create_table(tid, schema=iceberg_schema, properties=_DEFAULT_TABLE_PROPERTIES)
         tbl.append(arrow_table)
         return rows
 
     part_iceberg_field = iceberg_schema.find_field(partition_col)
     if part_iceberg_field is None:
         logger.warning("Partition column %s not in Iceberg schema", partition_col)
-        tbl = cat.create_table(tid, schema=iceberg_schema)
+        tbl = cat.create_table(tid, schema=iceberg_schema, properties=_DEFAULT_TABLE_PROPERTIES)
         tbl.append(arrow_table)
         return rows
 
@@ -2142,7 +2276,7 @@ def write_destination(
             raise
 
     # Table truly doesn't exist — create it fresh
-    tbl = cat.create_table(tid, schema=iceberg_schema, partition_spec=partition_spec)
+    tbl = cat.create_table(tid, schema=iceberg_schema, partition_spec=partition_spec, properties=_DEFAULT_TABLE_PROPERTIES)
     tbl.append(arrow_table)
     logger.info("Created gold.%s with %d rows (partitioned by %s)", safe_name, rows, partition_col)
     return rows
@@ -2555,7 +2689,7 @@ def write_forecast_result(table_name: str, df: pd.DataFrame) -> int:
         pass
     from pyiceberg.io.pyarrow import pyarrow_to_schema
     schema = pyarrow_to_schema(arrow_table.schema)
-    table = cat.create_table(tid, schema=schema)
+    table = cat.create_table(tid, schema=schema, properties=_DEFAULT_TABLE_PROPERTIES)
     table.append(arrow_table)
     logger.info("Published %d forecast rows to %s.%s", len(df), namespace, safe_name)
     return len(df)
@@ -2584,9 +2718,10 @@ def _publish_planning_dataframe(
     except Exception:
         pass
     from pyiceberg.io.pyarrow import pyarrow_to_schema
-    table = cat.create_table(tid, schema=pyarrow_to_schema(arrow_table.schema))
+    table = cat.create_table(tid, schema=pyarrow_to_schema(arrow_table.schema), properties=_DEFAULT_TABLE_PROPERTIES)
     table.append(arrow_table)
     logger.info("Published %d planning rows to %s.%s", len(df), namespace, safe_name)
+    _request_maintenance(namespace, safe_name)
     return safe_name
 
 
@@ -2650,9 +2785,10 @@ def merge_planning_rateio(
 
     read_error: Exception | None = None
     existing = pd.DataFrame()
+    before: dict[str, int] = {}
     try:
         table = cat.load_table(tid)
-        existing = table.scan().to_pandas()
+        existing, before = _read_planning_for_merge(table, replace_types)
     except Exception as exc:  # noqa: BLE001 - distinguimos "não existe" de "falhou"
         read_error = exc
 
@@ -2687,7 +2823,7 @@ def merge_planning_rateio(
     # Sem rateio novo e sem rateio anterior não há nada a fazer: republicar
     # reescreveria a tabela inteira e poderia perder linhas se qualquer etapa
     # da escrita falhasse.
-    if rateio_df.empty and not any(_type_counts(existing).get(tipo, 0) for tipo in replace_types):
+    if rateio_df.empty and not any(before.get(tipo, 0) for tipo in replace_types):
         return 0
 
     frames = [frame for frame in (keep, rateio_df) if frame is not None and not frame.empty]
@@ -2695,7 +2831,6 @@ def merge_planning_rateio(
 
     # Guarda de perda de dado: um tipo preservado que existia antes não pode
     # desaparecer do resultado por causa do merge.
-    before = _type_counts(existing)
     after = _type_counts(combined)
     for tipo in preserve_types:
         if before.get(tipo, 0) > 0 and after.get(tipo, 0) == 0:
@@ -2710,6 +2845,24 @@ def merge_planning_rateio(
         namespace, safe_name, before, after,
     )
     return 0 if rateio_df.empty else int(len(rateio_df))
+
+
+def _read_planning_for_merge(table: Any, replace_types: tuple[str, ...]) -> tuple[pd.DataFrame, dict[str, int]]:
+    """Linhas a preservar e contagem por ``tipo`` lendo o mínimo do Iceberg.
+
+    A contagem por tipo (guarda de perda de dado) sai de uma projeção só da
+    coluna ``tipo``; as linhas completas são lidas já sem os tipos que o merge
+    vai substituir. Antes a tabela inteira ia para o pandas duas vezes o
+    necessário. O filtro em pandas continua como autoridade (case-insensitive).
+    """
+    from pyiceberg.expressions import In, IsNull, Not, Or
+
+    tipos = table.scan(selected_fields=("tipo",)).to_pandas()
+    before = _type_counts(tipos)
+    if "tipo" not in tipos.columns:
+        return table.scan().to_pandas(), before
+    keep_filter = Or(IsNull("tipo"), Not(In("tipo", [str(value) for value in replace_types])))
+    return table.scan(row_filter=keep_filter).to_pandas(), before
 
 
 def _type_counts(frame: pd.DataFrame) -> dict[str, int]:
@@ -2747,8 +2900,45 @@ def _append_or_create_table(namespace: str, table_name: str, df: pd.DataFrame, p
                     name=partition_col,
                 )
             )
-        cat.create_table(tid, schema=iceberg_schema, partition_spec=spec)
+        cat.create_table(tid, schema=iceberg_schema, partition_spec=spec, properties=_DEFAULT_TABLE_PROPERTIES)
         cat.load_table(tid).append(arrow_table)
+    return len(frame)
+
+
+def replace_oci_compute_hourly(
+    df: pd.DataFrame, *, connection_id: int, billing_period: str, hour_range: tuple[str, str] | None = None,
+) -> int:
+    """Replace one connection+month of the hourly OCI compute Silver in one transaction.
+
+    ``hour_range`` (``[first, end)`` as ``YYYY-MM-DDTHH``) limits the replacement
+    to the hours that were fetched, so a partial fetch keeps the older hours.
+    """
+    from pyiceberg.expressions import And, EqualTo, GreaterThanOrEqual, LessThan
+
+    namespace = layers.detail_layer()
+    column_types = {"billed_cost": "DOUBLE", "billed_quantity": "DOUBLE", "source_connection_id": "BIGINT"}
+    frame = df.copy() if df is not None else pd.DataFrame()
+    cat = _get_catalog()
+    try:
+        tbl = cat.load_table(_table_id(namespace, "oci_compute_hourly"))
+    except Exception:
+        if frame.empty:
+            return 0
+        frame = frame.astype({name: "float64" for name in ("billed_cost", "billed_quantity")})
+        frame["source_connection_id"] = frame["source_connection_id"].astype("int64")
+        return _append_or_create_table(namespace, "oci_compute_hourly", frame, "_billing_period")
+    from app.services.write_lock import exclusive_write_lock
+
+    with exclusive_write_lock():
+        tx = tbl.transaction()
+        slice_filter = And(EqualTo("source_connection_id", int(connection_id)), EqualTo("_billing_period", str(billing_period)))
+        if hour_range:
+            slice_filter = And(slice_filter, GreaterThanOrEqual("usage_hour", hour_range[0]),
+                               LessThan("usage_hour", hour_range[1]))
+        tx.delete(slice_filter)
+        if not frame.empty:
+            tx.append(_df_to_arrow(frame, column_types=column_types, target_schema=tbl.schema()))
+        tx.commit_transaction()
     return len(frame)
 
 

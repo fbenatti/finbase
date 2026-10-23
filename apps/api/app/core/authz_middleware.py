@@ -45,6 +45,7 @@ PATH_MODULE: list[tuple[str, str]] = [
     ("/custos/compromisso-mca", "reservations"),
     ("/otimizacao", "savings"),
     ("/custos/oci-operacional", "oci_operational"),
+    ("/custos/metricas-infra", "infrastructure_metrics"),
     ("/custos", "gold"),
     ("/dados/fato", "fact"),
     ("/administracao/usuarios", "users"),
@@ -75,6 +76,7 @@ METHOD_ACTION = {
 READ_POST_PREFIXES: list[tuple[str, str]] = [
     ("/custos/consulta", "gold"),
     ("/custos/informacoes", "gold"),
+    ("/custos/metricas-infra/planejar", "infrastructure_metrics"),
     ("/dados/explorador/consulta", "analysis"),
     ("/dados/explorador/dinamica", "analysis"),
     ("/dados/explorador/visao-esperada", "analysis"),

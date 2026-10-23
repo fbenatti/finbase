@@ -23,7 +23,9 @@ class _FakeTable:
     def __init__(self, frame: pd.DataFrame):
         self._frame = frame
 
-    def scan(self):
+    def scan(self, **_kwargs):
+        # Projeção e filtro são otimizações de leitura; o fake devolve tudo e o
+        # merge continua obrigado a filtrar em pandas.
         return self
 
     def to_pandas(self) -> pd.DataFrame:

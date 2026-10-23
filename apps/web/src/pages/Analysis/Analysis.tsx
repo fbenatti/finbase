@@ -84,12 +84,12 @@ const PREBUILT: Record<string, { label: string; sql: string }[]> = {
   bronze: [],
   silver: [],
   gold: [
-    { label: "Top 10 serviços por custo faturado", sql: 'SELECT "ServiceName", SUM("BilledCost") AS total_billed, COUNT(*) AS rows FROM iceberg.gold.dest_billing_cloud GROUP BY "ServiceName" ORDER BY total_billed DESC LIMIT 10' },
-    { label: "Custo por unidade", sql: 'SELECT "hierarquia_1", SUM("BilledCost") AS total_billed, SUM("EffectiveCost") AS total_effective, COUNT(*) AS rows FROM iceberg.gold.dest_billing_cloud GROUP BY "hierarquia_1" ORDER BY total_billed DESC LIMIT 20' },
-    { label: "Custo por competência", sql: 'SELECT "_billing_period", SUM("BilledCost") AS total_billed, SUM("EffectiveCost") AS total_effective, COUNT(*) AS rows FROM iceberg.gold.dest_billing_cloud GROUP BY "_billing_period" ORDER BY "_billing_period" DESC' },
-    { label: "Custo por localização", sql: 'SELECT "RegionName", SUM("BilledCost") AS total_billed, COUNT(*) AS rows FROM iceberg.gold.dest_billing_cloud GROUP BY "RegionName" ORDER BY total_billed DESC LIMIT 20' },
-    { label: "Custo por fonte e mês", sql: 'SELECT "cloud_origem", "_billing_period", SUM("BilledCost") AS total_billed, COUNT(*) AS rows FROM iceberg.gold.dest_billing_cloud GROUP BY "cloud_origem", "_billing_period" ORDER BY "_billing_period" DESC, total_billed DESC' },
-    { label: "Unidade / fonte por mês", sql: 'SELECT "hierarquia_1", "cloud_origem", "_billing_period", SUM("BilledCost") AS total_billed, SUM("EffectiveCost") AS total_effective, COUNT(*) AS rows FROM iceberg.gold.dest_billing_cloud GROUP BY "hierarquia_1", "cloud_origem", "_billing_period" ORDER BY "_billing_period" DESC, total_billed DESC LIMIT 500' },
+    { label: "Top 10 serviços por custo faturado", sql: 'SELECT "ServiceName", SUM("BilledCost") AS total_billed, COUNT(*) AS rows FROM dados.consolidacao.dest_billing_cloud GROUP BY "ServiceName" ORDER BY total_billed DESC LIMIT 10' },
+    { label: "Custo por unidade", sql: 'SELECT "hierarquia_1", SUM("BilledCost") AS total_billed, SUM("EffectiveCost") AS total_effective, COUNT(*) AS rows FROM dados.consolidacao.dest_billing_cloud GROUP BY "hierarquia_1" ORDER BY total_billed DESC LIMIT 20' },
+    { label: "Custo por competência", sql: 'SELECT "_billing_period", SUM("BilledCost") AS total_billed, SUM("EffectiveCost") AS total_effective, COUNT(*) AS rows FROM dados.consolidacao.dest_billing_cloud GROUP BY "_billing_period" ORDER BY "_billing_period" DESC' },
+    { label: "Custo por localização", sql: 'SELECT "RegionName", SUM("BilledCost") AS total_billed, COUNT(*) AS rows FROM dados.consolidacao.dest_billing_cloud GROUP BY "RegionName" ORDER BY total_billed DESC LIMIT 20' },
+    { label: "Custo por fonte e mês", sql: 'SELECT "cloud_origem", "_billing_period", SUM("BilledCost") AS total_billed, COUNT(*) AS rows FROM dados.consolidacao.dest_billing_cloud GROUP BY "cloud_origem", "_billing_period" ORDER BY "_billing_period" DESC, total_billed DESC' },
+    { label: "Unidade / fonte por mês", sql: 'SELECT "hierarquia_1", "cloud_origem", "_billing_period", SUM("BilledCost") AS total_billed, SUM("EffectiveCost") AS total_effective, COUNT(*) AS rows FROM dados.consolidacao.dest_billing_cloud GROUP BY "hierarquia_1", "cloud_origem", "_billing_period" ORDER BY "_billing_period" DESC, total_billed DESC LIMIT 500' },
   ],
 };
 
@@ -100,12 +100,13 @@ export default function Analysis() {
   const publicTab = searchParams.get("tab");
   const requestedTab = (publicTab === "acervo" ? "iceberg" : publicTab === "temporarios" ? "staging" : publicTab) as AnalysisTab | null;
   const tab: AnalysisTab = requestedTab && ["destino", "fontes", "iceberg", "staging", "pivot", "busca"].includes(requestedTab) ? requestedTab : "fontes";
-  const [health, setHealth] = useState<AnalysisHealth>({ trino: "?", nessie: "?", minio: "?" });
+  const [health, setHealth] = useState<AnalysisHealth>({ trino: "?", iceberg_catalog: "?" });
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
 
   // ─── Acervo de dados ───
   const layer = dataLayerForStage(searchParams.get("etapa") || searchParams.get("layer"));
+  const querySchema = layer === "bronze" ? "origem" : layer === "silver" ? "preparacao" : "consolidacao";
   const [tables, setTables] = useState<AnalysisTableList>({ bronze: [], silver: [], gold: [] });
   const [sql, setSql] = useState(() => typeof routeLocation.state?.analysisQuery === "string" ? routeLocation.state.analysisQuery : "");
   const [result, setResult] = useState<AnalysisQueryResult | null>(null);
@@ -212,7 +213,7 @@ export default function Analysis() {
     try {
       await deleteGoldTable(t);
       getAnalysisTables().then(setTables).catch(() => {});
-      if (sql.startsWith('SELECT * FROM iceberg.gold.' + t)) setSql("");
+      if (sql.startsWith('SELECT * FROM dados.consolidacao.' + t)) setSql("");
     } catch (e: unknown) {
       setError(formatApiError(e, 'Não foi possível excluir a base consolidada'));
     }
@@ -273,7 +274,7 @@ export default function Analysis() {
 
   const selectDataTable = async (tableName: string) => {
     setSelectedDataTable(tableName);
-    setSql(`SELECT * FROM iceberg.${layer}.${tableName} LIMIT 10`);
+    setSql(`SELECT * FROM dados.${querySchema}.${tableName} LIMIT 10`);
     setPartitionRows([]);
     setPartitionsLoading(true);
     try {
@@ -328,7 +329,7 @@ export default function Analysis() {
     }
     const where = clauses.length ? `\nWHERE ${clauses.join(" AND ")}` : "";
     setSelectedDataTable(tableName);
-    setSql(`SELECT * FROM iceberg.${layer}.${tableName}${where}\nLIMIT 10`);
+    setSql(`SELECT * FROM dados.${querySchema}.${tableName}${where}\nLIMIT 10`);
   };
 
   const togglePartitionNode = (key: string) => {
@@ -846,13 +847,13 @@ export default function Analysis() {
             <Box sx={{ display: "flex", gap: 1, mb: 1, flexWrap: "wrap" }}>
               {((layer === "bronze" || layer === "silver")
                 ? (selectedDataTable ? [
-                    { label: "Amostra da tabela escolhida", sql: `SELECT * FROM iceberg.${layer}.${selectedDataTable} LIMIT 10` },
-                    { label: "Contagem por competência", sql: `SELECT _billing_period, COUNT(*) AS rows FROM iceberg.${layer}.${selectedDataTable} GROUP BY _billing_period ORDER BY _billing_period DESC` },
+                    { label: "Amostra da tabela escolhida", sql: `SELECT * FROM dados.${querySchema}.${selectedDataTable} LIMIT 10` },
+                    { label: "Contagem por competência", sql: `SELECT _billing_period, COUNT(*) AS rows FROM dados.${querySchema}.${selectedDataTable} GROUP BY _billing_period ORDER BY _billing_period DESC` },
                   ] : [])
                 : layer === "gold"
                   ? (selectedDataTable ? (PREBUILT.gold || []).map(q => ({
                       ...q,
-                      sql: q.sql.split("iceberg.gold.dest_billing_cloud").join(`iceberg.gold.${selectedDataTable}`),
+                      sql: q.sql.split("dados.consolidacao.dest_billing_cloud").join(`dados.consolidacao.${selectedDataTable}`),
                     })) : [])
                   : (PREBUILT[layer] || [])).map((q) => (
                 <Button key={q.label} size="small" variant="outlined" onClick={() => setPrebuilt(q.sql)}>{q.label}</Button>
@@ -860,7 +861,7 @@ export default function Analysis() {
             </Box>
             <Box sx={{ display: "flex", gap: 1 }}>
               <TextField fullWidth multiline minRows={2} maxRows={6} size="small"
-                placeholder={layer === "gold" ? "SELECT * FROM iceberg.gold.dest_dm_cost_<code> LIMIT 10" : "SELECT * FROM iceberg." + layer + "." + ((tables[layer] || [])[0] || "...") + " LIMIT 10"}
+                placeholder={layer === "gold" ? "SELECT * FROM dados.consolidacao.nome_da_base LIMIT 10" : `SELECT * FROM dados.${querySchema}.nome_da_tabela LIMIT 10`}
                 value={sql} onChange={(e) => setSql(e.target.value)}
                 onKeyDown={(e) => e.key === "Enter" && e.metaKey && executeSql()}
                 sx={{ fontFamily: "monospace", "& textarea": { fontSize: "0.85rem" } }} />
@@ -1021,6 +1022,7 @@ export default function Analysis() {
               autoRun={searchParams.get("tab") === "pivot"}
               showSearch
               onOpenQuery={openQuery}
+              initialViewId={Number(searchParams.get("relatorio")) || undefined}
             />
           : <EmptyState message="Nenhuma base consolidada ativa disponível para tabela dinâmica." />
       )}

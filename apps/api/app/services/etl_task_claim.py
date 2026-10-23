@@ -28,6 +28,7 @@ WORKER_TASK_TYPES: tuple[str, ...] = (
     "ai_cost_relationship_reprocess",
     "gold_reprocess",
     "reservation_collection",
+    "rightsizing_analysis",
     "price_reference_collection",
     "azure_pricesheet_refresh",
     "anomaly_detection",

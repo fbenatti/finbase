@@ -40,7 +40,7 @@ export const FORECAST_RULE_FIELD_HELP = {
   behavior:
     "O que fazer com os dados:\n• Excluir da origem — remove da base consolidada antes da agregação quando o campo começa com o valor informado; o campo não precisa ser dimensão.\n• Média de 30 dias — separa a origem e calcula esse componente com a média diária dos últimos 30 dias; ideal para overage que reinicia no ciclo mensal.\n• Ratear fatura mensal — distribui valor no intervalo Start→End.\n• Recorrente — replica compra nos meses seguintes.\n• Cancelar em refund — encerra ao detectar estorno.\n• Substituir — troca por valor fixo.",
   scope:
-    "Filtro adicional por dimensão (formato dim=valor, separado por vírgula).\n\nEx.: cloud_origem=ibm-ti restringe a regra a essa origem.",
+    "Filtro adicional por dimensão (formato dim=valor, separado por vírgula).\n\nEx.: cloud_origem=fonte-configurada restringe a regra a essa origem.",
   chargeEndColumn: "Coluna com o fim do período de cobrança usada na alocação (ex.: ChargePeriodEnd). Obrigatória para comportamento de alocação.",
   valueColumn: "Coluna numérica usada como base do valor da regra (geralmente a mesma medida do forecast).",
   replacementValue: "Valor fixado que substitui o Forecast quando o comportamento é Substituir por valor fixado.",

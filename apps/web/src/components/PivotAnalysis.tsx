@@ -2,9 +2,9 @@ import { Dialog, DialogActions, DialogContent, DialogTitle } from "./FinbaseDial
 import DataGrid from "./FinbaseDataGrid";
 import { dataDisplayText } from "../utils/dataPresentation";
 import { DragEvent, useEffect, useMemo, useRef, useState } from "react";
-import { Alert, Autocomplete, Box, Button, Chip, CircularProgress, Divider, Drawer, FormControl, IconButton, InputLabel, MenuItem, Paper, Select, Stack, Table, TableBody, TableCell, TableContainer, TableHead, TableRow, TextField, Typography } from "@mui/material";
+import { Alert, Autocomplete, Box, Breadcrumbs, Button, Chip, CircularProgress, Divider, Drawer, FormControl, IconButton, InputLabel, MenuItem, Paper, Select, Stack, Table, TableBody, TableCell, TableContainer, TableHead, TableRow, TextField, ToggleButton, ToggleButtonGroup, Typography } from "@mui/material";
 import { GridColDef, GridPaginationModel } from "@mui/x-data-grid";
-import { Add, Close, CompareArrows, ContentCopy, Delete, Download, OpenInFull, PlayArrow, Save, TableChart, Visibility } from "./FinbaseIcons";
+import { Add, AutoAwesome, Close, CompareArrows, ContentCopy, Delete, Download, OpenInFull, PlayArrow, Save, TableChart, Tune, Visibility } from "./FinbaseIcons";
 import * as XLSX from "xlsx";
 import {
   DestinationAnalysis, PivotFilter, PivotMeasure, PivotMetadata, PivotRequest, PivotResult, PivotView, PivotSort,
@@ -13,6 +13,10 @@ import {
 } from "../services/api";
 import { RowAction } from "./RowAction";
 import { colors } from "../theme/tokens";
+import PivotChart, { PivotVisualization } from "./PivotChart";
+import PivotGuidedPanel, { PivotTemplate } from "./PivotGuidedPanel";
+import SavedReportsGrid, { reportVisualization } from "./SavedReportsGrid";
+import { AGGREGATION_LABELS, OPERATOR_LABELS, fieldLabel, friendlyMeasureLabel } from "../utils/pivotLabels";
 
 interface Props {
   destinations: DestinationAnalysis[];
@@ -22,6 +26,8 @@ interface Props {
   initialFilters?: PivotFilter[];
   autoRun?: boolean;
   onOpenQuery?: (sql: string) => void;
+  /** Saved report to open on arrival (the Relatórios screen links here with ?relatorio=). */
+  initialViewId?: number;
 }
 
 const money = new Intl.NumberFormat("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
@@ -45,6 +51,13 @@ const dimLabel = (name: string, value: unknown) => {
   if (isPeriodDim(name)) return formatPeriod(value);
   return value == null || value === "" ? "(vazio)" : String(value);
 };
+
+type PivotMode = "guided" | "advanced";
+const MODE_STORAGE_KEY = "finbase.pivot.mode";
+const readMode = (): PivotMode => {
+  try { return localStorage.getItem(MODE_STORAGE_KEY) === "advanced" ? "advanced" : "guided"; } catch { return "guided"; }
+};
+const GUIDED_RUN_DELAY_MS = 700;
 
 function downloadBlob(blob: Blob, filename: string) {
   const url = URL.createObjectURL(blob);
@@ -106,7 +119,7 @@ function downloadExcel(result: PivotResult) {
   XLSX.writeFile(workbook, `pivot_${new Date().toISOString().slice(0, 10)}.xlsx`);
 }
 
-export default function PivotAnalysis({ destinations, initialTableId, showSearch = false, initialMeasure, initialFilters = [], autoRun = false, onOpenQuery }: Props) {
+export default function PivotAnalysis({ destinations, initialTableId, showSearch = false, initialMeasure, initialFilters = [], autoRun = false, onOpenQuery, initialViewId }: Props) {
   const first = initialTableId || destinations.filter(d => d.id > 0)[0]?.id || destinations[0]?.id || 0;
   const [tableId, setTableId] = useState(first);
   const [sourceIds, setSourceIds] = useState<number[]>([first]);
@@ -140,6 +153,14 @@ export default function PivotAnalysis({ destinations, initialTableId, showSearch
   const [searchTerm, setSearchTerm] = useState("");
   const [searchResult, setSearchResult] = useState<DataSearchResult | null>(null);
   const [searchLoading, setSearchLoading] = useState(false);
+  const [mode, setModeState] = useState<PivotMode>(readMode);
+  const [pendingViewId, setPendingViewId] = useState(initialViewId);
+  const [visualization, setVisualization] = useState<PivotVisualization>("bar");
+  const runSeq = useRef(0);
+  const setMode = (next: PivotMode) => {
+    setModeState(next);
+    try { localStorage.setItem(MODE_STORAGE_KEY, next); } catch { /* per-viewer preference only */ }
+  };
 
   const [drag, setDrag] = useState<{ area: "rows" | "cols" | "filters"; name: string } | null>(null);
   const [dragOverZone, setDragOverZone] = useState<"rows" | "cols" | "filters" | null>(null);
@@ -244,7 +265,9 @@ export default function PivotAnalysis({ destinations, initialTableId, showSearch
       return [`${column} IN (${literals.join(", ")})`];
     });
     const sourceName = tableName.replace(/-/g, "_").replace(/\./g, "_");
-    const from = `iceberg.silver.${sourceName}`;
+    const sourceLayer = catalogSource?.layer || "silver";
+    const publicLayer = sourceLayer === "bronze" ? "origem" : sourceLayer === "gold" ? "consolidacao" : "preparacao";
+    const from = `dados.${publicLayer}.${sourceName}`;
     const groupBy = dimensionSql.length ? `\nGROUP BY ${dimensionSql.join(", ")}` : "";
     const orderDims = [...rows, ...cols].filter((name, index, all) => all.indexOf(name) === index && !isOriginDim(name)).map(quote);
     const orderBy = orderDims.length ? `\nORDER BY ${orderDims.join(", ")}` : "";
@@ -283,8 +306,12 @@ export default function PivotAnalysis({ destinations, initialTableId, showSearch
 
   useEffect(() => {
     if (!tableId) return;
+    // A late answer for a previous table (or StrictMode's first run) must not
+    // reapply defaults over a report the user has already opened.
+    let cancelled = false;
     setMeta(null); setResult(null); setError("");
     getPivotMetadata(tableId).then(next => {
+      if (cancelled) return;
       setMeta(next);
       const dimensions = new Set(next.dimensions);
       const isForecastManual = tableId === FORECAST_MANUAL_PIVOT_ID;
@@ -313,14 +340,16 @@ export default function PivotAnalysis({ destinations, initialTableId, showSearch
       setFilters(current => current.filter(item => known.has(item.column)));
       const wanted = [initialMeasure, "realizado", next.default_measure].find(name => name && next.measures.includes(name));
       setMeasures(wanted ? [{ column: wanted, aggregation: "SUM" }] : []);
-    }).catch(e => setError(formatApiError(e, "Não foi possível carregar a estrutura da base consolidada")));
+    }).catch(e => { if (!cancelled) setError(formatApiError(e, "Não foi possível carregar a estrutura da base consolidada")); });
     // Views are global to the workspace. Filtering only by the current table
     // made a saved dashboard disappear when the user opened another table.
     getPivotViews().then(setViews).catch(() => setViews([]));
+    return () => { cancelled = true; };
   }, [tableId]);
 
   const execute = async () => {
     if (!tableId || !measures.length) return;
+    const seq = ++runSeq.current;
     setLoading(true); setError("");
     try {
       // A single active source may be the planning pseudo-destination (negative
@@ -343,19 +372,30 @@ export default function PivotAnalysis({ destinations, initialTableId, showSearch
       const safeFilters = known.size ? filters.filter(item => known.has(item.column) || isPeriodName(item.column)) : filters;
       const safeMeasures = known.size ? measures.filter(item => known.has(item.column)) : measures;
       if (!safeMeasures.length) return;
-      setResult(sourceIds.length > 1
+      const next = sourceIds.length > 1
         ? await runPivotUnion({ destination_table_ids: sourceIds, rows: safeRows, columns: safeCols, measures: safeMeasures, filters: safeFilters, row_limit: 500, column_limit: 60, include_totals: true, origin_column: "origem", sort_rows: sortRows, sort_columns: sortCols })
-        : await runPivot({ destination_table_id: pivotTarget, rows: safeRows, columns: safeCols, measures: safeMeasures, filters: safeFilters, row_limit: 500, column_limit: 60, include_totals: true, sort_rows: sortRows, sort_columns: sortCols }));
+        : await runPivot({ destination_table_id: pivotTarget, rows: safeRows, columns: safeCols, measures: safeMeasures, filters: safeFilters, row_limit: 500, column_limit: 60, include_totals: true, sort_rows: sortRows, sort_columns: sortCols });
+      // Guided mode recalculates on every change; drop answers that a newer
+      // request has already superseded.
+      if (seq === runSeq.current) setResult(next);
     }
-    catch (e: unknown) { setError(formatApiError(e, "Falha ao consultar os dados")); }
-    finally { setLoading(false); }
+    catch (e: unknown) { if (seq === runSeq.current) setError(formatApiError(e, "Falha ao consultar os dados")); }
+    finally { if (seq === runSeq.current) setLoading(false); }
   };
 
   useEffect(() => {
-    if (!autoRun || didAutoRun || !meta || !tableId || !measures.length) return;
+    if (mode === "guided" || !autoRun || didAutoRun || !meta || !tableId || !measures.length) return;
     setDidAutoRun(true);
     void execute();
-  }, [autoRun, didAutoRun, meta, tableId, measures, rows, cols, filters, sourceIds]);
+  }, [mode, autoRun, didAutoRun, meta, tableId, measures, rows, cols, filters, sourceIds]);
+
+  // Guided mode behaves like a report designer: every change refreshes the
+  // preview, so there is no "recalculate" step for the user to remember.
+  useEffect(() => {
+    if (mode !== "guided" || !meta || !tableId || !measures.length) return;
+    const timer = window.setTimeout(() => { void execute(); }, GUIDED_RUN_DELAY_MS);
+    return () => window.clearTimeout(timer);
+  }, [mode, meta, tableId, sourceIds, rows, cols, measures, filters, sortRows, sortCols]);
   const executeSearch = async () => {
     if (!tableId || !searchTerm.trim()) return;
     setSearchLoading(true); setError("");
@@ -381,10 +421,44 @@ export default function PivotAnalysis({ destinations, initialTableId, showSearch
   const saveView = async () => {
     if (!viewName.trim()) return;
     const validSourceIds = sourceIds.filter(id => id !== 0);
-    try { await savePivotView(viewName.trim(), { ...request, source_ids: validSourceIds.length ? validSourceIds : [tableId] } as PivotRequest & { perspective_config?: unknown }); setViews(await getPivotViews()); setViewName(""); }
+    try { await savePivotView(viewName.trim(), { ...request, source_ids: validSourceIds.length ? validSourceIds : [tableId], visualization } as PivotRequest & { perspective_config?: unknown }); setViews(await getPivotViews()); setViewName(""); }
     catch (e: unknown) { setError(e instanceof Error ? e.message : "Não foi possível gravar a visão"); }
   };
-  const loadView = (view: PivotView) => { setTableId(view.destination_table_id); const config = view.config as PivotView["config"] & { source_ids?: number[]; sort_rows?: PivotSort[]; sort_columns?: PivotSort[] }; const sourceIds = config.source_ids?.filter(id => id !== 0) || []; setSourceIds(sourceIds.length ? sourceIds : [view.destination_table_id]); setRows(view.config.rows); setCols(view.config.columns); setMeasures(view.config.measures); setFilters(view.config.filters); setSortRows(config.sort_rows || []); setSortCols(config.sort_columns || []); };
+  const loadView = (view: PivotView) => { setTableId(view.destination_table_id); const config = view.config as PivotView["config"] & { source_ids?: number[]; sort_rows?: PivotSort[]; sort_columns?: PivotSort[] }; const sourceIds = config.source_ids?.filter(id => id !== 0) || []; setSourceIds(sourceIds.length ? sourceIds : [view.destination_table_id]); setRows(view.config.rows); setCols(view.config.columns); setMeasures(view.config.measures); setFilters(view.config.filters); setSortRows(config.sort_rows || []); setSortCols(config.sort_columns || []); setVisualization(reportVisualization(view)); };
+  // Opening a report from the URL: switch to its table first, then apply the
+  // config once that table's metadata (and its defaults) has loaded.
+  useEffect(() => {
+    if (!pendingViewId || !meta || !views.length) return;
+    const view = views.find(item => item.id === pendingViewId);
+    if (!view) { setPendingViewId(undefined); setError("O relatório pedido não foi encontrado."); return; }
+    if (meta.destination_table_id !== view.destination_table_id) { setTableId(view.destination_table_id); return; }
+    // Older reports saved FOCUS names in another case ("EffectiveCost"); use the
+    // table's spelling so the field pickers recognise them.
+    const known = new Map(meta.columns.map(column => [column.name.toLowerCase(), column.name]));
+    const name = (column: string) => known.get(column.toLowerCase()) || column;
+    loadView({ ...view, config: {
+      ...view.config,
+      rows: (view.config.rows || []).map(name), columns: (view.config.columns || []).map(name),
+      measures: (view.config.measures || []).map(measure => ({ ...measure, column: name(measure.column) })),
+      filters: (view.config.filters || []).map(filter => ({ ...filter, column: name(filter.column) })),
+    } });
+    setViewName(view.name);
+    setPendingViewId(undefined);
+  }, [pendingViewId, meta, views]);
+  const deleteReport = (view: PivotView) => { void deletePivotView(view.id).then(() => getPivotViews().then(setViews)).catch(e => setError(formatApiError(e, "Não foi possível excluir o relatório"))); };
+  const applyTemplate = (template: PivotTemplate) => {
+    setVisualization(template.visualization);
+    setRows(template.rows);
+    setCols(template.cols);
+    setSortCols([]);
+    setSortRows([]);
+    if (template.sort && template.sort !== "none") setMeasureSort(0, template.sort);
+  };
+  const guidedMeasureSort = (() => {
+    const measureSort = sortRows.find(item => item.column === "m0");
+    if (!measureSort) return "none" as const;
+    return measureSort.direction === "desc" ? "only_desc" as const : "only_asc" as const;
+  })();
   const loadDrill = async (
     destId: number,
     cellFilters: Record<string, unknown>,
@@ -630,11 +704,16 @@ export default function PivotAnalysis({ destinations, initialTableId, showSearch
             }
             return next;
           })} />)}
-          {sourceIds.length > 1 && <Typography variant="caption" color="text.secondary">Para separar as fontes, adicione o campo <code>origem</code> em Linhas.</Typography>}
+          {sourceIds.length > 1 && <Typography variant="caption" color="text.secondary">Para separar as fontes, adicione o campo <code>origem</code> em {mode === "guided" ? "Agrupar por" : "Linhas"}.</Typography>}
           </Box>
+          <Box sx={{ flex: 1 }} />
+          <ToggleButtonGroup exclusive size="small" value={mode} onChange={(_, value) => value && setMode(value)} aria-label="Modo de montagem">
+            <ToggleButton value="guided" sx={{ gap: 0.75, px: 1.5, textTransform: "none" }}><AutoAwesome fontSize="small" />Modo guiado</ToggleButton>
+            <ToggleButton value="advanced" sx={{ gap: 0.75, px: 1.5, textTransform: "none" }}><Tune fontSize="small" />Modo avançado</ToggleButton>
+          </ToggleButtonGroup>
         </Stack>
         <Stack direction="row" gap={1} alignItems="center" flexWrap="wrap">
-          <Autocomplete
+          {mode === "advanced" && <><Autocomplete
           size="small"
           options={fieldOptions}
           value={fieldOptions.find(c => c.name === field) || null}
@@ -650,9 +729,10 @@ export default function PivotAnalysis({ destinations, initialTableId, showSearch
         />
         <Button startIcon={<Add />} onClick={() => addField("rows")} disabled={!field}>Linhas</Button>
         <Button startIcon={<Add />} onClick={() => addField("cols")} disabled={!field}>Colunas</Button>
-        <Button startIcon={<Add />} onClick={() => addField("filters")} disabled={!field}>Filtro</Button>
+        <Button startIcon={<Add />} onClick={() => addField("filters")} disabled={!field}>Filtro</Button></>}
+        {mode === "guided" && <Box sx={{ flex: 1 }}><Typography variant="body2" color="text.secondary">Escolha o que ver em poucos passos. A prévia atualiza sozinha a cada mudança.</Typography></Box>}
         <Button variant="outlined" startIcon={<Visibility />} onClick={() => setQueryOpen(true)}>Ver consulta</Button>
-          <Button variant="contained" startIcon={<PlayArrow />} onClick={execute} disabled={loading || !meta}>{loading ? "Consultando dados..." : "Recalcular pivot"}</Button>
+          <Button variant="contained" startIcon={<PlayArrow />} onClick={execute} disabled={loading || !meta}>{loading ? "Consultando dados..." : mode === "guided" ? "Atualizar" : "Recalcular pivot"}</Button>
           <Button variant="outlined" startIcon={<Download />} disabled={!result} onClick={() => result && downloadCsv(result)}>CSV</Button>
           <Button variant="outlined" startIcon={<TableChart />} disabled={!result} onClick={() => result && downloadExcel(result)}>Excel</Button>
         </Stack>
@@ -662,6 +742,32 @@ export default function PivotAnalysis({ destinations, initialTableId, showSearch
         <Button variant="outlined" startIcon={<Visibility />} onClick={executeSearch} disabled={searchLoading || !searchTerm.trim()}>{searchLoading ? "Procurando..." : "Buscar"}</Button>
       </Stack>}
       <Divider sx={{ my: 1.5 }} />
+      {mode === "guided" && <PivotGuidedPanel
+        meta={meta}
+        fields={fieldOptions}
+        visualization={visualization}
+        rows={rows}
+        cols={cols}
+        measures={measures}
+        filters={filters}
+        filterInputs={filterInputs}
+        measureSort={guidedMeasureSort}
+        onVisualization={setVisualization}
+        onRows={next => { setRows(next); setSortRows(current => current.filter(item => next.includes(item.column) || /^m\d+$/.test(item.column))); }}
+        onCols={next => { setCols(next); setSortCols(current => current.filter(item => next.includes(item.column))); }}
+        onMeasure={next => setMeasures(current => [next, ...current.slice(1)])}
+        onMeasureSort={next => setMeasureSort(0, next)}
+        onFilters={next => {
+          setFilters(next);
+          setFilterInputs(current => Object.fromEntries(Object.entries(current).filter(([name]) => next.some(item => item.column === name))));
+        }}
+        onFilterInput={(column, input) => {
+          setFilterInputs(current => ({ ...current, [column]: input }));
+          setFilters(current => current.map(f => f.column === column ? { ...f, values: input.split(",").map(v => v.trim()).filter(Boolean) } : f));
+        }}
+        onTemplate={applyTemplate}
+      />}
+      {mode === "advanced" && <>
       <Typography variant="caption" color="text.secondary" sx={{ mb: 0.5, display: "block" }}>
         Marque campos na lista e arraste um ou vários para Linhas, Colunas ou Filtros. Os campos nas áreas também podem ser reordenados.
       </Typography>
@@ -749,7 +855,7 @@ export default function PivotAnalysis({ destinations, initialTableId, showSearch
             </Paper>
           );
         })}
-        <Paper variant="outlined" sx={{ p: 1, minWidth: 260, flex: 1 }}><Typography variant="caption" fontWeight={700}>VALORES</Typography>{measures.map((m, index) => { const measureSort = sortRows.find(item => item.column === `m${index}`); const exclusive = sortRows.length === 1 && measureSort; const sortValue = exclusive ? (measureSort.direction === "desc" ? "only_desc" : "only_asc") : (measureSort?.direction || "none"); return <Stack key={index} direction="row" gap={.5} mt={.5}><Select size="small" value={m.column} onChange={e => setMeasures(measures.map((x, i) => i === index ? { ...x, column: e.target.value } : x))} sx={{ flex: 1 }}>{meta?.measures.map(name => <MenuItem key={name} value={name}>{name}</MenuItem>)}</Select><Select size="small" value={m.aggregation} onChange={e => setMeasures(measures.map((x, i) => i === index ? { ...x, aggregation: e.target.value as PivotMeasure["aggregation"] } : x))}>{["SUM", "COUNT", "COUNT_DISTINCT", "AVG", "MIN", "MAX"].map(op => <MenuItem key={op} value={op}>{op}</MenuItem>)}</Select><Select size="small" value={sortValue} onChange={e => setMeasureSort(index, e.target.value as "none" | PivotSort["direction"] | "only_desc" | "only_asc")} title="Classificar linhas pelo valor"><MenuItem value="none">Sem ordenação</MenuItem><MenuItem value="desc">Do maior para o menor</MenuItem><MenuItem value="asc">Menor → maior</MenuItem><MenuItem value="only_desc">Somente valor: maior → menor</MenuItem><MenuItem value="only_asc">Somente valor: menor → maior</MenuItem></Select><RowAction kind="delete" onClick={() => setMeasures(measures.filter((_, i) => i !== index))} /></Stack>; })}<Button size="small" startIcon={<Add />} onClick={() => meta?.default_measure && setMeasures([...measures, { column: meta.default_measure, aggregation: "SUM" }])}>Incluir medida</Button></Paper>
+        <Paper variant="outlined" sx={{ p: 1, minWidth: 260, flex: 1 }}><Typography variant="caption" fontWeight={700}>VALORES</Typography>{measures.map((m, index) => { const measureSort = sortRows.find(item => item.column === `m${index}`); const exclusive = sortRows.length === 1 && measureSort; const sortValue = exclusive ? (measureSort.direction === "desc" ? "only_desc" : "only_asc") : (measureSort?.direction || "none"); return <Stack key={index} direction="row" gap={.5} mt={.5}><Select size="small" value={m.column} onChange={e => setMeasures(measures.map((x, i) => i === index ? { ...x, column: e.target.value } : x))} sx={{ flex: 1 }}>{meta?.measures.map(name => <MenuItem key={name} value={name}>{name}</MenuItem>)}</Select><Select size="small" value={m.aggregation} onChange={e => setMeasures(measures.map((x, i) => i === index ? { ...x, aggregation: e.target.value as PivotMeasure["aggregation"] } : x))}>{(Object.keys(AGGREGATION_LABELS) as PivotMeasure["aggregation"][]).map(op => <MenuItem key={op} value={op}>{AGGREGATION_LABELS[op]}</MenuItem>)}</Select><Select size="small" value={sortValue} onChange={e => setMeasureSort(index, e.target.value as "none" | PivotSort["direction"] | "only_desc" | "only_asc")} title="Classificar linhas pelo valor"><MenuItem value="none">Sem ordenação</MenuItem><MenuItem value="desc">Do maior para o menor</MenuItem><MenuItem value="asc">Menor → maior</MenuItem><MenuItem value="only_desc">Somente valor: maior → menor</MenuItem><MenuItem value="only_asc">Somente valor: menor → maior</MenuItem></Select><RowAction kind="delete" onClick={() => setMeasures(measures.filter((_, i) => i !== index))} /></Stack>; })}<Button size="small" startIcon={<Add />} onClick={() => meta?.default_measure && setMeasures([...measures, { column: meta.default_measure, aggregation: "SUM" }])}>Incluir medida</Button></Paper>
       </Stack>
       {filters.map(filter => <Stack key={filter.column} direction="row" gap={1} alignItems="center" sx={{ mt: 1, mr: 1, flexWrap: "wrap" }}>
         <FormControl size="small" sx={{ minWidth: 150 }}><InputLabel>Condição</InputLabel><Select label="Condição" value={filter.operator || "IN"} onChange={e => setFilters(filters.map(f => f.column === filter.column ? { ...f, operator: e.target.value as PivotFilter["operator"], values: ["IS_NULL", "IS_NOT_NULL"].includes(e.target.value) ? [] : f.values } : f))}><MenuItem value="IN">É igual a</MenuItem><MenuItem value="NOT_IN">Não é</MenuItem><MenuItem value="CONTAINS">Contém</MenuItem><MenuItem value="NOT_CONTAINS">Não contém</MenuItem><MenuItem value="IS_NULL">É vazio</MenuItem><MenuItem value="IS_NOT_NULL">Preenchido</MenuItem></Select></FormControl>
@@ -768,11 +874,12 @@ export default function PivotAnalysis({ destinations, initialTableId, showSearch
           }}
         />
       </Stack>)}
+      </>}
       <Stack direction="row" gap={1} mt={2} alignItems="center" flexWrap="wrap">
-        <TextField size="small" label="Compartilhar visão" value={viewName} onChange={e => setViewName(e.target.value)} />
-        <Button startIcon={<Save />} onClick={saveView} disabled={!viewName.trim()}>Salvar</Button>
-        <Button variant="outlined" onClick={() => setSavedViewsOpen(true)} disabled={!views.length}>
-          Visões salvas ({views.length})
+        <TextField size="small" label="Nome do relatório" value={viewName} onChange={e => setViewName(e.target.value)} />
+        <Button startIcon={<Save />} onClick={saveView} disabled={!viewName.trim()}>Salvar relatório</Button>
+        <Button variant="outlined" onClick={() => setSavedViewsOpen(true)}>
+          Relatórios salvos ({views.length})
         </Button>
       </Stack>
     </Paper>
@@ -783,9 +890,18 @@ export default function PivotAnalysis({ destinations, initialTableId, showSearch
       </Alert>
     )}
     {result?.currency_added && <Alert severity="info" sx={{ mb: 2 }}>Currency foi incluída nas linhas para impedir a soma de moedas diferentes.</Alert>}
-    {result?.period_auto_applied && <Alert severity="info" sx={{ mb: 2 }}>Sem período no eixo, o pivot restringiu base consolidada e forecast a {result.period_auto_applied}. Coloque <code>_billing_period</code> (ou <code>period</code>) em colunas para ver a série completa.</Alert>}
+    {result?.period_auto_applied && mode === "guided" && <Alert severity="info" sx={{ mb: 2 }}>Sem mês no agrupamento, o relatório mostra só {formatPeriod(result.period_auto_applied)}. Inclua <strong>{fieldLabel(meta?.columns.find(column => isPeriodDim(column.name))?.name || "period")}</strong> em Agrupar por ou Separar séries para ver todos os meses.</Alert>}
+    {result?.period_auto_applied && mode === "advanced" && <Alert severity="info" sx={{ mb: 2 }}>Sem período no eixo, o pivot restringiu base consolidada e forecast a {result.period_auto_applied}. Coloque <code>_billing_period</code> (ou <code>period</code>) em colunas para ver a série completa.</Alert>}
     {drillLoading && <Alert severity="info" sx={{ mb: 2 }}>Carregando detalhamento...</Alert>}
-    {(result || loading) && <Box sx={{ position: "relative" }} aria-busy={loading}>{result && <TableContainer component={Paper} sx={{ maxHeight: "60vh", opacity: loading ? 0.45 : 1, transition: "opacity .15s" }}><Table stickyHeader size="small"><TableHead><TableRow>{result.rows.map(name => <TableCell key={name}>{name}</TableCell>)}{colKeys.flatMap(col => result.measures.map(m => <TableCell key={`${key(col)}-${m.column}`}>{formatKey(col, result.columns)}<br /><small>{m.label || `${m.aggregation} ${m.column}`}</small></TableCell>))}<TableCell>Total</TableCell></TableRow></TableHead><TableBody>{rowKeys.map(row => <TableRow key={key(row)}>{row.map((value, i) => <TableCell key={i}>{dimLabel(result.rows[i], value)}</TableCell>)}{colKeys.flatMap(col => (cells.get(`${key(row)}|${key(col)}`) || result.measures.map(() => null)).map((value, i) => <TableCell key={`${key(col)}-${i}`} onClick={() => openDrill(row, col)} sx={{ cursor: "pointer", "&:hover": { bgcolor: "action.hover" } }}>{typeof value === "number" ? money.format(value) : "—"}</TableCell>))}<TableCell>{totalFor("rows", row).map(value => typeof value === "number" ? money.format(value) : "—").join(" / ")}</TableCell></TableRow>)}{result.totals && <TableRow sx={{ bgcolor: "action.hover" }}>{result.rows.map((_, i) => <TableCell key={i}>{i === 0 ? "TOTAL" : ""}</TableCell>)}{colKeys.flatMap(col => totalFor("columns", col).map((value, i) => <TableCell key={`${key(col)}-${i}`}>{typeof value === "number" ? money.format(value) : "—"}</TableCell>))}<TableCell>{result.totals.grand.map(value => typeof value === "number" ? money.format(value) : "—").join(" / ")}</TableCell></TableRow>}</TableBody></Table></TableContainer>}{loading && <Box sx={{ position: "absolute", inset: 0, display: "grid", placeItems: "center", bgcolor: "rgba(255,255,255,.55)", zIndex: 1 }}><Paper elevation={3} sx={{ px: 2, py: 1.5, display: "flex", alignItems: "center", gap: 1 }}><CircularProgress size={20} /><Typography variant="body2">Recalculando o pivot…</Typography></Paper></Box>}</Box>}
+    {mode === "guided" && meta && <Breadcrumbs separator="›" sx={{ mb: 1, "& .MuiBreadcrumbs-ol": { rowGap: 0.5 } }} aria-label="Resumo do relatório">
+      <Typography variant="body2" fontWeight={700}>{selectedDestination?.name || "Base"}</Typography>
+      {measures[0] && <Typography variant="body2">{friendlyMeasureLabel(measures[0])}</Typography>}
+      {rows.length > 0 && visualization !== "indicator" && <Typography variant="body2">por {rows.map(fieldLabel).join(" › ")}</Typography>}
+      {filters.map(filter => <Chip key={filter.column} size="small" onDelete={() => removeField("filters", filter.column)}
+        label={`${fieldLabel(filter.column)} ${OPERATOR_LABELS[filter.operator || "IN"]}${filter.values.length ? ` ${filter.values.join(", ")}` : ""}`} />)}
+    </Breadcrumbs>}
+    {mode === "guided" && result && visualization !== "table" && <Box sx={{ opacity: loading ? 0.45 : 1, transition: "opacity .15s" }}><PivotChart result={result} visualization={visualization} onCellClick={(row, col) => { void openDrill(row, col); }} /></Box>}
+    {(mode === "advanced" || visualization === "table") && (result || loading) && <Box sx={{ position: "relative" }} aria-busy={loading}>{result && <TableContainer component={Paper} sx={{ maxHeight: "60vh", opacity: loading ? 0.45 : 1, transition: "opacity .15s" }}><Table stickyHeader size="small"><TableHead><TableRow>{result.rows.map(name => <TableCell key={name}>{mode === "guided" ? fieldLabel(name) : name}</TableCell>)}{colKeys.flatMap(col => result.measures.map(m => <TableCell key={`${key(col)}-${m.column}`}>{formatKey(col, result.columns)}<br /><small>{mode === "guided" ? friendlyMeasureLabel(m) : m.label || `${m.aggregation} ${m.column}`}</small></TableCell>))}<TableCell>Total</TableCell></TableRow></TableHead><TableBody>{rowKeys.map(row => <TableRow key={key(row)}>{row.map((value, i) => <TableCell key={i}>{dimLabel(result.rows[i], value)}</TableCell>)}{colKeys.flatMap(col => (cells.get(`${key(row)}|${key(col)}`) || result.measures.map(() => null)).map((value, i) => <TableCell key={`${key(col)}-${i}`} onClick={() => openDrill(row, col)} sx={{ cursor: "pointer", "&:hover": { bgcolor: "action.hover" } }}>{typeof value === "number" ? money.format(value) : "—"}</TableCell>))}<TableCell>{totalFor("rows", row).map(value => typeof value === "number" ? money.format(value) : "—").join(" / ")}</TableCell></TableRow>)}{result.totals && <TableRow sx={{ bgcolor: "action.hover" }}>{result.rows.map((_, i) => <TableCell key={i}>{i === 0 ? "TOTAL" : ""}</TableCell>)}{colKeys.flatMap(col => totalFor("columns", col).map((value, i) => <TableCell key={`${key(col)}-${i}`}>{typeof value === "number" ? money.format(value) : "—"}</TableCell>))}<TableCell>{result.totals.grand.map(value => typeof value === "number" ? money.format(value) : "—").join(" / ")}</TableCell></TableRow>}</TableBody></Table></TableContainer>}{loading && <Box sx={{ position: "absolute", inset: 0, display: "grid", placeItems: "center", bgcolor: "rgba(255,255,255,.55)", zIndex: 1 }}><Paper elevation={3} sx={{ px: 2, py: 1.5, display: "flex", alignItems: "center", gap: 1 }}><CircularProgress size={20} /><Typography variant="body2">Recalculando o pivot…</Typography></Paper></Box>}</Box>}
     {showSearch && searchResult && <Paper sx={{ mt: 2, p: 2 }}><Stack direction="row" justifyContent="space-between" alignItems="center"><Typography variant="subtitle1">Resultados para “{searchTerm}”</Typography><Chip label={`${searchResult.total.toLocaleString("pt-BR")}${searchResult.total_is_estimate ? " exibidos (limite da busca)" : " registros encontrados"}`} size="small" /></Stack><Typography variant="caption" color="text.secondary">Pesquisa realizada em {searchResult.searched_columns?.length || 0} colunas textuais. As colunas encontradas aparecem destacadas.</Typography><TableContainer sx={{ maxHeight: "55vh", mt: 1 }}><Table stickyHeader size="small"><TableHead><TableRow>{searchResult.columns.map(column => <TableCell key={column}>{column}</TableCell>)}</TableRow></TableHead><TableBody>{searchResult.rows.map((row, index) => <TableRow key={index}>{searchResult.columns.map(column => <TableCell key={column} sx={searchResult.matched_columns[index]?.includes(column) ? { bgcolor: "#fff3cd", fontWeight: 700 } : undefined}>{String(row[column] ?? "")}</TableCell>)}</TableRow>)}</TableBody></Table></TableContainer></Paper>}
     <Drawer
       anchor="right"
@@ -872,25 +988,10 @@ export default function PivotAnalysis({ destinations, initialTableId, showSearch
       </DialogContent>
       <DialogActions><Button onClick={() => setRelationDialogOpen(false)}>Fechar</Button></DialogActions>
     </Dialog>
-    <Dialog open={savedViewsOpen} onClose={() => setSavedViewsOpen(false)} fullWidth maxWidth="sm">
-      <DialogTitle>Escolher visão gravada</DialogTitle>
+    <Dialog open={savedViewsOpen} onClose={() => setSavedViewsOpen(false)} fullWidth maxWidth="lg">
+      <DialogTitle>Relatórios salvos</DialogTitle>
       <DialogContent dividers>
-        <Stack spacing={1}>
-          {views.map(view => (
-            <Paper key={view.id} variant="outlined" sx={{ p: 1.25, display: "flex", alignItems: "center", justifyContent: "space-between", gap: 1 }}>
-              <Box sx={{ minWidth: 0 }}>
-                <Typography variant="body2" fontWeight={600} noWrap>{view.name}</Typography>
-                <Typography variant="caption" color="text.secondary" noWrap>
-                  {destinations.find(destination => destination.id === view.destination_table_id)?.name || "Tabela não disponível"}
-                </Typography>
-              </Box>
-              <Stack direction="row" spacing={0.5} flexShrink={0}>
-                <Button size="small" variant="contained" onClick={() => { loadView(view); setSavedViewsOpen(false); }}>Selecionar</Button>
-                <RowAction kind="delete" label={`Excluir visão ${view.name}`} onClick={() => deletePivotView(view.id).then(() => getPivotViews().then(setViews))} />
-              </Stack>
-            </Paper>
-          ))}
-        </Stack>
+        <SavedReportsGrid reports={views} destinations={destinations} onOpen={view => { loadView(view); setSavedViewsOpen(false); }} onDelete={deleteReport} />
       </DialogContent>
       <DialogActions><Button onClick={() => setSavedViewsOpen(false)}>Fechar</Button></DialogActions>
     </Dialog>

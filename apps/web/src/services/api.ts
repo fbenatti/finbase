@@ -7,6 +7,20 @@ export const api = axios.create({
   timeout: 120000,
 });
 
+const DISPLAY_MESSAGE_FIELDS = new Set([
+  "detail", "message", "error", "error_message", "last_test_message",
+  "current_blob", "phase", "reason", "warning", "warnings", "note", "notes", "checkpoint",
+]);
+
+function sanitizeApiDisplayMessages(value: unknown, field?: string): unknown {
+  if (typeof value === "string") return field && DISPLAY_MESSAGE_FIELDS.has(field) ? dataDisplayText(value) : value;
+  if (Array.isArray(value)) return value.map((item) => sanitizeApiDisplayMessages(item, field));
+  if (value && typeof value === "object") {
+    return Object.fromEntries(Object.entries(value).map(([key, item]) => [key, sanitizeApiDisplayMessages(item, key.toLowerCase())]));
+  }
+  return value;
+}
+
 export async function getMcaCommitmentStatus() {
   const { data } = await api.get("/custos/compromisso-mca/situacao");
   return data;
@@ -218,8 +232,12 @@ async function tryRefresh(): Promise<string | null> {
 }
 
 api.interceptors.response.use(
-  (response) => response,
+  (response) => {
+    response.data = sanitizeApiDisplayMessages(response.data);
+    return response;
+  },
   async (error) => {
+    if (error.response) error.response.data = sanitizeApiDisplayMessages(error.response.data);
     const original = error.config || {};
     const url: string = original.url || "";
     // login/refresh/sso jamais repetem via refresh (evita loop); as demais
@@ -376,6 +394,7 @@ export const SCANNABLE_CONNECTOR_TYPES = new Set([
   "azure_openai_ptu",
   "gcp_bigquery",
   "oci",
+  "oci_monitoring",
   "mongodb_atlas",
   "github_license",
   "github_token",
@@ -3581,8 +3600,7 @@ export interface AnalysisSummaryRow {
 
 export interface AnalysisHealth {
   trino: string;
-  nessie: string;
-  minio: string;
+  iceberg_catalog: string;
 }
 
 export interface AnalysisStagingTable {
@@ -3928,6 +3946,72 @@ export async function savePivotView(
 }
 export async function deletePivotView(viewId: number): Promise<void> {
   await api.delete(`/dados/explorador/dinamica/visoes/${viewId}`);
+}
+/** Runs a saved report with the same sources and limits the pivot screen uses. */
+export async function runSavedReport(view: PivotView): Promise<PivotResult> {
+  const config = view.config as PivotRequest & { source_ids?: number[] };
+  const sourceIds = (config.source_ids || []).filter(id => id !== 0);
+  const ids = sourceIds.length ? sourceIds : [view.destination_table_id];
+  const common = {
+    rows: config.rows || [], columns: config.columns || [], measures: config.measures || [], filters: config.filters || [],
+    row_limit: config.row_limit || 500, column_limit: config.column_limit || 60, include_totals: true,
+    sort_rows: config.sort_rows || [], sort_columns: config.sort_columns || [],
+  };
+  return ids.length > 1
+    ? runPivotUnion({ ...common, destination_table_ids: ids, origin_column: "origem" })
+    : runPivot({ ...common, destination_table_id: ids[0] });
+}
+
+// ── Painéis: composições de relatórios salvos ──
+export type DashboardChartType = "table" | "bar" | "line" | "pie" | "kpi";
+export interface DashboardWidgetPosition {
+  order: number;
+  /** Colunas ocupadas numa grade de 12. */
+  width: number;
+  /** Altura em linhas de grade. */
+  height: number;
+}
+export interface DashboardWidget {
+  id: number;
+  dashboard_id: number;
+  pivot_view_id: number | null;
+  title: string;
+  chart_type: DashboardChartType;
+  config: Record<string, unknown>;
+  position: Partial<DashboardWidgetPosition>;
+}
+export interface Dashboard {
+  id: number;
+  name: string;
+  pivot_view_id: number | null;
+  global_filters: Record<string, unknown>;
+  layout: Record<string, unknown>;
+  widgets: DashboardWidget[];
+  updated_at?: string;
+}
+export type DashboardWidgetInput = Pick<DashboardWidget, "pivot_view_id" | "title" | "chart_type" | "position">;
+export async function getDashboards(): Promise<Dashboard[]> {
+  return (await api.get("/dados/explorador/paineis")).data;
+}
+export async function saveDashboard(name: string, dashboardId?: number): Promise<Dashboard> {
+  const body = { name, global_filters: {}, layout: {} };
+  const { data } = dashboardId
+    ? await api.put(`/dados/explorador/paineis/${dashboardId}`, body)
+    : await api.post("/dados/explorador/paineis", body);
+  return { widgets: [], ...data };
+}
+export async function deleteDashboard(dashboardId: number): Promise<void> {
+  await api.delete(`/dados/explorador/paineis/${dashboardId}`);
+}
+export async function saveDashboardWidget(dashboardId: number, widget: DashboardWidgetInput, widgetId?: number): Promise<DashboardWidget> {
+  const body = { ...widget, dashboard_id: dashboardId, config: {} };
+  const { data } = widgetId
+    ? await api.put(`/dados/explorador/paineis/${dashboardId}/componentes/${widgetId}`, body)
+    : await api.post(`/dados/explorador/paineis/${dashboardId}/componentes`, body);
+  return data;
+}
+export async function deleteDashboardWidget(dashboardId: number, widgetId: number): Promise<void> {
+  await api.delete(`/dados/explorador/paineis/${dashboardId}/componentes/${widgetId}`);
 }
 export interface DataSearchResult {
   columns: string[];

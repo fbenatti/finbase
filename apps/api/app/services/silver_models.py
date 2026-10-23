@@ -68,62 +68,6 @@ def _f(name: str, type_: str, role: str, **kw: Any) -> SilverField:
 # pergunta "qual o valor desta métrica neste recurso nesta janela" é idêntica em
 # todas elas.
 
-METRIC_SERIES = SilverModel(
-    name="resource_metric_series",
-    table="resource_metric_series",
-    description="Série temporal de métricas de qualquer recurso, em qualquer nuvem.",
-    grain=("cloud_provider", "sub_account_id", "resource_id", "metric", "bucket_start_utc"),
-    primary_measure="value",
-    time_field="bucket_start_utc",
-    fields=(
-        _f("cloud_provider", "varchar", ROLE_IDENTITY, required=True),
-        _f("resource_type", "varchar", ROLE_IDENTITY),
-        _f("resource_id", "varchar", ROLE_IDENTITY, required=True),
-        _f("resource_name", "varchar", ROLE_DIMENSION),
-        _f("sub_account_id", "varchar", ROLE_IDENTITY,
-           notes="FOCUS SubAccountId: assinatura, conta ou projeto."),
-        _f("resource_group_id", "varchar", ROLE_DIMENSION, notes="FOCUS ResourceGroupId."),
-        _f("region_id", "varchar", ROLE_DIMENSION, notes="FOCUS RegionId."),
-        _f("resource_sku", "varchar", ROLE_DIMENSION),
-        _f("operating_system", "varchar", ROLE_DIMENSION),
-        _f("resource_state", "varchar", ROLE_DIMENSION),
-        _f("metric", "varchar", ROLE_IDENTITY, required=True),
-        _f("metric_unit", "varchar", ROLE_QUALITY),
-        _f("dimensions_json", "varchar", ROLE_DIMENSION,
-           notes="Dimensões da métrica; o conjunto varia por provider."),
-        _f("bucket_start_utc", "timestamp", ROLE_TIME, required=True),
-        _f("value_average", "decimal", ROLE_MEASURE),
-        _f("value_minimum", "decimal", ROLE_MEASURE),
-        _f("value_maximum", "decimal", ROLE_MEASURE),
-        _f("value_total", "decimal", ROLE_MEASURE),
-        _f("sample_count", "double", ROLE_MEASURE,
-           notes="Agregação count devolvida pela Azure; pode ser fracionária em métricas de disco."),
-        _f("value", "decimal", ROLE_MEASURE, notes="Valor canônico da série."),
-        _f("quality_status", "varchar", ROLE_QUALITY, required=True,
-           notes="OK | GAP | NOT_AVAILABLE. Ausência nunca vira zero."),
-        _f("quality_reason", "varchar", ROLE_QUALITY),
-        _f("source_api_version", "varchar", ROLE_QUALITY),
-        _f("_bronze_blob_path", "varchar", ROLE_QUALITY),
-        _f("_silver_ingested_at", "varchar", ROLE_QUALITY),
-        _f("_silver_owner", "varchar", ROLE_QUALITY,
-           notes="Fonte que escreveu a linha; a tabela recebe várias."),
-        _f("_processed_at", "varchar", ROLE_QUALITY,
-           notes="Gravado pelo writer; declarado para o schema não divergir."),
-        _f("_source_connection_id", "bigint", ROLE_QUALITY,
-           notes="Conexao que originou a linha."),
-        _f("_source_connection_code", "varchar", ROLE_QUALITY,
-           notes="Codigo da conexao de origem."),
-        _f("_source_connection_name", "varchar", ROLE_QUALITY,
-           notes="Tabela Bronze de origem; identidade estavel."),
-        _f("_billing_period", "varchar", ROLE_QUALITY),
-    ),
-)
-
-
-# ── Modelo: inventário de recursos ────────────────────────────────────────────
-# Azure Resource Graph, AWS Config, GCP Cloud Asset, OCI Search. Responde
-# "quais recursos existem, com que atributos, a partir de quando".
-
 RESOURCE_INVENTORY = SilverModel(
     name="resource_inventory",
     table="resource_inventory",
@@ -140,6 +84,18 @@ RESOURCE_INVENTORY = SilverModel(
         _f("region_id", "varchar", ROLE_DIMENSION),
         _f("resource_sku", "varchar", ROLE_DIMENSION),
         _f("sku_capacity", "bigint", ROLE_DIMENSION),
+        _f("vcpu_count", "double", ROLE_DIMENSION),
+        _f("ocpu_count", "double", ROLE_DIMENSION),
+        _f("cpu_architecture", "varchar", ROLE_DIMENSION),
+        _f("memory_bytes", "bigint", ROLE_DIMENSION),
+        _f("provisioned_capacity_bytes", "bigint", ROLE_DIMENSION),
+        _f("provisioned_iops", "double", ROLE_DIMENSION),
+        _f("provisioned_throughput_bytes_per_second", "double", ROLE_DIMENSION),
+        _f("network_bandwidth_bytes_per_second", "double", ROLE_DIMENSION),
+        _f("capacity_snapshot_id", "varchar", ROLE_QUALITY),
+        _f("capacity_source", "varchar", ROLE_QUALITY),
+        _f("raw_attributes_json", "varchar", ROLE_QUALITY),
+        _f("valid_to", "timestamp", ROLE_TIME),
         _f("resource_state", "varchar", ROLE_DIMENSION),
         _f("operating_system", "varchar", ROLE_DIMENSION),
         _f("provisioning_state", "varchar", ROLE_QUALITY),
@@ -750,56 +706,9 @@ RESOURCE_PROFILE_WINDOW = SilverModel(
 
 # Perfil diário separado do agregado legado mensal. A tabela antiga permanece
 # intacta para auditoria e não pode ser confundida com a nova série diária.
-RESOURCE_PROFILE_DAILY_WINDOW = SilverModel(
-    name="resource_profile_daily_window",
-    table="resource_profile_daily_window",
-    description="Perfil de uso calculado sobre partições diárias UTC e com custo mensal alocado explicitamente.",
-    grain=("resource_id", "metric", "window_from_day", "window_to_day", "series_source_connection_id", "series_owner"),
-    primary_measure="effective_cost",
-    time_field="window_to_day",
-    fields=(
-        _f("resource_id", "varchar", ROLE_IDENTITY, required=True),
-        _f("resource_name", "varchar", ROLE_DIMENSION),
-        _f("resource_sku", "varchar", ROLE_DIMENSION),
-        _f("resource_state", "varchar", ROLE_DIMENSION),
-        _f("region_id", "varchar", ROLE_DIMENSION),
-        _f("sub_account_id", "varchar", ROLE_IDENTITY),
-        _f("resource_type", "varchar", ROLE_DIMENSION),
-        _f("metric", "varchar", ROLE_IDENTITY, required=True),
-        _f("billing_period", "varchar", ROLE_IDENTITY, notes="Mês de custo associado; distinto da janela de perfil."),
-        _f("window_from_day", "varchar", ROLE_TIME, required=True),
-        _f("window_to_day", "varchar", ROLE_TIME, required=True),
-        _f("requested_days", "bigint", ROLE_QUALITY),
-        _f("observed_days", "bigint", ROLE_QUALITY),
-        _f("samples", "bigint", ROLE_QUALITY),
-        _f("value_min", "double", ROLE_MEASURE),
-        _f("p50", "double", ROLE_MEASURE),
-        _f("p95", "double", ROLE_MEASURE),
-        _f("p99", "double", ROLE_MEASURE),
-        _f("value_max", "double", ROLE_MEASURE),
-        _f("value_avg", "double", ROLE_MEASURE),
-        _f("coverage", "double", ROLE_QUALITY),
-        _f("confidence", "varchar", ROLE_QUALITY),
-        _f("cost_window_amount", "double", ROLE_MEASURE,
-           notes="Custo mensal rateado pelos dias de cada mês que intersectam a janela UTC."),
-        _f("effective_cost", "double", ROLE_MEASURE,
-           notes="Run rate mensal: custo alocado na janela / dias da janela × 30,4375."),
-        _f("cost_proration_rule", "varchar", ROLE_QUALITY),
-        _f("billed_cost", "varchar", ROLE_QUALITY),
-        _f("consumed_quantity", "varchar", ROLE_QUALITY),
-        _f("pricing_currency", "varchar", ROLE_QUALITY),
-        _f("profile_hash", "varchar", ROLE_QUALITY),
-        _f("profile_built_at", "varchar", ROLE_TIME),
-        _f("series_source_connection_id", "bigint", ROLE_QUALITY, required=True),
-        _f("series_owner", "varchar", ROLE_QUALITY, required=True),
-        _f("_billing_period", "varchar", ROLE_QUALITY),
-        _f("_processed_at", "varchar", ROLE_QUALITY),
-    ),
-)
 
 
 MODELS: dict[str, SilverModel] = {
-    METRIC_SERIES.name: METRIC_SERIES,
     RESOURCE_INVENTORY.name: RESOURCE_INVENTORY,
     RESOURCE_COST.name: RESOURCE_COST,
     PRICE_CATALOG.name: PRICE_CATALOG,
@@ -812,7 +721,6 @@ MODELS: dict[str, SilverModel] = {
     RIGHTSIZING_CANDIDATE.name: RIGHTSIZING_CANDIDATE,
     RIGHTSIZING_DECISION.name: RIGHTSIZING_DECISION,
     RESOURCE_PROFILE_WINDOW.name: RESOURCE_PROFILE_WINDOW,
-    RESOURCE_PROFILE_DAILY_WINDOW.name: RESOURCE_PROFILE_DAILY_WINDOW,
 }
 
 

@@ -8,7 +8,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import select, text
 from app.config import settings
 from app.database import engine, Base, async_session
-from app.routers import connections, csv_upload, etl, rules, periods, analysis, destinations, schema, forecast, clone_rules, planning, anomalies, savings, azure_tag_policy, gold, reservations, azure_resource_graph, azure_sources, azure_mca_commitment, oci_operational, ideas, financial_contracts, auth as auth_router, users as users_router, groups as groups_router, roles as roles_router, audit as audit_router, sso as sso_router, sso_providers as sso_providers_router, integrations, processing_logs
+from app.routers import connections, csv_upload, etl, rules, periods, analysis, destinations, schema, forecast, clone_rules, planning, anomalies, savings, azure_tag_policy, gold, reservations, azure_resource_graph, azure_sources, azure_mca_commitment, oci_operational, infrastructure_metrics, ideas, financial_contracts, commitment_engine, auth as auth_router, users as users_router, groups as groups_router, roles as roles_router, audit as audit_router, sso as sso_router, sso_providers as sso_providers_router, integrations, processing_logs
 from app.routers import modules as modules_router
 from app.routers import hierarchy_aliases
 from app.routers import connector_visibility as connector_visibility_router
@@ -147,6 +147,7 @@ async def lifespan(app: FastAPI):
         from app.models.ingested_blob import IngestedBlob  # noqa: F401
         from app.models.rules import EtlMapping, BusinessRule, ClassificationRule, ClassificationFieldValue, OrganizationMoveAudit, DepartmentSharedCost, DepartmentSharedCostTarget  # noqa: F401
         from app.models.financial_contract import FinancialContract, FinancialContractConnection, FinancialContractBudgetScope, ContractSettlementRun, ContractSettlementMonth  # noqa: F401
+        from app.models.commitment import CommitmentOffer, CommitmentRecoRun, CommitmentRecommendation  # noqa: F401
         from app.models.period_status import PeriodStatus  # noqa: F401
         from app.models.etl_task import EtlTask  # noqa: F401
         from app.models.processing_log import ProcessingLog  # noqa: F401
@@ -203,6 +204,8 @@ async def lifespan(app: FastAPI):
         await _execute_migration(conn, "ALTER TABLE user_account ADD COLUMN IF NOT EXISTS failed_attempts INTEGER NOT NULL DEFAULT 0")
         await _execute_migration(conn, "ALTER TABLE user_account ADD COLUMN IF NOT EXISTS locked_until TIMESTAMPTZ")
         await _execute_migration(conn, "ALTER TABLE navigation_module ADD COLUMN IF NOT EXISTS custom_label VARCHAR(160)")
+        await _execute_migration(conn, "ALTER TABLE navigation_module ADD COLUMN IF NOT EXISTS custom_position INTEGER")
+        await _execute_migration(conn, "ALTER TABLE navigation_module ADD COLUMN IF NOT EXISTS custom_parent_code VARCHAR(60)")
         await _execute_migration(conn, "ALTER TABLE role_permission ADD COLUMN IF NOT EXISTS scope VARCHAR(60)")
         await _execute_migration(conn, "ALTER TABLE user_grant ADD COLUMN IF NOT EXISTS scope VARCHAR(60)")
         await _execute_migration(conn, "ALTER TABLE role_permission DROP CONSTRAINT IF EXISTS uq_role_permission")
@@ -215,6 +218,7 @@ async def lifespan(app: FastAPI):
             "ALTER TABLE department ADD COLUMN IF NOT EXISTS id_orcamento VARCHAR(80)",
             "CREATE INDEX IF NOT EXISTS ix_department_id_orcamento ON department (id_orcamento)",
             "UPDATE department SET id_orcamento = NULLIF(BTRIM(custom_fields->>'IDOrcamento'), '') WHERE id_orcamento IS NULL AND custom_fields->>'IDOrcamento' IS NOT NULL",
+            "ALTER TABLE commitment_offer ADD COLUMN IF NOT EXISTS min_commit_annual DOUBLE PRECISION",
             "ALTER TABLE planning_version ADD COLUMN IF NOT EXISTS title VARCHAR(200)",
             "ALTER TABLE planning_version ADD COLUMN IF NOT EXISTS description TEXT",
             "ALTER TABLE planning_version ADD COLUMN IF NOT EXISTS event_type VARCHAR(40)",
@@ -269,6 +273,7 @@ async def lifespan(app: FastAPI):
             "ALTER TABLE scheduled_task ADD COLUMN IF NOT EXISTS connection_ids JSONB NOT NULL DEFAULT '[]'::jsonb",
             "ALTER TABLE scheduled_task ADD COLUMN IF NOT EXISTS schedule_type VARCHAR(30) NOT NULL DEFAULT 'collection'",
             "ALTER TABLE scheduled_task ALTER COLUMN connection_id DROP NOT NULL",
+            "ALTER TABLE pivot_view ALTER COLUMN destination_table_id DROP NOT NULL",
             "ALTER TABLE forecast_config ADD COLUMN IF NOT EXISTS period_allocation VARCHAR(30) NOT NULL DEFAULT 'none'",
             "ALTER TABLE forecast_config ADD COLUMN IF NOT EXISTS recent_weight DOUBLE PRECISION NOT NULL DEFAULT 0.7",
             "ALTER TABLE forecast_config ADD COLUMN IF NOT EXISTS minimum_daily_points INTEGER NOT NULL DEFAULT 7",
@@ -852,6 +857,20 @@ async def lifespan(app: FastAPI):
             # forecast_run.cutoff_date is now NULL until the engine computes the
             # data-driven cutoff (MAX collected − cutoff_days); never "today".
             "ALTER TABLE forecast_run ALTER COLUMN cutoff_date DROP NOT NULL",
+            "ALTER TABLE infra_opportunity_run ADD COLUMN IF NOT EXISTS policy_revision INTEGER",
+            "ALTER TABLE infra_opportunity_run ADD COLUMN IF NOT EXISTS policy_aggressiveness VARCHAR(20)",
+            "ALTER TABLE infra_opportunity_run ADD COLUMN IF NOT EXISTS policy_params JSON",
+        ):
+            await _execute_migration(conn, statement)
+
+        # Recurring-peak insight of a rightsizing opportunity: its saving is
+        # conditional on changing the job and has its own decision state.
+        for statement in (
+            "ALTER TABLE infra_opportunity ADD COLUMN IF NOT EXISTS conditional_action_type VARCHAR(30)",
+            "ALTER TABLE infra_opportunity ADD COLUMN IF NOT EXISTS conditional_monthly_saving DOUBLE PRECISION",
+            "ALTER TABLE infra_opportunity ADD COLUMN IF NOT EXISTS conditional_state VARCHAR(30)",
+            "ALTER TABLE infra_opportunity ADD COLUMN IF NOT EXISTS conditional_state_note VARCHAR(2000)",
+            "ALTER TABLE infra_opportunity ADD COLUMN IF NOT EXISTS conditional_state_changed_at TIMESTAMPTZ",
         ):
             await _execute_migration(conn, statement)
 
@@ -949,6 +968,11 @@ from app.core.security_headers_middleware import SecurityHeadersMiddleware
 from app.core.audit_middleware import AuditCaptureMiddleware
 from app.core.authz_middleware import RBACMiddleware
 
+from app.core.latency_middleware import LatencyMetricsMiddleware
+
+# O mais interno de propósito: mede só o tratamento da rota, sem autorização e
+# auditoria, que é onde o Trino entra.
+app.add_middleware(LatencyMetricsMiddleware)
 app.add_middleware(SecurityHeadersMiddleware)
 app.add_middleware(AuditCaptureMiddleware)
 app.add_middleware(RBACMiddleware)
@@ -991,12 +1015,14 @@ app.include_router(savings.router)
 app.include_router(azure_tag_policy.router)
 app.include_router(gold.router)
 app.include_router(reservations.router)
+app.include_router(commitment_engine.router)
 app.include_router(azure_resource_graph.router)
 app.include_router(azure_sources.router)
 app.include_router(azure_mca_commitment.router)
 app.include_router(integrations.router)
 app.include_router(financial_contracts.router)
 app.include_router(oci_operational.router)
+app.include_router(infrastructure_metrics.router)
 app.include_router(ideas.router)
 from app.routers import access as access_router  # noqa: E402
 app.include_router(access_router.router)

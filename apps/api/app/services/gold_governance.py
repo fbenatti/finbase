@@ -624,6 +624,12 @@ async def _finish_manifest(entrada: ManifestEntry, saida: PublishOutcome) -> Non
             invalidate_after_publish(entrada.cube_code)
         except Exception as exc:  # noqa: BLE001 — cache não derruba publicação
             logger.warning("Falha ao invalidar cache de %s: %s", entrada.cube_code, exc)
+        try:
+            from app.services.iceberg_maintenance import request_maintenance_after_publish
+
+            request_maintenance_after_publish(entrada.namespace, entrada.physical_table)
+        except Exception as exc:  # noqa: BLE001 — manutenção não derruba publicação
+            logger.warning("Falha ao pedir manutenção de %s: %s", entrada.physical_table, exc)
 
 
 class ManifestUnavailableError(RuntimeError):

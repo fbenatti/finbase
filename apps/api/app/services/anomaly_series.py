@@ -28,12 +28,11 @@ from datetime import date, datetime, timedelta, timezone
 from typing import Any, Mapping, Sequence
 
 from app.services.anomaly_observed import observed_daily_sql
+from app.services import lakehouse_metadata
 from app.services.forecast_service import gold_date_expr
 from app.services.trino_service import execute as trino_execute
 
 logger = logging.getLogger(__name__)
-_DETAIL_SCHEMA_CACHE: dict[tuple[str, str], tuple[float, list[str]]] = {}
-_DETAIL_SCHEMA_TTL_SECONDS = 300
 
 # Drilldown adicional, apenas quando a coluna existe na fonte configurada.
 # O forecast continua sendo comparável somente no grão de suas séries.
@@ -103,17 +102,16 @@ def detailed_event_sql(*, source_namespace: str, source_table: str, date_column:
 
 
 async def _read_detail_schema(source_namespace: str, source_table: str) -> list[str]:
-    key = (source_namespace, source_table)
-    cached = _DETAIL_SCHEMA_CACHE.get(key)
-    if cached and time.monotonic() - cached[0] < _DETAIL_SCHEMA_TTL_SECONDS:
-        return cached[1]
+    """Colunas da fonte, do catálogo por snapshot (``lakehouse_metadata``); DESCRIBE só como fallback."""
+    try:
+        return list(await lakehouse_metadata.table_schema(source_namespace, source_table))
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("[anomaly] schema de %s.%s indisponível no catálogo (%s); usando DESCRIBE", source_namespace, source_table, exc)
     rows = await trino_execute(
         f"DESCRIBE iceberg.{source_namespace}.{_quote(source_table)}", timeout_s=30
     )
-    columns = [str(row.get("Column") or row.get("column_name") or row.get("column") or "")
-               for row in rows]
-    _DETAIL_SCHEMA_CACHE[key] = (time.monotonic(), columns)
-    return columns
+    return [str(row.get("Column") or row.get("column_name") or row.get("column") or "")
+            for row in rows]
 
 #: Horizonte usado quando o caso não tem publicação com corte conhecido.
 DEFAULT_HORIZON_DAYS = 15

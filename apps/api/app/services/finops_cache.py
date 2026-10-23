@@ -131,6 +131,14 @@ def invalidate_after_publish(cube_code: str | None = None) -> int:
             removidas = len(chaves)
         for stats in _stats.values():
             stats.invalidations += removidas
+    # Os metadados de tabela (schema, último período) são chaveados por snapshot
+    # e já se corrigem sozinhos; esquecê-los aqui só libera a versão antiga.
+    try:
+        from app.services import lakehouse_metadata
+
+        lakehouse_metadata.invalidate()
+    except Exception:  # noqa: BLE001 — cache não derruba publicação
+        pass
     return removidas
 
 

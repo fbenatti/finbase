@@ -37,6 +37,11 @@ function formatFileSize(bytes: number): string {
   return `${size.toFixed(i === 0 ? 0 : 1)} ${units[i]}`;
 }
 
+function toLocalDateTimeInput(value: Date): string {
+  const local = new Date(value.getTime() - value.getTimezoneOffset() * 60000);
+  return local.toISOString().slice(0, 16);
+}
+
 // Seção da barra de extração: rótulo e explicação à esquerda, ações à direita.
 function ToolbarSection({ title, description, children }: { title: string; description: string; children: ReactNode }) {
   return (
@@ -99,6 +104,10 @@ export default function Extraction({ embedded = false }: { embedded?: boolean })
   );
   const isDatabricksSelected = useMemo(
     () => extractableConnections.some((c) => c.id === connId && c.connector_type === "databricks"),
+    [extractableConnections, connId],
+  );
+  const selectedConnection = useMemo(
+    () => extractableConnections.find((connection) => connection.id === connId) || null,
     [extractableConnections, connId],
   );
   const [ptuPeriods, setPtuPeriods] = useState<AvailablePeriod[]>([]);

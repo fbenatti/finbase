@@ -37,7 +37,7 @@ from app.services import lakehouse_layers as layers
 router = APIRouter(prefix="/custos/reservas", tags=["reservations"])
 logger = logging.getLogger(__name__)
 
-# Base do nome: a conexão entra como sufixo (`raw_azure_4p_...`), como em todas
+# Base do nome: a conexão entra como sufixo (`raw_<código>_...`), como em todas
 # as outras fontes. Guardar várias conexões na mesma tabela foi desenho legado.
 CATALOG_BASE = "reservations_catalog"
 UTILIZATION_BASE = "benefit_utilization"
@@ -62,14 +62,14 @@ def _ident(name: str) -> str:
 async def _tabelas_da_base(base: str) -> list[str]:
     """Tabelas Bronze das conexões para uma base de nome.
 
-    Cada conexão tem a sua (`raw_azure_4p_advisor_recommendations`,
-    `raw_<código>_advisor_recommendations`). A leitura une todas — quem consome
+    Cada conexão tem sua própria tabela (`raw_<código>_advisor_recommendations`).
+    A leitura une todas — quem consome
     não precisa saber em quantas conexões o dado está.
     """
     try:
         linhas = await trino_execute(
             "SELECT table_name FROM iceberg.information_schema.tables "
-            f"WHERE table_schema='bronze' AND table_name LIKE 'raw_azure\_%\_{base}' "
+            f"WHERE table_schema='bronze' AND table_name LIKE 'raw\_%\_{base}' "
             "ESCAPE '\\' ORDER BY table_name",
             timeout_s=TRINO_TIMEOUT_S,
         )
@@ -86,7 +86,7 @@ async def _table(base: str) -> str:
     """
     tabelas = await _tabelas_da_base(base)
     if not tabelas:
-        return f"iceberg.bronze.raw_azure_4p_{base}"
+        raise LookupError(f"Nenhuma tabela de origem encontrada para {base}")
     if len(tabelas) == 1:
         return f"iceberg.bronze.{tabelas[0]}"
     return "(" + " UNION ALL ".join(f"SELECT * FROM iceberg.bronze.{t}" for t in tabelas) + ")"

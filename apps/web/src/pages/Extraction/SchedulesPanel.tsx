@@ -39,6 +39,8 @@ interface SchedForm {
   gold_rule_ids: number[];
   accuracy: boolean;
   shared_cost: boolean;
+  rightsizing_after_pipeline: boolean;
+  rightsizing_days: number;
   backup_layers: ("bronze" | "silver" | "gold")[];
 }
 
@@ -50,6 +52,7 @@ const EMPTY_FORM: SchedForm = {
   forecast_after_ingestion: false, forecast_config_id: "",
   destination_table_ids: [], period_mode: "all", billing_periods: "",
   forecast_config_ids: [], gold_rule_ids: [], accuracy: true, shared_cost: false,
+  rightsizing_after_pipeline: false, rightsizing_days: 30,
   backup_layers: ["bronze"],
 };
 
@@ -133,6 +136,8 @@ export default function SchedulesPanel({ connections }: { connections: SourceCon
         ? cfg.gold_rule_ids.map(Number)
         : focusDimonIds(Array.isArray(cfg.destination_table_ids) ? cfg.destination_table_ids.map(Number) : []),
       accuracy: cfg.accuracy !== false, shared_cost: cfg.shared_cost === true,
+      rightsizing_after_pipeline: cfg.rightsizing_after_pipeline === true,
+      rightsizing_days: Number(cfg.rightsizing_days) || 30,
       backup_layers: Array.isArray(cfg.backup_layers) && cfg.backup_layers.length
         ? cfg.backup_layers.filter((layer): layer is "bronze" | "silver" | "gold" => ["bronze", "silver", "gold"].includes(String(layer)))
         : ["bronze"],
@@ -156,6 +161,8 @@ export default function SchedulesPanel({ connections }: { connections: SourceCon
         connection_ids: form.schedule_type === "backup" ? [] : (form.connection_ids.length ? form.connection_ids : [form.connection_id]),
         schedule_type: form.schedule_type,
         config_json: {
+          // Keys this form does not edit (e.g. anomaly_after_pipeline) stay as saved.
+          ...(editing?.config_json || {}),
           forecast_after_ingestion: form.forecast_after_ingestion,
           forecast_config_id: form.forecast_after_ingestion || form.schedule_type === "reprocess"
             ? (form.forecast_config_ids[0] || (form.forecast_config_id ? Number(form.forecast_config_id) : null))
@@ -167,6 +174,8 @@ export default function SchedulesPanel({ connections }: { connections: SourceCon
           gold_rule_ids: form.gold_rule_ids,
           accuracy: form.accuracy,
           shared_cost: form.shared_cost,
+          rightsizing_after_pipeline: form.rightsizing_after_pipeline,
+          rightsizing_days: form.rightsizing_days,
           backup_layers: form.backup_layers.length ? form.backup_layers : ["bronze"],
         },
       };
@@ -413,8 +422,8 @@ export default function SchedulesPanel({ connections }: { connections: SourceCon
               <SectionTitle>Processamento pós-coleta</SectionTitle>
               <Box>
                 <FormControl size="small" fullWidth>
-                  <InputLabel>bases consolidadas (camada gold)</InputLabel>
-                  <Select multiple value={form.destination_table_ids} label="Bases consolidadas (gold)"
+                  <InputLabel>Bases consolidadas</InputLabel>
+                  <Select multiple value={form.destination_table_ids} label="Bases consolidadas"
                     onChange={e => setForm({ ...form, destination_table_ids: e.target.value as number[] })}
                     renderValue={ids => (ids as number[]).map(id => destinations.find(d => d.id === id)?.name || `ID ${id}`).join(", ")}>
                     {destinations.map(d => <MenuItem key={d.id} value={d.id}>{d.name}</MenuItem>)}
@@ -434,6 +443,12 @@ export default function SchedulesPanel({ connections }: { connections: SourceCon
               {(form.schedule_type === "reprocess" || form.forecast_after_ingestion) && <FormControl size="small"><InputLabel>Forecasts candidatas</InputLabel><Select multiple value={form.forecast_config_ids} label="Forecasts candidatas" onChange={e => { const ids = (e.target.value as number[]).map(Number); setForm({ ...form, forecast_config_ids: ids, forecast_config_id: String(ids[0] || "") }); }} renderValue={ids => (ids as number[]).map(id => { const candidate = forecastConfigs.find(c => c.id === Number(id)); return candidate ? `${candidate.name} — ${candidate.table_name || `base consolidada ${candidate.destination_table_id}`}` : `Configuração ${id}`; }).join(", ")}><MenuItem value={0}>Nenhum</MenuItem>{forecastCandidates.map(c => <MenuItem key={c.id} value={c.id}>{c.name} — {c.table_name || `base consolidada ${c.destination_table_id}`}</MenuItem>)}</Select><FormHelperText>{forecastConfigsError ? "Não foi possível carregar as configurações de forecast. Verifique a API." : forecastCandidates.length ? "Somente configurações ativas compatíveis com as bases consolidadas selecionadas." : "Nenhuma configuração ativa compatível com as bases consolidadas selecionadas."}</FormHelperText></FormControl>}
               <FormControlLabel control={<Switch checked={form.accuracy} onChange={e => setForm({ ...form, accuracy: e.target.checked })} />} label="Gerar acerto da Forecast" />
               <FormControlLabel control={<Switch checked={form.shared_cost} onChange={e => setForm({ ...form, shared_cost: e.target.checked })} />} label="Gerar rateio de custo compartilhado" />
+              {form.schedule_type === "collection" && <Box sx={{ display: "flex", gap: 2, alignItems: "center", flexWrap: "wrap" }}>
+                <FormControlLabel control={<Switch checked={form.rightsizing_after_pipeline} onChange={e => setForm({ ...form, rightsizing_after_pipeline: e.target.checked })} />} label="Executar o motor de rightsizing após o reprocessamento" />
+                {form.rightsizing_after_pipeline && <TextField size="small" type="number" label="Janela da análise (dias)" sx={{ width: 190 }}
+                  value={form.rightsizing_days} onChange={e => setForm({ ...form, rightsizing_days: Math.max(1, Math.min(60, Number(e.target.value) || 30)) })}
+                  helperText="Vale para as fontes de métricas do agendamento" />}
+              </Box>}
               <Box>
                 <FormControl size="small" fullWidth><InputLabel>cubos analíticos</InputLabel><Select multiple value={form.gold_rule_ids} label="cubos analíticos" onChange={e => setForm({ ...form, gold_rule_ids: e.target.value as number[] })} renderValue={ids => (ids as number[]).map(id => goldRules.find(r => r.id === id)?.name || `Regra ${id}`).join(", ")}><MenuItem value={0}>Nenhuma base</MenuItem>{goldRules.filter(r => r.active).map(r => <MenuItem key={r.id} value={r.id}>{r.name}</MenuItem>)}</Select><FormHelperText>Os modelos analíticos relacionados à base escolhida já aparecem marcados.</FormHelperText></FormControl>
                 <Box sx={{ display: "flex", gap: 1, mt: 0.5 }}>

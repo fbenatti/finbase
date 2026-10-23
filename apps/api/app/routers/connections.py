@@ -56,6 +56,7 @@ GRID_FIELDS = {
 TOOL_CONNECTOR_TYPES = (
     "azure_openai_ptu",
     "azure_resource_graph",
+    "oci_monitoring",
     "github_billing", "github_license", "github_token",
     "notebooklm_license", "notebooklm_token",
     "claude_license", "claude_token",
@@ -83,6 +84,7 @@ GRID_FILTER_VALUES = {
         "azure resource graph": "azure_resource_graph",
         "gcp bigquery": "gcp_bigquery",
         "oracle cloud (oci)": "oci",
+        "oci monitoring (métricas)": "oci_monitoring",
         "mongodb atlas": "mongodb_atlas",
         "upload manual de csv": "manual_csv",
         "github billing (copilot)": "github_billing",

@@ -20,6 +20,7 @@ import AnomalyCaseDrawer, { CAUSE_LABEL, DECISION_LABEL, SEVERITY_COLOR, STATE_L
 import AnomaliesCasesDataGrid from "./AnomaliesCasesDataGrid";
 import AnomaliesImpactTab from "./AnomaliesImpactTab";
 import AnomaliesSettingsTab from "./AnomaliesSettingsTab";
+import RightsizingPolicySettings from "../InfrastructureOpportunities/RightsizingPolicySettings";
 import ExpandMoreIcon from "@mui/icons-material/ExpandMoreOutlined";
 import CloseIcon from "@mui/icons-material/CloseOutlined";
 import RefreshIcon from "@mui/icons-material/RefreshOutlined";
@@ -422,8 +423,11 @@ export default function Anomalies() {
         </Box>
       )}
 
-      {tab === 7 && config && (
-        <AnomaliesSettingsTab config={config} onSaved={() => void loadAll()} busy={busy} setBusy={setBusy} />
+      {tab === 7 && (
+        <Stack spacing={3}>
+          {config && <AnomaliesSettingsTab config={config} onSaved={() => void loadAll()} busy={busy} setBusy={setBusy} />}
+          <RightsizingPolicySettings />
+        </Stack>
       )}
 
       {tab === 3 && (

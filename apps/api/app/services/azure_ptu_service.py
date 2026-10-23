@@ -982,7 +982,7 @@ async def probe_eventhub(config: dict[str, Any]) -> dict[str, Any]:
                     "consumer_group": group,
                     "consumer_group_status": cg.status_code,
                     "partition_count": len((parts.json() or {}).get("value") or []) if parts.status_code == 200 else 0,
-                    "checkpoint": "postgres:azure_ptu_checkpoint",
+                    "checkpoint": "Controle de coleta incremental",
                 }
     return {"status": "FAILED", "message": f"Namespace {ns} não encontrado nas assinaturas visíveis"}
 

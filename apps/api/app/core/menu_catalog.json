@@ -450,6 +450,21 @@
     "api_prefixes": []
   },
   {
+    "code": "otimizacao_rightsizing_infra",
+    "parent_code": "section_otimizacao",
+    "label": "Rightsizing de infraestrutura",
+    "path": "/otimizacao/rightsizing-infra",
+    "renderer": "InfrastructureOpportunities",
+    "view_params": {},
+    "permission_module": "infrastructure_metrics",
+    "position": 3,
+    "icon": "SavingsOutlined",
+    "required": false,
+    "development_only": false,
+    "legacy_path": null,
+    "api_prefixes": []
+  },
+  {
     "code": "otimizacao_compromissos_e_compras",
     "parent_code": "section_otimizacao",
     "label": "Compras e compromissos",
@@ -550,8 +565,23 @@
     "api_prefixes": []
   },
   {
-    "code": "dados_catalogo_tabelas",
+    "code": "dados_metricas_infra",
     "parent_code": "section_dados",
+    "label": "Consumo de infraestrutura",
+    "path": "/dados/metricas-infra",
+    "renderer": "InfrastructureMetrics",
+    "view_params": {},
+    "permission_module": "infrastructure_metrics",
+    "position": 2,
+    "icon": "TimelineOutlined",
+    "required": false,
+    "development_only": false,
+    "legacy_path": null,
+    "api_prefixes": ["/custos/metricas-infra"]
+  },
+  {
+    "code": "dados_catalogo_tabelas",
+    "parent_code": "section_regras_negocio",
     "label": "Catálogo de dados",
     "path": "/dados/catalogo/tabelas",
     "renderer": "Tables",
@@ -559,7 +589,7 @@
       "tab": "destinations"
     },
     "permission_module": "destinations",
-    "position": 3,
+    "position": 11,
     "icon": "TableChartOutlined",
     "required": false,
     "development_only": false,
@@ -748,7 +778,7 @@
       "tab": "destino"
     },
     "permission_module": "analysis",
-    "position": 2,
+    "position": 4,
     "icon": "TableChartOutlined",
     "required": false,
     "development_only": false,
@@ -765,7 +795,7 @@
       "tab": "fontes"
     },
     "permission_module": "analysis",
-    "position": 3,
+    "position": 5,
     "icon": "CloudOutlined",
     "required": false,
     "development_only": false,
@@ -783,7 +813,7 @@
       "etapa": "origem"
     },
     "permission_module": "analysis",
-    "position": 4,
+    "position": 6,
     "icon": "StorageOutlined",
     "required": false,
     "development_only": false,
@@ -801,7 +831,7 @@
       "etapa": "preparacao"
     },
     "permission_module": "analysis",
-    "position": 5,
+    "position": 7,
     "icon": "DataObjectOutlined",
     "required": false,
     "development_only": false,
@@ -819,7 +849,7 @@
       "etapa": "consolidacao"
     },
     "permission_module": "analysis",
-    "position": 6,
+    "position": 8,
     "icon": "PaidOutlined",
     "required": false,
     "development_only": false,
@@ -836,7 +866,7 @@
       "tab": "temporarios"
     },
     "permission_module": "analysis",
-    "position": 7,
+    "position": 9,
     "icon": "DeleteSweepOutlined",
     "required": false,
     "development_only": false,
@@ -846,7 +876,7 @@
   {
     "code": "dados_explorador_tabelas_dinamicas",
     "parent_code": "section_consultas",
-    "label": "Pivot de custos",
+    "label": "Novo relatório",
     "path": "/dados/explorador/tabelas-dinamicas",
     "renderer": "Analysis",
     "view_params": {
@@ -861,6 +891,36 @@
     "api_prefixes": []
   },
   {
+    "code": "dados_explorador_relatorios",
+    "parent_code": "section_consultas",
+    "label": "Relatórios salvos",
+    "path": "/dados/explorador/relatorios",
+    "renderer": "Reports",
+    "view_params": {},
+    "permission_module": "analysis",
+    "position": 2,
+    "icon": "QueryStatsOutlined",
+    "required": false,
+    "development_only": false,
+    "legacy_path": null,
+    "api_prefixes": []
+  },
+  {
+    "code": "dados_explorador_paineis",
+    "parent_code": "section_consultas",
+    "label": "Painéis",
+    "path": "/dados/explorador/paineis",
+    "renderer": "Dashboards",
+    "view_params": {},
+    "permission_module": "analysis",
+    "position": 3,
+    "icon": "DashboardOutlined",
+    "required": false,
+    "development_only": false,
+    "legacy_path": null,
+    "api_prefixes": []
+  },
+  {
     "code": "dados_explorador_busca",
     "parent_code": "section_consultas",
     "label": "Busca na origem",
@@ -870,7 +930,7 @@
       "tab": "busca"
     },
     "permission_module": "analysis",
-    "position": 8,
+    "position": 10,
     "icon": "ScienceOutlined",
     "required": false,
     "development_only": false,
@@ -928,7 +988,7 @@
   },
   {
     "code": "governanca_regras_de_ajuste",
-    "parent_code": "section_regras_negocio",
+    "parent_code": "section_governanca",
     "label": "Regras financeiras",
     "path": "/governanca/regras-de-ajuste",
     "renderer": "Governance",
@@ -981,7 +1041,7 @@
   },
   {
     "code": "governanca_cubos",
-    "parent_code": "section_dados",
+    "parent_code": "section_regras_negocio",
     "label": "Modelos analíticos",
     "path": "/governanca/cubos",
     "renderer": "Governance",
@@ -989,7 +1049,7 @@
       "tab": "cost-relationship"
     },
     "permission_module": "gold",
-    "position": 10,
+    "position": 12,
     "icon": "DataObjectOutlined",
     "required": false,
     "development_only": false,
@@ -1064,13 +1124,13 @@
   },
   {
     "code": "administracao_auditoria",
-    "parent_code": "section_administracao",
+    "parent_code": "section_regras_negocio",
     "label": "Registro de auditoria",
     "path": "/administracao/auditoria",
     "renderer": "Audit",
     "view_params": {},
     "permission_module": "audit",
-    "position": 4,
+    "position": 13,
     "icon": "FactCheckOutlined",
     "required": false,
     "development_only": false,
@@ -1094,13 +1154,13 @@
   },
   {
     "code": "administracao_modulos",
-    "parent_code": "section_administracao",
+    "parent_code": "section_regras_negocio",
     "label": "Módulos do sistema",
     "path": "/administracao/modulos",
     "renderer": "Modules",
     "view_params": {},
     "permission_module": "modules",
-    "position": 7,
+    "position": 14,
     "icon": "SettingsOutlined",
     "required": true,
     "development_only": false,
@@ -1200,13 +1260,13 @@
   },
   {
     "code": "administracao_conectores",
-    "parent_code": "section_administracao",
+    "parent_code": "section_regras_negocio",
     "label": "Conexões de nuvem",
     "path": "/administracao/conectores",
     "renderer": "Connectors",
     "view_params": {},
     "permission_module": "connections",
-    "position": 6,
+    "position": 15,
     "icon": "CableOutlined",
     "required": false,
     "development_only": false,

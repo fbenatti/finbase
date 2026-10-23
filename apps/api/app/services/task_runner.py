@@ -12,7 +12,7 @@ import os
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timedelta, timezone
 from threading import Lock
-from typing import Optional
+from typing import Any, Optional
 
 import numpy as np
 import pandas as pd
@@ -29,7 +29,9 @@ from app.models.destination import DestinationTable, DestinationColumn, SourceDe
 from app.services.azure_extractor import AzureExtractor, derive_billing_period
 from app.services.gcp_bigquery_extractor import GcpBigQueryExtractor
 from app.services.oci_extractor import OciExtractor, derive_billing_period_oci
+from app.services.commitments.providers.oci import compute_hourly_rows
 from app.services.mongodb_extractor import MongoAtlasExtractor
+from app.services.oci_monitoring_extractor import OciMonitoringExtractor
 from app.services.github_extractor import GithubBillingExtractor
 from app.services.github_license_extractor import GithubLicenseExtractor
 from app.services.github_token_extractor import GithubTokenExtractor
@@ -1157,6 +1159,40 @@ def _process_databricks_month_sync_worker(
             pass
 
 
+def _fetch_oci_usage_api_hourly(
+    task_id, extractor: OciExtractor, connection_id: int, billing_period: str,
+) -> tuple[list[pd.DataFrame], tuple[str, str]] | None:
+    """Hourly compute from the Usage API and the hours it covers; None keeps the stored series."""
+    try:
+        _persist_download_progress(task_id, phase=f"Usage API OCI ({billing_period}): compute por hora")
+        fetched = extractor.fetch_compute_hourly_month(billing_period, connection_id)
+    except Exception as exc:
+        logger.error("Hourly OCI Usage API fetch failed (%s/%s): %s", connection_id, billing_period, exc)
+        return None
+    if fetched is None:
+        return None
+    frame, first_hour, end_hour = fetched
+    return [frame], (first_hour, end_hour)
+
+
+def _write_oci_compute_hourly(
+    task_id, connection_id: int, billing_period: str, parts: list[pd.DataFrame],
+    hour_range: tuple[str, str] | None = None,
+) -> None:
+    """Hourly compute Silver for the commitment engine; a failure never fails the cost load."""
+    frames = [part for part in parts if part is not None and not part.empty]
+    hourly = pd.concat(frames, ignore_index=True) if frames else pd.DataFrame()
+    if not hourly.empty:
+        keys = [c for c in hourly.columns if c not in ("billed_cost", "billed_quantity")]
+        hourly = hourly.groupby(keys, as_index=False, dropna=False)[["billed_cost", "billed_quantity"]].sum()
+    try:
+        _persist_download_progress(task_id, phase=f"Silver: compute horário OCI ({billing_period}, {len(hourly)} linhas)")
+        iceberg.replace_oci_compute_hourly(hourly, connection_id=connection_id, billing_period=billing_period,
+                                           hour_range=hour_range)
+    except Exception as exc:
+        logger.error("Hourly OCI compute write failed (%s/%s): %s", connection_id, billing_period, exc)
+
+
 def _process_oci_blob_sync(
     session: Session,
     extractor: OciExtractor,
@@ -1191,6 +1227,8 @@ def _process_oci_blob_sync(
             if full_df.empty:
                 logger.warning("Nenhum dado na Usage API para o período OCI %s", billing_period)
                 return 0, 0, 0, [f"Nenhum registro para {billing_period}"]
+            hourly = _fetch_oci_usage_api_hourly(task_id, extractor, conn.id, billing_period)
+            hourly_parts, hourly_range = hourly if hourly is not None else (None, None)
             full_df = OciExtractor.aggregate_df_daily(full_df)
             raw_df_bronze = full_df.copy()
         else:
@@ -1218,6 +1256,9 @@ def _process_oci_blob_sync(
             _persist_download_blob(task_id, blob_path, "DOWNLOADING", 0, total_bytes_expected)
 
             dfs: list[pd.DataFrame] = []
+            # The cost reports bring the whole month: its slice is replaced whole.
+            hourly_parts: list[pd.DataFrame] = []
+            hourly_range = None
             cumulative_bytes = 0
 
             for idx, obj in enumerate(objects_in_period, 1):
@@ -1242,6 +1283,8 @@ def _process_oci_blob_sync(
 
                 df_part = extractor._parse_csv_bytes(raw_bytes, obj_name)
                 if not df_part.empty:
+                    # O motor de compromissos precisa da hora: o compute é separado antes de virar dia.
+                    hourly_parts.append(compute_hourly_rows(df_part, connection_id=conn.id, billing_period=billing_period))
                     # Agregação parcial imediata por arquivo para economizar memória (reduz de 15k para ~500 linhas)
                     df_part_agg = OciExtractor.aggregate_df_daily(df_part)
                     dfs.append(df_part_agg)
@@ -1303,6 +1346,9 @@ def _process_oci_blob_sync(
             session.delete(ingested)
             session.flush()
             return len(full_df), 0, 0, [f"Bronze write failed: {exc}"]
+
+    if hourly_parts is not None:
+        _write_oci_compute_hourly(task_id, conn.id, billing_period, hourly_parts, hourly_range)
 
     _persist_download_progress(task_id, phase=f"Carga Bronze OCI ({billing_period}) concluída com {len(full_df)} linhas")
     _persist_download_blob(task_id, blob_path, "BRONZE_IMPORTED", cumulative_bytes, cumulative_bytes)
@@ -2603,6 +2649,180 @@ def _process_mongodb_invoice_sync_worker(
             pass
 
 
+def _process_oci_monitoring_sync(
+    session: Session,
+    extractor: OciMonitoringExtractor,
+    blob_path: str,
+    blob_prefix: str,
+    task_id: int | None = None,
+) -> tuple[int, int, int, list[str]]:
+    """Grava em Bronze os pontos crus de uma janela OCI Monitoring.
+
+    A Silver não é escrita aqui: ela nasce do reprocessamento, aplicando os
+    mapeamentos do catálogo sobre a Bronze, como nas demais fontes.
+    """
+    conn = extractor.connection
+    _persist_download_progress(task_id, current_blob=blob_path, phase=f"OCI Monitoring: coletando {blob_path}")
+    _persist_download_blob(task_id, blob_path, "DOWNLOADING", 0, 0)
+    try:
+        df, effective_end, call_errors = extractor.fetch_window(
+            blob_path, should_abort=(lambda: _check_cancelled(task_id)) if task_id else None,
+            progress=(lambda done, total: (done % 5 == 0 or done == total) and _persist_download_progress(
+                task_id, phase=f"OCI Monitoring: {blob_path} — chamada {done}/{total}",
+            )) if task_id else None,
+        )
+    except Exception as exc:
+        logger.error("Falha ao coletar OCI Monitoring %s: %s", blob_path, exc)
+        return 0, 0, 0, [f"OCI Monitoring {blob_path}: {exc}"]
+    from app.services.oci_monitoring_extractor import parse_blob_path
+
+    billing_period = parse_blob_path(blob_path)[1].strftime("%Y%m")
+    if call_errors and df.empty:
+        return 0, 0, 0, [f"{blob_path}: " + "; ".join(call_errors[:5])]
+
+    existing = session.execute(
+        select(IngestedBlob).where(IngestedBlob.connection_id == conn.id, IngestedBlob.blob_path == blob_path)
+    ).scalar_one_or_none()
+    if existing:
+        session.delete(existing)
+        session.flush()
+    ingested = IngestedBlob(
+        connection_id=conn.id, blob_path=blob_path, blob_prefix=blob_prefix,
+        billing_period=billing_period, last_modified=effective_end, etag="",
+        content_length=len(df), row_count=len(df), status="INGESTED",
+    )
+    session.add(ingested)
+    session.flush()
+    if not df.empty:
+        _persist_download_blob(task_id, blob_path, "BRONZE", len(df), len(df))
+        try:
+            iceberg.replace_bronze_slice(conn.code, df, billing_period, blob_path)
+        except Exception as exc:
+            logger.error("Bronze write failed for OCI Monitoring (%s): %s", blob_path, exc)
+            session.delete(ingested)
+            session.flush()
+            return len(df), 0, 0, [f"Bronze write failed: {exc}"]
+    _persist_download_progress(task_id, phase=f"Bronze OCI Monitoring {blob_path}: {len(df)} pontos")
+    _persist_download_blob(task_id, blob_path, "BRONZE_IMPORTED", len(df), len(df))
+    return len(df), 0, 0, [f"{blob_path}: " + error for error in call_errors[:20]]
+
+
+#: Janelas OCI Monitoring gravadas por commit na Bronze. Um commit por janela
+#: deixou 389 parquet em 390 commits; o lote junta as janelas de uma mesma
+#: tabela num delete+append só.
+OCI_MONITORING_COMMIT_BATCH = max(1, int(os.getenv("OCI_MONITORING_COMMIT_BATCH", "48")))
+
+
+def _process_oci_monitoring_batch_sync(
+    session: Session,
+    extractor: OciMonitoringExtractor,
+    items: list,
+    task_id: int | None = None,
+) -> tuple[int, int, int, list[str]]:
+    """Coleta um lote de janelas e grava todas num único commit da Bronze.
+
+    A proveniência por blob (``IngestedBlob``) só é registrada depois que o
+    commit do lote existe: se a escrita falhar, nenhuma janela do lote fica
+    marcada como ingerida sem dado na Bronze.
+    """
+    from app.services.oci_monitoring_extractor import parse_blob_path
+
+    conn = extractor.connection
+    errors: list[str] = []
+    collected: list[tuple[Any, str, str, Any]] = []  # (df, período, blob_path, effective_end)
+    for item in items:
+        if task_id and _check_cancelled(task_id):
+            errors.append("Cancelled")
+            break
+        blob_path = item.blob_path
+        _persist_download_progress(task_id, current_blob=blob_path, phase=f"OCI Monitoring: coletando {blob_path}")
+        _persist_download_blob(task_id, blob_path, "DOWNLOADING", 0, 0)
+        try:
+            df, effective_end, call_errors = extractor.fetch_window(
+                blob_path, should_abort=(lambda: _check_cancelled(task_id)) if task_id else None,
+                progress=(lambda done, total, _blob=blob_path: (done % 5 == 0 or done == total) and _persist_download_progress(
+                    task_id, phase=f"OCI Monitoring: {_blob} — chamada {done}/{total}",
+                )) if task_id else None,
+            )
+        except Exception as exc:
+            logger.error("Falha ao coletar OCI Monitoring %s: %s", blob_path, exc)
+            errors.append(f"OCI Monitoring {blob_path}: {exc}")
+            continue
+        if call_errors and df.empty:
+            errors.append(f"{blob_path}: " + "; ".join(call_errors[:5]))
+            continue
+        errors.extend(f"{blob_path}: " + error for error in call_errors[:20])
+        collected.append((df, parse_blob_path(blob_path)[1].strftime("%Y%m"), blob_path, effective_end))
+        if not df.empty:
+            _persist_download_blob(task_id, blob_path, "BRONZE", len(df), len(df))
+
+    raw_rows = sum(len(df) for df, *_ in collected)
+    with_rows = [(df, period, blob_path) for df, period, blob_path, _end in collected if not df.empty]
+    if with_rows:
+        try:
+            iceberg.replace_bronze_slices(conn.code, with_rows)
+        except Exception as exc:
+            logger.error("Bronze write failed for OCI Monitoring batch of %d windows: %s", len(with_rows), exc)
+            for _df, _period, blob_path in with_rows:
+                _persist_download_blob(task_id, blob_path, "DOWNLOADING", 0, 0)
+            return raw_rows, 0, 0, [*errors, f"Bronze write failed: {exc}"]
+
+    for df, period, blob_path, effective_end in collected:
+        existing = session.execute(
+            select(IngestedBlob).where(IngestedBlob.connection_id == conn.id, IngestedBlob.blob_path == blob_path)
+        ).scalar_one_or_none()
+        if existing:
+            session.delete(existing)
+            session.flush()
+        session.add(IngestedBlob(
+            connection_id=conn.id, blob_path=blob_path, blob_prefix=getattr(items[0], "blob_prefix", ""),
+            billing_period=period, last_modified=effective_end, etag="",
+            content_length=len(df), row_count=len(df), status="INGESTED",
+        ))
+        session.flush()
+        _persist_download_blob(task_id, blob_path, "BRONZE_IMPORTED", len(df), len(df))
+    _persist_download_progress(
+        task_id, phase=f"Bronze OCI Monitoring: {len(collected)} janelas, {raw_rows} pontos em um commit",
+    )
+    return raw_rows, 0, 0, errors
+
+
+def _process_oci_monitoring_batch_sync_worker(
+    task_id: int,
+    items: list,
+    extractor: OciMonitoringExtractor,
+) -> tuple[int, int, int, list[str]]:
+    from app.database import SyncSession as WorkerSync
+
+    if _check_cancelled(task_id):
+        return 0, 0, 0, ["Cancelled"]
+    session = WorkerSync()
+    try:
+        result = _process_oci_monitoring_batch_sync(session, extractor, items, task_id)
+        session.commit()
+        return result
+    finally:
+        session.close()
+
+
+def _process_oci_monitoring_sync_worker(
+    task_id: int,
+    item,
+    extractor: OciMonitoringExtractor,
+) -> tuple[int, int, int, list[str]]:
+    from app.database import SyncSession as WorkerSync
+
+    if _check_cancelled(task_id):
+        return 0, 0, 0, ["Cancelled"]
+    session = WorkerSync()
+    try:
+        result = _process_oci_monitoring_sync(session, extractor, item.blob_path, item.blob_prefix, task_id)
+        session.commit()
+        return result
+    finally:
+        session.close()
+
+
 def _process_github_report_sync_worker(
     task_id: int,
     item,
@@ -2854,7 +3074,7 @@ def _run_etl_sync(
             status["status"] = "COMPLETED"
             return
 
-        if conn.connector_type not in ("azure_blob", "gcp_bigquery", "oci", "mongodb_atlas", "github_billing", "github_license", "github_token", "notebooklm_license", "notebooklm_token", "claude_license", "claude_token", "gemini_license", "gemini_token", "gemini_notebooklm", "databricks", "azure_resource_graph"):
+        if conn.connector_type not in ("azure_blob", "gcp_bigquery", "oci", "oci_monitoring", "mongodb_atlas", "github_billing", "github_license", "github_token", "notebooklm_license", "notebooklm_token", "claude_license", "claude_token", "gemini_license", "gemini_token", "gemini_notebooklm", "databricks", "azure_resource_graph"):
             result.status = "FAILED"
             result.errors = ["Invalid connection"]
             result.finished_at = datetime.now(timezone.utc)
@@ -2874,6 +3094,10 @@ def _run_etl_sync(
             extractor = MongoAtlasExtractor(conn)
             scan_items = extractor._scan_sync(session)
             worker_fn = _process_mongodb_invoice_sync_worker
+        elif conn.connector_type == "oci_monitoring":
+            extractor = OciMonitoringExtractor(conn)
+            scan_items = extractor._scan_sync(session)
+            worker_fn = _process_oci_monitoring_sync_worker
         elif conn.connector_type == "github_license":
             extractor = GithubLicenseExtractor(conn)
             scan_items = extractor._scan_sync(session)
@@ -3028,22 +3252,32 @@ def _run_etl_sync(
             # two Pandas parsers at once kills the worker before it can commit
             # a single Bronze checkpoint; make concurrency an explicit opt-in.
             max_workers = max(1, int(os.getenv("AZURE_EXTRACTION_WORKERS", "1")))
-        elif conn.connector_type in ("gcp_bigquery", "mongodb_atlas", "github_billing", "github_license", "github_token", "notebooklm_license", "notebooklm_token", "claude_license", "claude_token", "gemini_license", "gemini_token", "gemini_notebooklm", "databricks"):
+        elif conn.connector_type in ("gcp_bigquery", "mongodb_atlas", "oci_monitoring", "github_billing", "github_license", "github_token", "notebooklm_license", "notebooklm_token", "claude_license", "claude_token", "gemini_license", "gemini_token", "gemini_notebooklm", "databricks"):
             max_workers = 1
         else:
             max_workers = 2
 
 
 
+        # OCI Monitoring grava em lotes: um commit da Bronze por
+        # OCI_MONITORING_COMMIT_BATCH janelas em vez de um por janela.
+        if conn.connector_type == "oci_monitoring":
+            batches = [
+                to_process[start:start + OCI_MONITORING_COMMIT_BATCH]
+                for start in range(0, len(to_process), OCI_MONITORING_COMMIT_BATCH)
+            ]
+        else:
+            batches = [[item] for item in to_process]
+
         with ThreadPoolExecutor(max_workers=max_workers, thread_name_prefix="blob-dl") as dl_executor:
             futures = {}
-            for i, item in enumerate(to_process):
+            for i, batch in enumerate(batches):
                 if _check_cancelled(task_id):
                     break
-                future = dl_executor.submit(
-                    worker_fn,
-                    task_id, item, extractor,
-                )
+                if conn.connector_type == "oci_monitoring":
+                    future = dl_executor.submit(_process_oci_monitoring_batch_sync_worker, task_id, batch, extractor)
+                else:
+                    future = dl_executor.submit(worker_fn, task_id, batch[0], extractor)
                 futures[future] = i
 
             for future in as_completed(futures):
@@ -3057,14 +3291,15 @@ def _run_etl_sync(
                     return
 
                 idx = futures[future]
-                item = to_process[idx]
+                batch_items = batches[idx]
+                item = batch_items[-1]
                 try:
-                    raw, norm, dest, errs = future.result(timeout=900)  # 15min per blob
+                    raw, norm, dest, errs = future.result(timeout=900 * len(batch_items))  # 15min per blob
                 except Exception as blob_err:
                     error_msg = f"{item.blob_path}: {blob_err}"
                     logger.error(error_msg)
                     with progress_lock:
-                        completed += 1
+                        completed += len(batch_items)
                         result.errors.append(error_msg)
                         status.setdefault("errors", []).append(error_msg)
                         result.processed_blobs = completed
@@ -3075,7 +3310,7 @@ def _run_etl_sync(
                     continue
                 else:
                     with progress_lock:
-                        completed += 1
+                        completed += len(batch_items)
                         result.rows_raw += raw
                         result.rows_normalized += norm
                         result.rows_destination = (result.rows_destination or 0) + dest
@@ -3086,8 +3321,8 @@ def _run_etl_sync(
                         status["rows_normalized"] = result.rows_normalized
                         status["rows_destination"] = status.get("rows_destination", 0) + dest
                         status["current_blob"] = item.blob_path
-                        status["downloaded_bytes_total"] += (
-                            item.content_length or getattr(item, "row_count", 0) or 0
+                        status["downloaded_bytes_total"] += sum(
+                            (entry.content_length or getattr(entry, "row_count", 0) or 0) for entry in batch_items
                         )
                         for e in errs:
                             result.errors.append(e)

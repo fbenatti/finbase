@@ -13,6 +13,8 @@ import ChangePassword from "./auth/ChangePassword";
 const Modules = lazy(() => import("./pages/Admin/Modules"));
 const Login = lazy(() => import("./pages/Login/Login"));
 const Connections = lazy(() => import("./pages/Connections/Connections"));
+const InfrastructureMetrics = lazy(() => import("./pages/InfrastructureMetrics/InfrastructureMetrics"));
+const InfrastructureOpportunities = lazy(() => import("./pages/InfrastructureOpportunities/InfrastructureOpportunities"));
 const Explorer = lazy(() => import("./pages/Explorer/Explorer"));
 const Mappings = lazy(() => import("./pages/Mappings/Mappings"));
 const Governance = lazy(() => import("./pages/Governance/Governance"));
@@ -39,6 +41,8 @@ const Audit = lazy(() => import("./pages/Admin/Audit"));
 const Ideas = lazy(() => import("./pages/Ideas/Ideas"));
 const Anomalies = lazy(() => import("./pages/Anomalies/Anomalies"));
 const Connectors = lazy(() => import("./pages/Admin/Connectors"));
+const Reports = lazy(() => import("./pages/Reports/Reports"));
+const Dashboards = lazy(() => import("./pages/Dashboards/Dashboards"));
 function RequireAuth({ children }: { children: ReactElement }) {
   const { user, loading } = useAuth();
   const location = useLocation();
@@ -98,7 +102,7 @@ function LegacyExplorer() {
   return <LegacyRedirect to={`/dados/fontes/${connectionId}/explorar`} />;
 }
 
-const CATALOG_RENDERERS = { Modules, Connectors, GoldDashboard, Anomalies, FinancialPlanning, ForecastAccuracy, Forecast, Savings, Connections, Tables, PipelineBuilder, Reprocess, Analysis, Governance, Admin, Audit, SsoProviders };
+const CATALOG_RENDERERS = { Modules, Connectors, GoldDashboard, Anomalies, FinancialPlanning, ForecastAccuracy, Forecast, Savings, Connections, InfrastructureMetrics, InfrastructureOpportunities, Tables, PipelineBuilder, Reprocess, Analysis, Reports, Dashboards, Governance, Admin, Audit, SsoProviders };
 
 function ApplicationRoutes() {
   const { user } = useAuth();

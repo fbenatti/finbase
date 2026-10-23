@@ -8,13 +8,16 @@ from typing import Any, Iterable, Literal, Optional
 
 import pandas as pd
 
-Grain = Literal["billing_period", "snapshot_date"]
+Grain = Literal["billing_period", "snapshot_date", "metric_day"]
 
 _SNAPSHOT_PHYSICAL_DEFAULTS = frozenset({
     "dest_cloud_resource_inventory",
     "dest_cloud_orphan_resources",
     "dest_licencas_ia",
 })
+# No table defaults to a metric_day slice today; a destination can still opt
+# in through partition_spec_json.
+_METRIC_DAY_PHYSICAL_DEFAULTS: frozenset[str] = frozenset()
 
 _MAX_EXTRA_PARTITIONS = 2
 # Sentinel for null/empty values when a column is used as an Iceberg identity partition.
@@ -40,13 +43,16 @@ class PartitionExtra:
 class DestinationSliceConfig:
     grain: Grain
     snapshot_column: str = "snapshot_date"
+    connection_column: str = "source_connection_id"
     extras: tuple[PartitionExtra, ...] = field(default_factory=tuple)
 
     @property
     def replace_columns(self) -> tuple[str, str]:
         if self.grain == "billing_period":
-            return ("_billing_period", "source_connection_id")
-        return (self.snapshot_column, "source_connection_id")
+            return ("_billing_period", self.connection_column)
+        if self.grain == "metric_day":
+            return ("metric_day", self.connection_column)
+        return (self.snapshot_column, self.connection_column)
 
     def partition_columns(self) -> list[str]:
         cols = list(self.replace_columns)
@@ -158,16 +164,25 @@ def resolve_destination_slice_config(
     safe = _normalise_physical_name(physical_name)
     grain: Grain
     raw_grain = str(spec.get("grain") or "").strip().lower()
-    if raw_grain in ("billing_period", "snapshot_date"):
+    if raw_grain in ("billing_period", "snapshot_date", "metric_day"):
         grain = raw_grain  # type: ignore[assignment]
+    elif safe in _METRIC_DAY_PHYSICAL_DEFAULTS:
+        grain = "metric_day"
     elif safe in _SNAPSHOT_PHYSICAL_DEFAULTS:
         grain = "snapshot_date"
     else:
         grain = "billing_period"
 
     snapshot_column = resolve_snapshot_column(spec if grain == "snapshot_date" else None, column_names)
+    connection_column = str(spec.get("connection_column") or "source_connection_id").strip()
+    if grain == "metric_day" and not spec.get("connection_column"):
+        names = {str(name).lower(): str(name) for name in (column_names or ())}
+        connection_column = names.get("_source_connection_id", "_source_connection_id")
     extras = _parse_extras(spec.get("extra_partitions"), column_names=column_names)
-    return DestinationSliceConfig(grain=grain, snapshot_column=snapshot_column, extras=extras)
+    return DestinationSliceConfig(
+        grain=grain, snapshot_column=snapshot_column,
+        connection_column=connection_column, extras=extras,
+    )
 
 
 def primary_partition_column(config: DestinationSliceConfig) -> str:
@@ -180,19 +195,24 @@ def build_slice_row_filter(
     connection_id: int,
     billing_period: str | None = None,
     snapshot_date: str | None = None,
+    metric_day: str | None = None,
 ):
     from pyiceberg.expressions import And, EqualTo
 
     period_col, _conn_col = config.replace_columns
-    clauses = [EqualTo("source_connection_id", int(connection_id))]
+    clauses = [EqualTo(config.connection_column, int(connection_id))]
     if config.grain == "billing_period":
         if billing_period is None:
             raise ValueError("billing_period é obrigatório para publicação por mês")
         clauses.append(EqualTo(period_col, str(billing_period)))
-    else:
+    elif config.grain == "snapshot_date":
         if snapshot_date is None:
             raise ValueError("snapshot_date é obrigatório para publicação diária")
         clauses.append(EqualTo(period_col, str(snapshot_date)))
+    else:
+        if metric_day is None:
+            raise ValueError("metric_day é obrigatório para publicação de métricas")
+        clauses.append(EqualTo(period_col, str(metric_day)))
     if len(clauses) == 1:
         return clauses[0]
     return And(*clauses)
@@ -266,6 +286,7 @@ def validate_staging_slice(
     connection_id: int,
     billing_period: str | None = None,
     snapshot_date: str | None = None,
+    metric_day: str | None = None,
     expected_row_count: int | None = None,
 ) -> None:
     if df.empty:
@@ -275,11 +296,12 @@ def validate_staging_slice(
             )
         return
 
-    if "source_connection_id" not in df.columns:
-        raise ValueError("Staging sem coluna source_connection_id")
-    conn_series = pd.to_numeric(df["source_connection_id"], errors="coerce")
+    connection_col = config.connection_column
+    if connection_col not in df.columns:
+        raise ValueError(f"Staging sem coluna {connection_col}")
+    conn_series = pd.to_numeric(df[connection_col], errors="coerce")
     if (conn_series != int(connection_id)).any():
-        raise ValueError("Staging mistura source_connection_id distintos da fatia")
+        raise ValueError(f"Staging mistura {connection_col} distintos da fatia")
 
     period_col = config.replace_columns[0]
     if period_col not in df.columns:
@@ -291,8 +313,10 @@ def validate_staging_slice(
 
     if config.grain == "billing_period":
         expected = str(billing_period) if billing_period is not None else None
-    else:
+    elif config.grain == "snapshot_date":
         expected = str(snapshot_date) if snapshot_date is not None else None
+    else:
+        expected = str(metric_day) if metric_day is not None else None
     if expected is not None and str(period_values[0]) != expected:
         raise ValueError(
             f"Valor de {period_col} no staging ({period_values[0]}) diverge da fatia ({expected})"
@@ -303,7 +327,7 @@ def validate_staging_slice(
             f"Contagem no staging ({len(df)}) diverge do worker ({expected_row_count})"
         )
 
-    if config.grain == "snapshot_date" and {"resource_id", period_col}.issubset(df.columns):
+    if config.grain in ("snapshot_date", "metric_day") and {"resource_id", period_col}.issubset(df.columns):
         dupes = df.duplicated(subset=["resource_id", period_col], keep=False)
         if dupes.any():
             n = int(dupes.sum())
@@ -324,11 +348,12 @@ def validate_staged_table_slice(
     connection_id: int,
     billing_period: str | None = None,
     snapshot_date: str | None = None,
+    metric_day: str | None = None,
     expected_row_count: int | None = None,
 ) -> None:
     """Valida homogeneidade da fatia lendo apenas colunas-chave do staging Iceberg."""
     period_col = config.replace_columns[0]
-    columns = ["source_connection_id", period_col]
+    columns = [config.connection_column, period_col]
     if "resource_id" in {field.name for field in staged_table.schema().fields}:
         columns.append("resource_id")
     arrow = staged_table.scan().select(*columns).to_arrow()
@@ -339,6 +364,7 @@ def validate_staged_table_slice(
             connection_id=connection_id,
             billing_period=billing_period,
             snapshot_date=snapshot_date,
+            metric_day=metric_day,
             expected_row_count=expected_row_count,
         )
         return
@@ -349,5 +375,6 @@ def validate_staged_table_slice(
         connection_id=connection_id,
         billing_period=billing_period,
         snapshot_date=snapshot_date,
+        metric_day=metric_day,
         expected_row_count=expected_row_count,
     )

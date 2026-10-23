@@ -13,7 +13,7 @@ Contrato obrigatório do plano:
 from __future__ import annotations
 
 import logging
-from datetime import date
+from datetime import date, timedelta
 from typing import Any, Mapping, Sequence
 
 from app.services.forecast_service import gold_date_expr
@@ -31,6 +31,16 @@ def _quote(identifier: str) -> str:
 
 def _lit(value: str) -> str:
     return "'" + str(value).replace("'", "''") + "'"
+
+
+def billing_periods_between(start: date, end: date) -> list[str]:
+    """Meses ``YYYYMM`` de um mês antes de ``start`` até ``end``, para podar partições."""
+    months: list[str] = []
+    cursor = (start.replace(day=1) - timedelta(days=1)).replace(day=1)
+    while cursor <= end:
+        months.append(cursor.strftime("%Y%m"))
+        cursor = (cursor.replace(day=28) + timedelta(days=4)).replace(day=1)
+    return months
 
 
 def observed_daily_sql(
@@ -59,6 +69,15 @@ def observed_daily_sql(
         else "TRUE"
     )
     series_filter = " OR ".join(f"({item})" for item in series_filters if item) or "TRUE"
+    # Poda de partição: a Silver é particionada por período de faturamento, e
+    # sem este predicado o Trino lia a tabela inteira para depois filtrar por
+    # dia. Um mês de margem antes do início cobre cobranças faturadas no mês
+    # seguinte ao consumo (mesma regra do cubo diário v2).
+    period_prune = (
+        f" AND CAST({_quote(period_column)} AS VARCHAR) IN ({', '.join(_lit(m) for m in billing_periods_between(start, end))})"
+        if period_column
+        else ""
+    )
     period_select = (
         f"CAST({_quote(period_column)} AS VARCHAR) AS source_billing_period"
         if period_column
@@ -71,7 +90,7 @@ def observed_daily_sql(
                    COALESCE(TRY_CAST({_quote(measure_column)} AS DOUBLE), 0) AS value,
                    {period_select}
               FROM iceberg.{source_namespace}.{_quote(table)}
-             WHERE {type_filter} AND ({series_filter})
+             WHERE {type_filter} AND ({series_filter}){period_prune}
         )
         SELECT {dim_select}CAST(day AS VARCHAR) AS event_date,
                SUM(value) AS observed_cloud,

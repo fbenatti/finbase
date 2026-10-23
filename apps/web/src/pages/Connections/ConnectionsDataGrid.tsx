@@ -5,7 +5,6 @@ import {
   Chip,
   Divider,
   ListItemIcon,
-  IconButton,
   Menu,
   MenuItem,
   Stack,
@@ -17,7 +16,7 @@ import {
   Delete,
   Edit,
   History,
-  FilterAlt, More,
+  FilterAlt,
 } from "./ConnectionIcons";
 import { PlaylistAddCheck } from "@mui/icons-material";
 import { GridColDef, GridFilterModel, GridPaginationModel, GridSortModel, useGridApiRef } from "@mui/x-data-grid";
@@ -105,6 +104,8 @@ function getConnectionSummary(connection: SourceConnection): string {
     }
     case "oci":
       return [config.region, config.tenancy_ocid || config.tenancy].filter(Boolean).join(" · ") || "Região não definida";
+    case "oci_monitoring":
+      return [config.region, config.resolution, `${(config.resource_ids as unknown as string[] | undefined)?.length ?? 0} recurso(s)`].filter(Boolean).join(" · ");
     case "mongodb_atlas":
       return [config.group_id, config.contract_type].filter(Boolean).join(" · ") || "Grupo e contrato não definidos";
     case "manual_csv":
@@ -231,7 +232,8 @@ export default function ConnectionsDataGrid({
     {
       field: "test_status",
       headerName: "Resultado do último teste",
-      minWidth: 135,
+      minWidth: 220,
+      flex: 1.1,
       sortable: false,
       filterable: false,
       renderCell: ({ row }: { row: SourceConnection }) => {
@@ -258,7 +260,7 @@ export default function ConnectionsDataGrid({
     {
       field: "actions",
       headerName: "Operações",
-      width: 104,
+      width: 112,
       sortable: false,
       filterable: false,
       align: "center",
@@ -269,7 +271,7 @@ export default function ConnectionsDataGrid({
             <RowAction kind="edit" label={`Alterar ${row.name}`} onClick={() => onEdit(row)} />
           </Tooltip>
           <Tooltip title="Outras opções">
-            <IconButton aria-label={`Outras opções de ${row.name}`} aria-haspopup="menu" onClick={event => setRowMenu({ anchor: event.currentTarget, connection: row })}><More /></IconButton>
+            <RowAction kind="more" label={`Outras opções de ${row.name}`} onClick={event => setRowMenu({ anchor: event.currentTarget, connection: row })} />
           </Tooltip>
         </Stack>
       ),

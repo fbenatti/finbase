@@ -7,6 +7,7 @@ export const DATA_LAYER_LABELS: Record<string, string> = {
 
 export const DATA_SERVICE_LABELS: Record<string, string> = {
   trino: "Serviço de consultas",
+  iceberg_catalog: "Catálogo de dados",
   nessie: "Catálogo de dados",
   minio: "Armazenamento de arquivos",
 };
@@ -34,14 +35,20 @@ export function moduleDisplayName(module: string): string {
 export function dataDisplayText(value: string | null | undefined): string {
   if (!value) return "";
   return value
+    .replace(/\biceberg\.(bronze|silver|gold)\.[a-z0-9_$]+/gi, (_, layer: string) => DATA_LAYER_LABELS[layer.toLowerCase()])
     .replace(/\biceberg\.(bronze|silver|gold)\b/gi, (_, layer: string) => DATA_LAYER_LABELS[layer.toLowerCase()])
-    .replace(/\b(?:data[ -]?lake(?:house)?|lakehouse)\b/gi, "Central de dados")
-    .replace(/\b(?:Apache\s+)?Iceberg\b/gi, "acervo de dados")
-    .replace(/\bPostgres(?:ql)?\b/gi, "banco de dados")
+    .replace(/\biceberg(?:\.[a-z0-9_]+){1,2}\b/gi, "base de dados")
+    .replace(/\biceberg_catalog\b/gi, "catálogo de dados")
+    .replace(/(^|[_-])(?:4p|tlf|vivo|telef[oó]nica|telefonica|ibm-ti|dimon)(?=$|[_-])/gi, "$1ambiente")
+    .replace(/\b(?:4p|tlf|vivo|telef[oó]nica|telefonica|ibm-ti|dimon)\b/gi, "ambiente configurado")
+    .replace(/\b(?:Apache\s+)?(?:Py)?Iceberg\b/gi, "acervo de dados")
     .replace(/\bTr(?:i|e)no\b/gi, "serviço de consultas")
     .replace(/\bNessie\b/gi, "catálogo de dados")
     .replace(/\bMinIO\b/gi, "armazenamento de arquivos")
+    .replace(/\bPostgres(?:ql)?\b/gi, "banco de dados")
     .replace(/\bDuckDB\b/gi, "serviço de consultas local")
+    .replace(/\b(?:Azure|AWS|GCP|OCI)\s+(?:Blob|S3|Storage|Object Storage)\b/gi, "armazenamento de arquivos")
+    .replace(/\b(?:data[ -]?lake(?:house)?|lakehouse)\b/gi, "Central de dados")
     .replace(/\bETL\b/gi, "processamento de dados")
     .replace(/\bBronze\b/gi, "base de origem")
     .replace(/\bSilver\b/gi, "base preparada")

@@ -255,16 +255,20 @@ def _load_dotenv_if_needed() -> dict[str, str]:
 def _blob_backup_config(storage_ip: str | None = None) -> dict[str, str]:
     dotenv_vals = _load_dotenv_if_needed()
 
-    def _val(key: str, fallback: str) -> str:
-        return os.getenv(key) or dotenv_vals.get(key) or fallback
+    def _required(key: str) -> str:
+        value = os.getenv(key) or dotenv_vals.get(key)
+        if not value:
+            raise RuntimeError(f"Backup em nuvem não configurado: defina {key}.")
+        return value
 
-    tenant_id = _val("DEFAULT_TENANT_ID", "0fce1554-ffcc-4e69-aa8d-9334eb2d8fd7")
-    client_id = _val("DEFAULT_CLIENT_ID", "b497374e-e461-4043-ac57-406ce004c87d")
-    client_secret = _val("DEFAULT_CLIENT_SECRET", "lsj8Q~42HyMeNhcX0vtmLx1VWuwr5vRgIiF4XbOA")
-    storage_account = _val("DEFAULT_STORAGE_ACCOUNT", "proazurecostsmanagement")
-    container_name = _val("DEFAULT_CONTAINER_NAME", "4pfinops")
-    upload_prefix = _val("DEFAULT_UPLOAD_CONTAINER", "reports/DadosProcessados/").strip("/")
-    target_ip = storage_ip or _val("AZURE_STORAGE_IP_PROAZURECOSTSMANAGEMENT", "20.60.37.33")
+    tenant_id = _required("DEFAULT_TENANT_ID")
+    client_id = _required("DEFAULT_CLIENT_ID")
+    client_secret = _required("DEFAULT_CLIENT_SECRET")
+    storage_account = _required("DEFAULT_STORAGE_ACCOUNT")
+    container_name = _required("DEFAULT_CONTAINER_NAME")
+    upload_prefix = os.getenv("DEFAULT_UPLOAD_CONTAINER") or dotenv_vals.get("DEFAULT_UPLOAD_CONTAINER", "")
+    upload_prefix = upload_prefix.strip("/")
+    target_ip = storage_ip or os.getenv(f"AZURE_STORAGE_IP_{storage_account.upper()}") or os.getenv("AZURE_STORAGE_IP") or ""
 
     return {
         "tenant_id": tenant_id,

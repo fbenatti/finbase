@@ -46,6 +46,7 @@ from app.services.iceberg_service import (
 )
 from app.services.shared_cost import RATEIO_MEDIDA_ACTUAL, RATEIO_MEDIDA_FORECAST, RATEIO_TIPO, apply_rateio_facts
 from app.services.trino_service import execute as trino_execute, TrinoCancelled, TrinoError, wait_until_ready
+from app.services import lakehouse_metadata
 from app.services import lakehouse_layers as layers
 from app.services.gold_materialization import GOLD
 
@@ -122,8 +123,25 @@ class QueryRequest(BaseModel):
     catalog: str | None = None
 
 
-class QueryResponse(BaseModel):
+_PUBLIC_QUERY_SCHEMAS = {
+    "origem": "bronze",
+    "preparacao": "silver",
+    "consolidacao": "gold",
+}
+
+
+def _resolve_public_query_schemas(sql: str) -> str:
+    """Translate product-facing schema aliases to physical query schemas."""
+    return re.sub(
+        r"\bdados\.(origem|preparacao|consolidacao)\.",
+        lambda match: f"iceberg.{_PUBLIC_QUERY_SCHEMAS[match.group(1).lower()]}.",
+        sql,
+        flags=re.IGNORECASE,
+    )
+
+
     columns: list[str]
+class QueryResponse(BaseModel):
     rows: list[dict[str, Any]]
     row_count: int
 
@@ -428,7 +446,7 @@ class LakehouseSearchRequest(BaseModel):
     filters: list[PivotFilter] = []
 
 
-ChartType = Literal["kpi", "line", "area", "bar", "stacked_bar", "pie", "donut", "heatmap", "map"]
+ChartType = Literal["kpi", "line", "area", "bar", "stacked_bar", "pie", "donut", "heatmap", "map", "table"]
 
 
 class DashboardCreate(BaseModel):
@@ -502,11 +520,6 @@ def _quote_literal(value: str | int | float | bool) -> str:
     return "'" + str(value).replace("'", "''") + "'"
 
 
-_SCHEMA_CACHE: dict[str, tuple[float, dict[str, str]]] = {}
-_SCHEMA_CACHE_TTL_S = 90.0
-_SCHEMA_LOCK = asyncio.Lock()
-_SCHEMA_INFLIGHT: dict[str, asyncio.Task[tuple[str, dict[str, str]]]] = {}
-
 # Partition trees in Analysis only need Iceberg metadata (manifest stats), not
 # Postgres operational tables. Cache responses to avoid hammering Trino on
 # every expand of large tables such as dest_billing_cloud.
@@ -514,66 +527,41 @@ _PARTITION_META_CACHE: dict[str, tuple[float, dict[str, Any]]] = {}
 _PARTITION_META_CACHE_TTL_S = float(os.getenv("ANALYSIS_PARTITION_CACHE_TTL_S", "120"))
 
 
-def _schema_cache_key(namespace: str, safe_name: str) -> str:
-    return f"{namespace}.{safe_name}"
-
-
-def _local_iceberg_schema_sync(namespace: str, safe_name: str) -> dict[str, str]:
-    from app.services import iceberg_service as iceberg
-
-    table = iceberg._get_catalog().load_table(iceberg._table_id(namespace, safe_name))
-    return {field.name: str(field.field_type) for field in table.schema().fields}
-
-
-async def _local_iceberg_schema(namespace: str, safe_name: str) -> dict[str, str]:
-    schema = await asyncio.to_thread(_local_iceberg_schema_sync, namespace, safe_name)
-    if not schema:
-        raise HTTPException(status_code=422, detail="A tabela não possui schema disponível no Iceberg local")
-    return schema
-
-
-def _local_latest_period_sync(namespace: str, table_name: str, period_col: str) -> str | None:
-    from app.services import iceberg_service as iceberg
-
-    table = iceberg._get_catalog().load_table(iceberg._table_id(namespace, table_name))
-    try:
-        frame = table.inspect.partitions().to_pandas()
-        candidates = [column for column in frame.columns if column.lower() == period_col.lower()]
-        if candidates:
-            series = frame[candidates[0]].dropna().astype(str)
-            if not series.empty:
-                return series.max()
-    except Exception:
-        logger.debug("Iceberg inspect.partitions indisponível para %s.%s", namespace, table_name, exc_info=True)
-    return None
+async def _describe_via_trino(namespace: str, safe_name: str, max_retries: int | None) -> dict[str, str]:
+    schema = await trino_execute(
+        f"DESCRIBE iceberg.{namespace}.{safe_name}",
+        timeout_s=20,
+        max_retries=max_retries,
+    )
+    return {
+        str(c.get("Column") or c.get("column_name") or c.get("column")): str(c.get("Type") or c.get("data_type") or "")
+        for c in schema
+    }
 
 
 async def _describe_layer_schema(safe_name: str, max_retries: int | None, namespace: str | None = None) -> dict[str, str]:
-    # O detalhe vive na camada de detalhe (Silver). A resolução é central para
-    # não repetir o bug de ler Gold enquanto o reprocess grava Silver.
+    """Schema da tabela no formato do ``DESCRIBE`` do Trino, sem consultar o Trino.
+
+    O schema sai do catálogo PyIceberg, chaveado pelo snapshot da tabela
+    (``lakehouse_metadata``): um DESCRIBE custava 1,3–6,5 s por request no
+    cluster compartilhado. O DESCRIBE fica só como fallback quando o catálogo
+    não responde. O detalhe vive na camada de detalhe (Silver); a resolução é
+    central para não repetir o bug de ler Gold enquanto o reprocess grava Silver.
+    """
     namespace = namespace or layers.detail_layer()
-    cache_key = _schema_cache_key(namespace, safe_name)
     try:
-        schema = await trino_execute(
-            f"DESCRIBE iceberg.{namespace}.{safe_name}",
-            timeout_s=20,
-            max_retries=max_retries,
-        )
-        columns = {
-            str(c.get("Column") or c.get("column_name") or c.get("column")): str(c.get("Type") or c.get("data_type") or "")
-            for c in schema
-        }
-        if not columns:
-            raise HTTPException(status_code=422, detail="A tabela não possui schema disponível no Trino")
-        _SCHEMA_CACHE[cache_key] = (time.monotonic(), columns)
-        return columns
-    except HTTPException:
-        raise
-    except Exception as exc:
-        logger.warning("DESCRIBE Trino falhou para %s (%s); usando schema Iceberg local", cache_key, exc)
-        columns = await _local_iceberg_schema(namespace, safe_name)
-        _SCHEMA_CACHE[cache_key] = (time.monotonic(), columns)
-        return columns
+        columns = await lakehouse_metadata.table_schema(namespace, safe_name)
+    except Exception as exc:  # noqa: BLE001 — catálogo indisponível cai no Trino
+        logger.warning("Schema de %s.%s indisponível no catálogo (%s); usando DESCRIBE no Trino", namespace, safe_name, exc)
+        try:
+            columns = await _describe_via_trino(namespace, safe_name, max_retries)
+        except HTTPException:
+            raise
+        except Exception as trino_exc:
+            raise HTTPException(status_code=503, detail=f"Trino é obrigatório para tabela dinâmica: {trino_exc}") from trino_exc
+    if not columns:
+        raise HTTPException(status_code=422, detail="A tabela não possui schema disponível no Trino")
+    return columns
 
 
 async def _layer_from(
@@ -636,39 +624,7 @@ async def _pivot_table_context(db: AsyncSession, destination_table_id: int, max_
     safe_name = await _analysis_physical_name(db, destination_table_id)
     if not safe_name:
         raise HTTPException(status_code=404, detail="Tabela destino ativa não encontrada")
-    cache_key = _schema_cache_key(layers.detail_layer(), safe_name)
-    cached = _SCHEMA_CACHE.get(cache_key)
-    if cached and time.monotonic() - cached[0] < _SCHEMA_CACHE_TTL_S:
-        return safe_name, cached[1]
-    async with _SCHEMA_LOCK:
-        cached = _SCHEMA_CACHE.get(cache_key)
-        if cached and time.monotonic() - cached[0] < _SCHEMA_CACHE_TTL_S:
-            return safe_name, cached[1]
-        task = _SCHEMA_INFLIGHT.get(cache_key)
-        if task is None or task.done():
-            async def _load() -> dict[str, str]:
-                return await _describe_layer_schema(safe_name, max_retries)
-
-            task = asyncio.create_task(_load())
-            _SCHEMA_INFLIGHT[cache_key] = task
-    try:
-        schema = await task
-        return safe_name, schema
-    except HTTPException:
-        raise
-    except Exception as exc:
-        try:
-            schema = await _local_iceberg_schema(layers.detail_layer(), safe_name)
-            _SCHEMA_CACHE[cache_key] = (time.monotonic(), schema)
-            return safe_name, schema
-        except HTTPException:
-            raise
-        except Exception as local_exc:
-            logger.warning("Schema Iceberg local também falhou para %s: %s", cache_key, local_exc)
-        raise HTTPException(status_code=503, detail=f"Trino é obrigatório para tabela dinâmica: {exc}")
-    finally:
-        if _SCHEMA_INFLIGHT.get(cache_key) is task and task.done():
-            _SCHEMA_INFLIGHT.pop(cache_key, None)
+    return safe_name, await _describe_layer_schema(safe_name, max_retries)
 
 
 def _validate_pivot_request(req: PivotRequest, schema: dict[str, str]) -> tuple[list[str], list[str], list[PivotMeasure]]:
@@ -892,17 +848,29 @@ async def _inject_latest_period_filter(
     period_col = _schema_period_column(schema)
     if not period_col or _has_period_filter(filters) or _period_on_axes(axis_names or []):
         return filters, None
-    latest: str | None = None
-    try:
+    async def _max_via_trino() -> str | None:
         latest_rows = await trino_execute(
             f"SELECT MAX(CAST({_quote_ident(period_col)} AS VARCHAR)) AS latest "
             f"FROM iceberg.{namespace}.{table_name}",
             **({"timeout_s": 30, **trino_kwargs} if trino_kwargs else {"timeout_s": 30}),
         )
-        latest = latest_rows[0].get("latest") if latest_rows else None
-    except Exception as exc:
-        logger.warning("MAX período via Trino falhou para %s.%s (%s); tentando Iceberg local", namespace, table_name, exc)
-        latest = await asyncio.to_thread(_local_latest_period_sync, namespace, table_name, period_col)
+        return latest_rows[0].get("latest") if latest_rows else None
+
+    # O último período é por snapshot: sai dos manifests quando a coluna é de
+    # partição e, senão, de um único MAX por publicação — nunca um por request.
+    latest: str | None = None
+    try:
+        latest = await lakehouse_metadata.latest_period(namespace, table_name, period_col, fallback=_max_via_trino)
+    except TrinoCancelled:
+        raise
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("Último período de %s.%s indisponível no catálogo (%s); tentando MAX no Trino", namespace, table_name, exc)
+        try:
+            latest = await _max_via_trino()
+        except TrinoCancelled:
+            raise
+        except Exception as trino_exc:  # noqa: BLE001
+            logger.warning("MAX período via Trino falhou para %s.%s: %s", namespace, table_name, trino_exc)
     if not latest:
         return filters, None
     return [
@@ -2312,28 +2280,10 @@ async def _expected_view_core(
     if "tipo" in actual_columns:
         tipo_col = _quote_ident(actual_columns["tipo"])
         tipo_actual = f" AND ({tipo_col} IS NULL OR lower(CAST({tipo_col} AS VARCHAR)) IN ('realizado', ''))"
-    try:
-        cutoff_rows = await trino_execute(
-            f"""
-            SELECT MIN({forecast_period}) AS period
-            FROM iceberg.{forecast_namespace}.{forecast_name}
-            WHERE ({forecast_scope_filter}){dimension_filter}
-              {forecast_year_clause}
-              AND lower(CAST({forecast_type} AS VARCHAR)) = 'forecast'
-            """,
-            **interactive,
-        )
-    except TrinoCancelled:
-        raise
-    except Exception as exc:
-        raise HTTPException(status_code=503, detail=f"Falha ao consultar a Visão Esperada: {exc}")
-    cutoff = str(cutoff_rows[0]["period"]) if cutoff_rows and cutoff_rows[0].get("period") is not None else None
-    cutoff_lit = _quote_literal(cutoff) if cutoff else None
-    # Realizado always comes from Gold for every collected month. A global
-    # ``actual_period < MIN(forecast)`` cutoff hid recent loads (e.g. July
-    # azure-marketplace) whenever another series already had forecast rows in
-    # an earlier month.
-    forecast_from = f" AND {forecast_period} >= {cutoff_lit}" if cutoff_lit else ""
+    # Antes havia aqui um ``SELECT MIN(period)`` dos forecasts para filtrar o
+    # próprio forecast por ``period >= MIN(period)`` — uma tautologia que custava
+    # uma ida ao Trino em série antes das agregações. O realizado nunca dependeu
+    # desse corte: vem da Gold para todo mês coletado.
     # A Visão Diretoria muda a ordem de navegação para 1 → 2 → 4 → 3 → 5 → 6.
     # Aplicar a exceção apenas no terceiro nível fazia o gráfico de drivers
     # pular para Cloud (nível 3) em escopos onde o próximo nó deveria ser a
@@ -2373,7 +2323,6 @@ async def _expected_view_core(
       WHERE ({forecast_scope_filter}){dimension_filter}
         {forecast_year_clause}
         AND lower(CAST({forecast_type} AS VARCHAR)) = 'forecast'
-        {forecast_from}
       GROUP BY 1, 2
     """
     planning_sql = None
@@ -2403,18 +2352,36 @@ async def _expected_view_core(
           WHERE {' AND '.join(planning_filters)}
           GROUP BY 1, 2, 3
         """
+    rateio_sql = None
+    if body.include_shared_cost:
+        medida_col = forecast_columns.get("rateio_medida")
+        if forecast_name.endswith("_planning") and not medida_col:
+            medida_sql = ", 'forecast' AS rateio_medida"
+            group_rateio = ""
+        else:
+            medida_sql = f", lower(CAST({_quote_ident(medida_col)} AS VARCHAR)) AS rateio_medida" if medida_col else ""
+            group_rateio = f", 3" if medida_col else ""
+        rateio_sql = f"""
+          SELECT {forecast_period} AS period,
+                 COALESCE(NULLIF(TRIM(CAST({forecast_driver} AS VARCHAR)), ''), 'Sem departamento filho') AS driver
+                 {medida_sql},
+                 SUM(COALESCE(TRY_CAST({forecast_value} AS DOUBLE), 0)) AS value
+          FROM iceberg.{forecast_namespace}.{forecast_name}
+          WHERE ({forecast_scope_filter}){dimension_filter}
+            {forecast_year_clause}
+            AND lower(CAST({forecast_type} AS VARCHAR)) = '{RATEIO_TIPO}'
+          GROUP BY 1, 2{group_rateio}
+        """
     try:
-        # These scans are independent after the cutoff query. Running them in
-        # parallel removes one full Trino round-trip from the dashboard path.
+        # Realizado, forecast, planning e rateio são leituras independentes:
+        # todas partem na mesma hora, e a view espera só pela mais lenta.
         tasks = [
             trino_execute(actual_sql, **interactive),
             trino_execute(forecast_sql, **interactive),
+            trino_execute(planning_sql, **interactive) if planning_sql else asyncio.sleep(0, result=[]),
+            trino_execute(rateio_sql, **interactive) if rateio_sql else asyncio.sleep(0, result=[]),
         ]
-        if planning_sql:
-            tasks.append(trino_execute(planning_sql, **interactive))
-        results = await asyncio.gather(*tasks)
-        actual_fact_rows, forecast_fact_rows = results[:2]
-        planning_fact_rows = results[2] if len(results) > 2 else []
+        actual_fact_rows, forecast_fact_rows, planning_fact_rows, rateio_fact_rows = await asyncio.gather(*tasks)
     except TrinoCancelled:
         raise
     except Exception as exc:
@@ -2469,30 +2436,7 @@ async def _expected_view_core(
             value = float(row.get("forecast_value") or 0)
             forecast_by_driver[driver] = forecast_by_driver.get(driver, 0.0) + value
     if body.include_shared_cost:
-        medida_col = forecast_columns.get("rateio_medida")
-        if forecast_name.endswith("_planning") and not medida_col:
-            medida_sql = ", 'forecast' AS rateio_medida"
-            group_rateio = ""
-        else:
-            medida_sql = f", lower(CAST({_quote_ident(medida_col)} AS VARCHAR)) AS rateio_medida" if medida_col else ""
-            group_rateio = f", 3" if medida_col else ""
-        rateio_sql = f"""
-          SELECT {forecast_period} AS period,
-                 COALESCE(NULLIF(TRIM(CAST({forecast_driver} AS VARCHAR)), ''), 'Sem departamento filho') AS driver
-                 {medida_sql},
-                 SUM(COALESCE(TRY_CAST({forecast_value} AS DOUBLE), 0)) AS value
-          FROM iceberg.{forecast_namespace}.{forecast_name}
-          WHERE ({forecast_scope_filter}){dimension_filter}
-            {forecast_year_clause}
-            AND lower(CAST({forecast_type} AS VARCHAR)) = '{RATEIO_TIPO}'
-          GROUP BY 1, 2{group_rateio}
-        """
-        try:
-            rateio_rows = await trino_execute(rateio_sql, **interactive)
-        except TrinoCancelled:
-            raise
-        except Exception as exc:
-            raise HTTPException(status_code=503, detail=f"Falha ao consultar o rateio de custo compartilhado: {exc}")
+        rateio_rows = rateio_fact_rows
         actual_rateio: list[dict[str, Any]] = []
         forecast_rateio: list[dict[str, Any]] = []
         closed_periods = {
@@ -2771,35 +2715,36 @@ async def delete_staging_table(table_name: str, db: AsyncSession = Depends(get_d
 @router.post("/consulta", response_model=QueryResponse)
 async def run_query(req: QueryRequest, request: Request, db: AsyncSession = Depends(get_db)):
     """
-    Execute a SQL query against Trino + Iceberg.
+    Execute a read-only query against the data catalog.
 
     Examples:
-      SELECT * FROM iceberg.bronze.raw_oci WHERE _billing_period = '202504' LIMIT 10
-      SELECT SUM("BilledCost") AS total_billed FROM iceberg.silver.dest_billing_cloud WHERE "_billing_period" = '202504'
+      SELECT * FROM dados.origem.nome_da_tabela WHERE _billing_period = '202504' LIMIT 10
+      SELECT SUM("BilledCost") AS total_billed FROM dados.preparacao.nome_da_tabela WHERE "_billing_period" = '202504'
     """
     allowed = set((await db.execute(select(DestinationTable.physical_name).where(DestinationTable.active.is_(True)))).scalars().all())
     # Bases de origem (bronze) das fontes cadastradas: bronze.raw_<identificador>.
     from app.services.iceberg_service import _bronze_table_id
     connection_codes = (await db.execute(select(SourceConnection.code))).scalars().all()
     allowed.update(".".join(_bronze_table_id(code)) for code in connection_codes if code)
+    resolved_sql = _resolve_public_query_schemas(req.sql)
     try:
-        check_read_only_select(req.sql, allowed)
+        check_read_only_select(resolved_sql, allowed)
     except SqlRejected as exc:
         raise HTTPException(status_code=403, detail=str(exc))
     async with _ClientCancelScope(request) as scope:
         try:
-            rows = await trino_execute(req.sql, catalog=req.catalog, **scope.trino_kwargs)
+            rows = await trino_execute(resolved_sql, catalog=req.catalog, **scope.trino_kwargs)
         except TrinoCancelled:
             raise _cancelled_http()
         except TrinoError as e:
-            rows = _run_local_bronze_star_query(req.sql, str(e))
+            rows = _run_local_bronze_star_query(resolved_sql, str(e))
             if rows is not None:
                 columns = list(rows[0].keys()) if rows else []
                 return QueryResponse(columns=columns, rows=rows, row_count=len(rows))
             # O detalhe pode estar no catálogo PyIceberg local enquanto o Trino
             # lê pelo catálogo PostgreSQL. Suporta as agregações padrão do
             # destino pela mesma tabela Iceberg local.
-            rows = _run_local_gold_query(req.sql)
+            rows = _run_local_gold_query(resolved_sql)
             if rows is None:
                 raise HTTPException(status_code=502, detail=str(e))
         except ConnectionError as e:
@@ -2936,6 +2881,17 @@ def _run_local_bronze_star_query(sql: str, trino_error: str) -> list[dict[str, A
 # ---------------------------------------------------------------------------
 # Pre-built analysis queries
 # ---------------------------------------------------------------------------
+def _catalog_total_records(namespace: str, table: str) -> int | None:
+    """``total-records`` do snapshot atual; ``None`` quando o metadado não diz."""
+    from app.services.iceberg_service import get_catalog
+
+    snapshot = get_catalog().load_table((namespace, table)).current_snapshot()
+    if snapshot is None:
+        return 0
+    value = (snapshot.summary or {}).get("total-records")
+    return int(value) if value is not None else None
+
+
 @router.get("/resumo")
 async def get_summary(
     connection_code: str | None = Query(None),
@@ -2972,17 +2928,31 @@ async def get_summary(
             ORDER BY "_billing_period" DESC, "cloud_origem"
         """
     else:
-        # For bronze/silver, return row counts per table
-        tables = list_tables(layer)
-        rows: list[dict] = []
-        for tbl in tables:
+        # For bronze/silver, return row counts per table. O total vem do resumo
+        # do snapshot no catálogo (sem Trino), lido em série numa única thread:
+        # o catálogo PyIceberg serializa acessos concorrentes e dez threads
+        # demoram dez vezes mais que uma. Só o que o catálogo não souber vai ao
+        # Trino, em paralelo.
+        def catalog_counts() -> dict[str, int | None]:
+            counts: dict[str, int | None] = {}
+            for tbl in list_tables(layer):
+                try:
+                    counts[tbl] = _catalog_total_records(layer, tbl)
+                except Exception:
+                    counts[tbl] = None
+            return counts
+
+        async def count_rows(tbl: str, known: int | None) -> dict[str, Any]:
+            if known is not None:
+                return {"layer": layer, "table": tbl, "row_count": known}
             try:
-                result = await trino_execute(
-                    f"SELECT COUNT(*) AS cnt FROM iceberg.{layer}.{tbl}"
-                )
-                rows.append({"layer": layer, "table": tbl, "row_count": result[0]["cnt"] if result else 0})
+                result = await trino_execute(f"SELECT COUNT(*) AS cnt FROM iceberg.{layer}.{tbl}")
+                return {"layer": layer, "table": tbl, "row_count": result[0]["cnt"] if result else 0}
             except Exception:
-                rows.append({"layer": layer, "table": tbl, "row_count": -1})
+                return {"layer": layer, "table": tbl, "row_count": -1}
+
+        known = await asyncio.to_thread(catalog_counts)
+        rows = list(await asyncio.gather(*(count_rows(tbl, total) for tbl, total in known.items())))
         return {"summary": rows}
 
     try:
@@ -2990,6 +2960,18 @@ async def get_summary(
         return {"summary": result}
     except TrinoError as e:
         raise HTTPException(status_code=502, detail=str(e))
+
+
+@router.get("/metricas-latencia")
+async def latency_metrics():
+    """p50/p95 medidos por rota e por tipo de query Trino desde o início do processo.
+
+    Amostras em memória, janela curta (ver ``finops_cache``): servem para o aceite
+    de performance no ambiente de referência, não para observabilidade histórica.
+    """
+    from app.services.finops_cache import metrics_report
+
+    return metrics_report()
 
 
 @router.get("/saude")
@@ -3081,126 +3063,143 @@ async def query_source_data(
 # Destination table data (classified + business rules in Iceberg/Parquet)
 # ═══════════════════════════════════════════════════════════════════════
 
+def _planning_breakdown(rows: list[dict[str, Any]]) -> dict[str, Any]:
+    """Totais e períodos do planning e do rateio a partir de **uma** agregação.
+
+    ``rows`` tem ``(period, shared, cnt)``: contagem por mês e por "é rateio".
+    Antes eram quatro queries em série por destino (COUNT planning, períodos
+    planning, COUNT rateio, períodos rateio); a mesma informação cabe num GROUP BY.
+    """
+    total = 0
+    shared_total = 0
+    periods: dict[str, int] = {}
+    shared_periods: dict[str, int] = {}
+    for row in rows:
+        period = str(row.get("period"))
+        count = int(row.get("cnt") or 0)
+        total += count
+        periods[period] = periods.get(period, 0) + count
+        if row.get("shared"):
+            shared_total += count
+            shared_periods[period] = shared_periods.get(period, 0) + count
+
+    def listed(mapping: dict[str, int]) -> list[dict[str, Any]]:
+        ordered = sorted(mapping.items(), key=lambda item: item[0], reverse=True)[:20]
+        return [{"period": period, "count": count} for period, count in ordered]
+
+    return {"rows": total, "periods": listed(periods), "shared_rows": shared_total, "shared_periods": listed(shared_periods)}
+
+
+def _destination_periods_sync(table_name: str) -> tuple[int, list[dict[str, Any]]]:
+    """Fallback sem Trino: conta por período lendo só a coluna de partição."""
+    import pyarrow.compute as pc
+    from app.services.iceberg_service import get_catalog
+
+    arrow_table = get_catalog().load_table(table_name).scan().select("_billing_period").to_arrow()
+    counted = pc.value_counts(arrow_table.column("_billing_period"))
+    periods = [
+        {"period": str(counted.field(0)[i].as_py()), "count": counted.field(1)[i].as_py()}
+        for i in range(len(counted))
+    ]
+    return len(arrow_table), periods
+
+
+async def _destination_entries(tid: int, tname: str, phys: str, desc: str | None) -> list[dict[str, Any]]:
+    safe_name = phys.replace("-", "_").replace(".", "_")
+    table_name = f"silver.{safe_name}"
+    planning_name = f"{safe_name}_planning"
+
+    async def main_counts() -> tuple[int, list[dict[str, Any]]]:
+        try:
+            # Total e períodos saem do mesmo GROUP BY (poucos meses por tabela).
+            rows = await trino_execute(
+                f"SELECT _billing_period, COUNT(*) AS cnt FROM iceberg.{table_name} "
+                f"GROUP BY _billing_period ORDER BY _billing_period DESC"
+            )
+            periods = [{"period": str(p["_billing_period"]), "count": p["cnt"]} for p in (rows or [])]
+            return sum(int(p["count"] or 0) for p in periods), periods[:20]
+        except Exception:
+            try:
+                return await asyncio.to_thread(_destination_periods_sync, table_name)
+            except Exception:
+                return 0, []
+
+    async def planning_counts() -> dict[str, Any] | None:
+        try:
+            schema = await _describe_layer_schema(planning_name, None, namespace=layers.detail_layer())
+        except Exception:
+            return None
+        columns = {name.lower(): name for name in schema}
+        period_col = columns.get("period")
+        if not period_col:
+            return None
+        tipo_col = columns.get("tipo")
+        # Planning antigo grava rateio como tipo=rateio; o novo, shared_cost.
+        shared_expr = (
+            f"lower(CAST({_quote_ident(tipo_col)} AS VARCHAR)) IN ('rateio', 'shared_cost')" if tipo_col else "FALSE"
+        )
+        try:
+            rows = await trino_execute(
+                f"SELECT {_quote_ident(period_col)} AS period, {shared_expr} AS shared, COUNT(*) AS cnt "
+                f"FROM iceberg.{layers.detail_layer()}.{planning_name} GROUP BY 1, 2"
+            )
+        except Exception:
+            return None
+        return _planning_breakdown(rows)
+
+    (row_cnt, periods), planning = await asyncio.gather(main_counts(), planning_counts())
+    entries: list[dict[str, Any]] = [{
+        "id": tid,
+        "name": tname,
+        "physical_name": phys,
+        "description": desc,
+        "row_count": row_cnt,
+        "periods": periods,
+    }]
+    # Forecast is deliberately stored separately from the realized Gold.
+    # Expose it as an analysis-only pseudo-destination using a negative ID;
+    # it remains configuration-free and never becomes a reprocess target.
+    if planning and planning["rows"]:
+        entries.append({
+            "id": -int(tid),
+            "name": f"{tname} — Forecast / Planning",
+            "physical_name": planning_name,
+            "description": "Projeções mensais: realizado e forecast",
+            "row_count": planning["rows"],
+            "periods": planning["periods"],
+            "analysis_only": True,
+            "analysis_kind": "forecast",
+            "base_destination_id": int(tid),
+        })
+    # Rateio rows share the monthly planning table with forecast. Expose
+    # them separately so this pivot source stays independent of forecast.
+    if planning and planning["shared_rows"]:
+        entries.append({
+            "id": shared_cost_pivot_id(int(tid)),
+            "name": f"Custo compartilhado · {tname}",
+            "physical_name": planning_name,
+            "description": "Linhas de rateio de consumo (tipo shared_cost)",
+            "row_count": planning["shared_rows"],
+            "periods": planning["shared_periods"],
+            "analysis_only": True,
+            "analysis_kind": "shared_cost",
+            "base_destination_id": int(tid),
+        })
+    return entries
+
+
 @router.get("/destinos")
 async def list_destinations_data(db: AsyncSession = Depends(get_db)):
-    """List destination tables with row counts (Trino with PyIceberg fallback)."""
+    """List destination tables with row counts (Trino with PyIceberg fallback).
+
+    Os destinos são lidos em paralelo; cada um faz duas queries simultâneas
+    (períodos da tabela e do planning) em vez de cinco em série.
+    """
     tables = (await db.execute(
         text("SELECT id, name, physical_name, description FROM destination_table WHERE active = true ORDER BY id")
     )).all()
-
-    result = []
-    for t in tables:
-        tid, tname, phys, desc = t[0], t[1], t[2], t[3]
-        safe_name = phys.replace("-", "_").replace(".", "_")
-        table_name = f"silver.{safe_name}"
-        row_cnt = 0
-        periods: list[dict] = []
-        try:
-            trino_result = await trino_execute(f"SELECT COUNT(*) AS cnt FROM iceberg.{table_name}")
-            row_cnt = trino_result[0]["cnt"] if trino_result else 0
-            pr = await trino_execute(
-                f"SELECT _billing_period, COUNT(*) AS cnt FROM iceberg.{table_name} "
-                f"GROUP BY _billing_period ORDER BY _billing_period DESC LIMIT 20"
-            )
-            periods = [{"period": str(p["_billing_period"]), "count": p["cnt"]} for p in (pr or [])]
-        except Exception:
-            # Trino down — fall back to PyIceberg (lightweight: scan only billing_period)
-            try:
-                from app.services.iceberg_service import get_catalog
-                cat = get_catalog()
-                tbl = cat.load_table(table_name)
-                arrow_table = tbl.scan().select("_billing_period").to_arrow()
-                row_cnt = len(arrow_table)
-                # Count by billing period
-                import pyarrow.compute as pc
-                bp_col = arrow_table.column("_billing_period")
-                counted = pc.value_counts(bp_col)
-                for i in range(len(counted)):
-                    periods.append({
-                        "period": str(counted.field(0)[i].as_py()),
-                        "count": counted.field(1)[i].as_py(),
-                    })
-            except Exception:
-                row_cnt = 0
-
-        result.append({
-            "id": tid,
-            "name": tname,
-            "physical_name": phys,
-            "description": desc,
-            "row_count": row_cnt,
-            "periods": periods,
-        })
-
-        # Forecast is deliberately stored separately from the realized Gold.
-        # Expose it as an analysis-only pseudo-destination using a negative ID;
-        # it remains configuration-free and never becomes a reprocess target.
-        planning_name = f"{safe_name}_planning"
-        try:
-            planning_count = await trino_execute(
-                f"SELECT COUNT(*) AS cnt FROM iceberg.silver.{planning_name}"
-            )
-            planning_rows = planning_count[0]["cnt"] if planning_count else 0
-            planning_periods = await trino_execute(
-                f"SELECT period, COUNT(*) AS cnt FROM iceberg.silver.{planning_name} "
-                "GROUP BY period ORDER BY period DESC LIMIT 20"
-            )
-            planning_period_list = [
-                {"period": str(p["period"]), "count": p["cnt"]}
-                for p in (planning_periods or [])
-            ]
-            if planning_rows:
-                result.append({
-                    "id": -int(tid),
-                    "name": f"{tname} — Forecast / Planning",
-                    "physical_name": planning_name,
-                    "description": "Projeções mensais: realizado e forecast",
-                    "row_count": planning_rows,
-                    "periods": planning_period_list,
-                    "analysis_only": True,
-                    "analysis_kind": "forecast",
-                    "base_destination_id": int(tid),
-                })
-        except Exception:
-            pass
-
-        # Rateio rows share the monthly planning table with forecast. Expose
-        # them separately so this pivot source stays independent of forecast.
-        try:
-            planning_schema = await _describe_layer_schema(planning_name, None, namespace=layers.detail_layer())
-            columns = {name.lower(): name for name in planning_schema}
-            period_col = columns.get("period")
-            tipo_col = columns.get("tipo")
-            if period_col and tipo_col:
-                # Older planning snapshots store shared-cost rows as
-                # tipo=rateio; newer ones use tipo=shared_cost. Expose either
-                # format as long as the table contains rows to analyze.
-                where = f"lower(CAST({_quote_ident(tipo_col)} AS VARCHAR)) IN ('rateio', 'shared_cost')"
-                shared_count = await trino_execute(
-                    f"SELECT COUNT(*) AS cnt FROM iceberg.{layers.detail_layer()}.{planning_name} WHERE {where}"
-                )
-                shared_rows = int((shared_count[0] or {}).get("cnt") or 0) if shared_count else 0
-                if shared_rows:
-                    shared_period_rows = await trino_execute(
-                        f"SELECT {_quote_ident(period_col)} AS period, COUNT(*) AS cnt "
-                        f"FROM iceberg.{layers.detail_layer()}.{planning_name} WHERE {where} "
-                        f"GROUP BY 1 ORDER BY 1 DESC LIMIT 20"
-                    )
-                    result.append({
-                        "id": shared_cost_pivot_id(int(tid)),
-                        "name": f"Custo compartilhado · {tname}",
-                        "physical_name": planning_name,
-                        "description": "Linhas de rateio de consumo (tipo shared_cost)",
-                        "row_count": shared_rows,
-                        "periods": [{"period": str(p["period"]), "count": p["cnt"]} for p in (shared_period_rows or [])],
-                        "analysis_only": True,
-                        "analysis_kind": "shared_cost",
-                        "base_destination_id": int(tid),
-                    })
-        except Exception:
-            pass
-
-    return result
+    groups = await asyncio.gather(*(_destination_entries(t[0], t[1], t[2], t[3]) for t in tables))
+    return [entry for group in groups for entry in group]
 
 
 @router.get("/destinos/{table_id}/dados")

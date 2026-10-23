@@ -677,7 +677,7 @@ async def _validate_rule_fields(config_id: int, body: BusinessRuleIn, db: AsyncS
         if not body.reference_column:
             raise HTTPException(422, "CHARGE_INTERVAL exige coluna de fim do período (reference_column)")
         if not has_identity:
-            raise HTTPException(422, "CHARGE_INTERVAL exige identificação ou escopo (ex.: cloud_origem=ibm-ti)")
+            raise HTTPException(422, "CHARGE_INTERVAL exige identificação ou escopo")
     elif not has_identity:
         raise HTTPException(422, "Informe identification_clauses, identification_values ou escopo")
     allowed = {"REPEAT_NEXT_MONTH", "RECURRING_MONTHLY", "RECURRING_UNTIL_END", "CANCEL_ON_REFUND", "REPLACE_VALUE", "CHARGE_INTERVAL", "SOURCE_EXCLUDE_PREFIX", "SOURCE_MEAN_30D_PREFIX", "SOURCE_MAX_PREVIOUS_MONTH_PREFIX", "SOURCE_GITHUB_COPILOT_OVERAGE_2_PHASE", "SOURCE_VALIDITY"}
