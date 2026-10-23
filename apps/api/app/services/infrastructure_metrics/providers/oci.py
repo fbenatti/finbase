@@ -7,6 +7,7 @@ tenancy-wide discovery.
 from __future__ import annotations
 
 from datetime import datetime
+import json
 import time
 from typing import Any
 
@@ -46,7 +47,9 @@ class OciMetricsAdapter:
         started = time.perf_counter()
         points_by_key: dict[tuple[datetime, tuple[tuple[str, str], ...]], dict[str, float | None]] = {}
         sample_periods: dict[tuple[datetime, tuple[tuple[str, str], ...]], int | None] = {}
+        raw_payloads: list[dict[str, Any]] = []
         streams = pages = 0
+        response_bytes = 0
         errors: list[tuple[int, str]] = []
         safe_request: dict[str, Any] = {
             "provider": "oci", "namespace": query.descriptor.namespace,
@@ -73,6 +76,23 @@ class OciMetricsAdapter:
                         summarize_metrics_data_details=details,
                     )
                     pages += 1
+                    payload = self._serialize_response(response.data)
+                    response_bytes += len(json.dumps(
+                        payload, default=str, separators=(",", ":"),
+                    ).encode("utf-8"))
+                    headers = getattr(response, "headers", {}) or {}
+                    safe_headers = {
+                        key.lower(): str(value) for key, value in headers.items()
+                        if key.lower() in {"opc-request-id", "content-type", "opc-next-page"}
+                    }
+                    raw_payloads.append({
+                        "resource_id": resource_id,
+                        "statistic": statistic,
+                        "status_code": int(getattr(response, "status", 200) or 200),
+                        "request_id": safe_headers.get("opc-request-id"),
+                        "safe_headers": safe_headers,
+                        "payload": payload,
+                    })
                     for stream in response.data or ():
                         streams += 1
                         dimensions = dict(stream.dimensions or {})
@@ -90,6 +110,14 @@ class OciMetricsAdapter:
                     status = int(getattr(exc, "status", 0) or 0)
                     code = str(getattr(exc, "code", "SOURCE_ERROR"))
                     errors.append((status, code))
+                    raw_payloads.append({
+                        "resource_id": resource_id,
+                        "statistic": statistic,
+                        "status_code": status or 502,
+                        "error_code": code,
+                        "error_type": type(exc).__name__,
+                        "request_id": getattr(exc, "request_id", None),
+                    })
 
         points = tuple(
             MetricPoint(
@@ -104,9 +132,9 @@ class OciMetricsAdapter:
         status_code = 200 if not errors else (errors[0][0] or 502)
         return QueryResult(
             plan=query, status_code=status_code, points=points,
-            sanitized_request=safe_request, page_count=pages,
-            attempt_count=len(query.statistics), latency_ms=latency,
-            stream_count=streams,
+            raw_payloads=tuple(raw_payloads), sanitized_request=safe_request, page_count=pages,
+            attempt_count=len(query.scope.resource_ids) * len(query.statistics), latency_ms=latency,
+            response_bytes=response_bytes, stream_count=streams,
             error_code=errors[0][1] if errors else None,
         )
 
@@ -114,6 +142,16 @@ class OciMetricsAdapter:
         scope.validate()
         if scope.provider.lower() != self.provider:
             raise ValueError("scope provider does not match OCI adapter")
+
+    @staticmethod
+    def _serialize_response(data: Any) -> Any:
+        try:
+            import oci
+            return oci.util.to_dict(data)
+        except ImportError:  # fake clients in contract tests
+            if isinstance(data, (dict, list, str, int, float, type(None))):
+                return data
+            return str(data)
 
 
 def _summarize_details(query: QueryPlan, metric_query: str, resolution_minutes: int):
