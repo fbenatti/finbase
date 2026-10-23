@@ -10,6 +10,7 @@ import {
 import CloseIcon from "@mui/icons-material/CloseOutlined";
 import ArrowForwardIcon from "@mui/icons-material/ArrowForwardOutlined";
 import type { OpportunityDetail, SeriesStats } from "../../services/infraOpportunitiesApi";
+import OpportunityCharts from "./OpportunityCharts";
 import { getOpportunity, setOpportunityState } from "../../services/infraOpportunitiesApi";
 import {
   ACTION_COLOR, ACTION_LABEL, CONFIDENCE_COLOR, CONFIDENCE_LABEL, READINESS_LABEL, STATE_LABEL, money, pct,
@@ -92,7 +93,7 @@ export default function OpportunityDrawer({ opportunityId, onClose, onChanged }:
   const to = item?.to_config;
 
   return <Drawer anchor="right" open={opportunityId != null} onClose={onClose}
-                 PaperProps={{ sx: { width: { xs: "100%", md: 760 }, p: { xs: 2, md: 3 } } }}>
+                 PaperProps={{ sx: { width: { xs: "100%", md: 1040 }, p: { xs: 2, md: 3 } } }}>
     <Stack direction="row" justifyContent="space-between" alignItems="flex-start">
       <Box sx={{ minWidth: 0 }}>
         <Typography variant="overline" color="text.secondary">Oportunidade de rightsizing · Oracle Cloud</Typography>
@@ -141,7 +142,7 @@ export default function OpportunityDrawer({ opportunityId, onClose, onChanged }:
 
       <Paper variant="outlined" sx={{ p: 2 }}>
         <Typography variant="subtitle2">Consumo na janela analisada</Typography>
-        <Typography variant="caption" color="text.secondary">Percentis lineares sobre as médias de 1 minuto (Silver, origem NATIVE) · “No alvo” = utilização projetada após a ação (P95 / P99)</Typography>
+        <Typography variant="caption" color="text.secondary">Percentis lineares sobre as médias dos buckets da análise ({(evidence?.cpu as { resolution_seconds?: number } | null)?.resolution_seconds === 300 ? "5 min, rollup do 1 min com máximo preservado" : "1 min, origem NATIVE"}) · “No alvo” = utilização projetada após a ação (P95 / P99)</Typography>
         <Table size="small" sx={{ mt: 1 }}>
           <TableHead><TableRow>
             <TableCell>Métrica</TableCell><TableCell align="right">P50</TableCell><TableCell align="right">P95</TableCell>
@@ -152,7 +153,20 @@ export default function OpportunityDrawer({ opportunityId, onClose, onChanged }:
             <MetricRow label="Memória" stats={evidence?.memory ?? null} projected95={projected.memory_p95} projected99={projected.memory_p99} />
           </TableBody>
         </Table>
-        <Box sx={{ mt: 1.5 }}><DailyP95Chart cpu={evidence?.cpu ?? null} memory={evidence?.memory ?? null} /></Box>
+      </Paper>
+
+      <Paper variant="outlined" sx={{ p: 2 }}>
+        <Typography variant="subtitle2">De / para do consumo</Typography>
+        <Typography variant="caption" color="text.secondary" sx={{ display: "block", mb: 1 }}>
+          Como a VM está hoje e como ficaria no tamanho recomendado, com a mesma demanda observada na janela.
+        </Typography>
+        <OpportunityCharts opportunityId={item.id} from={from ?? null} to={to ?? null}
+                           targets={{ cpu: Number(evidence?.policy?.cpu_target_p95 ?? 0.7), memory: Number(evidence?.policy?.memory_target_p95 ?? 0.8) }} />
+      </Paper>
+
+      <Paper variant="outlined" sx={{ p: 2 }}>
+        <Typography variant="subtitle2" gutterBottom>Evolução diária</Typography>
+        <DailyP95Chart cpu={evidence?.cpu ?? null} memory={evidence?.memory ?? null} />
       </Paper>
 
       <Paper variant="outlined" sx={{ p: 2 }}>

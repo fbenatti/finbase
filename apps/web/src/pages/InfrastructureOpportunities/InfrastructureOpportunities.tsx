@@ -40,6 +40,7 @@ export default function InfrastructureOpportunities() {
   const [connections, setConnections] = useState<SourceConnection[]>([]);
   const [connectionId, setConnectionId] = useState<number | null>(null);
   const [days, setDays] = useState(7);
+  const [resolution, setResolution] = useState(300);
   const [summary, setSummary] = useState<OpportunitySummary | null>(null);
   const [items, setItems] = useState<Opportunity[]>([]);
   const [runs, setRuns] = useState<OpportunityRun[]>([]);
@@ -86,7 +87,7 @@ export default function InfrastructureOpportunities() {
     setError(null);
     setMessage(null);
     try {
-      const run = await runOpportunityEngine(connectionId, days);
+      const run = await runOpportunityEngine(connectionId, days, resolution);
       if (run.status === "FAILED") setError(`A análise falhou: ${run.error_message ?? "erro desconhecido"}`);
       else setMessage(`Análise #${run.id} concluída: ${run.resources_analyzed} recurso(s), ${run.opportunities_count} oportunidade(s), ${money(run.total_monthly_saving, run.currency ?? "BRL")}/mês.`);
       await load();
@@ -145,6 +146,13 @@ export default function InfrastructureOpportunities() {
               {[7, 14, 30, 60].map((value) => <MenuItem key={value} value={value}>{value} dias</MenuItem>)}
             </Select>
           </FormControl>
+          <FormControl size="small" sx={{ minWidth: 150 }}>
+            <InputLabel>Base do motor</InputLabel>
+            <Select label="Base do motor" value={resolution} onChange={(event) => setResolution(Number(event.target.value))}>
+              <MenuItem value={300}>Buckets de 5 min</MenuItem>
+              <MenuItem value={60}>Buckets de 1 min</MenuItem>
+            </Select>
+          </FormControl>
           <Button size="small" startIcon={<RefreshIcon />} onClick={() => void load()}>Atualizar</Button>
           <Button size="small" variant="contained" startIcon={<PlayArrowIcon />} disabled={connectionId == null || running} onClick={() => void runNow()}>
             {running ? "Analisando…" : "Executar análise"}
@@ -164,7 +172,7 @@ export default function InfrastructureOpportunities() {
         <Paper variant="outlined" sx={{ p: 2, mb: 2, borderColor: "success.light", background: "linear-gradient(110deg,#f5fbf8,#fff)" }}>
           <Typography variant="subtitle2">Impacto financeiro das oportunidades</Typography>
           <Typography variant="caption" color="text.secondary">
-            Análise #{run.id} · janela {run.window_start_utc.slice(0, 10)} a {run.window_end_utc.slice(0, 10)} (UTC) · saving projetado com o preço efetivo do billing de cada recurso, não economia realizada auditada.
+            Análise #{run.id} · janela {run.window_start_utc.slice(0, 10)} a {run.window_end_utc.slice(0, 10)} (UTC) · base de {run.resolution_seconds / 60} min · saving projetado com o preço efetivo do billing de cada recurso, não economia realizada auditada.
           </Typography>
           <Stack direction="row" spacing={2} flexWrap="wrap" useFlexGap sx={{ mt: 1.5 }}>
             {[
@@ -249,7 +257,7 @@ export default function InfrastructureOpportunities() {
         </Typography>
         <Table size="small">
           <TableHead><TableRow>
-            <TableCell>#</TableCell><TableCell>Situação</TableCell><TableCell>Concluída em</TableCell><TableCell>Janela (UTC)</TableCell>
+            <TableCell>#</TableCell><TableCell>Situação</TableCell><TableCell>Concluída em</TableCell><TableCell>Janela (UTC)</TableCell><TableCell>Base</TableCell>
             <TableCell align="right">Recursos</TableCell><TableCell align="right">Oportunidades</TableCell>
             <TableCell align="right">Saving total / mês</TableCell><TableCell align="right">Saving médio / oportunidade</TableCell><TableCell>Motor</TableCell>
           </TableRow></TableHead>
@@ -259,13 +267,14 @@ export default function InfrastructureOpportunities() {
               <TableCell><Chip size="small" color={item.status === "COMPLETED" ? "success" : item.status === "FAILED" ? "error" : "default"} label={item.status === "COMPLETED" ? "Concluída" : item.status === "FAILED" ? "Falhou" : "Em execução"} title={item.error_message ?? undefined} /></TableCell>
               <TableCell>{item.finished_at ? new Date(item.finished_at).toLocaleString("pt-BR") : "—"}</TableCell>
               <TableCell>{item.window_start_utc.slice(0, 10)} → {item.window_end_utc.slice(0, 10)}</TableCell>
+              <TableCell>{item.resolution_seconds / 60} min</TableCell>
               <TableCell align="right">{item.resources_analyzed}</TableCell>
               <TableCell align="right">{item.opportunities_count}</TableCell>
               <TableCell align="right">{money(item.total_monthly_saving, item.currency ?? currency)}</TableCell>
               <TableCell align="right">{money(item.avg_monthly_saving, item.currency ?? currency)}</TableCell>
               <TableCell>{item.engine_version}</TableCell>
             </TableRow>)}
-            {runs.length === 0 && <TableRow><TableCell colSpan={9}><Typography variant="body2" color="text.secondary">Nenhuma execução registrada.</Typography></TableCell></TableRow>}
+            {runs.length === 0 && <TableRow><TableCell colSpan={10}><Typography variant="body2" color="text.secondary">Nenhuma execução registrada.</Typography></TableCell></TableRow>}
           </TableBody>
         </Table>
       </Paper>}

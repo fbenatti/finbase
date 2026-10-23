@@ -25,6 +25,7 @@ export type OpportunityRun = {
   policy_version: string;
   window_start_utc: string;
   window_end_utc: string;
+  resolution_seconds: number;
   resources_analyzed: number;
   opportunities_count: number;
   total_monthly_saving: number | null;
@@ -111,7 +112,21 @@ export type OpportunitySummary = {
   by_confidence?: Record<string, number>;
 };
 
+export type OpportunitySeries = {
+  resolution_seconds: number;
+  window_start_utc: string;
+  window_end_utc: string;
+  from_config: FlexConfig | null;
+  to_config: FlexConfig | null;
+  points: { t: string; cpu_avg?: number | null; cpu_max?: number | null; memory_avg?: number | null; memory_max?: number | null }[];
+};
+
 const BASE = "/custos/metricas-infra/oportunidades";
+
+export async function getOpportunitySeries(id: number, resolutionSeconds: number): Promise<OpportunitySeries> {
+  const { data } = await api.get(`${BASE}/${id}/serie`, { params: { resolution_seconds: resolutionSeconds } });
+  return data;
+}
 
 export async function getOpportunitySummary(connectionId: number): Promise<OpportunitySummary> {
   const { data } = await api.get(`${BASE}/resumo`, { params: { connection_id: connectionId } });
@@ -133,8 +148,8 @@ export async function getOpportunity(id: number): Promise<OpportunityDetail> {
   return data;
 }
 
-export async function runOpportunityEngine(connectionId: number, days: number): Promise<OpportunityRun> {
-  const { data } = await api.post(`${BASE}/executar`, { connection_id: connectionId, days }, { timeout: 300_000 });
+export async function runOpportunityEngine(connectionId: number, days: number, resolutionSeconds: number): Promise<OpportunityRun> {
+  const { data } = await api.post(`${BASE}/executar`, { connection_id: connectionId, days, resolution_seconds: resolutionSeconds }, { timeout: 300_000 });
   return data;
 }
 
