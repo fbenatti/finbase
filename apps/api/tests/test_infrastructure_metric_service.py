@@ -144,8 +144,10 @@ def test_service_can_opt_in_to_day_slice_publication(monkeypatch):
     from app.services.infrastructure_metrics import bronze
     initialized = []
     monkeypatch.setattr(publication, "ensure_metric_series_table", lambda: initialized.append(True))
+    monkeypatch.setattr(publication, "ensure_metric_coverage_table", lambda: initialized.append(True))
     monkeypatch.setattr(bronze, "persist_raw_query_results", lambda **kwargs: 1)
     monkeypatch.setattr(publication, "publish_metric_rows", fake_publish)
+    monkeypatch.setattr(publication, "publish_metric_coverage_rows", fake_publish)
     start = datetime(2026, 1, 1, tzinfo=timezone.utc)
     result = service.collect_oci_metrics(
         connection, start_utc=start, end_utc=start + timedelta(minutes=1),
@@ -153,6 +155,7 @@ def test_service_can_opt_in_to_day_slice_publication(monkeypatch):
     )
     assert result["persistence_enabled"] is True
     assert result["persisted_by_day"] == {"20260101": 2}
-    assert initialized == [True]
-    assert len(published) == 1
+    assert result["coverage_persisted_by_day"] == {"20260101": 1}
+    assert initialized == [True, True]
+    assert len(published) == 2
     assert published[0][1:] == (4, "20260101")
