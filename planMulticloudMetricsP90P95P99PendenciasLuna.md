@@ -670,12 +670,12 @@ limiares: esses campos ficam nulos até existirem fontes válidas.
 | T09 | PARCIAL | Coverage e rollups 5m/15m integrados na coleta; cálculo/persistência de perfil via API agora conectado. Faltam predecessor de counter entre chunks, maturidade da qualidade, limiares/capacidade e validação física. |
 | T10 | PENDENTE | Sem experimento operacional de sete dias e ADR com custos/volume da Silver real. |
 | T11 | PARCIAL | Rotas de controle, séries, coverage e perfis disponíveis; faltam comparação, config/discovery completas, Gold, fluxo de Extração e integração de ponta a ponta em catálogo real. |
-| T12 | NÃO IMPLEMENTADO | Continua faltando página/menu de monitoramento dedicado e visualização dos perfis. |
+| T12 | PARCIAL | Página e item de menu criados para OCI: filtros de conexão/recurso/métrica/janela/resolução, série, cobertura e cálculo/consulta de perfil. Faltam comparação 1/5/15, tabela detalhada de gaps por bucket, custos, estados de execução e validação de acesso/menu no ambiente conectado. |
 | T13 | NÃO IMPLEMENTADO | Adaptadores AWS/Azure/GCP não foram adicionados. |
 | T14 | NÃO IMPLEMENTADO | Contrato versionado de readiness para análise de capacidade futura continua ausente. |
 | T15 | PARCIAL | Registro incrementado e testes locais registrados; faltam runbook e reconciliação de ambiente/rollback. |
 
-Resultado de teste após os últimos commits de código:
+Resultado de teste após os commits de API/perfis:
 
 ```bash
 cd apps/api
@@ -684,7 +684,24 @@ python -m pytest -q tests/test_infrastructure_metric_*.py tests/test_oci_infrast
 ```
 
 Resultado: **99 passed**. A compilação Python também passou. A advertência do
-`pytest-asyncio` sobre configuração de escopo do event loop permanece. Não houve
-build web, porque nenhuma alteração de UI de métricas foi feita. Não houve
-chamada OCI, consulta ou gravação em catálogo real. Estado geral permanece
-**ENTREGA PARCIAL**.
+`pytest-asyncio` sobre configuração de escopo do event loop permanece.
+
+### Incremento seguinte — página inicial de monitoramento
+
+- `d38de0de`: nova página `apps/web/src/pages/InfrastructureMetrics/InfrastructureMetrics.tsx`, com filtros OCI, gráfico de série, resumo de cobertura e perfil, e explicação de que P95 da janela difere do P95 nativo OCI.
+- `60b17d9c`: renderer lazy e item de navegação `dados_metricas_infra` protegido pelo módulo `infrastructure_metrics`.
+- `f8a4b529`: compatibilidade com o alvo de compilação TypeScript.
+- `40561bfc`: filtro de métrica baseado em `source_metric_name` e linhagem dessa métrica no perfil.
+- `ab81ae90`: cálculo/persistência do perfil exige permissão `create` por conexão.
+
+Após estes incrementos, a mesma suíte da API passou: **99 passed**. `npm run
+build` passou (`tsc -b` + Vite); o bundle registra o módulo
+`InfrastructureMetrics`. Vite reportou aviso de chunks já grandes, incluindo o
+bundle de Plotly existente. A tela não usa dados simulados. O menu se origina do
+catálogo JSON, porém sua sincronização/permissão no banco do ambiente não foi
+validada.
+
+Não houve chamada OCI, consulta/gravação em catálogo real nem exportação por
+Extração. Não houve materialização Gold, comparação 1/5/15 ou validação visual em
+sessão autenticada com dados. Portanto, cobertura operacional, Silver física e
+acesso de usuário seguem sem aceite. Estado geral permanece **ENTREGA PARCIAL**.
