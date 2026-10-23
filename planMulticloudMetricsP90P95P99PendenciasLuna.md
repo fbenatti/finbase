@@ -551,6 +551,7 @@ nem reduz o aceite T00–T15. O estado continua **ENTREGA PARCIAL**.
 | --- | --- | --- |
 | Chaves de identidade opcionais usam NULL canônico no merge; teste passa a saída real do normalizador ao merge. | `ef4fce5f`, `3e631f60` | `test_infrastructure_metric_publication.py` |
 | Persistência Bronze acontece antes da normalização/derivação. | `ba8f16d8` | Revisão do fluxo em `service.py`; sem escrita em catálogo real nesta sessão. |
+| Identidade de série v2 incorpora namespace, escopo, owner e campos opcionais; lote rejeita valores conflitantes na mesma chave; Silver recebe lineage por estatística com hash/request/path Bronze. | `b92a6718`, `32d33c2b`, `99e8a998`, `4025b664`, `0cf4f4c2`, `bd2ac3af`, `81e17d65`, `f60735f8`, `c2567643` | Fixtures verificam colisão e hash/path por estatística; ainda sem migração/publicação física em catálogo real. |
 | Contagens de execução usam status das chamadas registradas, não o número de descriptors; fallback para adapters agregados. | `9366989c`, `26d33f05`, `bcd38a99` | Suíte de métricas abaixo. |
 | Introduzido cancelamento cooperativo entre requisições OCI, antes da publicação diária e preservação do estado CANCELLED no worker. | `21b89f4a`, `b4c8da15`, `3298a66f`, `a4c2734d`, `2aee0349` | Teste de cancelamento do adapter; não houve teste integrado de worker concorrente/retomada. |
 | Perfis calculam lacunas ausentes incluindo bordas e emitem dias/perfil serializáveis; modelo declara expected_buckets e quantile_method. | `a7ea546b`, `f9733e38`, `022fb0ca` | `test_infrastructure_metric_profiles.py` |
@@ -572,7 +573,8 @@ python -m pytest -q \
   tests/test_semantic_normalization.py
 ```
 
-Resultado: **85 passed**. Permanece aviso de configuração de `pytest-asyncio`.
+Resultado inicial após os primeiros incrementos: **85 passed**. Após identidade v2,
+conflitos de lote e linhagem por estatística: **87 passed**. Permanece aviso de configuração de `pytest-asyncio`.
 Não foi executada build web nesta continuidade porque nenhuma tela web de
 métricas foi implementada. Não foram chamadas APIs OCI nem feitas consultas ou
 escritas no catálogo real.
@@ -582,15 +584,15 @@ escritas no catálogo real.
 | Item | Estado atual | O que ainda impede o aceite |
 | --- | --- | --- |
 | T00 | PARCIAL | Inventário operacional de conexões, catálogo físico, dependências e divergências ainda não foi produzido. |
-| T01 | PARCIAL | Identidade v1 ainda não contempla todos os componentes de namespace/scope/owner/partition/sub-account; falta conversão por descriptor, protocolo e versionamento/migração. |
+| T01 | PARCIAL | Identidade v2 contempla namespace/scope/owner e campos opcionais na função; faltam conversões por descriptor, integração completa do protocolo e migração/leitores para hashes v1 já persistidos. |
 | T02 | PARCIAL | Falta autorização por conexão/organização, configuração versionada auditável e budgets persistidos/validados em todos os caminhos. |
 | T03 | PARCIAL — físico não comprovado | Só o initializer da série existe; falta preparar/evoluir todos os modelos, relações, schema diff real e compatibilidade legado. |
-| T04 | PARCIAL | Corrigido o KeyError de chaves opcionais, mas falta conflito de duplicatas no lote, isolamento/concorrência/rerun e publicação Iceberg real. |
+| T04 | PARCIAL | Corrigidos chaves opcionais e conflitos de valores duplicados no lote; falta isolamento/concorrência/rerun e publicação Iceberg real. |
 | T05 | PARCIAL | Adapter ainda cobre consulta de métricas; sem inventário/capacity/attachments/capabilities nem validação viva. |
-| T06 | PARCIAL | Cancelamento foi iniciado; faltam checkpoints persistidos, retomada, progresso durante chunks, retry/backoff, budgets de pontos/bytes/RPS e teste concorrente integrado. |
+| T06 | PARCIAL | Cancelamento cooperativo e preservação de CANCELLED implementados; faltam checkpoints persistidos, retomada, progresso durante chunks, retry/backoff, budgets de pontos/bytes/RPS e teste concorrente integrado. |
 | T07 | PENDENTE — evidência operacional | Nenhum piloto do worker atual com Bronze/Silver reais foi executado nesta sessão. |
 | T08 | NÃO IMPLEMENTADO no fluxo novo | Ainda sem backfill de 60 dias, planner/chunks, cutoff/lifecycle e reconciliação real. |
-| T09 | PARCIAL | Cálculo isolado de perfil melhorado; ainda sem coverage writer, rollups, job leitor/publicador, schema/consumidor integrado e taxa entre chunks. |
+| T09 | PARCIAL | Cálculo isolado de perfil/gaps melhorado; ainda sem coverage writer, rollups, job leitor/publicador, schema/consumidor integrado e taxa entre chunks. |
 | T10 | PENDENTE | Sem experimento operacional de sete dias ou ADR derivado dos bytes/custos reais da aplicação. |
 | T11 | PARCIAL | Permanecem rotas de controle; faltam APIs de séries/perfis/comparação, Gold e leitura/exportação autorizada. |
 | T12 | NÃO IMPLEMENTADO | Falta página/menu de monitoramento dedicada. |
@@ -600,16 +602,27 @@ escritas no catálogo real.
 
 ### Correções técnicas ainda necessárias antes de prosseguir com dados reais
 
-- A linhagem Silver ainda não contém hash/caminho/request real por estatística;
-  a mudança de ordem preserva Bronze em falhas posteriores, mas não fecha L02.
-- A chave de série ainda usa identidade `v1` e dimensões completas. Alterá-la sem
-  estratégia versionada pode fragmentar/duplicar as séries existentes.
+- A linhagem Silver agora carrega hash/caminho/request por estatística quando
+  `bronze_persisted=True`; falta comprovar isso em Bronze/Silver físicos e tornar
+  evidências imutáveis/versionadas nos retries.
+- A identidade `v2` substituiu o hash do normalizador; falta migração e
+  compatibilidade dos leitores com séries legadas `v1` antes de misturar dados.
 - O novo teste normalizador→merge valida o merge em memória; não é teste de
   publicação Iceberg. A tabela física e seus field IDs continuam sem evidência.
 - O cancelamento não fornece checkpoints nem retomada; a operação inteira ainda
   não foi integrada com progresso real e concorrência do worker.
 - O perfil corrigido segue sendo função sem consumidor operacional; ausência de
   amostras ainda não gera linha de coverage.
+
+### Nota de concorrência de Git
+
+O commit `074aeed4` foi criado enquanto outros arquivos já estavam staged no
+índice compartilhado; além do teste deste módulo, incluiu alterações de
+`apps/api/app/routers/analysis.py`, `apps/web/src/components/PivotAnalysis.tsx`
+e `apps/web/src/services/api.ts`. Não foi feito reset/rebase/revert automático
+porque isso reescreveria estado compartilhado; esses arquivos não foram incluídos
+nos commits posteriores desta iniciativa e devem ser revisados pelo dono dessas
+alterações antes do merge da branch.
 
 **Conclusão desta continuidade: ENTREGA PARCIAL.** Antes de declarar concluído,
 reler este documento, o PLAN completo e as solicitações de UI/Extração/Silver;
