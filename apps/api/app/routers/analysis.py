@@ -2799,6 +2799,7 @@ async def run_query(req: QueryRequest, request: Request, db: AsyncSession = Depe
     from app.services.iceberg_service import _bronze_table_id
     connection_codes = (await db.execute(select(SourceConnection.code))).scalars().all()
     allowed.update(".".join(_bronze_table_id(code)) for code in connection_codes if code)
+    resolved_sql = _resolve_public_query_schemas(req.sql)
     try:
         check_read_only_select(resolved_sql, allowed)
     except SqlRejected as exc:
@@ -2895,7 +2896,6 @@ def _run_local_gold_query(sql: str) -> list[dict[str, Any]] | None:
             return None
         fields = [f.strip().strip('"') for f in generic.group(2).split(",")]
         allowed = {"hierarquia_1", "projeto_nome", "_billing_period", "RegionName", "cloud_origem", "ServiceName"}
-    resolved_sql = _resolve_public_query_schemas(req.sql)
         if not fields or any(f not in allowed for f in fields):
             return None
         table = get_catalog().load_table((layers.detail_layer(), "dest_billing_cloud"))
