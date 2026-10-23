@@ -11,7 +11,6 @@ from app.routers.analysis import (
     _measure_column_for_side,
     _origin_from_cell_filters,
     _period_on_axes,
-    _schema_cache_key,
     _schema_period_column,
 )
 
@@ -104,11 +103,6 @@ def test_cell_filters_remap_period_and_drop_unknown_columns():
         {"period": "varchar", "tipo": "varchar"},
     )
     assert mapped == {"period": "202607"}
-
-
-def test_schema_cache_key_is_namespace_qualified():
-    assert _schema_cache_key("gold", "dest_billing_cloud") == "gold.dest_billing_cloud"
-    assert _schema_cache_key("gold", "dest_dm_cost") == "gold.dest_dm_cost"
 
 
 def test_axis_limit_keeps_large_negative_refunds_in_unfiltered_pivot():

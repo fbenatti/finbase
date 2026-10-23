@@ -46,6 +46,7 @@ from app.services.iceberg_service import (
 )
 from app.services.shared_cost import RATEIO_MEDIDA_ACTUAL, RATEIO_MEDIDA_FORECAST, RATEIO_TIPO, apply_rateio_facts
 from app.services.trino_service import execute as trino_execute, TrinoCancelled, TrinoError, wait_until_ready
+from app.services import lakehouse_metadata
 from app.services import lakehouse_layers as layers
 from app.services.gold_materialization import GOLD
 
@@ -519,11 +520,6 @@ def _quote_literal(value: str | int | float | bool) -> str:
     return "'" + str(value).replace("'", "''") + "'"
 
 
-_SCHEMA_CACHE: dict[str, tuple[float, dict[str, str]]] = {}
-_SCHEMA_CACHE_TTL_S = 90.0
-_SCHEMA_LOCK = asyncio.Lock()
-_SCHEMA_INFLIGHT: dict[str, asyncio.Task[tuple[str, dict[str, str]]]] = {}
-
 # Partition trees in Analysis only need Iceberg metadata (manifest stats), not
 # Postgres operational tables. Cache responses to avoid hammering Trino on
 # every expand of large tables such as dest_billing_cloud.
@@ -531,66 +527,41 @@ _PARTITION_META_CACHE: dict[str, tuple[float, dict[str, Any]]] = {}
 _PARTITION_META_CACHE_TTL_S = float(os.getenv("ANALYSIS_PARTITION_CACHE_TTL_S", "120"))
 
 
-def _schema_cache_key(namespace: str, safe_name: str) -> str:
-    return f"{namespace}.{safe_name}"
-
-
-def _local_iceberg_schema_sync(namespace: str, safe_name: str) -> dict[str, str]:
-    from app.services import iceberg_service as iceberg
-
-    table = iceberg._get_catalog().load_table(iceberg._table_id(namespace, safe_name))
-    return {field.name: str(field.field_type) for field in table.schema().fields}
-
-
-async def _local_iceberg_schema(namespace: str, safe_name: str) -> dict[str, str]:
-    schema = await asyncio.to_thread(_local_iceberg_schema_sync, namespace, safe_name)
-    if not schema:
-        raise HTTPException(status_code=422, detail="A tabela não possui schema disponível no Iceberg local")
-    return schema
-
-
-def _local_latest_period_sync(namespace: str, table_name: str, period_col: str) -> str | None:
-    from app.services import iceberg_service as iceberg
-
-    table = iceberg._get_catalog().load_table(iceberg._table_id(namespace, table_name))
-    try:
-        frame = table.inspect.partitions().to_pandas()
-        candidates = [column for column in frame.columns if column.lower() == period_col.lower()]
-        if candidates:
-            series = frame[candidates[0]].dropna().astype(str)
-            if not series.empty:
-                return series.max()
-    except Exception:
-        logger.debug("Iceberg inspect.partitions indisponível para %s.%s", namespace, table_name, exc_info=True)
-    return None
+async def _describe_via_trino(namespace: str, safe_name: str, max_retries: int | None) -> dict[str, str]:
+    schema = await trino_execute(
+        f"DESCRIBE iceberg.{namespace}.{safe_name}",
+        timeout_s=20,
+        max_retries=max_retries,
+    )
+    return {
+        str(c.get("Column") or c.get("column_name") or c.get("column")): str(c.get("Type") or c.get("data_type") or "")
+        for c in schema
+    }
 
 
 async def _describe_layer_schema(safe_name: str, max_retries: int | None, namespace: str | None = None) -> dict[str, str]:
-    # O detalhe vive na camada de detalhe (Silver). A resolução é central para
-    # não repetir o bug de ler Gold enquanto o reprocess grava Silver.
+    """Schema da tabela no formato do ``DESCRIBE`` do Trino, sem consultar o Trino.
+
+    O schema sai do catálogo PyIceberg, chaveado pelo snapshot da tabela
+    (``lakehouse_metadata``): um DESCRIBE custava 1,3–6,5 s por request no
+    cluster compartilhado. O DESCRIBE fica só como fallback quando o catálogo
+    não responde. O detalhe vive na camada de detalhe (Silver); a resolução é
+    central para não repetir o bug de ler Gold enquanto o reprocess grava Silver.
+    """
     namespace = namespace or layers.detail_layer()
-    cache_key = _schema_cache_key(namespace, safe_name)
     try:
-        schema = await trino_execute(
-            f"DESCRIBE iceberg.{namespace}.{safe_name}",
-            timeout_s=20,
-            max_retries=max_retries,
-        )
-        columns = {
-            str(c.get("Column") or c.get("column_name") or c.get("column")): str(c.get("Type") or c.get("data_type") or "")
-            for c in schema
-        }
-        if not columns:
-            raise HTTPException(status_code=422, detail="A tabela não possui schema disponível no Trino")
-        _SCHEMA_CACHE[cache_key] = (time.monotonic(), columns)
-        return columns
-    except HTTPException:
-        raise
-    except Exception as exc:
-        logger.warning("DESCRIBE Trino falhou para %s (%s); usando schema Iceberg local", cache_key, exc)
-        columns = await _local_iceberg_schema(namespace, safe_name)
-        _SCHEMA_CACHE[cache_key] = (time.monotonic(), columns)
-        return columns
+        columns = await lakehouse_metadata.table_schema(namespace, safe_name)
+    except Exception as exc:  # noqa: BLE001 — catálogo indisponível cai no Trino
+        logger.warning("Schema de %s.%s indisponível no catálogo (%s); usando DESCRIBE no Trino", namespace, safe_name, exc)
+        try:
+            columns = await _describe_via_trino(namespace, safe_name, max_retries)
+        except HTTPException:
+            raise
+        except Exception as trino_exc:
+            raise HTTPException(status_code=503, detail=f"Trino é obrigatório para tabela dinâmica: {trino_exc}") from trino_exc
+    if not columns:
+        raise HTTPException(status_code=422, detail="A tabela não possui schema disponível no Trino")
+    return columns
 
 
 async def _layer_from(
@@ -653,39 +624,7 @@ async def _pivot_table_context(db: AsyncSession, destination_table_id: int, max_
     safe_name = await _analysis_physical_name(db, destination_table_id)
     if not safe_name:
         raise HTTPException(status_code=404, detail="Tabela destino ativa não encontrada")
-    cache_key = _schema_cache_key(layers.detail_layer(), safe_name)
-    cached = _SCHEMA_CACHE.get(cache_key)
-    if cached and time.monotonic() - cached[0] < _SCHEMA_CACHE_TTL_S:
-        return safe_name, cached[1]
-    async with _SCHEMA_LOCK:
-        cached = _SCHEMA_CACHE.get(cache_key)
-        if cached and time.monotonic() - cached[0] < _SCHEMA_CACHE_TTL_S:
-            return safe_name, cached[1]
-        task = _SCHEMA_INFLIGHT.get(cache_key)
-        if task is None or task.done():
-            async def _load() -> dict[str, str]:
-                return await _describe_layer_schema(safe_name, max_retries)
-
-            task = asyncio.create_task(_load())
-            _SCHEMA_INFLIGHT[cache_key] = task
-    try:
-        schema = await task
-        return safe_name, schema
-    except HTTPException:
-        raise
-    except Exception as exc:
-        try:
-            schema = await _local_iceberg_schema(layers.detail_layer(), safe_name)
-            _SCHEMA_CACHE[cache_key] = (time.monotonic(), schema)
-            return safe_name, schema
-        except HTTPException:
-            raise
-        except Exception as local_exc:
-            logger.warning("Schema Iceberg local também falhou para %s: %s", cache_key, local_exc)
-        raise HTTPException(status_code=503, detail=f"Trino é obrigatório para tabela dinâmica: {exc}")
-    finally:
-        if _SCHEMA_INFLIGHT.get(cache_key) is task and task.done():
-            _SCHEMA_INFLIGHT.pop(cache_key, None)
+    return safe_name, await _describe_layer_schema(safe_name, max_retries)
 
 
 def _validate_pivot_request(req: PivotRequest, schema: dict[str, str]) -> tuple[list[str], list[str], list[PivotMeasure]]:
@@ -909,17 +848,29 @@ async def _inject_latest_period_filter(
     period_col = _schema_period_column(schema)
     if not period_col or _has_period_filter(filters) or _period_on_axes(axis_names or []):
         return filters, None
-    latest: str | None = None
-    try:
+    async def _max_via_trino() -> str | None:
         latest_rows = await trino_execute(
             f"SELECT MAX(CAST({_quote_ident(period_col)} AS VARCHAR)) AS latest "
             f"FROM iceberg.{namespace}.{table_name}",
             **({"timeout_s": 30, **trino_kwargs} if trino_kwargs else {"timeout_s": 30}),
         )
-        latest = latest_rows[0].get("latest") if latest_rows else None
-    except Exception as exc:
-        logger.warning("MAX período via Trino falhou para %s.%s (%s); tentando Iceberg local", namespace, table_name, exc)
-        latest = await asyncio.to_thread(_local_latest_period_sync, namespace, table_name, period_col)
+        return latest_rows[0].get("latest") if latest_rows else None
+
+    # O último período é por snapshot: sai dos manifests quando a coluna é de
+    # partição e, senão, de um único MAX por publicação — nunca um por request.
+    latest: str | None = None
+    try:
+        latest = await lakehouse_metadata.latest_period(namespace, table_name, period_col, fallback=_max_via_trino)
+    except TrinoCancelled:
+        raise
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("Último período de %s.%s indisponível no catálogo (%s); tentando MAX no Trino", namespace, table_name, exc)
+        try:
+            latest = await _max_via_trino()
+        except TrinoCancelled:
+            raise
+        except Exception as trino_exc:  # noqa: BLE001
+            logger.warning("MAX período via Trino falhou para %s.%s: %s", namespace, table_name, trino_exc)
     if not latest:
         return filters, None
     return [

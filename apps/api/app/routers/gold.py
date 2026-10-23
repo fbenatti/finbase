@@ -27,6 +27,7 @@ from app.services.gold_materialization import (
     _quote_literal,
 )
 from app.services.trino_service import execute
+from app.services import lakehouse_metadata
 
 logger = logging.getLogger(__name__)
 
@@ -519,22 +520,35 @@ class GoldFilterOptionsRequest(BaseModel):
     limit: int = Field(default=100, ge=1, le=500)
 
 
+async def _table_schema(namespace: str, table: str) -> dict[str, str]:
+    """``{nome_minusculo: nome}`` das colunas, do catálogo por snapshot; DESCRIBE só como fallback.
+
+    O DESCRIBE no Trino custava 1,3–2,6 s em cada consulta do dashboard. O
+    catálogo PyIceberg responde em milissegundos e muda só quando a tabela é
+    publicada (``lakehouse_metadata``).
+    """
+    try:
+        columns = list(await lakehouse_metadata.table_schema(namespace, table))
+    except Exception as catalog_exc:  # noqa: BLE001
+        logger.warning("Schema de %s.%s indisponível no catálogo (%s); usando DESCRIBE", namespace, table, catalog_exc)
+        try:
+            rows = await execute(f"DESCRIBE iceberg.{namespace}.{table}", timeout_s=30)
+        except Exception as exc:  # noqa: BLE001
+            _raise_gold_query_error(table, exc)
+        columns = [
+            str(row.get("Column") or row.get("column_name") or row.get("column") or "") for row in rows
+        ]
+    schema = {name.lower(): name for name in columns if name}
+    if not schema:
+        raise HTTPException(status_code=422, detail=f"Tabela vazia/inexistente: {namespace}.{table}")
+    return schema
+
+
 async def _gold_schema(table: str) -> dict[str, str]:
-    """DESCRIBE a Gold cube, validating the name against the whitelist."""
+    """Schema de um cubo Gold, validando o nome contra a whitelist."""
     if not _GOLD_TABLE_RE.match(table):
         raise HTTPException(status_code=422, detail=f"Nome de tabela Gold inválido: {table}")
-    try:
-        rows = await execute(f"DESCRIBE iceberg.{GOLD}.{table}", timeout_s=30)
-    except Exception as exc:  # noqa: BLE001
-        _raise_gold_query_error(table, exc)
-    schema: dict[str, str] = {}
-    for row in rows:
-        name = str(row.get("Column") or row.get("column_name") or row.get("column") or "")
-        if name:
-            schema[name.lower()] = name
-    if not schema:
-        raise HTTPException(status_code=422, detail=f"Tabela Gold vazia/inexistente: {table}")
-    return schema
+    return await _table_schema(GOLD, table)
 
 
 def _gold_resolve(schema: dict[str, str], name: str) -> str | None:
@@ -703,19 +717,14 @@ async def query_gold_daily_consumption(body: GoldQueryRequest):
     if not silver_table:
         raise HTTPException(status_code=422, detail=f"Série diária indisponível para o cubo: {body.table}")
     try:
-        described, forecast_schema = await asyncio.gather(
-            execute(f"DESCRIBE iceberg.silver.{silver_table}", timeout_s=30),
+        schema, forecast_schema = await asyncio.gather(
+            _table_schema("silver", silver_table),
             _gold_schema(body.table),
         )
+    except HTTPException:
+        raise
     except Exception as exc:  # noqa: BLE001
         _raise_gold_query_error(body.table, exc)
-    schema: dict[str, str] = {}
-    for row in described:
-        name = str(row.get("Column") or row.get("column_name") or row.get("column") or "")
-        if name:
-            schema[name.lower()] = name
-    if not schema:
-        raise HTTPException(status_code=503, detail=f"Tabela Silver indisponível: {silver_table}")
     # ChargePeriodStart is the same real date used by the forecast-accuracy
     # daily drill; prefer it over billing-period end or derived month fields.
     date_col = next((schema[name] for name in (
