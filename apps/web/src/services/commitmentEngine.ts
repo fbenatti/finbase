@@ -52,6 +52,7 @@ export interface CommitmentRecommendation {
   currency: string | null;
   risks: string[];
   rationale: string[];
+  projected_annual_spend: number | null;
 }
 
 const BASE = "/custos/reservas/motor";

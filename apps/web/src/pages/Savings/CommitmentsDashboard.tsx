@@ -138,7 +138,7 @@ export default function CommitmentsDashboard() {
             Compra, base sob demanda e saving efetivado por projeto.
           </Typography>
         </Box>
-        <Stack direction={{ xs: "column", sm: "row" }} gap={1.5}>
+        <Stack direction="row" gap={1.5} flexWrap="wrap" useFlexGap>
           <TextField label="Início" type="month" size="small" value={startMonth} onChange={(event) => setStartMonth(event.target.value)} InputLabelProps={{ shrink: true }} />
           <TextField label="Fim" type="month" size="small" value={endMonth} onChange={(event) => setEndMonth(event.target.value)} InputLabelProps={{ shrink: true }} />
           <FormControl size="small" sx={{ minWidth: 150 }}>
@@ -151,7 +151,10 @@ export default function CommitmentsDashboard() {
         </Stack>
       </Stack>
 
-      {error && <Alert severity="error" sx={{ mb: 2 }}>{error}</Alert>}
+      {/* Without the Gold cube there is simply no RI history yet (e.g. an OCI-only base): not an error. */}
+      {error && (/materializ/i.test(error)
+        ? <Alert severity="info" sx={{ mb: 2 }}>Ainda não há histórico de compras de RI nesta base: o cubo do painel (regra Gold commitments_dashboard) não foi materializado.</Alert>
+        : <Alert severity="error" sx={{ mb: 2 }}>{error}</Alert>)}
       {loading && !data && <Stack alignItems="center" sx={{ py: 5 }}><CircularProgress /></Stack>}
       {loading && data && <Typography variant="caption" color="text.secondary" sx={{ display: "block", mb: 1 }}>Recalculando o período…</Typography>}
       {data && <>

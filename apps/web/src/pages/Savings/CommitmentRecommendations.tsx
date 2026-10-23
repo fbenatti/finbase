@@ -93,7 +93,7 @@ function NegotiatedOfferForm({ item, onSaved }: { item: CommitmentRecommendation
   };
 
   return (
-    <Stack direction={{ xs: "column", sm: "row" }} gap={1} alignItems={{ sm: "center" }} sx={{ mt: 1, ml: 2 }}>
+    <Stack direction="row" gap={1} alignItems="center" flexWrap="wrap" useFlexGap sx={{ mt: 1.5 }}>
       <TextField size="small" label="Desconto negociado (%)" value={discount} sx={{ width: 190 }}
                  onChange={(event) => setDiscount(event.target.value)} inputProps={{ inputMode: "decimal" }} />
       <FormControl size="small" sx={{ width: 130 }}>
@@ -107,6 +107,54 @@ function NegotiatedOfferForm({ item, onSaved }: { item: CommitmentRecommendation
       </Button>
       {error && <Typography variant="body2" color="error">{error}</Typography>}
     </Stack>
+  );
+}
+
+const SIMULATED_DISCOUNTS = [0.05, 0.10, 0.15, 0.20, 0.25];
+const BALANCED_SHARE = 0.9;
+
+// Until the deal's discount is registered, show what the spend pool is worth per discount point.
+function SpendSimulation({ item, money, onSaved }: {
+  item: CommitmentRecommendation; money: (value: unknown) => string; onSaved: () => Promise<void>;
+}) {
+  const projected = Number(item.projected_annual_spend || 0);
+  return (
+    <Card sx={{ mb: 2, borderColor: "warning.light" }} variant="outlined"><CardContent>
+      <Typography variant="overline" color="text.secondary">{item.instrument_label}</Typography>
+      <Stack gap={2.5}>
+        <Box sx={{ maxWidth: 720 }}>
+          <Typography variant="body2" color="text.secondary">Consumo projetado / ano</Typography>
+          <Typography variant="h4" sx={{ fontWeight: 700 }}>{money(projected)}</Typography>
+          <Typography variant="body2" color="text.secondary" sx={{ mt: 1 }}>
+            O desconto vem do acordo com o provider: o motor não presume nenhum. Cada ponto percentual vale {money(projected / 100)} por ano.
+            Cadastre o desconto negociado (ou a proposta recebida) para virar recomendação.
+          </Typography>
+          <NegotiatedOfferForm item={item} onSaved={onSaved} />
+        </Box>
+        <Box sx={{ maxWidth: 720 }}>
+          <Typography variant="subtitle2" fontWeight={600} mb={0.5}>Simulação — perfil balanceado</Typography>
+          <Box component="table" sx={{ width: "100%", borderCollapse: "collapse", "& td, & th": { py: 0.75, px: 1, borderBottom: "1px solid", borderColor: "divider", textAlign: "right" }, "& th:first-of-type, & td:first-of-type": { textAlign: "left" } }}>
+            <thead><tr>
+              <Typography component="th" variant="caption" color="text.secondary">Desconto</Typography>
+              <Typography component="th" variant="caption" color="text.secondary">Compromisso / ano</Typography>
+              <Typography component="th" variant="caption" color="text.secondary">Saving / mês</Typography>
+              <Typography component="th" variant="caption" color="text.secondary">Saving / ano</Typography>
+            </tr></thead>
+            <tbody>{SIMULATED_DISCOUNTS.map((discount) => (
+              <tr key={discount}>
+                <Typography component="td" variant="body2">{percent(discount)}</Typography>
+                <Typography component="td" variant="body2">{money(projected * (1 - discount) * BALANCED_SHARE)}</Typography>
+                <Typography component="td" variant="body2">{money(projected * discount / 12)}</Typography>
+                <Typography component="td" variant="body2" fontWeight={700} color="success.main">{money(projected * discount)}</Typography>
+              </tr>
+            ))}</tbody>
+          </Box>
+          <Typography variant="caption" color="text.secondary">
+            Compromisso de {Math.round(BALANCED_SHARE * 100)}% do consumo projetado ao preço com desconto; o consumo acima dele mantém o desconto.
+          </Typography>
+        </Box>
+      </Stack>
+    </CardContent></Card>
   );
 }
 
@@ -170,6 +218,9 @@ export default function CommitmentRecommendations() {
   const proposals = items.filter((item) => item.profile === profile && item.action_type === "COMMIT");
   const counted = proposals.filter((item) => item.state !== "REJECTED");
   const notReady = items.filter((item) => item.profile === "NONE");
+  const awaitingDiscount = notReady.filter((item) =>
+    item.readiness_status === "MISSING_OFFER" && item.purchase_path === "negotiated" && item.projected_annual_spend);
+  const otherNotReady = notReady.filter((item) => !awaitingDiscount.includes(item));
   const currency = proposals[0]?.currency || run?.currency || "BRL";
   const money = moneyIn(currency);
   const sum = (pick: (item: CommitmentRecommendation) => number | null) =>
@@ -221,8 +272,8 @@ export default function CommitmentRecommendations() {
 
   return (
     <Box>
-      <Stack direction={{ xs: "column", md: "row" }} justifyContent="space-between" alignItems={{ md: "center" }} gap={2} mb={1}>
-        <Box>
+      <Stack direction={{ xs: "column", lg: "row" }} justifyContent="space-between" alignItems={{ lg: "center" }} gap={2} mb={1}>
+        <Box sx={{ maxWidth: 640 }}>
           <Typography variant="subtitle1" fontWeight={700}>Recomendações do motor de compromissos</Typography>
           <Typography variant="body2" color="text.secondary">
             Saving gerado se a proposta for executada, calculado da quantidade faturada (por hora ou por dia, conforme a
@@ -230,7 +281,7 @@ export default function CommitmentRecommendations() {
           </Typography>
         </Box>
         {connections && connections.length > 0 && (
-          <Stack direction={{ xs: "column", sm: "row" }} gap={1.5} alignItems={{ sm: "center" }}>
+          <Stack direction="row" gap={1.5} alignItems="center" flexWrap="wrap" useFlexGap>
             <FormControl size="small" sx={{ minWidth: 200 }}>
               <InputLabel>Conexão</InputLabel>
               <Select label="Conexão" value={connectionId} onChange={(event) => setConnectionId(Number(event.target.value))}>
@@ -266,7 +317,11 @@ export default function CommitmentRecommendations() {
       )}
       {run?.status === "FAILED" && <Alert severity="warning" sx={{ mb: 2 }}>A última análise não terminou: {run.error_message}</Alert>}
 
-      {connection && items.length > 0 && <>
+      {connection && awaitingDiscount.map((item) => (
+        <SpendSimulation key={item.id} item={item} money={moneyIn(item.currency || currency)} onSaved={execute} />
+      ))}
+
+      {connection && proposals.length > 0 && <>
         <Stack direction="row" gap={2} flexWrap="wrap" mb={2}>
           <Metric title="Saving / mês se executado" value={money(sum((item) => item.monthly_saving))}
                   detail={`Perfil ${PROFILES.find((item) => item.value === profile)?.label.toLowerCase()} · sem as rejeitadas`} />
@@ -294,12 +349,13 @@ export default function CommitmentRecommendations() {
             localeText={{ noRowsLabel: "Nenhuma proposta com economia neste perfil." }}
           />
         </CardContent></Card>
+      </>}
 
-        {notReady.length > 0 && (
+      {connection && otherNotReady.length > 0 && (
           <Card sx={{ mb: 2 }}><CardContent>
             <Typography variant="subtitle2" fontWeight={600} mb={1}>Sem proposta</Typography>
             <Stack spacing={0.75}>
-              {notReady.map((item) => (
+              {otherNotReady.map((item) => (
                 <Box key={item.id}>
                   <Typography variant="body2">
                     <strong>{item.instrument_label}</strong> — {READINESS_LABELS[item.readiness_status] || item.readiness_status}: {item.rationale[0]}
@@ -310,8 +366,10 @@ export default function CommitmentRecommendations() {
               ))}
             </Stack>
           </CardContent></Card>
-        )}
-      </>}
+      )}
+      {connection && run?.status === "COMPLETED" && !items.length && !loading && (
+        <Alert severity="info" sx={{ mb: 2 }}>A última análise não encontrou uso elegível a compromisso nesta conexão.</Alert>
+      )}
     </Box>
   );
 }

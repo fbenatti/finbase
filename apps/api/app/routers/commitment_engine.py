@@ -131,6 +131,8 @@ def _reco_dict(item: CommitmentRecommendation, *, full: bool = False) -> dict:
         "npv": item.npv, "payback_months": item.payback_months,
         "saving_if_usage_drops": item.saving_if_usage_drops, "currency": item.currency,
         "risks": item.risks or [], "rationale": item.rationale or [],
+        # Spend pools: the projected yearly consumption, also when no discount is registered yet.
+        "projected_annual_spend": (item.evidence or {}).get("projected_annual_spend"),
         "state_note": item.state_note, "state_changed_at": _iso(item.state_changed_at),
         "inputs_hash": item.inputs_hash, "engine_version": item.engine_version,
     }
