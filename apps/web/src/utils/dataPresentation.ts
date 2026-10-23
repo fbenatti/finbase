@@ -21,7 +21,7 @@ const MODULE_LABELS: Record<string, string> = {
   ai_copilot: "Assistente de IA", ai_dashboards: "Adoção de IA", ai_provider_dashboards: "Provedores de IA",
   azure_ptu: "Capacidade de IA", azure_resource_graph: "Inventário de recursos",
   azure_tag_policy: "Políticas de classificação", oci_operational: "Operação de recursos",
-  scheduled_shutdown: "Desligamento programado", ideas: "Iniciativas", auth: "Login corporativo",
+  ideas: "Iniciativas", auth: "Login corporativo",
   users: "Pessoas e acessos", groups: "Grupos", roles: "Funções e permissões", audit: "Trilha de auditoria",
   anomalies: "Alertas", notifications: "Avisos do sistema",
 };

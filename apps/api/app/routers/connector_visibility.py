@@ -14,7 +14,7 @@ router = APIRouter(prefix="/dados/fontes/visibilidade", tags=["connector-visibil
 # Tipos de conector que a página Fontes de dados conhece (espelha CONNECTOR_TYPES do front).
 KNOWN_CONNECTOR_TYPES = frozenset({
     "azure_mca_invoice", "azure_blob", "azure_pricesheet", "azure_openai_ptu",
-    "azure_automation_jobs", "azure_resource_graph", "gcp_bigquery", "oci", "mongodb_atlas",
+    "azure_resource_graph", "gcp_bigquery", "oci", "mongodb_atlas",
     "github_billing", "github_license", "github_token",
     "notebooklm_license", "notebooklm_token", "gemini_license", "gemini_token",
     "claude_license", "claude_token", "databricks",

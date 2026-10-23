@@ -90,7 +90,7 @@ export default function Extraction({ embedded = false }: { embedded?: boolean })
     [connections, extractableConnectorTypes],
   );
   const isManualCsvSelected = useMemo(
-    () => !!uploadConn || extractableConnections.some((c) => c.id === connId && ["manual_csv", "azure_automation_jobs"].includes(c.connector_type)),
+    () => !!uploadConn || extractableConnections.some((c) => c.id === connId && c.connector_type === "manual_csv"),
     [extractableConnections, connId, uploadConn],
   );
   const isAzurePtuSelected = useMemo(

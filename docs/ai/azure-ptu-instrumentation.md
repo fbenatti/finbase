@@ -11,7 +11,7 @@ Os deployments PTU são compartilhados. O Azure Monitor é a fonte autoritativa 
   usam esta tabela leve.
 - A Dimon é atualizada diariamente após a coleta PTU e também pode ser refeita
   por `POST /visoes-consumo-ia/azure-ptu/dimon/reprocess?days=400`.
-- Aura Brain e Vivo Mais cruzam o custo mensal de referência das respectivas
+- Projeto Beta e Projeto Alfa cruzam o custo mensal de referência das respectivas
   Dimons de custo com `input_tokens_sum + output_tokens_sum` acumulados nos
   últimos 30 dias na Dimon PTU. A janela móvel pode atravessar meses.
 
@@ -30,8 +30,8 @@ Os deployments PTU são compartilhados. O Azure Monitor é a fonte autoritativa 
   "schema_version": "1.0",
   "event_id": "uuid",
   "occurred_at": "2026-08-24T15:32:10Z",
-  "telemetry_client_id": "vivo-mais-app-x",
-  "project_key": "vivo-mais",
+  "telemetry_client_id": "projeto-alfa-app-x",
+  "project_key": "projeto-alfa",
   "subproject_key": "atendimento-digital",
   "environment": "production",
   "azure_account_resource_id": "/subscriptions/.../accounts/...",

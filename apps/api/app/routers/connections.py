@@ -55,7 +55,6 @@ GRID_FIELDS = {
 # colaboração) e marketplace. Derivadas do connector_type — a UI filtra por elas.
 TOOL_CONNECTOR_TYPES = (
     "azure_openai_ptu",
-    "azure_automation_jobs",
     "azure_resource_graph",
     "github_billing", "github_license", "github_token",
     "notebooklm_license", "notebooklm_token",
@@ -81,7 +80,6 @@ GRID_FILTER_VALUES = {
     },
     "connector_type": {
         "azure blob storage": "azure_blob",
-        "azure automation jobs": "azure_automation_jobs",
         "azure resource graph": "azure_resource_graph",
         "gcp bigquery": "gcp_bigquery",
         "oracle cloud (oci)": "oci",
@@ -231,15 +229,6 @@ async def create_connection(data: SourceConnectionCreate, request: Request, db: 
                 after=to_snapshot(conn), status_code=201)
     await db.commit()
     await db.refresh(conn)
-
-    # Azure Automation: cria tabela destino e mappings automaticamente.
-    if conn.connector_type == "azure_automation_jobs":
-        try:
-            from app.routers.scheduled_shutdown import _setup_for_connection
-            await _setup_for_connection(db, conn)
-        except Exception:
-            import logging
-            logging.getLogger(__name__).exception("Falha ao configurar Azure Automation para conexão %s", conn.code)
 
     # Azure Resource Graph: cria tabelas destino (inventário + órfãos) e mappings.
     if conn.connector_type == "azure_resource_graph":

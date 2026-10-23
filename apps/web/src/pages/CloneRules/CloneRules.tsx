@@ -308,8 +308,8 @@ export default function CloneRules({ embedded }: { embedded?: boolean } = {}) {
           </Box>
           <Stack direction="row" gap={1} flexWrap="wrap" alignItems="center">
             <FormControl size="small" sx={{ minWidth: 250 }}>
-              <InputLabel>Tabela de destino</InputLabel>
-              <Select value={tableId} label="Tabela de destino" onChange={(e) => { setTableId(Number(e.target.value)); reset(); }}>
+              <InputLabel shrink>Tabela de destino</InputLabel>
+              <Select notched value={tableId} label="Tabela de destino" onChange={(e) => { setTableId(Number(e.target.value)); reset(); }}>
                 {tables.map((t) => <MenuItem key={t.id} value={t.id}>{t.name}</MenuItem>)}
               </Select>
             </FormControl>

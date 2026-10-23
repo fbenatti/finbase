@@ -405,10 +405,6 @@ async def test_azure_source(connection_id: int, db: AsyncSession = Depends(get_d
                 "subscriptions": len(subs),
                 "resources": sum(int(s.get("resource_count") or 0) for s in subs),
             }
-        elif connector == "azure_automation_jobs":
-            from app.services.azure_automation_service import discover_accounts
-            accounts = await discover_accounts(config)
-            capability = {"automation_accounts": len(accounts)}
         elif connector == "azure_openai_ptu":
             from app.services.azure_ptu_service import discover as discover_ptu
             found = await discover_ptu(config)

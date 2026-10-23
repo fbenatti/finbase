@@ -1,6 +1,6 @@
 """Azure Resource Graph — coleta real de inventário e recursos órfãos via ARG.
 
-Seguindo o padrão das coletas de Azure Automation (azure_automation_service):
+Seguindo o padrão das coletas Azure via ARM:
 a conexão guarda credenciais (credential_profile ou tenant/client/secret) e a
 coleta é executada pelo worker (task de extração). Os dados são persistidos na
 Bronze (raw_<connection_code>) com _billing_period, para depois serem mapeados
@@ -472,6 +472,29 @@ async def discover_subscriptions(config: dict[str, Any]) -> list[dict[str, Any]]
     ]
 
 
+def asyncio_run(coro):
+    """Executa uma coroutine no event loop (thread worker usa um loop novo)."""
+    import asyncio
+    import threading
+
+    try:
+        loop = asyncio.get_event_loop()
+    except RuntimeError:
+        loop = None
+    if loop and loop.is_running():
+        # Já dentro de um loop: roda a coroutine num loop novo em outra thread.
+        out: dict[str, Any] = {}
+
+        def runner():
+            out["result"] = asyncio.run(coro)
+
+        thread = threading.Thread(target=runner)
+        thread.start()
+        thread.join()
+        return out["result"]
+    return asyncio.run(coro)
+
+
 def run_resource_graph_collection(
     session,
     connection_id: int,
@@ -485,7 +508,6 @@ def run_resource_graph_collection(
     from app.database import SyncSession as _Sync
     from app.models.source_connection import SourceConnection
     from app.models.etl_task import EtlTask
-    from app.services.azure_automation_service import asyncio_run
 
     s = session or _Sync()
     try:

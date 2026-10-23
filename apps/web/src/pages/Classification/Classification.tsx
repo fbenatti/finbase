@@ -15,6 +15,7 @@ import {
 import EmptyState from "../../components/EmptyState";
 import DepartmentTreePicker, { flattenDepartments } from "../../components/DepartmentTreePicker";
 import ClassificationDataGrid, { ClassificationGridFilter } from "./ClassificationDataGrid";
+import { ClassificationCoverageView, ClassificationStructureView } from "./ClassificationExplorer";
 import PolicyFlow from "./PolicyFlow";
 import AzureTagExecutiveDashboard from "./AzureTagExecutiveDashboard";
 import { ORG } from "../../constants/orgLabels";
@@ -91,6 +92,7 @@ const ClassificationRuleDialog = memo(function ClassificationRuleDialog({
   open,
   editing,
   cloning,
+  draft,
   destColumns,
   departments,
   destinationTableId,
@@ -101,6 +103,8 @@ const ClassificationRuleDialog = memo(function ClassificationRuleDialog({
   open: boolean;
   editing: ClassificationRule | null;
   cloning: ClassificationRule | null;
+  /** Valores iniciais de uma regra nova (unidade escolhida na árvore ou valor da cobertura). */
+  draft: Partial<typeof emptyForm> | null;
   destColumns: string[];
   departments: Department[];
   destinationTableId: number | null;
@@ -113,9 +117,9 @@ const ClassificationRuleDialog = memo(function ClassificationRuleDialog({
   useEffect(() => {
     if (open) {
       const source = editing || cloning;
-      setForm(source ? { ...formFromRule(source), ...(cloning && !editing ? { name: `${source.name} (duplicado)` } : {}) } : formFromRule(null));
+      setForm(source ? { ...formFromRule(source), ...(cloning && !editing ? { name: `${source.name} (duplicado)` } : {}) } : { ...formFromRule(null), ...draft });
     }
-  }, [open, editing, cloning]);
+  }, [open, editing, cloning, draft]);
 
   // Autocomplete de valores reais por campo (tabela auxiliar no Postgres, enriquecida no reprocessamento).
   const [valueSearch, setValueSearch] = useState<Record<number, string>>({});
@@ -389,6 +393,9 @@ export function ClassificationRulesTab() {
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editing, setEditing] = useState<ClassificationRule | null>(null);
   const [cloning, setCloning] = useState<ClassificationRule | null>(null);
+  const [draft, setDraft] = useState<Partial<typeof emptyForm> | null>(null);
+  const [view, setView] = useState<"structure" | "coverage" | "list">("structure");
+  const [allRules, setAllRules] = useState<ClassificationRule[]>([]);
   const [deletePending, setDeletePending] = useState<ClassificationRule | null>(null);
   const [selectedRuleIds, setSelectedRuleIds] = useState<number[]>([]);
   const [bulkDeleteOpen, setBulkDeleteOpen] = useState(false);
@@ -397,6 +404,18 @@ export function ClassificationRulesTab() {
   useEffect(() => {
     getDepartments(false).then(setDepartments).catch(() => {});
   }, []);
+
+  // Árvore e cobertura leem todas as regras de uma vez; a lista continua paginada.
+  const loadAll = useCallback(() => {
+    getClassifications(undefined, undefined, selectedDestId)
+      .then(setAllRules)
+      .catch((e: unknown) => setError(e instanceof Error ? e.message : "Não foi possível carregar as classificações"));
+  }, [selectedDestId]);
+  useEffect(() => { loadAll(); }, [loadAll]);
+  const reload = () => {
+    loadAll();
+    void load(queryRef.current);
+  };
 
   useEffect(() => {
     getDestinationSchema(selectedDestId)
@@ -439,11 +458,18 @@ export function ClassificationRulesTab() {
     void load(query);
   };
 
-  const openNew = () => {
+  const openNew = (initial: Partial<typeof emptyForm> | null = null) => {
     setEditing(null);
     setCloning(null);
+    setDraft(initial);
     setDialogOpen(true);
   };
+
+  const openClassify = (field: string, value: string, cloud?: string) => openNew({
+    name: value,
+    cloud_scope: cloud || "global",
+    conditions: [{ field, operator: "=", values: value, logic: "AND" }],
+  });
 
   const openEdit = (r: ClassificationRule) => {
     setCloning(null);
@@ -463,7 +489,7 @@ export function ClassificationRulesTab() {
       await deleteClassification(deletePending.id);
       setDeletePending(null);
       setSuccess("Regra de classificação excluída.");
-      void load(queryRef.current);
+      reload();
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : "Não foi possível excluir a classificação");
     }
@@ -475,7 +501,7 @@ export function ClassificationRulesTab() {
     setBulkDeleteOpen(false);
     setSelectedRuleIds([]);
     setSuccess(failed ? `${outcomes.length - failed} regras excluídas; ${failed} não puderam ser excluídas.` : `${outcomes.length} regras excluídas.`);
-    void load(queryRef.current);
+    reload();
   };
 
   const flatDepartments = useMemo(() => flattenDepartments(departments), [departments]);
@@ -483,8 +509,6 @@ export function ClassificationRulesTab() {
     () => new Map(flatDepartments.map((d) => [d.id, d])),
     [flatDepartments],
   );
-
-  const filtersReady = true;
 
   return (
     <Box>
@@ -508,8 +532,8 @@ export function ClassificationRulesTab() {
           >
             Atualizar valores
           </Button>
-          <Button variant="contained" startIcon={<AddOutlined />} onClick={openNew}>
-            Nova
+          <Button variant="contained" startIcon={<AddOutlined />} onClick={() => openNew()}>
+            Nova regra
           </Button>
         </Stack>
       </Stack>
@@ -517,18 +541,16 @@ export function ClassificationRulesTab() {
       {error && <Alert severity="error" sx={{ mb: 2 }} onClose={() => setError("")}>{dataDisplayText(error)}</Alert>}
       {success && <Alert severity="success" sx={{ mb: 2 }} onClose={() => setSuccess("")}>{dataDisplayText(success)}</Alert>}
 
-      {!filtersReady ? (
-        <Box sx={{ py: 7 }}>
-          <EmptyState
-            message="Nenhuma regra de classificação para os filtros escolhidos."
-          />
-        </Box>
-      ) : (
-        <>
+      <Stack direction="row" alignItems="center" gap={1.5} flexWrap="wrap" sx={{ mb: 2 }}>
+        <ToggleButtonGroup size="small" exclusive value={view} sx={{ "& .MuiToggleButton-root": { textTransform: "none" } }} onChange={(_, value: typeof view | null) => value && setView(value)}>
+          <ToggleButton value="structure"><AccountTreeOutlined fontSize="small" sx={{ mr: 0.75 }} />Por estrutura</ToggleButton>
+          <ToggleButton value="coverage">Cobertura</ToggleButton>
+          <ToggleButton value="list">Lista</ToggleButton>
+        </ToggleButtonGroup>
+        {view !== "coverage" && (
           <TextField
-            fullWidth
             size="small"
-            placeholder="Buscar regras (nome, unidade ou padrão)"
+            placeholder="Buscar regras (nome, unidade ou valor)"
             value={search}
             onChange={(event) => setSearch(event.target.value)}
             slotProps={{
@@ -548,9 +570,33 @@ export function ClassificationRulesTab() {
                 sx: { height: 40 },
               },
             }}
-            sx={{ mb: 2, maxWidth: 520 }}
+            sx={{ flex: 1, minWidth: 240, maxWidth: 420 }}
           />
+        )}
+      </Stack>
 
+      {view === "structure" && (
+        <ClassificationStructureView
+          rules={allRules}
+          departments={departments}
+          search={search}
+          onNew={(departmentId) => openNew(departmentId != null ? { department_id: departmentId } : null)}
+          onEdit={openEdit}
+          onClone={openClone}
+          onDelete={setDeletePending}
+        />
+      )}
+      {view === "coverage" && (
+        <ClassificationCoverageView
+          rules={allRules}
+          departments={departments}
+          destinationTableId={selectedDestId}
+          onClassify={openClassify}
+          onEdit={openEdit}
+        />
+      )}
+      {view === "list" && (
+        <>
           {selectedRuleIds.length >= 2 && (
             <Stack direction="row" justifyContent="flex-end" sx={{ mb: 1 }}>
               <Button color="error" variant="contained" startIcon={<DeleteOutlined />} onClick={() => setBulkDeleteOpen(true)}>
@@ -581,8 +627,9 @@ export function ClassificationRulesTab() {
         destColumns={destColumns}
         departments={departments}
         destinationTableId={selectedDestId}
+        draft={draft}
         onClose={() => setDialogOpen(false)}
-        onSaved={() => void load(queryRef.current)}
+        onSaved={reload}
         onError={setError}
       />
 

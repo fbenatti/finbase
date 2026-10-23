@@ -1,6 +1,6 @@
 # FORECAST engine internals — read-only reconnaissance report
 
-Repo: `/Users/fernandohenriquebenatti/projetos/OpenFinops`
+Repo: `<raiz-do-repositorio>`
 Sources read: `FORECAST.md`, `apps/api/app/services/forecast_service.py`, `apps/api/app/models/forecast.py`,
 `apps/api/app/routers/forecast.py`, `apps/api/worker.py`, `apps/api/app/services/iceberg_service.py`,
 `apps/api/app/services/lakehouse_layers.py`, `apps/api/app/main.py`, plus live Postgres (host `localhost:5433`)
@@ -506,7 +506,7 @@ Per-rule strings emitted:
   `"{name} (válida; idade máxima A dias)"` (522), `"{name} (sem séries correspondentes)"` (524)
 
 Live corroboration (`forecast_run.error_metrics`, Postgres 5433): run 399/397/395/... carry an 11-entry list
-including `"Azure-4P - suspender após 30 dias sem dados (suspensas 26 linhas; validade 30 dias; idade
+including `"Azure-Producao - suspender após 30 dias sem dados (suspensas 26 linhas; validade 30 dias; idade
 avaliada 104 dias em 2026-10-14)"` and `"Marketplace ONESHOT zera forecast (sem séries correspondentes)"`.
 Run 387 shows the legacy `"(não aplicada: comportamento desconhecido)"` string.
 
@@ -570,8 +570,8 @@ Details:
 - `evaluated_at` is `freshness_reference = simulated_as_of or date.today()` (1744), so simulations use the
   simulated clock — covered by `apps/api/tests/test_forecast_source_validity.py`
   (`test_source_validity_uses_simulated_date_not_wall_clock`).
-- Live config 9 rule: "Azure-4P - suspender após 30 dias sem dados" (`max_age_days = 30`,
-  `scope = {"cloud_origem": "azure-4p"}`, priority 1) — suspended 26 rows in run 399.
+- Live config 9 rule: "Azure-Producao - suspender após 30 dias sem dados" (`max_age_days = 30`,
+  `scope = {"cloud_origem": "azure-producao"}`, priority 1) — suspended 26 rows in run 399.
 
 ---
 

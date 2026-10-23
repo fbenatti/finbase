@@ -125,19 +125,19 @@ Convenção **somente para novas fontes**: `azure-{environment_slug}-{dataset_sl
 
 | `source_key` | Existe? | Code 4P/contrato | Destino lógico |
 |---|---|---|---|
-| `cost_exports` | Sim | `azure-4p` legado; confirmar TI no banco | Bronze atual → Silver FOCUS detalhada → cubos Gold |
+| `cost_exports` | Sim | `azure-producao` legado; confirmar TI no banco | Bronze atual → Silver FOCUS detalhada → cubos Gold |
 | `automation_jobs` | Sim | code da conexão atual | Bronze atual, fatias `automation/jobs/` e `automation/schedules/` |
 | `resource_graph` | Sim | code da conexão atual | Bronze atual, fatias `arg/inventory/` e `arg/orphans/` |
-| `openai_ptu` | Sim | `azure-4p-ptu` quando semeado | Fluxo PTU especial; fora do MVP |
-| `aks_inventory` | Novo | `azure-4p-aks-inventory` | Bronze exclusiva → Silver entidades/arestas Kubernetes |
-| `aks_cost_allocation` | Novo, condicionado ao add-on/oferta | `azure-4p-aks-cost-allocation` | Bronze exclusiva → Silver alocação diária reconciliável |
-| `container_insights` | Novo, se necessário para consumo runtime | `azure-4p-container-insights` | Bronze exclusiva → Silver métricas de node/pod/container |
-| `monitor_vm_metrics` | Novo | `azure-4p-monitor-vm-metrics` | Bronze exclusiva → Silver série 15 min |
-| `compute_skus` | Novo | `azure-4p-compute-skus` | Bronze exclusiva → Silver SKU por região |
-| `compute_quota` | Novo | `azure-4p-compute-quota` | Bronze exclusiva → Silver quota por subscription/região |
-| `customer_price` | Novo, se permitido | `azure-4p-customer-price` | Bronze exclusiva → Silver preço contratado |
-| `retail_price` | Novo | `azure-4p-retail-price` | Bronze exclusiva → Silver preço público |
-| `region_policy` | Novo, necessário em P11 | `azure-4p-region-policy` | Bronze exclusiva → Silver restrições |
+| `openai_ptu` | Sim | `azure-producao-ptu` quando semeado | Fluxo PTU especial; fora do MVP |
+| `aks_inventory` | Novo | `azure-producao-aks-inventory` | Bronze exclusiva → Silver entidades/arestas Kubernetes |
+| `aks_cost_allocation` | Novo, condicionado ao add-on/oferta | `azure-producao-aks-cost-allocation` | Bronze exclusiva → Silver alocação diária reconciliável |
+| `container_insights` | Novo, se necessário para consumo runtime | `azure-producao-container-insights` | Bronze exclusiva → Silver métricas de node/pod/container |
+| `monitor_vm_metrics` | Novo | `azure-producao-monitor-vm-metrics` | Bronze exclusiva → Silver série 15 min |
+| `compute_skus` | Novo | `azure-producao-compute-skus` | Bronze exclusiva → Silver SKU por região |
+| `compute_quota` | Novo | `azure-producao-compute-quota` | Bronze exclusiva → Silver quota por subscription/região |
+| `customer_price` | Novo, se permitido | `azure-producao-customer-price` | Bronze exclusiva → Silver preço contratado |
+| `retail_price` | Novo | `azure-producao-retail-price` | Bronze exclusiva → Silver preço público |
+| `region_policy` | Novo, necessário em P11 | `azure-producao-region-policy` | Bronze exclusiva → Silver restrições |
 | `advisor`, `resource_mover` | Opcionais | Só criar ao habilitar | Bronze própria se houver valor comprovado |
 
 Para TI, trocar o slug `4p` pelo slug real do ambiente, mantendo o `source_key`. Os códigos de Automation/ARG podem não seguir o padrão novo: **vincular, não renomear**. PTU grava Bronze especializada, inclusive `raw_azure_ptu_metrics`; não forçar `raw_{code}` retroativamente.
@@ -151,7 +151,7 @@ Definir em registro único: `source_key`, versão de schema, escopo Azure, perfi
 ### Compatibilidade e migração
 
 1. Inventariar no banco `SourceConnection.code`, tabelas Bronze/Silver/Gold e namespace Dimon legado, mappings, rules, `IngestedBlob`, `etl_task` e schedules reais. Código do repositório indica capacidade, não prova dado coletado.
-2. Inventariar igualdade literal e prefixos dos codes em `cloud_origem`, queries, seeds, materializações legadas, dashboard e filtros. Há referências explícitas a `azure-4p`/`azure-ti` e ao namespace Dimon no código atual.
+2. Inventariar igualdade literal e prefixos dos codes em `cloud_origem`, queries, seeds, materializações legadas, dashboard e filtros. Há referências explícitas a `azure-producao`/`azure-dev` e ao namespace Dimon no código atual.
 3. Criar associação `source_key` ↔ conexão legada sem alterar code, Bronze ou histórico. Seed/migração idempotente e sem duplicar mappings/regras.
 4. Novos codes passam pelo validador de unicidade lógica e física; gerar metadata antes da primeira coleta.
 5. Onde a query hoje filtra custos por code, preservar os códigos FOCUS exatos ou usar metadata de fonte de custo. Não incluir métricas no cubo FOCUS por acidente.

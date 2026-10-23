@@ -26,7 +26,6 @@ export const SOURCE_PROVIDERS: SourceProvider[] = [
       { connectorType: "azure_mca_invoice", label: "Faturas e contratos", description: "Valores mensais e compromissos firmados (MCA)" },
       { connectorType: "azure_pricesheet", label: "Preços contratados", description: "Tabela de preços negociados" },
       { connectorType: "azure_openai_ptu", label: "Capacidade de IA reservada", description: "Azure OpenAI PTU" },
-      { connectorType: "azure_automation_jobs", label: "Execuções (jobs)", description: "Jobs de liga e desliga de máquinas" },
       { connectorType: "azure_resource_graph", label: "Inventário de recursos", description: "Recursos existentes e ociosos" },
     ],
   },

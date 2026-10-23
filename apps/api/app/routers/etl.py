@@ -134,45 +134,6 @@ async def scan_blobs(connection_id: int, db: AsyncSession = Depends(get_db)):
     conn = result.scalar_one_or_none()
     if not conn:
         raise HTTPException(status_code=404, detail="Connection not found")
-    if conn.connector_type == "azure_automation_jobs":
-        # Azure Automation: o "scan" descobre as Automation Accounts nas
-        # subscriptions configuradas. A coleta de jobs/schedules acontece no
-        # worker quando a extração é executada (/etl/run).
-        try:
-            from app.services.azure_automation_service import discover_accounts
-            accounts = await discover_accounts(dict(conn.config_json or {}))
-            return {
-                "connection_id": connection_id,
-                "total": len(accounts),
-                "new": 0,
-                "changed": 0,
-                "unchanged": 0,
-                "items": [
-                    {
-                        "blob_path": f"automation/{a['account_name'] or '?'}",
-                        "billing_period": None,
-                        "last_modified": None,
-                        "etag": "",
-                        "content_length": 0,
-                        "status": "NEW",
-                    }
-                    for a in accounts
-                ],
-                "message": (
-                    f"Azure Automation: {len(accounts)} conta(s) encontrada(s) nas subscriptions. "
-                    "Execute a extração para coletar jobs e schedules."
-                ),
-            }
-        except Exception as exc:
-            return {
-                "connection_id": connection_id,
-                "total": 0,
-                "new": 0,
-                "changed": 0,
-                "unchanged": 0,
-                "items": [],
-                "message": f"Falha ao descobrir Automation Accounts: {str(exc)[:400]}",
-            }
     if conn.connector_type == "azure_resource_graph":
         # Azure Resource Graph: o "scan" valida a credencial e lista as
         # subscriptions acessíveis com a contagem de recursos. A coleta de
@@ -592,7 +553,7 @@ async def run_etl(request: EtlRunRequest, db: AsyncSession = Depends(get_db)):
         # PTU is an operational source, not an Azure Blob export.  It is
         # executed by the worker through the PTU collector below.
         pass
-    elif conn.connector_type not in ("azure_blob", "gcp_bigquery", "oci", "mongodb_atlas", "github_billing", "github_license", "github_token", "notebooklm_license", "notebooklm_token", "claude_license", "claude_token", "gemini_license", "gemini_token", "gemini_notebooklm", "databricks", "azure_automation_jobs", "azure_resource_graph"):
+    elif conn.connector_type not in ("azure_blob", "gcp_bigquery", "oci", "mongodb_atlas", "github_billing", "github_license", "github_token", "notebooklm_license", "notebooklm_token", "claude_license", "claude_token", "gemini_license", "gemini_token", "gemini_notebooklm", "databricks", "azure_resource_graph"):
         return {
             "task_id": 0,
             "status": "NOT_IMPLEMENTED",
@@ -786,21 +747,6 @@ async def _execute_connection_test(conn: SourceConnection) -> dict[str, str]:
             return result
         except Exception as e:
             return {"status": "FAILED", "message": f"Azure PTU: {str(e)[:450]}"}
-
-    if conn.connector_type == "azure_automation_jobs":
-        try:
-            from app.services.azure_automation_service import discover_accounts
-            accounts = await discover_accounts(config)
-            return {
-                "status": "OK" if accounts else "PENDING",
-                "message": (
-                    f"Azure Automation validado: {len(accounts)} conta(s) nas subscriptions"
-                    if accounts
-                    else "Azure Automation conectado, mas nenhuma Automation Account encontrada nas subscriptions."
-                ),
-            }
-        except Exception as e:
-            return {"status": "FAILED", "message": f"Azure Automation: {str(e)[:450]}"}
 
     if conn.connector_type == "azure_resource_graph":
         try:

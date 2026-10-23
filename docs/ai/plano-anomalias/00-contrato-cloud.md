@@ -103,16 +103,16 @@ recorte `chargeperiodstart >= 2026-08-01`:
 
 | cloud | linhas | `realizado_cloud` | `realizado` |
 |---|---:|---:|---:|
-| azure-ti | 7.992.624 | 97.411.758,16 | 97.411.758,16 |
+| azure-dev | 7.992.624 | 97.411.758,16 | 97.411.758,16 |
 | oci | 1.954.498 | 31.283.494,94 | 25.332.158,56 |
 | azure-marketplace | 622 | 19.005.757,23 | 19.005.757,23 |
-| azure-4p | — | 13.171.716,48 | 13.171.716,48 |
-| gcp-ttech | 49.489 | 8.871.282,99 | 8.871.282,99 |
+| azure-producao | — | 13.171.716,48 | 13.171.716,48 |
+| gcp-terceiros | 49.489 | 8.871.282,99 | 8.871.282,99 |
 | mongodb-atlas-pro | 36.374 | 4.980.394,77 | 4.980.394,77 |
-| gcp-4p | 142.492 | 3.320.584,60 | 3.320.584,60 |
+| gcp-producao | 142.492 | 3.320.584,60 | 3.320.584,60 |
 | oci-prod | — | 2.153.402,92 | 2.153.402,92 |
 | ibm | 1.520 | 1.248.053,54 | 10.228.302,00 |
-| gcp-ti | 248 | 847.909,07 | 847.909,07 |
+| gcp-dev | 248 | 847.909,07 | 847.909,07 |
 
 (Os totais são sobre todo o histórico da tabela; o recorte por mês está em §5.)
 
@@ -124,12 +124,12 @@ Detectar sobre `realizado` produziria um falso positivo permanente em IBM.
 
 | cloud | `billingcurrency` | linhas | `realizado_cloud` | `billedcost` |
 |---|---|---:|---:|---:|
-| azure-4p | BRL | 3.116.998 | 13.171.716,48 | 11.107.000,83 |
+| azure-producao | BRL | 3.116.998 | 13.171.716,48 | 11.107.000,83 |
 | azure-marketplace | BRL | 1.759 | 19.005.757,23 | 16.696.615,31 |
-| azure-ti | BRL | 24.506.349 | 97.411.758,16 | 82.343.643,32 |
-| gcp-4p | BRL | 620.976 | 3.320.584,60 | 3.370.455,05 |
-| gcp-ti | BRL | 849 | 847.909,07 | 854.890,93 |
-| gcp-ttech | BRL | 224.350 | 8.871.282,99 | 9.435.092,24 |
+| azure-dev | BRL | 24.506.349 | 97.411.758,16 | 82.343.643,32 |
+| gcp-producao | BRL | 620.976 | 3.320.584,60 | 3.370.455,05 |
+| gcp-dev | BRL | 849 | 847.909,07 | 854.890,93 |
+| gcp-terceiros | BRL | 224.350 | 8.871.282,99 | 9.435.092,24 |
 | ibm | BRL | 4.644 | 1.248.053,54 | 1.522.267,13 |
 | mongodb-atlas-enterprise | **USD** | 1.637 | 105.693,00 | 14.565,25 |
 | mongodb-atlas-pro | **USD** | 121.414 | 4.980.394,77 | 781.059,76 |
@@ -204,8 +204,8 @@ cadastradas, **12 ativas** (id 23 e id 14 estão `active = false`).
 | id | nome | comportamento | prioridade | ativa | opções |
 |---:|---|---|---:|:--:|---|
 | 19 | Excluir consumo horário de PTU | `SOURCE_EXCLUDE_PREFIX` | 1 | ✔ | — |
-| 24 | Azure-4P — suspender após 30 dias sem dados | `SOURCE_VALIDITY` | 1 | ✔ | `max_age_days=30` |
-| 20 | Aura Brain — PTU Azure OpenAI mensal | `RECURRING_MONTHLY` | 2 | ✔ | — |
+| 24 | Azure-Producao — suspender após 30 dias sem dados | `SOURCE_VALIDITY` | 1 | ✔ | `max_age_days=30` |
+| 20 | Projeto Beta — PTU Azure OpenAI mensal | `RECURRING_MONTHLY` | 2 | ✔ | — |
 | 23 | GitHub Copilot — overage média 30 dias | `SOURCE_EXCLUDE_PREFIX` | 2 | ✘ | — |
 | 14 | OCI Marketplace compra | `REPLACE_VALUE` | 5 | ✘ | — |
 | 17 | Marketplace ONESHOT zera forecast | `REPLACE_VALUE` | 5 | ✔ | — |
@@ -215,7 +215,7 @@ cadastradas, **12 ativas** (id 23 e id 14 estão `active = false`).
 | 15 | OCI Refund cancela compromisso | `CANCEL_ON_REFUND` | 15 | ✔ | — |
 | 7 | Return simulado | `RECURRING_MONTHLY` | 20 | ✔ | — |
 | 8 | Compras recorrentes — zerar mês já realizado | `RECURRING_MONTHLY` | 30 | ✔ | `current_month_policy=ZERO_WHEN_REALIZED` |
-| 21 | Vivo Mais — encerrar reserva PTU Azure-4P estornada | `CANCEL_ON_REFUND` | 35 | ✔ | — |
+| 21 | Projeto Alfa — encerrar reserva PTU Azure-Producao estornada | `CANCEL_ON_REFUND` | 35 | ✔ | — |
 | 9 | Refund cancela compromisso | `CANCEL_ON_REFUND` | 40 | ✔ | — |
 
 > **Achado A0-3 — "regra cadastrada" ≠ "regra aplicada", e o rastro é texto livre.**
@@ -258,8 +258,8 @@ Regras de comportamento preservadas (contrato do plano §2.4):
 
 | cloud | formato físico | exemplo |
 |---|---|---|
-| azure-4p, azure-marketplace, azure-ti | `MM/DD/YYYY` | `01/01/2026` |
-| gcp-4p, gcp-ti, gcp-ttech | ISO-8601 com offset UTC | `2025-11-24T00:00:00+00:00` |
+| azure-producao, azure-marketplace, azure-dev | `MM/DD/YYYY` | `01/01/2026` |
+| gcp-producao, gcp-dev, gcp-terceiros | ISO-8601 com offset UTC | `2025-11-24T00:00:00+00:00` |
 | ibm | ISO-8601 `Z` | `2026-01-01T00:00:00Z` |
 | mongodb-atlas-* | ISO-8601 `Z` | `2025-12-01T00:00:00Z` |
 | oci, oci-prod | `YYYY-MM-DD` | `2025-12-10` |
@@ -281,10 +281,10 @@ Medido com a expressão de `gold_date_expr` e `tipo='realizado'`:
 
 | cloud | linhas | datas parseadas | menor dia | maior dia | dias distintos |
 |---|---:|---:|---|---|---:|
-| azure-ti | 7.992.624 | 7.992.624 | 2026-08-01 | **2026-10-13** | 74 |
-| gcp-4p | 142.492 | 142.492 | 2026-07-24 | **2026-10-13** | 76 |
-| gcp-ti | 248 | 248 | 2026-07-24 | **2026-10-13** | 77 |
-| gcp-ttech | 49.489 | 49.489 | 2026-07-24 | **2026-10-13** | 76 |
+| azure-dev | 7.992.624 | 7.992.624 | 2026-08-01 | **2026-10-13** | 74 |
+| gcp-producao | 142.492 | 142.492 | 2026-07-24 | **2026-10-13** | 76 |
+| gcp-dev | 248 | 248 | 2026-07-24 | **2026-10-13** | 77 |
+| gcp-terceiros | 49.489 | 49.489 | 2026-07-24 | **2026-10-13** | 76 |
 | azure-marketplace | 622 | 622 | 2026-08-01 | 2026-09-30 | 61 |
 | oci | 1.954.498 | 1.954.498 | 2026-07-31 | 2026-09-21 | 53 |
 | ibm | 1.520 | 1.520 | 2026-08-01 | 2026-09-01 | **2** |
@@ -298,7 +298,7 @@ Medido com a expressão de `gold_date_expr` e `tipo='realizado'`:
 
 | classe | clouds | dias distintos | detector |
 |---|---|---|---|
-| consumo diário | azure-ti, azure-4p, azure-marketplace, gcp-4p, gcp-ti, gcp-ttech, oci, oci-prod | 53–77 | **consumo diário** |
+| consumo diário | azure-dev, azure-producao, azure-marketplace, gcp-producao, gcp-dev, gcp-terceiros, oci, oci-prod | 53–77 | **consumo diário** |
 | cobrança por intervalo/fatura | ibm (2 datas), mongodb-atlas-pro (3 datas) | 2–3 | **evento mensal / acumulado** |
 
 `ibm` e `mongodb-atlas-*` não têm consumo diário observável. Uma média diária
@@ -377,15 +377,15 @@ Séries distintas com `tipo='realizado'` e `_billing_period >= '202604'`:
 
 | cloud | séries |
 |---|---:|
-| azure-ti | 7.195 |
-| gcp-4p | 2.804 |
+| azure-dev | 7.195 |
+| gcp-producao | 2.804 |
 | oci | 1.044 |
-| gcp-ttech | 947 |
+| gcp-terceiros | 947 |
 | mongodb-atlas-pro | 460 |
 | ibm | 45 |
-| azure-4p | 25 |
+| azure-producao | 25 |
 | azure-marketplace | 22 |
-| gcp-ti | 5 |
+| gcp-dev | 5 |
 | **total** | **12.547** |
 
 Consequências de projeto:
@@ -397,7 +397,7 @@ Consequências de projeto:
 - A agregação diária deve acontecer **no Trino**, com `GROUP BY` na
   granularidade da série; o Python recebe apenas a série agregada, como o
   motor de forecast já faz.
-- Ordem de grandeza da leitura por dia reconstruído: `azure-ti` tem 7,99 M
+- Ordem de grandeza da leitura por dia reconstruído: `azure-dev` tem 7,99 M
   linhas em 74 dias (~108 k/dia). Nenhuma reconstrução pode ler o billing
   inteiro por dia (plano §6).
 

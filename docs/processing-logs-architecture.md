@@ -79,7 +79,7 @@ As rotas antigas continuam disponíveis para outros consumidores. Esta entrega r
 
 ### Dados e configuração
 
-- `Azure Price Sheet` é uma `SourceConnection` Azure independente (`code=azure-pricesheet`, `connector_type=azure_pricesheet`), não uma seleção dentro de `azure-4p`/Cost Management. Ela tem credenciais, prefixo/blob, tarefa e Bronze próprios, mesmo quando usa os mesmos valores de tenant/client/secret.
+- `Azure Price Sheet` é uma `SourceConnection` Azure independente (`code=azure-pricesheet`, `connector_type=azure_pricesheet`), não uma seleção dentro de `azure-producao`/Cost Management. Ela tem credenciais, prefixo/blob, tarefa e Bronze próprios, mesmo quando usa os mesmos valores de tenant/client/secret.
 - A conexão pode ser criada/editada em **Conexões** como Azure Price Sheet. O endpoint de refresh continua criando-a sob demanda para compatibilidade, caso ainda não exista.
 - O catálogo PostgreSQL `azure_source_catalog` é sincronizado pelo seed do repositório (inserção das fontes declaradas, remoção apenas de metadata obsoleta e vínculo das conexões existentes); ele não guarda credenciais. Remover uma metadata do catálogo não apaga conexão, invoices, Bronze nem histórico. `contracts_mca` não é uma fonte selecionável no Cost Management: **Contratos MCA Brasil** permanece na sua conexão e fluxo de invoices independentes.
 - O endpoint `POST /etl/azure-pricesheet/refresh` cria uma tarefa `azure_pricesheet_refresh`; worker executa ingestão.
@@ -91,7 +91,7 @@ As rotas antigas continuam disponíveis para outros consumidores. Esta entrega r
 
 Não há nova tabela PostgreSQL para armazenar preços nem DDL manual necessário. A metadata da conexão e do snapshot usa as tabelas existentes `source_connection` e `etl_task`; a Bronze é `raw_azure_pricesheet`. Em PRD, criar/editar a conexão pelo fluxo normal de **Conexões**, preenchendo as credenciais independentes e validando acesso ao container/prefixo `reports/report_-pricesheet/`. Não inserir segredo por SQL. O fallback para variáveis 4P/TI só deve ser usado durante a transição.
 
-O item **Compromisso MCA (totais de invoice)** não pertence ao catálogo de coletas do Azure 4P Cost Management. Ele permanece na conexão independente **Contratos MCA Brasil**, com seu endpoint, autenticação, parâmetros e Bronze de invoices. Não habilitar esse item dentro da seleção de fontes de `azure-4p` nem enfileirá-lo pela carga full genérica.
+O item **Compromisso MCA (totais de invoice)** não pertence ao catálogo de coletas do Azure 4P Cost Management. Ele permanece na conexão independente **Contratos MCA Brasil**, com seu endpoint, autenticação, parâmetros e Bronze de invoices. Não habilitar esse item dentro da seleção de fontes de `azure-producao` nem enfileirá-lo pela carga full genérica.
 
 ### Regras do fallback
 
@@ -113,7 +113,7 @@ Há alteração em `FORECAST.md` para documentar o novo contrato. Não é necess
 
 ## 6. Dashboard de compromissos (Savings)
 
-Nova rota `GET /savings/commitments-dashboard` calcula por período e origem (all, azure-ti, azure-4p): compras de Reservation/Savings Plan, baseline OnDemand a partir das linhas sintéticas Return vinculadas à linha de uso original, economia estimada e série de forecast. A aba nova em Savings exibe métricas, séries e visão por projeto.
+Nova rota `GET /savings/commitments-dashboard` calcula por período e origem (all, azure-dev, azure-producao): compras de Reservation/Savings Plan, baseline OnDemand a partir das linhas sintéticas Return vinculadas à linha de uso original, economia estimada e série de forecast. A aba nova em Savings exibe métricas, séries e visão por projeto.
 
 As consultas usam Trino nas tabelas FOCUS detalhadas e planejamento da camada ativa. Não criam tabelas. As compras não são rateadas por projeto; o baseline de projeto é mostrado separadamente. Validar moeda e semântica contábil dos valores com FinOps antes de divulgar como saving realizado. O retorno usa `realizado_cloud` e a documentação/resposta da API informa unidade monetária conforme a fonte; não presumir BRL quando a origem trouxer outra moeda.
 
@@ -157,7 +157,7 @@ As consultas usam Trino nas tabelas FOCUS detalhadas e planejamento da camada at
 2. Fazer deploy do worker compatível, que escreve status/eventos no log e reconhece `azure_pricesheet_refresh`.
 3. Validar `GET /processing-logs`, filtros e detalhes para execução antiga e uma nova execução curta de cada tipo habilitado.
 4. Fazer deploy do frontend e validar `/reprocess?tab=logs`, cancelamento e link Bronze.
-5. Azure Price Sheet: usar a ação de refresh da conexão independente; verificar tarefa, manifest ativo, período, total de linhas e `bronze.raw_azure_pricesheet`. A carga full do ambiente `azure-4p` não deve enfileirar este snapshot.
+5. Azure Price Sheet: usar a ação de refresh da conexão independente; verificar tarefa, manifest ativo, período, total de linhas e `bronze.raw_azure_pricesheet`. A carga full do ambiente `azure-producao` não deve enfileirar este snapshot.
 6. Executar um reprocessamento/clonagem piloto de fonte/período aprovado; comparar preços observados, curados e fallback, e validar contagens de Bronze/Silver/Gold.
 7. Validar forecast em uma configuração piloto e comparar cutoff/snapshot; validar `/savings/commitments-dashboard` contra consultas/relatórios financeiros de referência.
 8. Só após aceite funcional planejar backfill/reprocessamento histórico amplo e eventual aposentadoria de endpoints antigos em release posterior.

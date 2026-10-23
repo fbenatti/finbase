@@ -105,8 +105,8 @@ Fora do escopo imediato:
 
 `resource_cost` nao representa uma serie mensal homogenea:
 
-- `azure-4p` possui 12.970.906 linhas e R$ 35.368.613,01, de 202504 a 202607;
-- `azure-ti` possui 548.606 linhas e R$ 1.987.748,46, somente em 202609;
+- `azure-producao` possui 12.970.906 linhas e R$ 35.368.613,01, de 202504 a 202607;
+- `azure-dev` possui 548.606 linhas e R$ 1.987.748,46, somente em 202609;
 - no 4P, 202604 tem 51 linhas, 202605 e 202606 tem 1 linha cada e 202607 tem 3 linhas;
 - 202504 e 202505 possuem ausencia massiva de servico, regiao e tags;
 - `Microsoft.Compute` e `microsoft.compute` aparecem separados por caixa;

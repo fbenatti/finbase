@@ -49,7 +49,6 @@ const connectorLabels: Record<string, string> = {
   azure_blob: "Arquivos de custo Azure",
   azure_mca_invoice: "Faturas e compromissos Azure",
   azure_pricesheet: "Tabela de preços contratados (Azure)",
-  azure_automation_jobs: "Jobs de automação Azure",
   azure_resource_graph: "Inventário de recursos Azure",
   manual_csv: "Carga manual de CSV",
   azure_openai_ptu: "Capacidade provisionada Azure",

@@ -95,7 +95,6 @@ def test_source_key_prefers_explicit_metadata():
 def test_source_key_falls_back_to_connector_type():
     assert source_key_for(conn(connector_type="azure_blob")) == "cost_exports"
     assert source_key_for(conn(connector_type="azure_resource_graph")) == "resource_graph"
-    assert source_key_for(conn(connector_type="azure_automation_jobs")) == "automation_jobs"
     assert source_key_for(conn(connector_type="azure_openai_ptu")) == "openai_ptu"
 
 
@@ -133,7 +132,7 @@ def test_only_cost_exports_is_a_cost_source_in_the_catalog():
 
 def test_catalog_has_official_sources_and_mca_commitment():
     keys = {entry["source_key"] for entry in AZURE_SOURCE_CATALOG}
-    assert keys == {"cost_exports", "resource_graph", "automation_jobs", "openai_ptu", "price_sheet"}
+    assert keys == {"cost_exports", "resource_graph", "openai_ptu", "price_sheet"}
     price_sheet = next(entry for entry in AZURE_SOURCE_CATALOG if entry["source_key"] == "price_sheet")
     assert price_sheet["code_pattern"] == "azure-pricesheet"
     assert price_sheet["bronze_pattern"] == "raw_azure_pricesheet"

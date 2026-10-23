@@ -72,8 +72,6 @@ const emptyForm = {
   databricks_query: "SELECT * FROM system.billing.usage",
   databricks_month_column: "usage_date",
   databricks_token: "",
-  automation_subscription_ids: "",
-  automation_backfill_days: 93,
   arg_subscription_ids: "",
   arg_orphan_rules: "",
   mca_auth_mode: "bearer" as "bearer" | "service_principal" | "azure_cli",
@@ -467,21 +465,6 @@ export default function Connections() {
         databricks_month_column: cfg.month_column || "usage_date",
         databricks_token: "",
       });
-    } else if (conn.connector_type === "azure_automation_jobs") {
-      const subIds = Array.isArray(cfg.subscription_ids) ? cfg.subscription_ids.join("\n") : "";
-      setForm({
-        ...emptyForm,
-        code: conn.code, name: conn.name,
-        connector_type: conn.connector_type,
-        cloud_name: conn.cloud_name || "Azure",
-        cloud_scope: conn.cloud_scope || "azure",
-        tenant_id: cfg.tenant_id || "",
-        client_id: cfg.client_id || "",
-        client_secret: cfg.client_secret || "",
-        credential_profile: cfg.credential_profile || "",
-        automation_subscription_ids: subIds,
-        automation_backfill_days: Number(cfg.backfill_days) || 93,
-      });
     } else if (conn.connector_type === "azure_resource_graph") {
       const subIds = Array.isArray(cfg.subscription_ids) ? cfg.subscription_ids.join("\n") : "";
       const rules = (cfg.orphan_rules && typeof cfg.orphan_rules === "object")
@@ -601,14 +584,6 @@ export default function Connections() {
       if (form.databricks_month_column) configJson.month_column = form.databricks_month_column;
       // Token é write-only e opcional: por padrão o runtime lê de .env-databriks (DATABRICKS_TOKEN).
       if (form.databricks_token) configJson.token = form.databricks_token;
-    } else if (form.connector_type === "azure_automation_jobs") {
-      if (form.credential_profile) configJson.credential_profile = form.credential_profile;
-      if (form.tenant_id) configJson.tenant_id = form.tenant_id;
-      if (form.client_id) configJson.client_id = form.client_id;
-      if (form.client_secret) configJson.client_secret = form.client_secret;
-      configJson.subscription_ids = form.automation_subscription_ids
-        .split("\n").map(s => s.trim()).filter(Boolean);
-      configJson.backfill_days = Number(form.automation_backfill_days) || 93;
     } else if (form.connector_type === "azure_resource_graph") {
       if (form.credential_profile) configJson.credential_profile = form.credential_profile;
       if (form.tenant_id) configJson.tenant_id = form.tenant_id;
@@ -976,36 +951,6 @@ export default function Connections() {
               </>
             )}
 
-            {form.connector_type === "azure_automation_jobs" && (
-              <>
-                <Typography variant="subtitle2" sx={{ mt: 1, color: "text.primary" }}>Credenciais</Typography>
-                <Alert severity="info">A coleta lê jobs e agendamentos das Automation Accounts pela API ARM. Nenhum recurso é criado. O secret nunca é devolvido pela API.</Alert>
-                <TextField label="Conjunto de credenciais" value={form.credential_profile || ""}
-                  onChange={(e) => setForm({ ...form, credential_profile: e.target.value })}
-                  helperText="Perfil do .env. Em branco = usar os campos abaixo." />
-                <TextField label="Diretório (tenant)" value={form.tenant_id}
-                  onChange={(e) => setForm({ ...form, tenant_id: e.target.value })} />
-                <TextField label="Aplicação (client ID)" value={form.client_id}
-                  onChange={(e) => setForm({ ...form, client_id: e.target.value })} />
-                <TextField label="Segredo de acesso (para substituir)" type="password" value={form.client_secret}
-                  onChange={(e) => setForm({ ...form, client_secret: e.target.value })}
-                  helperText="Deixe em branco para manter o segredo já configurado." />
-                <Typography variant="subtitle2" sx={{ mt: 1 }}>Abrangência da coleta</Typography>
-                <TextField label="IDs das assinaturas (uma por linha)" multiline rows={3}
-                  value={form.automation_subscription_ids}
-                  onChange={(e) => setForm({ ...form, automation_subscription_ids: e.target.value })}
-                  helperText="Em branco = todas as subscriptions que a credencial acessa." />
-                <TextField label="Janela de histórico (dias)" type="number" value={form.automation_backfill_days}
-                  onChange={(e) => setForm({ ...form, automation_backfill_days: Number(e.target.value) || 93 })}
-                  helperText="Quantidade de dias de histórico de jobs a coletar (padrão: 93)." />
-                <Typography variant="subtitle2" sx={{ mt: 1 }}>Agendamento da coleta</Typography>
-                <Typography variant="body2" color="text.secondary">
-                  Scan descobre as Automation Accounts; a extração coleta jobs (últimos N dias) e
-                  schedules atuais, persiste na base de origem e permite reprocessar para a base consolidada
-                  (MODELO AUTOMATION / MODELO AUTOMATION SCHEDULE).
-                </Typography>
-              </>
-            )}
 
             {form.connector_type === "azure_resource_graph" && (
               <>

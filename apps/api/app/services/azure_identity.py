@@ -2,7 +2,7 @@
 
 Centraliza a leitura das credenciais persistidas na conexão e o
 ClientSecretCredential usado por
-azure_automation_service, azure_ptu_service e azure_resource_graph_service.
+azure_ptu_service e azure_resource_graph_service.
 """
 from __future__ import annotations
 

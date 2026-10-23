@@ -43,7 +43,6 @@ from app.models.idea import Idea
 from app.models.pivot_view import PivotView
 from app.models.rules import BusinessRule, ClassificationRule, Department, EtlMapping
 from app.models.saving import SavingAction
-from app.models.shutdown_exception_rule import ShutdownExceptionRule
 from app.models.source_connection import SourceConnection
 
 logger = logging.getLogger(__name__)
@@ -74,7 +73,6 @@ AUDIT_MODELS: dict[str, type] = {
     "alertas/configuracoes": AnomalyConfig,
     "alertas/acoes": AnomalyAction,
     "otimizacao/acoes": SavingAction,
-    "otimizacao/excecoes": ShutdownExceptionRule,
     "mapeamentos-tags": AzureTagMapping,
     "tabelas": DestinationTable,
     "colunas": DestinationColumn,

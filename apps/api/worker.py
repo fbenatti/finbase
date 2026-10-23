@@ -6,7 +6,6 @@
 # é justamente o tipo de divergência que já causou erro silencioso.
 _DEDICATED_COLLECTORS: frozenset[str] = frozenset({
     "azure_resource_graph",
-    "azure_automation_jobs",
 })
 
 #!/usr/bin/env python3
@@ -1853,54 +1852,10 @@ def consumer_main(worker_id: int):
                                         return getattr(self._base, name)
                                 _ptu_conn = _SourceConn(_ptu_conn, _source_connector)
 
-                            if _ptu_conn and _ptu_conn.connector_type == "azure_automation_jobs":
-                                # Azure Automation é coletado via ARM (jobs e
-                                # schedules) e persistido na Bronze, seguindo o
-                                # mesmo padrão de coleta do PTU.
-                                from app.services.azure_automation_service import run_automation_collection
-                                _cfg = dict(_ptu_conn.config_json or {})
-                                _backfill = int(_cfg.get("backfill_days") or 93)
-                                try:
-                                    _result = run_automation_collection(
-                                        _ptu_session,
-                                        _ptu_conn.id,
-                                        backfill_days=_backfill,
-                                        task_id=task_id,
-                                        source_code=source_code,
-                                    )
-                                except Exception as _coll_exc:
-                                    import traceback as _tb
-                                    _tb.print_exc()
-                                    _t_fail = _ptu_session.get(EtlTask, task_id)
-                                    if _t_fail:
-                                        _t_fail.status = "FAILED"
-                                        _t_fail.phase = f"Azure Automation coleta falhou: {str(_coll_exc)[:400]}"
-                                        _t_fail.errors = [str(_coll_exc)[:1000]]
-                                        _t_fail.finished_at = datetime.now(timezone.utc)
-                                        _ptu_session.commit()
-                                    _inmemory_tasks[task_id]["status"] = "FAILED"
-                                    _inmemory_tasks.pop(task_id, None)
-                                    continue
-                                _t = _ptu_session.get(EtlTask, task_id)
-                                if _t:
-                                    _t.status = "COMPLETED"
-                                    _t.phase = (
-                                        f"Azure Automation: {_result.get('jobs_collected', 0)} jobs / "
-                                        f"{_result.get('schedules_collected', 0)} schedules em "
-                                        f"{_result.get('accounts', 0)} conta(s)"
-                                    )
-                                    _t.rows_raw = _result.get("jobs_bronze", 0) + _result.get("schedules_bronze", 0)
-                                    _t.billing_periods = _result.get("billing_periods") or []
-                                    _t.result_json = _result
-                                    _t.finished_at = datetime.now(timezone.utc)
-                                    _ptu_session.commit()
-                                _inmemory_tasks[task_id]["status"] = "COMPLETED"
-                                _inmemory_tasks.pop(task_id, None)
-                                continue
                             if _ptu_conn and _ptu_conn.connector_type == "azure_resource_graph":
                                 # Azure Resource Graph é coletado via ARG (inventário
                                 # e regras de órfãos) e persistido na Bronze, seguindo
-                                # o mesmo padrão de coleta do PTU/Automation.
+                                # o mesmo padrão de coleta do PTU.
                                 from app.services.azure_resource_graph_service import run_resource_graph_collection
                                 try:
                                     _arg_result = run_resource_graph_collection(

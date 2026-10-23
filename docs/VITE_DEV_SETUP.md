@@ -28,7 +28,7 @@ sudo nginx -t
 sudo systemctl reload nginx
 ```
 
-Acesse `https://finopsintelligence.telefonicabigdata.com/dimon-dashboard`.
+Acesse `https://<seu-dominio>/dimon-dashboard`.
 
 ## Ativar a API no host
 

@@ -47,7 +47,7 @@ Casos no banco: **1**.
 
 ```text
 #13 nota=89 HIGH estado=NEW
-    família=cloud_origem=azure-ti|servicename=Microsoft.CognitiveServices|
+    família=cloud_origem=azure-dev|servicename=Microsoft.CognitiveServices|
             servicesubcategory=Azure OpenAI|chargecategory=Usage|
             commitmentdiscounttype=Reservation
     data=2026-10-13  esperado=0,00  observado=1.431,15  anômalo=1.323,50
@@ -209,7 +209,7 @@ Sequência executada no ambiente de DEV com o **agendador e o worker reais**:
           anomaly_run 10: trigger=SCHEDULED forecast_run=399 corte=2026-10-12
           10.903 séries · 914 linhas · cases_created=1
           caso #14: ASSIGNED · HIGH · nota 89 · responsável=6
-          regra de roteamento=azure-ti-financeiro · prazo 24h
+          regra de roteamento=azure-dev-financeiro · prazo 24h
           notificação ASSIGNMENT → usuário 6
 ```
 
@@ -248,7 +248,7 @@ notificações: #3 ASSIGNMENT → usuário 6
 ```
 
 Detecção manual via `POST /anomalies/configs/11/run` gerou o caso #15, também
-roteado para o usuário 6 (`azure-ti-financeiro`), com prazo de 24h.
+roteado para o usuário 6 (`azure-dev-financeiro`), com prazo de 24h.
 
 ### 7.1.1 Dois defeitos encontrados **ao vivo** e corrigidos
 

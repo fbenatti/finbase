@@ -87,8 +87,8 @@ O motor grava textos como:
 ```text
 "Return simulado"
 "Marketplace ONESHOT zera forecast (sem séries correspondentes)"
-"Aura Brain - PTU Azure OpenAI mensal (não aplicada: campo fora das dimensões)"
-"Azure-4P - suspender após 30 dias sem dados (suspensas 26 linhas; validade 30 dias; idade avaliada 104 dias em 2026-10-14)"
+"Projeto Beta - PTU Azure OpenAI mensal (não aplicada: campo fora das dimensões)"
+"Azure-Producao - suspender após 30 dias sem dados (suspensas 26 linhas; validade 30 dias; idade avaliada 104 dias em 2026-10-14)"
 ```
 
 O adaptador converte em referências com estado explícito:

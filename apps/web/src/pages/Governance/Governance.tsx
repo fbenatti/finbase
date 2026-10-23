@@ -27,7 +27,7 @@ export default function Governance() {
   const [searchParams, setSearchParams] = useSearchParams();
   const { hasPerm } = useAuth();
   const requested = searchParams.get("tab");
-  if (requested === "desligue" || requested === "orfaos") {
+  if (requested === "orfaos") {
     return <Navigate to={`/otimizacao?tab=${requested}`} replace />;
   }
   if (requested === "reservas-legacy") {

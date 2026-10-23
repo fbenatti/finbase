@@ -508,7 +508,7 @@ Em DEV, a regra 8 da configuração 9 também foi atualizada para a versão 2 co
 `ZERO_WHEN_REALIZED` em 09/10/2026; o forecast 388 usava a versão 1, sem a opção.
 
 A validação completa em DEV foi publicada pelo agendamento Reprocessamento
-(4), selecionando Azure-TI / `202610`, forecast 9, rateio e cubo Gold 4:
+(4), selecionando Azure-Dev / `202610`, forecast 9, rateio e cubo Gold 4:
 tarefa 8148 de reclassificação → tarefa 8149 / forecast 390 → Gold 8150,
 todas concluídas. Para SAPTDF, o cubo passou de R$ 470.452,45 para
 R$ 140.684,85 de forecast em outubro; Purchase ficou em zero, enquanto
@@ -524,7 +524,7 @@ O commit `3acdce04` havia condicionado o fechamento do mês à classificação
 classificador conta até três datas de cobrança em todo o histórico, as três
 datas de setembro mais duas de outubro perderam a classificação mensal.
 A opção explícita `ZERO_WHEN_REALIZED` restaura o fechamento independente dessa
-heurística. A regra de validade Azure-4P continua separada e configurável.
+heurística. A regra de validade Azure-Producao continua separada e configurável.
 
 Agendamentos de reprocessamento precisam marcar as tarefas de reclassificação
 como `scheduled_pipeline`. O worker espera as demais tarefas do mesmo agendamento

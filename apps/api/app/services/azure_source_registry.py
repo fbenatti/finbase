@@ -69,22 +69,6 @@ AZURE_SOURCE_CATALOG: tuple[dict[str, Any], ...] = (
         "collection_mode": "dedicated",
     },
     {
-        "source_key": "automation_jobs",
-        "display_name": "Automation (jobs e schedules)",
-        "description": "Jobs e schedules dos runbooks de start/stop — evidência de desligue.",
-        "position": 30,
-        "connector_type": "azure_automation_jobs",
-        "code_pattern": "azure-{env}-automation",
-        "bronze_pattern": "raw_azure_{env}_automation",
-        "silver_target": "silver.dest_modelo_automation, silver.dest_modelo_automation_schedule",
-        "gold_target": "gold.azure_automation_cube",
-        "is_cost_source": False,
-        "api_reference": "Microsoft.Automation automationAccounts (2023-11-01)",
-        "required_permission": "Reader no Automation Account",
-        "azure_scope": "subscription",
-        "implementation_status": "implemented",
-    },
-    {
         "source_key": "openai_ptu",
         "display_name": "Azure OpenAI PTU",
         "description": "Métricas e capacidade de PTU. Fluxo operacional próprio, preservado.",
@@ -107,7 +91,6 @@ CONNECTOR_TO_SOURCE_KEY: dict[str, str] = {
     "azure_blob": COST_EXPORTS_KEY,
     "azure_pricesheet": "price_sheet",
     "azure_resource_graph": "resource_graph",
-    "azure_automation_jobs": "automation_jobs",
     "azure_openai_ptu": "openai_ptu",
 }
 
@@ -225,7 +208,6 @@ SOURCE_CODE_SUFFIX: dict[str, str] = {
     "cost_exports": "",
     "price_sheet": "",
     "resource_graph": "resource-graph",
-    "automation_jobs": "automation",
     "openai_ptu": "ptu",
 }
 

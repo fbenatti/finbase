@@ -689,7 +689,7 @@ async def classification_field_values(
         .limit(limit)
     )
     rows = (await db.execute(stmt)).scalars().all()
-    return [{"value": row.value, "count": row.count} for row in rows]
+    return [{"value": row.value, "count": row.count, "cloud": row.cloud} for row in rows]
 
 
 @router.post("/dados/classificacoes/atualizar-valores-campos", status_code=202)

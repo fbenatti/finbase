@@ -112,7 +112,7 @@ Verificado em Trino real (`scripts/verify_anomaly_series.py`):
 
 ```text
 fonte: silver.dest_modelo_focus dimensões=18
-série escolhida: {'cloud_origem': 'azure-ti', 'servicename': 'Microsoft.Compute'}
+série escolhida: {'cloud_origem': 'azure-dev', 'servicename': 'Microsoft.Compute'}
 linhas observadas por dia (1ª a 13/10): 13
 série derivada: 31 dias; soma esperada=31.000,00 (forecast 31.000,00)
    dia útil médio=1.210,94  fim de semana médio=484,38

@@ -11,7 +11,7 @@ Criar, na página **Governança**, uma estrutura para **buscar recursos órfãos
 
 1. **Fonte de dados dentro de ferramentas cloud** — novo conector na tela Conexões
    (categoria "Ferramentas"), igual ao "Azure Automation".
-2. **Credenciais** — reutilizar as mesmas Service Principals `azure-4p` / `azure-ti`
+2. **Credenciais** — reutilizar as mesmas Service Principals `azure-producao` / `azure-dev`
    já usadas pelo Automation (nada novo de infra).
 3. **Download Bronze** — a extração (worker) consulta a API do ARG e grava o resultado
    cru no Iceberg (`bronze.raw_<code>`), registrando o `IngestedBlob`.
@@ -46,7 +46,7 @@ Governança: "Desligue Programado" ◄───── Trino ◄─────�
 
 Pontos-chave do padrão:
 
-- **Credenciais**: `config_json.credential_profile = "azure-4p" | "azure-ti"` →
+- **Credenciais**: `config_json.credential_profile = "azure-producao" | "azure-dev"` →
   `resolve_config()` busca `tenant_id/client_id/client_secret` em `Settings`
   (carregados de `.env-4p` / `.env-ti`). Alternativa: credenciais direto no `config_json`.
 - **Bronze**: `iceberg.write_bronze(conn.code, df, billing_period, blob_path)` +
@@ -81,7 +81,7 @@ Pontos-chave do padrão:
 - **`config_json`**:
   ```json
   {
-    "credential_profile": "azure-4p",
+    "credential_profile": "azure-producao",
     "subscription_ids": ["sub1", "sub2"],
     "snapshot_mode": "daily",
     "orphan_rules": {
@@ -190,15 +190,15 @@ A regra Gold `custo_recursos_orfaos` (criada/atualizada no setup ou pelo endpoin
 `POST /azure-resource-graph/seed-gold`) materializa o custo dos órfãos cruzando
 o detalhe Silver com o detalhe FOCUS. O destino de órfãos é compartilhado entre
 as conexões 4P e TI; `cloud_origem` e `source_connection_id` mantêm a origem,
-enquanto os valores `azure-resource-graph-4p` e `azure-resource-graph-ti` são
-traduzidos para `azure-4p` e `azure-ti` no join de custo:
+enquanto os valores `azure-resource-graph-producao` e `azure-resource-graph-dev` são
+traduzidos para `azure-producao` e `azure-dev` no join de custo:
 
 ```sql
 WITH orphan_ids AS (
   SELECT DISTINCT lower(resource_id) AS rid, "_billing_period",
          CASE cloud_origem
-           WHEN 'azure-resource-graph-4p' THEN 'azure-4p'
-           WHEN 'azure-resource-graph-ti' THEN 'azure-ti'
+           WHEN 'azure-resource-graph-producao' THEN 'azure-producao'
+           WHEN 'azure-resource-graph-dev' THEN 'azure-dev'
            ELSE cloud_origem END AS focus_cloud_origem
   FROM iceberg.silver.dest_cloud_orphan_resources
 ), focus_dedup AS (
@@ -224,8 +224,8 @@ FROM iceberg.silver.dest_cloud_orphan_resources o
 LEFT JOIN focus_dedup f ON lower(f.resourceid) = lower(o.resource_id)
   AND f."_billing_period" = o."_billing_period"
   AND lower(f.cloud_origem) = lower(CASE o.cloud_origem
-    WHEN 'azure-resource-graph-4p' THEN 'azure-4p'
-    WHEN 'azure-resource-graph-ti' THEN 'azure-ti'
+    WHEN 'azure-resource-graph-producao' THEN 'azure-producao'
+    WHEN 'azure-resource-graph-dev' THEN 'azure-dev'
     ELSE o.cloud_origem END)
 GROUP BY 1,2,3,4,5,6,7,8,9,10,11,12
 ```
@@ -391,14 +391,14 @@ Após publicar a versão corrigida do backend em PRD:
 
 1. Confirmar no PostgreSQL PRD que Resource Graph está habilitado no catálogo
    das conexões Azure do ambiente. No padrão atual, **não** se cria uma conexão
-   `azure_resource_graph` separada: a credencial fica em `azure-4p`/`azure-ti` e
+   `azure_resource_graph` separada: a credencial fica em `azure-producao`/`azure-dev` e
    cada fonte é uma seleção em `azure_connection_source`.
 
    ```sql
    SELECT sc.id, sc.code, acs.source_key, acs.enabled, acs.subscription_ids
    FROM source_connection sc
    JOIN azure_connection_source acs ON acs.connection_id = sc.id
-   WHERE sc.code IN ('azure-4p', 'azure-ti')
+   WHERE sc.code IN ('azure-producao', 'azure-dev')
      AND sc.connector_type = 'azure_blob'
      AND acs.source_key = 'resource_graph'
    ORDER BY sc.code;
@@ -414,7 +414,7 @@ Após publicar a versão corrigida do backend em PRD:
    FROM source_connection sc
    JOIN source_destination_mapping m ON m.source_connection_id = sc.id AND m.active
    JOIN destination_table d ON d.id = m.destination_table_id
-   WHERE sc.code IN ('azure-4p', 'azure-ti')
+   WHERE sc.code IN ('azure-producao', 'azure-dev')
      AND d.physical_name IN ('dest_cloud_orphan_resources', 'dest_cloud_resource_inventory')
    GROUP BY sc.code, d.physical_name
    ORDER BY sc.code, d.physical_name;
@@ -448,7 +448,7 @@ Após publicar a versão corrigida do backend em PRD:
 6. Confirmar que `silver.dest_cloud_orphan_resources` contém as duas origens
    (4P e TI) e que a Gold mantém `cloud_origem`/`source_connection_id`, sem
    misturar custos: o join deve continuar particionado pela origem Azure
-   correspondente (`azure-4p` ou `azure-ti`).
+   correspondente (`azure-producao` ou `azure-dev`).
 
 O seed não altera dados de custo diretamente nem cria uma tabela Silver. A Gold
 é reconstruída pelo fluxo normal de materialização. Em produção, executar os

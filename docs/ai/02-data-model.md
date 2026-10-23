@@ -94,7 +94,7 @@ para o JSONB `extra`; `Tags` vai para `tags`.
 ## 2.5 Mapeamento GCP → MODELO FOCUS
 
 O seed `apps/api/seed_gcp_focus_mappings.py` aplica o mapeamento oficial Google/FOCUS
-para as conexões `gcp-4p` e `gcp-ti`, cobrindo os 50 campos folha do export
+para as conexões `gcp-producao` e `gcp-dev`, cobrindo os 50 campos folha do export
 `gcp_billing_export_resource_v1_*`. Campos canônicos FOCUS usam transforms
 (`JSON_PATH`, `JSON_SUM`, `VALUE_MAP`, `MONTH_START/END`, `CONST`); campos sem
 coluna FOCUS vão para colunas provider-specific `x_*` (26 colunas adicionais).

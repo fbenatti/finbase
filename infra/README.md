@@ -40,7 +40,7 @@ shared local warehouse:
 connector.name=iceberg
 iceberg.catalog.type=jdbc
 iceberg.jdbc-catalog.connection-url=jdbc:postgresql://host.docker.internal:5433/finops
-iceberg.jdbc-catalog.default-warehouse-dir=file:///Users/fernandohenriquebenatti/projetos/OpenFinops/apps/data/iceberg
+iceberg.jdbc-catalog.default-warehouse-dir=file://<raiz-do-repositorio>/apps/data/iceberg
 fs.local.enabled=true
 fs.hadoop.enabled=true
 ```

@@ -454,16 +454,16 @@ export function NotificationProvider({ children }: { children: React.ReactNode }
   );
 
   const openDialog = useCallback(() => {
-    setItems((prev) => {
-      // Ao abrir: ack das notificações. Concluídas/falhas saem da lista; ativas continuam com progresso.
-      return prev
-        .filter((i) => i.status === "QUEUED" || i.status === "RUNNING")
-        .map((i) => ({ ...i, read: true }));
-    });
+    // Ao abrir: tudo continua visível e passa a contar como lido.
+    setItems((prev) => prev.map((i) => ({ ...i, read: true })));
     setDialogOpen(true);
   }, []);
 
-  const closeDialog = useCallback(() => setDialogOpen(false), []);
+  // Ao fechar: concluídas/falhas já vistas saem; ativas e as que terminaram com o painel aberto ficam.
+  const closeDialog = useCallback(() => {
+    setItems((prev) => prev.filter((i) => i.status === "QUEUED" || i.status === "RUNNING" || !i.read));
+    setDialogOpen(false);
+  }, []);
   const remove = useCallback((taskId: number) => setItems((prev) => prev.filter((i) => i.id !== taskId)), []);
   const clearAll = useCallback(() => setItems([]), []);
   const closeSnackbar = useCallback(() => setSnackbar((s) => ({ ...s, open: false })), []);

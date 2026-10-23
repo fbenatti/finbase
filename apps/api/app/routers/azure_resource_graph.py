@@ -1,6 +1,6 @@
 """Azure Resource Graph — setup das tabelas destino e endpoints da aba de governança.
 
-Setup idempotente (espelho do scheduled_shutdown): ao criar a conexão do tipo
+Setup idempotente: ao criar a conexão do tipo
 azure_resource_graph, cria automaticamente:
 
 - dest_cloud_resource_inventory  (MODELO INVENTÁRIO CLOUD)  ← Bronze arg/inventory/

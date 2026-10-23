@@ -70,7 +70,7 @@ Iceberg/Parquet consultado via Trino** (`execute()` de `app/services/trino_servi
 ### Dimon (namespace `dimon`)
 
 Tabelas pré-agregadas (`dest_dm_cost_*`), criadas por **regras** (`DimonRule`):
-`visao-completa`, `custo_aura_brain_vivo_mais`, `custo_notebooklm`, `copilot-custo`.
+`visao-completa`, `custo_projeto`, `custo_notebooklm`, `copilot-custo`.
 Cada regra declara `gold_tables` (Gold + planning), `dimensions` (GROUP BY) e `measure_columns`.
 A materialização faz `UNION ALL` das fontes (projetando as dimensões; fonte sem a coluna projeta
 `NULL`, exceto via lookup) e agrega com `SUM`.

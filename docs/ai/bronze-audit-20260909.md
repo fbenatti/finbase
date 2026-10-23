@@ -44,7 +44,7 @@ path/período correto; a reconciliação financeira é feita no resultado agrega
 
 ## Divergências de proveniência/contagem
 
-- `gcp-4p`, 202604, blob 130: 54.469 esperadas, 1.548.630 lidas.
+- `gcp-producao`, 202604, blob 130: 54.469 esperadas, 1.548.630 lidas.
 - `mongodb-atlas-pro`, 202512–202609: todos os dez meses divergem (oito vezes
   o esperado nos meses 202512–202608; 6.616 versus 3.790 em 202609).
 - `mongodb-atlas-enterprise`: 202512 (807/7.263), 202601 (812/7.308) e

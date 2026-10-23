@@ -43,7 +43,6 @@ PATH_MODULE: list[tuple[str, str]] = [
     ("/governanca/grafo-recursos-azure", "azure_resource_graph"),
     ("/custos/reservas", "reservations"),
     ("/custos/compromisso-mca", "reservations"),
-    ("/otimizacao/desligamento-agendado", "scheduled_shutdown"),
     ("/otimizacao", "savings"),
     ("/custos/oci-operacional", "oci_operational"),
     ("/custos", "gold"),

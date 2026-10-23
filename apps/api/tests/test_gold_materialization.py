@@ -4,12 +4,8 @@ import pytest
 from app.services import lakehouse_layers as layers
 
 from app.services.gold_materialization import (
-    _desligue_validation_dates,
     _merged_dimensions,
     rule_target_table,
-    evaluate_daily_quality,
-    evaluate_vm_lifecycle,
-    is_aks_managed_resource,
     normalize_code,
     preview_source,
 )
@@ -85,53 +81,3 @@ def test_source_gold_tables_list_kept_in_order():
     from app.services.gold_materialization import _source_clause
     clause = _source_clause(schema, source)
     assert "servicename" in clause
-
-
-def test_desligue_validation_dates_last_14_days_of_month():
-    start, end = _desligue_validation_dates("202608")
-    assert start == "2026-08-18"
-    assert end == "2026-08-31"
-
-
-def test_evaluate_daily_quality_counts_material_days():
-    rows = [
-        {"day": "2026-08-20", "hours": 0.1},
-        {"day": "2026-08-21", "hours": 4.5},
-        {"day": "2026-08-22", "hours": 8},
-        {"day": "2026-08-23", "hours": 3.9},
-    ]
-    quality = evaluate_daily_quality(
-        rows,
-        validation_start="2026-08-18",
-        validation_end="2026-08-31",
-        total_hours=16.5,
-        baseline_hours=744,
-    )
-    assert quality["active_days"] == 2
-    assert quality["window_hours"] == 16.5
-    assert quality["window_uptime_pct"] == round(16.5 / 336, 4)
-    assert quality["monthly_uptime_pct"] == round(16.5 / 744, 4)
-
-
-def test_is_aks_managed_resource_detects_mc_aks():
-    rid = "/subscriptions/x/resourceGroups/mc_aks_cluster/providers/Microsoft.Compute/virtualMachines/aks-default-6qvtj"
-    assert is_aks_managed_resource(rid) is True
-    assert is_aks_managed_resource("/subscriptions/x/resourceGroups/rg-dev/providers/Microsoft.Compute/virtualMachines/vm1") is False
-
-
-def test_desligue_list_filter_sql_excludes_ephemeral_and_24x7():
-    from app.services.gold_materialization import desligue_list_filter_sql
-
-    sql = desligue_list_filter_sql()
-    assert "CICLO_CURTO" in sql
-    assert "LIGADA_24x7" in sql
-    assert "prismacloud-scan" in sql
-
-
-def test_evaluate_vm_lifecycle_recently_born():
-    born, died, lifecycle = evaluate_vm_lifecycle(
-        "2026-08-20", "2026-08-31", "2026-08-02", "2026-08-31"
-    )
-    assert born is True
-    assert died is False
-    assert lifecycle == "recently_born"
