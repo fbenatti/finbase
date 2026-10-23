@@ -91,6 +91,37 @@ def test_service_rejects_windows_larger_than_the_pilot_budget():
         )
 
 
+def test_worker_config_snapshot_freezes_allowlist_after_connection_edit(monkeypatch):
+    connection = SimpleNamespace(
+        id=4, connector_type="oci", config_json={
+            "tenancy": "changed-tenancy", "region": "changed-region",
+            "infrastructure_metrics": {"enabled": False},
+        },
+    )
+
+    class CapturingAdapter(EmptyAdapter):
+        resources = []
+
+        def fetch(self, plan):
+            self.resources.extend(plan.scope.resource_ids)
+            return super().fetch(plan)
+
+    adapter = CapturingAdapter()
+    monkeypatch.setattr(service, "build_oci_adapter", lambda conn, config: adapter)
+    start = datetime(2026, 1, 1, tzinfo=timezone.utc)
+    result = service.collect_oci_metrics(
+        connection, start_utc=start, end_utc=start + timedelta(minutes=1),
+        resolution_seconds=60, statistics=("mean",), config_snapshot={
+            "version": 1, "enabled": True, "compartment_id": "compartment-a",
+            "provider_account_id": "original-tenancy", "region": "original-region",
+            "resource_ids": ["vm-allowlisted"], "metric_names": ["CpuUtilization"],
+            "resolutions_seconds": [60], "retention_days": 60,
+        },
+    )
+    assert result["region"] == "original-region"
+    assert set(adapter.resources) == {"vm-allowlisted"}
+
+
 def test_service_can_opt_in_to_day_slice_publication(monkeypatch):
     connection = SimpleNamespace(
         id=4, code="oci_test", connector_type="oci", config_json={
