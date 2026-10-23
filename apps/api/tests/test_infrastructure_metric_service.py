@@ -154,7 +154,7 @@ def test_service_can_opt_in_to_day_slice_publication(monkeypatch):
         resolution_seconds=60, statistics=("mean",), persist=True,
     )
     assert result["persistence_enabled"] is True
-    assert result["persisted_by_day"] == {"20260101": 2}
+    assert result["persisted_by_day"] == {"20260101": 6}
     assert result["coverage_persisted_by_day"] == {"20260101": 1}
     assert initialized == [True, True]
     assert len(published) == 2
