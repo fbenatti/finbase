@@ -8,7 +8,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import select, text
 from app.config import settings
 from app.database import engine, Base, async_session
-from app.routers import connections, csv_upload, etl, rules, periods, analysis, destinations, schema, forecast, clone_rules, planning, anomalies, savings, azure_tag_policy, gold, reservations, azure_resource_graph, azure_sources, azure_mca_commitment, oci_operational, ideas, financial_contracts, auth as auth_router, users as users_router, groups as groups_router, roles as roles_router, audit as audit_router, sso as sso_router, sso_providers as sso_providers_router, integrations, processing_logs
+from app.routers import connections, csv_upload, etl, rules, periods, analysis, destinations, schema, forecast, clone_rules, planning, anomalies, savings, azure_tag_policy, gold, reservations, azure_resource_graph, azure_sources, azure_mca_commitment, oci_operational, infrastructure_metrics, ideas, financial_contracts, auth as auth_router, users as users_router, groups as groups_router, roles as roles_router, audit as audit_router, sso as sso_router, sso_providers as sso_providers_router, integrations, processing_logs
 from app.routers import modules as modules_router
 from app.routers import hierarchy_aliases
 from app.routers import connector_visibility as connector_visibility_router
@@ -997,6 +997,7 @@ app.include_router(azure_mca_commitment.router)
 app.include_router(integrations.router)
 app.include_router(financial_contracts.router)
 app.include_router(oci_operational.router)
+app.include_router(infrastructure_metrics.router)
 app.include_router(ideas.router)
 from app.routers import access as access_router  # noqa: E402
 app.include_router(access_router.router)
