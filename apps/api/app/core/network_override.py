@@ -12,15 +12,7 @@ from typing import Any
 
 logger = logging.getLogger(__name__)
 
-# Default known infrastructure IP addresses for private Azure Blob Storages
-_DEFAULT_STORAGE_IPS: dict[str, str] = {
-    "reportfinopsti": "20.209.12.41",
-    "reportfinopsti.blob.core.windows.net": "20.209.12.41",
-    "proazurecostsmanagement": "20.60.37.33",
-    "proazurecostsmanagement.blob.core.windows.net": "20.60.37.33",
-}
-
-_STORAGE_HOST_MAP: dict[str, str] = dict(_DEFAULT_STORAGE_IPS)
+_STORAGE_HOST_MAP: dict[str, str] = {}
 _ORIGINAL_GETADDRINFO = socket.getaddrinfo
 _PATCH_INSTALLED = False
 
@@ -36,7 +28,8 @@ def _custom_getaddrinfo(host: Any, *args: Any, **kwargs: Any) -> Any:
 def register_storage_ip(storage_account_or_host: str, ip: str | None = None) -> str | None:
     """Register direct IP resolution for an Azure Storage account or hostname.
 
-    If ``ip`` is None, checks environment variables or pre-configured defaults.
+    If ``ip`` is None, checks environment variables. Hosts without an explicit
+    override use the system resolver.
     """
     global _PATCH_INSTALLED
     cleaned = storage_account_or_host.lower().strip()
@@ -47,7 +40,6 @@ def register_storage_ip(storage_account_or_host: str, ip: str | None = None) -> 
         ip
         or os.getenv(f"AZURE_STORAGE_IP_{account_name.upper()}")
         or os.getenv("AZURE_STORAGE_IP")
-        or _DEFAULT_STORAGE_IPS.get(account_name)
     )
 
     if target_ip:
@@ -61,8 +53,3 @@ def register_storage_ip(storage_account_or_host: str, ip: str | None = None) -> 
         return target_ip
 
     return None
-
-
-# Automatically install resolution for known default infrastructure storages on module load
-for account, default_ip in _DEFAULT_STORAGE_IPS.items():
-    register_storage_ip(account, default_ip)
