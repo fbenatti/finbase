@@ -631,7 +631,7 @@ export default function CostSummary({ table, director, departmentId, path, inclu
               <Box sx={{ width: 34, height: 34, borderRadius: "10px", bgcolor: "rgba(15, 98, 254, 0.1)", color: colors.brand, display: "grid", placeItems: "center", flexShrink: 0 }}><AccountTreeOutlined fontSize="small" /></Box>
               <Box sx={{ minWidth: 0 }}>
                 <Typography variant="subtitle1" fontWeight={800} color={colors.text}>Onde está o custo</Typography>
-                <Typography variant="caption" color="text.secondary">{focus.label} · {decompChain.map((item) => item.label).join(" → ")}. Clique em cada nó para descer um nível.</Typography>
+                <Typography variant="caption" color="text.secondary">{focus.label} · Selecione um item para abrir o próximo nível.</Typography>
               </Box>
             </Stack>
             <IconButton size="small" aria-label="Fechar decomposição" onClick={() => setFocus(null)}><CloseOutlined fontSize="small" /></IconButton>
@@ -643,6 +643,7 @@ export default function CostSummary({ table, director, departmentId, path, inclu
             queryKey={`resumo-onde-${JSON.stringify(focusFilters)}`}
             measureColumn={measureColumn}
             shareCaption="participação no recorte"
+            presentation="ranked"
           />
         </Paper>
       )}

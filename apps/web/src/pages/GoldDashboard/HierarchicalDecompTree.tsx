@@ -195,6 +195,7 @@ export default function HierarchicalDecompTree({
   filterRowTypes = true,
   measureColumn = "realizado",
   labelManualForecast = false,
+  presentation = "flow",
 }: {
   table: string;
   baseFilters: GoldQueryFilter[];
@@ -209,6 +210,8 @@ export default function HierarchicalDecompTree({
   measureColumn?: "realizado" | "realizado_cloud";
   /** Marca como Forecast Manual as linhas forecast-manual sem nível organizacional. */
   labelManualForecast?: boolean;
+  /** Lista de participação para análises em espaço compacto. */
+  presentation?: "flow" | "ranked";
 }) {
   const theme = useTheme();
   const ACCENT = theme.palette.primary.main;
@@ -348,6 +351,56 @@ export default function HierarchicalDecompTree({
   const selectTreeNode = (idx: number, field: string, value: string) => {
     setTreePath([...treePath.slice(0, idx), { field, value }]);
   };
+
+  if (presentation === "ranked") {
+    return (
+      <Box>
+        {error && <Alert severity="error" sx={{ mb: 1 }}>{dataDisplayText(error)}</Alert>}
+        <Stack direction="row" gap={0.75} flexWrap="wrap" alignItems="center" sx={{ mb: 2 }}>
+          <Button size="small" variant={treePath.length ? "text" : "contained"} onClick={() => setTreePath([])} sx={{ textTransform: "none" }}>Total</Button>
+          {treePath.map((step, index) => (
+            <Button key={`${step.field}-${index}`} size="small" variant={index === treePath.length - 1 ? "contained" : "text"} onClick={() => setTreePath(treePath.slice(0, index + 1))} sx={{ textTransform: "none", maxWidth: 220 }}>
+              <Box component="span" sx={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{step.value}</Box>
+            </Button>
+          ))}
+        </Stack>
+        <Stack direction={{ xs: "column", md: "row" }} gap={2} alignItems={{ md: "flex-end" }} justifyContent="space-between" sx={{ mb: 2 }}>
+          <Box>
+            <Typography variant="body2" color="text.secondary">{treePath.length ? chain.find(item => item.field === treePath[treePath.length - 1].field)?.label : "Custo no recorte"}</Typography>
+            <Typography variant="h4" fontWeight={800} color="text.primary" title={nodeTotal.toLocaleString("pt-BR", { style: "currency", currency: "BRL" })}>{compact(nodeTotal)}</Typography>
+            <Typography variant="body2" color="text.secondary">{pct(shareTotal)} do total · {shareCaption}</Typography>
+          </Box>
+          {onApplyContext && treePath.length > 0 && <Button size="small" variant="outlined" onClick={() => onApplyContext(treePath)}>Aplicar recorte</Button>}
+        </Stack>
+        <Stack direction="row" justifyContent="space-between" alignItems="center" gap={1} sx={{ borderBottom: "1px solid", borderColor: "divider", pb: 1, mb: 0.5 }}>
+          <Typography variant="subtitle2" fontWeight={800}>{nextLabel ? `Abrir por ${nextLabel.toLowerCase()}` : "Fim da hierarquia"}</Typography>
+          <Typography variant="caption" color="text.secondary">Participação no nível atual</Typography>
+        </Stack>
+        <Box sx={{ position: "relative", minHeight: 90 }}>
+          {loading && <Stack alignItems="center" justifyContent="center" sx={{ position: "absolute", inset: 0, bgcolor: "rgba(255,255,255,.7)", zIndex: 1 }}><CircularProgress size={24} /></Stack>}
+          {treeChildren.map((item) => {
+            const share = nodeTotal ? Math.abs(item.cost) / Math.abs(nodeTotal) * 100 : 0;
+            const clickable = item.__other || (item.key !== EMPTY_DIMENSION_LABEL && !item.__manualForecast && Boolean(nextField));
+            return (
+              <Box key={item.key} component={clickable ? "button" : "div"} type={clickable ? "button" : undefined}
+                onClick={item.__other ? () => setShowOtherChildren(true) : clickable && nextField ? () => selectTreeNode(treeStart, nextField, item.key) : undefined}
+                sx={{ display: "block", width: "100%", textAlign: "left", font: "inherit", color: "inherit", bgcolor: "transparent", border: 0, borderBottom: "1px solid", borderColor: "divider", px: 1, py: 1.35, cursor: clickable ? "pointer" : "default", borderRadius: 0.5, "&:hover": clickable ? { bgcolor: "action.hover" } : undefined, "&:focus-visible": { outline: `2px solid ${ACCENT}`, outlineOffset: -2 } }}>
+                <Stack direction="row" justifyContent="space-between" gap={2} alignItems="baseline">
+                  <Typography variant="body2" fontWeight={700} sx={{ minWidth: 0, overflowWrap: "anywhere" }}>{item.key}{item.__other ? " · ver demais" : ""}</Typography>
+                  <Stack direction="row" gap={2} alignItems="baseline" sx={{ flexShrink: 0 }}>
+                    <Typography variant="body2" fontWeight={800}>{compact(item.cost)}</Typography>
+                    <Typography variant="caption" color="text.secondary" sx={{ minWidth: 46, textAlign: "right" }}>{pct(share)}</Typography>
+                  </Stack>
+                </Stack>
+                <Box sx={{ height: 5, bgcolor: "action.hover", borderRadius: 3, mt: 0.8, overflow: "hidden" }}><Box sx={{ width: `${Math.min(share, 100)}%`, height: "100%", bgcolor: ACCENT, borderRadius: 3 }} /></Box>
+              </Box>
+            );
+          })}
+          {!loading && !treeChildren.length && <Typography variant="body2" color="text.secondary" sx={{ py: 2 }}>{nextField ? "Nenhum item neste nível do recorte." : "Não há outro nível para detalhar."}</Typography>}
+        </Box>
+      </Box>
+    );
+  }
 
   return (
     <Box>
