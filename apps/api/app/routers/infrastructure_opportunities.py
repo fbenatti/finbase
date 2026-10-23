@@ -236,12 +236,19 @@ def _read_chart_series(item: InfraOpportunity, run: InfraOpportunityRun, resolut
     from app.services.infrastructure_metrics.opportunities import CPU_METRIC
     from app.services.infrastructure_metrics.opportunity_runner import ANALYZED_METRICS, read_series
 
+    from concurrent.futures import ThreadPoolExecutor
+
+    with ThreadPoolExecutor(max_workers=len(ANALYZED_METRICS)) as pool:
+        series = dict(zip(ANALYZED_METRICS, pool.map(
+            lambda metric: read_series(
+                item.connection_id, item.resource_id, metric, run.window_start_utc, run.window_end_utc, resolution_seconds,
+            ),
+            ANALYZED_METRICS,
+        )))
     points: dict[str, dict] = {}
     for metric in ANALYZED_METRICS:
         key = "cpu" if metric == CPU_METRIC else "memory"
-        for row in read_series(
-            item.connection_id, item.resource_id, metric, run.window_start_utc, run.window_end_utc, resolution_seconds,
-        ):
+        for row in series[metric]:
             point = points.setdefault(row["bucket_start_utc"], {"t": row["bucket_start_utc"]})
             point[f"{key}_avg"] = row.get("value_average")
             point[f"{key}_max"] = row.get("value_maximum")

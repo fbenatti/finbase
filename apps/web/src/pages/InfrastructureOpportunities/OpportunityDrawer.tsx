@@ -21,31 +21,6 @@ const UNIT_PRICE_LABEL: Record<string, string> = { ocpu_hour: "OCPU-h", memory_g
 const unitPrice = (value: number, currency: string) =>
   value.toLocaleString("pt-BR", { style: "currency", currency, minimumFractionDigits: 4, maximumFractionDigits: 4 });
 
-function DailyP95Chart({ cpu, memory }: { cpu: SeriesStats | null; memory: SeriesStats | null }) {
-  const days = cpu?.daily ?? [];
-  if (days.length < 2) return <Typography variant="body2" color="text.secondary">Série diária insuficiente para o gráfico.</Typography>;
-  const memoryByDay = new Map((memory?.daily ?? []).map((item) => [item.day, item]));
-  const x = (index: number) => 40 + index * 700 / (days.length - 1);
-  const y = (value: number) => 150 - Math.min(value, 100) * 1.3;
-  const line = (values: (number | null | undefined)[]) =>
-    values.map((value, index) => (value == null ? null : `${x(index)},${y(value)}`)).filter(Boolean).join(" ");
-  return <svg viewBox="0 0 760 190" role="img" aria-label="P95 diário de CPU e memória" style={{ width: "100%", height: 200 }}>
-    {[0, 25, 50, 75, 100].map((tick) => <g key={tick}>
-      <line x1="40" x2="740" y1={y(tick)} y2={y(tick)} stroke="#e4e9ed" />
-      <text x="34" y={y(tick) + 4} textAnchor="end" fontSize="10" fill="#66747d">{tick}%</text>
-    </g>)}
-    <polyline points={line(days.map((item) => item.max))} fill="none" stroke="#f0a35e" strokeWidth="1.5" strokeDasharray="4 3" />
-    <polyline points={line(days.map((item) => item.p95))} fill="none" stroke="#087f8c" strokeWidth="2.5" />
-    <polyline points={line(days.map((item) => memoryByDay.get(item.day)?.p95))} fill="none" stroke="#6b4fbb" strokeWidth="2.5" />
-    {days.map((item, index) => <text key={item.day} x={x(index)} y="172" textAnchor="middle" fontSize="10" fill="#66747d">{item.day.slice(5)}</text>)}
-    <g fontSize="11">
-      <rect x="40" y="180" width="10" height="3" fill="#087f8c" /><text x="54" y="185" fill="#33424b">CPU P95</text>
-      <rect x="120" y="180" width="10" height="3" fill="#6b4fbb" /><text x="134" y="185" fill="#33424b">Memória P95</text>
-      <rect x="230" y="180" width="10" height="3" fill="#f0a35e" /><text x="244" y="185" fill="#33424b">CPU máx. das médias de 1m</text>
-    </g>
-  </svg>;
-}
-
 function MetricRow({ label, stats, projected95, projected99 }: { label: string; stats: SeriesStats | null; projected95?: number; projected99?: number }) {
   if (!stats) return <TableRow><TableCell>{label}</TableCell><TableCell colSpan={6}>Sem telemetria</TableCell></TableRow>;
   return <TableRow>
@@ -95,7 +70,7 @@ export default function OpportunityDrawer({ opportunityId, onClose, onChanged }:
   const to = item?.to_config;
 
   return <Drawer anchor="right" open={opportunityId != null} onClose={onClose}
-                 PaperProps={{ sx: { width: { xs: "100%", md: 1040 }, p: { xs: 2, md: 3 } } }}>
+                 PaperProps={{ sx: { width: { xs: "100%", md: "min(1360px, 94vw)" }, p: { xs: 2, md: 3 } } }}>
     <Stack direction="row" justifyContent="space-between" alignItems="flex-start">
       <Box sx={{ minWidth: 0 }}>
         <Typography variant="overline" color="text.secondary">Oportunidade de rightsizing · {(item?.provider ?? "").toUpperCase() || "—"}</Typography>
@@ -157,19 +132,21 @@ export default function OpportunityDrawer({ opportunityId, onClose, onChanged }:
         </Table>
       </Paper>
 
-      <Paper variant="outlined" sx={{ p: 2 }}>
-        <Typography variant="subtitle2">De / para do consumo</Typography>
-        <Typography variant="caption" color="text.secondary" sx={{ display: "block", mb: 1 }}>
-          Como a VM está hoje e como ficaria no tamanho recomendado, com a mesma demanda observada na janela.
+      <Box>
+        <Typography variant="h6" sx={{ mb: 0.5 }}>De / para do consumo</Typography>
+        <Typography variant="body2" color="text.secondary" sx={{ mb: 1.5 }}>
+          Como o recurso está hoje e como ficaria no tamanho recomendado, com a mesma demanda observada na janela da análise.
         </Typography>
-        <OpportunityCharts opportunityId={item.id} from={from ?? null} to={to ?? null}
-                           targets={{ cpu: Number(evidence?.policy?.cpu_target_p95 ?? 0.7), memory: Number(evidence?.policy?.memory_target_p95 ?? 0.8) }} />
-      </Paper>
-
-      <Paper variant="outlined" sx={{ p: 2 }}>
-        <Typography variant="subtitle2" gutterBottom>Evolução diária</Typography>
-        <DailyP95Chart cpu={evidence?.cpu ?? null} memory={evidence?.memory ?? null} />
-      </Paper>
+        <OpportunityCharts
+          opportunityId={item.id} from={from ?? null} to={to ?? null}
+          coverage={item.coverage}
+          daysObserved={Math.min(evidence?.cpu?.days_observed ?? 0, evidence?.memory?.days_observed ?? evidence?.cpu?.days_observed ?? 0) || null}
+          targets={{
+            cpu: Number(evidence?.policy?.cpu_target_p95 ?? 0.7), memory: Number(evidence?.policy?.memory_target_p95 ?? 0.8),
+            cpuP99: Number(evidence?.policy?.cpu_target_p99 ?? 0.9), memoryP99: Number(evidence?.policy?.memory_target_p99 ?? 0.9),
+          }}
+        />
+      </Box>
 
       <Paper variant="outlined" sx={{ p: 2 }}>
         <Typography variant="subtitle2" gutterBottom>Por que o motor recomendou</Typography>

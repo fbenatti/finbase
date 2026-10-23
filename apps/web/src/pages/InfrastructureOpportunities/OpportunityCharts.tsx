@@ -1,31 +1,43 @@
 /**
  * Gráficos de/para da oportunidade: o consumo observado na janela do motor,
- * projetado sobre o tamanho recomendado. A projeção é linear (mesmo trabalho em
- * menos capacidade): utilização_após = utilização_hoje × atual / recomendado.
+ * projetado sobre o tamanho recomendado. A projeção é linear (mesma demanda em
+ * outra capacidade): utilização_após = utilização_hoje × atual / recomendado.
+ *
+ * Organização, pensada para quem decide a troca:
+ * 1. leitura guiada e checklist (o que os números significam e se é seguro);
+ * 2. consumo no tempo em dois painéis empilhados — hoje e após — com a mesma
+ *    escala, agregados por hora para não esconder uma série atrás da outra;
+ * 3. curva de permanência em seção própria;
+ * 4. mapa de picos por dia e hora em seção própria.
  */
 import { useEffect, useMemo, useState } from "react";
 import {
-  Alert, Box, CircularProgress, Paper, Stack, ToggleButton, ToggleButtonGroup, Typography,
+  Alert, Box, Chip, CircularProgress, Paper, Stack, ToggleButton, ToggleButtonGroup, Typography,
 } from "@mui/material";
+import CheckCircleIcon from "@mui/icons-material/CheckCircleOutlined";
+import WarningIcon from "@mui/icons-material/WarningAmberOutlined";
+import ErrorIcon from "@mui/icons-material/ErrorOutlineOutlined";
 import Plot from "@/components/Plot";
 import type { FlexConfig, OpportunitySeries } from "../../services/infraOpportunitiesApi";
 import { getOpportunitySeries } from "../../services/infraOpportunitiesApi";
 
 type Metric = "cpu" | "memory";
-type Mode = "capacity" | "utilization";
 
-const COLORS = { now: "#0F62FE", after: "#149683", peak: "#ed8a3b", current: "#8497A8", target: "#149683", limit: "#d64c4c", grid: "#e8edf3" };
+const COLORS = {
+  today: "#0F62FE", after: "#149683", band: "rgba(15,98,254,0.14)", bandAfter: "rgba(20,150,131,0.16)",
+  target: "#b7791f", limit: "#d64c4c", grid: "#e8edf3", ink: "#33424b", muted: "#66747d",
+};
+const ZONES = { ok: "rgba(20,150,131,0.06)", attention: "rgba(240,163,94,0.10)", saturated: "rgba(214,76,76,0.10)" };
 const HOUR_LABELS = Array.from({ length: 24 }, (_, hour) => `${String(hour).padStart(2, "0")}h`);
 
-const localStamp = (utc: string) => {
-  const date = new Date(`${utc}Z`);
-  const pad = (value: number) => String(value).padStart(2, "0");
-  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())} ${pad(date.getHours())}:${pad(date.getMinutes())}`;
-};
+const localDate = (utc: string) => new Date(utc.endsWith("Z") || utc.includes("+") ? utc : `${utc}Z`);
+const pad = (value: number) => String(value).padStart(2, "0");
+const hourKey = (date: Date) => `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())} ${pad(date.getHours())}:00`;
 const share = (values: number[], threshold: number) =>
   values.length ? values.filter((value) => value > threshold).length / values.length : 0;
 const duration = (fraction: number, windowHours: number) => {
   const hours = fraction * windowHours;
+  if (hours === 0) return "nunca";
   return hours < 1 ? `${Math.round(hours * 60)} min` : `${hours.toFixed(1)} h`;
 };
 const quantile = (values: number[], q: number) => {
@@ -36,18 +48,35 @@ const quantile = (values: number[], q: number) => {
   const upper = Math.ceil(position);
   return sorted[lower] + (sorted[upper] - sorted[lower]) * (position - lower);
 };
+const pct = (value: number | null) => (value == null ? "—" : `${value.toFixed(1)}%`);
 
 type Props = {
   opportunityId: number;
   from: FlexConfig | null;
   to: FlexConfig | null;
-  targets: { cpu: number; memory: number };
+  targets: { cpu: number; memory: number; cpuP99?: number; memoryP99?: number };
+  coverage?: number | null;
+  daysObserved?: number | null;
 };
 
-export default function OpportunityCharts({ opportunityId, from, to, targets }: Props) {
-  const [resolution, setResolution] = useState(300);
+type Check = { level: "ok" | "warn" | "risk"; label: string; detail: string };
+
+function CheckRow({ check }: { check: Check }) {
+  const Icon = check.level === "ok" ? CheckCircleIcon : check.level === "warn" ? WarningIcon : ErrorIcon;
+  const color = check.level === "ok" ? "success.main" : check.level === "warn" ? "warning.main" : "error.main";
+  return <Stack direction="row" spacing={1.25} alignItems="flex-start" sx={{ py: 0.75 }}>
+    <Icon sx={{ color, fontSize: 20, mt: 0.25 }} />
+    <Box>
+      <Typography variant="body2" fontWeight={650}>{check.label}</Typography>
+      <Typography variant="body2" color="text.secondary">{check.detail}</Typography>
+    </Box>
+  </Stack>;
+}
+
+export default function OpportunityCharts({ opportunityId, from, to, targets, coverage, daysObserved }: Props) {
+  // A base da análise: buckets de 5 min da Silver genérica.
+  const resolution = 300;
   const [metric, setMetric] = useState<Metric>("cpu");
-  const [mode, setMode] = useState<Mode>("capacity");
   const [series, setSeries] = useState<OpportunitySeries | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -63,174 +92,254 @@ export default function OpportunityCharts({ opportunityId, from, to, targets }: 
 
   const view = useMemo(() => {
     if (!series || !from || !to) return null;
+    const unit = metric === "cpu" ? "vCPU" : "GB";
     const capacityNow = metric === "cpu" ? from.vcpus : from.memory_gb;
     const capacityAfter = metric === "cpu" ? to.vcpus : to.memory_gb;
-    const unit = metric === "cpu" ? "vCPU" : "GB";
     const ratio = capacityNow / capacityAfter;
-    const target = metric === "cpu" ? targets.cpu : targets.memory;
+    const target = (metric === "cpu" ? targets.cpu : targets.memory) * 100;
+    const targetP99 = ((metric === "cpu" ? targets.cpuP99 : targets.memoryP99) ?? 0.9) * 100;
     const points = series.points.filter((point) => point[`${metric}_avg`] != null);
-    const x = points.map((point) => localStamp(point.t));
     const avgNow = points.map((point) => point[`${metric}_avg`] as number);
     const maxNow = points.map((point) => (point[`${metric}_max`] ?? point[`${metric}_avg`]) as number);
     const avgAfter = avgNow.map((value) => value * ratio);
     const maxAfter = maxNow.map((value) => value * ratio);
     const windowHours = points.length * series.resolution_seconds / 3600;
-    const heat: (number | null)[][] = [];
-    const days = [...new Set(x.map((stamp) => stamp.slice(0, 10)))];
-    const cells = new Map<string, number[]>();
-    points.forEach((_, index) => {
-      const key = `${x[index].slice(0, 10)}|${Number(x[index].slice(11, 13))}`;
-      cells.set(key, [...(cells.get(key) ?? []), maxAfter[index]]);
+
+    // Hourly view: the line is the hour's P95 of bucket averages, the band
+    // spans up to the hour's peak. Same demand, two capacities.
+    const hours = new Map<string, { avg: number[]; max: number[] }>();
+    points.forEach((point, index) => {
+      const key = hourKey(localDate(point.t));
+      const slot = hours.get(key) ?? { avg: [], max: [] };
+      slot.avg.push(avgNow[index]);
+      slot.max.push(maxNow[index]);
+      hours.set(key, slot);
     });
-    days.forEach((day) => heat.push(HOUR_LABELS.map((_, hour) => {
-      const values = cells.get(`${day}|${hour}`);
-      return values ? Math.max(...values) : null;
-    })));
+    const hourKeys = [...hours.keys()].sort();
+    const hourP95 = hourKeys.map((key) => quantile(hours.get(key)!.avg, 0.95) ?? 0);
+    const hourPeak = hourKeys.map((key) => Math.max(...hours.get(key)!.max));
+
+    const days = [...new Set(hourKeys.map((key) => key.slice(0, 10)))];
+    const heatAfter = days.map((day) => HOUR_LABELS.map((_, hour) => {
+      const slot = hours.get(`${day} ${pad(hour)}:00`);
+      return slot ? Math.max(...slot.max) * ratio : null;
+    }));
+    const saturatedHoursPerDay = days.map((day) => {
+      let count = 0;
+      for (let hour = 0; hour < 24; hour += 1) {
+        const slot = hours.get(`${day} ${pad(hour)}:00`);
+        if (slot && Math.max(...slot.max) * ratio > 100) count += 1;
+      }
+      return count;
+    });
+
+    const stats = {
+      p95Now: quantile(avgNow, 0.95), p95After: quantile(avgAfter, 0.95),
+      p99Now: quantile(avgNow, 0.99), p99After: quantile(avgAfter, 0.99),
+      peakNow: Math.max(...maxNow), peakAfter: Math.max(...maxAfter),
+      overTargetNow: share(avgNow, target), overTargetAfter: share(avgAfter, target),
+      saturatedNow: share(maxNow, 100), saturatedAfter: share(maxAfter, 100),
+    };
     return {
-      capacityNow, capacityAfter, unit, ratio, target, x, avgNow, maxNow, avgAfter, maxAfter, windowHours, days, heat,
-      stats: {
-        p95Now: quantile(avgNow, 0.95), p95After: quantile(avgAfter, 0.95),
-        p99Now: quantile(avgNow, 0.99), p99After: quantile(avgAfter, 0.99),
-        peakNow: Math.max(...maxNow), peakAfter: Math.max(...maxAfter),
-        overTargetNow: share(avgNow, target * 100), overTargetAfter: share(avgAfter, target * 100),
-        saturatedAfter: share(maxAfter, 100),
-      },
+      unit, capacityNow, capacityAfter, ratio, target, targetP99, windowHours, stats,
+      hourKeys, hourP95, hourPeak, days, heatAfter, saturatedHoursPerDay,
+      sortedNow: [...avgNow].sort((a, b) => b - a), sortedAfter: [...avgAfter].sort((a, b) => b - a),
     };
   }, [series, metric, from, to, targets]);
 
-  const timeChart = useMemo(() => {
-    if (!view) return null;
-    const scale = (values: number[], capacity: number) => values.map((value) => value / 100 * capacity);
-    const lines = (values: [number, string, string, string][]) => values.map(([y, color, dash, label]) => ({
-      type: "line" as const, xref: "paper" as const, yref: "y" as const, x0: 0, x1: 1, y0: y, y1: y, line: { color, width: 1.5, dash },
-      label: { text: label, textposition: "end" as const, font: { size: 10, color } },
-    }));
-    if (mode === "capacity") {
-      const used = scale(view.avgNow, view.capacityNow);
-      const peak = scale(view.maxNow, view.capacityNow);
-      return {
-        data: [
-          { type: "scatter", mode: "lines", name: `Pico do bucket (${view.unit})`, x: view.x, y: peak, line: { color: COLORS.peak, width: 1 }, opacity: 0.7, hovertemplate: `Pico: %{y:.2f} ${view.unit}<extra></extra>` },
-          { type: "scatter", mode: "lines", name: `Consumo médio (${view.unit})`, x: view.x, y: used, fill: "tozeroy", fillcolor: "rgba(15,98,254,0.12)", line: { color: COLORS.now, width: 1.5 }, hovertemplate: `Consumo: %{y:.2f} ${view.unit}<extra></extra>` },
-        ],
-        layout: {
-          yaxis: { title: { text: view.unit }, rangemode: "tozero" as const, range: [0, view.capacityNow * 1.12], gridcolor: COLORS.grid },
-          shapes: lines([
-            [view.capacityNow, COLORS.current, "dash", `Hoje: ${view.capacityNow} ${view.unit}`],
-            [view.capacityAfter, COLORS.target, "solid", `Recomendado: ${view.capacityAfter} ${view.unit}`],
-            [view.capacityAfter * view.target, COLORS.target, "dot", `Alvo P95 (${Math.round(view.target * 100)}% do recomendado)`],
-          ]),
-        },
-      };
-    }
-    return {
-      data: [
-        { type: "scatter", mode: "lines", name: "Pico após a mudança", x: view.x, y: view.maxAfter, line: { color: COLORS.peak, width: 1 }, opacity: 0.6, hovertemplate: "Pico após: %{y:.1f}%<extra></extra>" },
-        { type: "scatter", mode: "lines", name: `Hoje (% de ${view.capacityNow} ${view.unit})`, x: view.x, y: view.avgNow, line: { color: COLORS.now, width: 1.5 }, hovertemplate: "Hoje: %{y:.1f}%<extra></extra>" },
-        { type: "scatter", mode: "lines", name: `Após (% de ${view.capacityAfter} ${view.unit})`, x: view.x, y: view.avgAfter, line: { color: COLORS.after, width: 1.5 }, hovertemplate: "Após: %{y:.1f}%<extra></extra>" },
-      ],
-      layout: {
-        yaxis: { title: { text: "Utilização (%)" }, ticksuffix: "%", rangemode: "tozero" as const, gridcolor: COLORS.grid },
-        shapes: lines([
-          [100, COLORS.limit, "dash", "100% da capacidade"],
-          [view.target * 100, COLORS.target, "dot", `Alvo P95 ${Math.round(view.target * 100)}%`],
-        ]),
-      },
-    };
-  }, [view, mode]);
-
   if (error) return <Alert severity="error">{error}</Alert>;
-  if (!series || !view || !timeChart) return <Box sx={{ display: "grid", placeItems: "center", py: 6 }}><CircularProgress size={26} /></Box>;
-  if (!view.x.length) return <Alert severity="info">Sem buckets na Silver para esta métrica na janela da análise.</Alert>;
+  if (!series || !view) return <Box sx={{ display: "grid", placeItems: "center", py: 6 }}><CircularProgress size={26} /></Box>;
+  if (!view.hourKeys.length) return <Alert severity="info">Sem buckets na Silver para esta métrica na janela da análise.</Alert>;
 
-  const sortedNow = [...view.avgNow].sort((a, b) => b - a);
-  const sortedAfter = [...view.avgAfter].sort((a, b) => b - a);
-  const percentOfTime = sortedNow.map((_, index) => (index + 1) / sortedNow.length * 100);
-  const fmt = (value: number | null) => (value == null ? "—" : `${value.toFixed(1)}%`);
-  const kpis = [
-    { label: "P95", now: fmt(view.stats.p95Now), after: fmt(view.stats.p95After) },
-    { label: "P99", now: fmt(view.stats.p99Now), after: fmt(view.stats.p99After) },
-    { label: "Maior pico", now: fmt(view.stats.peakNow), after: fmt(view.stats.peakAfter) },
-    { label: `Tempo acima de ${Math.round(view.target * 100)}%`, now: duration(view.stats.overTargetNow, view.windowHours), after: duration(view.stats.overTargetAfter, view.windowHours) },
-    { label: "Tempo com pico ≥ 100%", now: "0 min", after: duration(view.stats.saturatedAfter, view.windowHours) },
+  const name = metric === "cpu" ? "CPU" : "memória";
+  const { stats } = view;
+  const checks: Check[] = [
+    {
+      level: (daysObserved ?? 0) >= 14 ? "ok" : (daysObserved ?? 0) >= 7 ? "warn" : "risk",
+      label: `Histórico analisado: ${daysObserved ?? "—"} dia(s)`,
+      detail: (daysObserved ?? 0) >= 14 ? "Cobre mais de uma semana de ciclos de uso." : "Uma semana capta o ciclo semanal, mas não fechamentos de mês ou sazonalidade.",
+    },
+    {
+      level: (coverage ?? 0) >= 0.98 ? "ok" : (coverage ?? 0) >= 0.9 ? "warn" : "risk",
+      label: `Cobertura dos dados: ${coverage == null ? "—" : `${(coverage * 100).toFixed(1)}%`}`,
+      detail: "Percentual dos intervalos esperados que chegaram da nuvem. Lacunas podem esconder picos.",
+    },
+    {
+      level: (stats.p95After ?? 0) <= view.target ? "ok" : "risk",
+      label: `P95 de ${name} após a mudança: ${pct(stats.p95After)} (limite ${view.target.toFixed(0)}%)`,
+      detail: "Em 95% do tempo o uso fica abaixo deste valor no novo tamanho. É o critério principal do motor.",
+    },
+    {
+      level: (stats.p99After ?? 0) <= view.targetP99 ? "ok" : "risk",
+      label: `P99 de ${name} após a mudança: ${pct(stats.p99After)} (limite ${view.targetP99.toFixed(0)}%)`,
+      detail: "Só 1% do tempo fica acima. Protege contra rajadas frequentes que o P95 não enxerga.",
+    },
+    {
+      level: stats.saturatedAfter === 0 ? "ok" : stats.saturatedAfter < 0.01 ? "warn" : "risk",
+      label: `Tempo com pico acima de 100% após a mudança: ${duration(stats.saturatedAfter, view.windowHours)}`,
+      detail: stats.saturatedAfter === 0
+        ? "Nenhum pico observado ultrapassaria a capacidade recomendada."
+        : `Nesses momentos a demanda passaria da capacidade: ${metric === "cpu" ? "processos esperam CPU (lentidão), sem queda" : "risco de falta de memória"}. Confira se coincidem com rotinas críticas no mapa abaixo.`,
+    },
+  ];
+
+  const todayPeak = view.hourPeak;
+  const todayP95 = view.hourP95;
+  const afterPeak = view.hourPeak.map((value) => value * view.ratio);
+  const afterP95 = view.hourP95.map((value) => value * view.ratio);
+  const yMax = Math.max(110, Math.ceil(Math.max(...afterPeak) / 10) * 10 + 10);
+  const zoneShapes = (yref: "y" | "y2") => [
+    { type: "rect", xref: "paper", yref, x0: 0, x1: 1, y0: 0, y1: view.target, fillcolor: ZONES.ok, line: { width: 0 }, layer: "below" },
+    { type: "rect", xref: "paper", yref, x0: 0, x1: 1, y0: view.target, y1: 100, fillcolor: ZONES.attention, line: { width: 0 }, layer: "below" },
+    { type: "rect", xref: "paper", yref, x0: 0, x1: 1, y0: 100, y1: yMax, fillcolor: ZONES.saturated, line: { width: 0 }, layer: "below" },
+    { type: "line", xref: "paper", yref, x0: 0, x1: 1, y0: 100, y1: 100, line: { color: COLORS.limit, width: 1.2, dash: "dash" } },
+    { type: "line", xref: "paper", yref, x0: 0, x1: 1, y0: view.target, y1: view.target, line: { color: COLORS.target, width: 1, dash: "dot" } },
   ];
   const commonLayout = {
     autosize: true, paper_bgcolor: "transparent", plot_bgcolor: "transparent", separators: ",.",
-    font: { family: "inherit", color: "#526777", size: 11 }, hovermode: "x unified" as const,
-    legend: { orientation: "h" as const, y: -0.2, x: 0, font: { size: 11 } },
+    font: { family: "inherit", color: COLORS.muted, size: 12 },
   };
+  const dayLabels = view.days.map((day) => `${day.slice(8, 10)}/${day.slice(5, 7)}`);
 
-  return <Stack spacing={1.5}>
+  return <Stack spacing={2}>
     <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap alignItems="center">
       <ToggleButtonGroup size="small" exclusive value={metric} onChange={(_, next) => next && setMetric(next)}>
         <ToggleButton value="cpu">CPU</ToggleButton>
         <ToggleButton value="memory">Memória</ToggleButton>
       </ToggleButtonGroup>
-      <ToggleButtonGroup size="small" exclusive value={mode} onChange={(_, next) => next && setMode(next)}>
-        <ToggleButton value="capacity">Capacidade ({view.unit})</ToggleButton>
-        <ToggleButton value="utilization">Utilização (%)</ToggleButton>
-      </ToggleButtonGroup>
-      <ToggleButtonGroup size="small" exclusive value={resolution} onChange={(_, next) => next && setResolution(next)}>
-        <ToggleButton value={300}>5 min</ToggleButton>
-        <ToggleButton value={60}>1 min</ToggleButton>
-      </ToggleButtonGroup>
       <Typography variant="caption" color="text.secondary">
-        {view.x.length.toLocaleString("pt-BR")} buckets · {view.days.length} dia(s) · horário local
+        {view.days.length} dia(s) · horário local · {name}: {view.capacityNow} → {view.capacityAfter} {view.unit}
       </Typography>
     </Stack>
 
-    <Box sx={{ display: "grid", gridTemplateColumns: { xs: "repeat(2, minmax(0,1fr))", md: "repeat(5, minmax(0,1fr))" }, gap: 1 }}>
-      {kpis.map((item) => <Paper key={item.label} variant="outlined" sx={{ p: 1 }}>
-        <Typography variant="caption" color="text.secondary">{item.label}</Typography>
-        <Typography variant="body2"><Box component="span" sx={{ color: COLORS.now, fontWeight: 650 }}>{item.now}</Box> → <Box component="span" sx={{ color: COLORS.after, fontWeight: 700 }}>{item.after}</Box></Typography>
-      </Paper>)}
-    </Box>
+    <Paper variant="outlined" sx={{ p: 2.5 }}>
+      <Typography variant="subtitle1" fontWeight={700}>Como ler estes números e se a troca é segura</Typography>
+      <Box sx={{ display: "grid", gridTemplateColumns: { xs: "1fr", lg: "1fr 1fr" }, gap: 3, mt: 1.5 }}>
+        <Box>
+          <Typography variant="body2" sx={{ mb: 1 }}>
+            A nuvem mede o uso a cada ~10 s e entrega um resumo a cada {series.resolution_seconds / 60} min (média, máximo e percentis).
+            O motor olha a janela inteira e pergunta: <em>se a mesma demanda rodasse no tamanho recomendado, onde ela ficaria?</em>
+          </Typography>
+          <Stack spacing={0.75} component="dl" sx={{ m: 0 }}>
+            {[
+              ["P50 (mediana)", "O uso típico: metade do tempo abaixo, metade acima."],
+              ["P95", `95% do tempo abaixo deste valor. O motor exige P95 ≤ ${view.target.toFixed(0)}% no novo tamanho — sobra margem para o dia a dia.`],
+              ["P99", `Só 1% do tempo acima (≈ 7 h por mês). Exigimos P99 ≤ ${view.targetP99.toFixed(0)}% para absorver rajadas frequentes.`],
+              ["Pico", "O maior valor medido pela nuvem dentro dos intervalos. Picos curtos acima de 100% não derrubam a VM: geram fila (lentidão) naquele momento."],
+            ].map(([term, text]) => <Box key={term}>
+              <Typography component="dt" variant="body2" fontWeight={700}>{term}</Typography>
+              <Typography component="dd" variant="body2" color="text.secondary" sx={{ m: 0 }}>{text}</Typography>
+            </Box>)}
+          </Stack>
+        </Box>
+        <Box>
+          <Typography variant="body2" fontWeight={700} sx={{ mb: 0.5 }}>Checklist da decisão</Typography>
+          {checks.map((check) => <CheckRow key={check.label} check={check} />)}
+        </Box>
+      </Box>
+      <Box sx={{ display: "grid", gridTemplateColumns: { xs: "repeat(2, minmax(0,1fr))", md: "repeat(5, minmax(0,1fr))" }, gap: 1, mt: 2 }}>
+        {[
+          ["P95", pct(stats.p95Now), pct(stats.p95After)],
+          ["P99", pct(stats.p99Now), pct(stats.p99After)],
+          ["Maior pico", pct(stats.peakNow), pct(stats.peakAfter)],
+          [`Tempo acima de ${view.target.toFixed(0)}%`, duration(stats.overTargetNow, view.windowHours), duration(stats.overTargetAfter, view.windowHours)],
+          ["Tempo com pico > 100%", duration(stats.saturatedNow, view.windowHours), duration(stats.saturatedAfter, view.windowHours)],
+        ].map(([label, now, later]) => <Paper key={label} variant="outlined" sx={{ p: 1.25 }}>
+          <Typography variant="caption" color="text.secondary">{label}</Typography>
+          <Stack direction="row" spacing={1} alignItems="baseline" flexWrap="wrap">
+            <Typography variant="body2" sx={{ color: COLORS.today, fontWeight: 650 }}>hoje {now}</Typography>
+            <Typography variant="body2" sx={{ color: COLORS.after, fontWeight: 700 }}>após {later}</Typography>
+          </Stack>
+        </Paper>)}
+      </Box>
+    </Paper>
 
-    <Paper variant="outlined" sx={{ p: 1.5 }}>
-      <Typography variant="subtitle2">Consumo no tempo — hoje × recomendado</Typography>
-      <Typography variant="caption" color="text.secondary">
-        {mode === "capacity"
-          ? `Consumo convertido em ${view.unit} contra a capacidade de hoje e a recomendada. Tudo que fica abaixo da linha verde cabe no novo tamanho.`
-          : `Mesma demanda expressa em % do tamanho atual e do recomendado (× ${view.ratio.toFixed(2)}).`}
+    <Paper variant="outlined" sx={{ p: 2.5 }}>
+      <Typography variant="subtitle1" fontWeight={700}>Consumo no tempo — hoje × recomendado</Typography>
+      <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>
+        Mesma demanda nos dois painéis, em % da capacidade de cada um. Linha = P95 de cada hora; faixa clara = até o pico daquela hora.
+        Fundo verde: folga; amarelo: acima do alvo de {view.target.toFixed(0)}%; vermelho: acima da capacidade.
       </Typography>
-      <Plot data={timeChart.data as never} layout={{
-        ...commonLayout, height: 340, margin: { l: 56, r: 150, t: 12, b: 70 },
-        xaxis: { type: "date", tickformat: "%d/%m %Hh", hoverformat: "%d/%m %H:%M", showgrid: false, rangeslider: { visible: true, thickness: 0.07 } },
-        ...timeChart.layout,
+      <Plot data={[
+        { type: "scatter", mode: "lines", x: view.hourKeys, y: todayPeak, line: { width: 0 }, fill: "tozeroy", fillcolor: COLORS.band, hovertemplate: "Pico: %{y:.1f}%<extra>Hoje</extra>", xaxis: "x", yaxis: "y" },
+        { type: "scatter", mode: "lines", x: view.hourKeys, y: todayP95, line: { color: COLORS.today, width: 2 }, hovertemplate: "P95 da hora: %{y:.1f}%<extra>Hoje</extra>", xaxis: "x", yaxis: "y" },
+        { type: "scatter", mode: "lines", x: view.hourKeys, y: afterPeak, line: { width: 0 }, fill: "tozeroy", fillcolor: COLORS.bandAfter, hovertemplate: "Pico: %{y:.1f}%<extra>Após</extra>", xaxis: "x", yaxis: "y2" },
+        { type: "scatter", mode: "lines", x: view.hourKeys, y: afterP95, line: { color: COLORS.after, width: 2 }, hovertemplate: "P95 da hora: %{y:.1f}%<extra>Após</extra>", xaxis: "x", yaxis: "y2" },
+      ] as never} layout={{
+        ...commonLayout, height: 540, margin: { l: 72, r: 20, t: 36, b: 50 }, hovermode: "x unified", showlegend: false,
+        xaxis: { type: "date", tickformat: "%d/%m", showgrid: false, anchor: "y2" },
+        yaxis: { domain: [0.56, 1], range: [0, yMax], ticksuffix: "%", gridcolor: COLORS.grid, title: { text: `${view.capacityNow} ${view.unit}` } },
+        yaxis2: { domain: [0, 0.44], range: [0, yMax], ticksuffix: "%", gridcolor: COLORS.grid, title: { text: `${view.capacityAfter} ${view.unit}` } },
+        shapes: [...zoneShapes("y"), ...zoneShapes("y2")],
+        annotations: [
+          { xref: "paper", yref: "paper", x: 0, y: 1.05, xanchor: "left", showarrow: false, text: `<b>Hoje</b> · ${view.capacityNow} ${view.unit} · P95 ${pct(stats.p95Now)}`, font: { color: COLORS.today, size: 13 } },
+          { xref: "paper", yref: "paper", x: 0, y: 0.49, xanchor: "left", showarrow: false, text: `<b>Após a mudança</b> · ${view.capacityAfter} ${view.unit} · P95 ${pct(stats.p95After)}`, font: { color: COLORS.after, size: 13 } },
+        ],
       } as never} />
     </Paper>
 
-    <Box sx={{ display: "grid", gridTemplateColumns: { xs: "1fr", lg: "1fr 1fr" }, gap: 1.5 }}>
-      <Paper variant="outlined" sx={{ p: 1.5 }}>
-        <Typography variant="subtitle2">Curva de permanência</Typography>
-        <Typography variant="caption" color="text.secondary">Percentual do tempo em que a utilização ficou acima de cada nível.</Typography>
-        <Plot data={[
-          { type: "scatter", mode: "lines", name: "Hoje", x: percentOfTime, y: sortedNow, line: { color: COLORS.now, width: 2 }, hovertemplate: "%{x:.1f}% do tempo acima de %{y:.1f}%<extra>Hoje</extra>" },
-          { type: "scatter", mode: "lines", name: "Após", x: percentOfTime, y: sortedAfter, line: { color: COLORS.after, width: 2 }, hovertemplate: "%{x:.1f}% do tempo acima de %{y:.1f}%<extra>Após</extra>" },
-        ] as never} layout={{
-          ...commonLayout, height: 280, hovermode: "closest", margin: { l: 48, r: 12, t: 10, b: 60 },
-          xaxis: { title: { text: "% do tempo" }, ticksuffix: "%", range: [0, 100], gridcolor: COLORS.grid },
-          yaxis: { ticksuffix: "%", rangemode: "tozero", gridcolor: COLORS.grid },
-          shapes: [
-            { type: "line", xref: "paper", x0: 0, x1: 1, y0: view.target * 100, y1: view.target * 100, line: { color: COLORS.target, dash: "dot", width: 1 } },
-            { type: "line", xref: "paper", x0: 0, x1: 1, y0: 100, y1: 100, line: { color: COLORS.limit, dash: "dash", width: 1 } },
-            { type: "line", yref: "paper", x0: 5, x1: 5, y0: 0, y1: 1, line: { color: "#A9BCCB", dash: "dot", width: 1 } },
-          ],
-          annotations: [{ x: 5, y: 1, yref: "paper", text: "P95", showarrow: false, yanchor: "bottom", font: { size: 10, color: "#8497A8" } }],
-        }} />
-      </Paper>
-      <Paper variant="outlined" sx={{ p: 1.5 }}>
-        <Typography variant="subtitle2">Picos após a mudança por dia e hora</Typography>
-        <Typography variant="caption" color="text.secondary">Maior pico projetado em cada hora (% do tamanho recomendado). Vermelho = acima da capacidade.</Typography>
-        <Plot data={[{
-          type: "heatmap", x: HOUR_LABELS, y: view.days.map((day) => `${day.slice(8, 10)}/${day.slice(5, 7)}`), z: view.heat,
-          zmin: 0, zmax: 120, colorscale: [[0, "#eef6f4"], [0.4, "#8fd3c4"], [view.target * 100 / 120, "#149683"], [100 / 120, "#f2b45c"], [1, "#d64c4c"]],
-          hovertemplate: "%{y} %{x}: pico %{z:.0f}%<extra></extra>", colorbar: { ticksuffix: "%", thickness: 10 },
-        }] as never} layout={{
-          ...commonLayout, height: 280, hovermode: "closest", margin: { l: 48, r: 10, t: 10, b: 40 },
-          xaxis: { tickangle: 0, dtick: 3 }, yaxis: { autorange: "reversed" },
-        }} />
-      </Paper>
-    </Box>
+    <Paper variant="outlined" sx={{ p: 2.5 }}>
+      <Typography variant="subtitle1" fontWeight={700}>Curva de permanência — quanto tempo o uso fica acima de cada nível</Typography>
+      <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>
+        Leia da esquerda para a direita: na marca de 5% do tempo está o P95, na de 1% o P99. Hoje a {name} passa de {view.target.toFixed(0)}% durante {duration(stats.overTargetNow, view.windowHours)};
+        após a mudança, durante {duration(stats.overTargetAfter, view.windowHours)}, e a média dos intervalos passa de 100% durante {duration(share(view.sortedAfter, 100), view.windowHours)}.
+      </Typography>
+      <Plot data={[
+        { type: "scatter", mode: "lines", name: `Hoje — ${view.capacityNow} ${view.unit}`, x: view.sortedNow.map((_, i) => (i + 1) / view.sortedNow.length * 100), y: view.sortedNow, line: { color: COLORS.today, width: 2.5 }, hovertemplate: "%{x:.2f}% do tempo acima de %{y:.1f}%<extra>Hoje</extra>" },
+        { type: "scatter", mode: "lines", name: `Após — ${view.capacityAfter} ${view.unit}`, x: view.sortedAfter.map((_, i) => (i + 1) / view.sortedAfter.length * 100), y: view.sortedAfter, line: { color: COLORS.after, width: 2.5 }, hovertemplate: "%{x:.2f}% do tempo acima de %{y:.1f}%<extra>Após</extra>" },
+      ] as never} layout={{
+        ...commonLayout, height: 400, hovermode: "closest", margin: { l: 72, r: 20, t: 16, b: 80 },
+        xaxis: { title: { text: "% do tempo (escala logarítmica: detalha os poucos momentos de maior uso)" }, type: "log", range: [Math.log10(0.05), 2], ticksuffix: "%", gridcolor: COLORS.grid, tickvals: [0.1, 0.5, 1, 5, 10, 25, 50, 100] },
+        yaxis: { title: { text: `Uso de ${name}` }, ticksuffix: "%", rangemode: "tozero", gridcolor: COLORS.grid },
+        shapes: [
+          { type: "rect", xref: "paper", x0: 0, x1: 1, y0: 0, y1: view.target, fillcolor: ZONES.ok, line: { width: 0 }, layer: "below" },
+          { type: "rect", xref: "paper", x0: 0, x1: 1, y0: view.target, y1: 100, fillcolor: ZONES.attention, line: { width: 0 }, layer: "below" },
+          { type: "line", xref: "paper", x0: 0, x1: 1, y0: 100, y1: 100, line: { color: COLORS.limit, dash: "dash", width: 1.2 } },
+          { type: "line", yref: "paper", x0: 5, x1: 5, y0: 0, y1: 1, line: { color: COLORS.muted, dash: "dot", width: 1 } },
+          { type: "line", yref: "paper", x0: 1, x1: 1, y0: 0, y1: 1, line: { color: COLORS.muted, dash: "dot", width: 1 } },
+        ],
+        annotations: [
+          { x: Math.log10(5), y: 1, yref: "paper", text: "P95", showarrow: false, yanchor: "bottom", font: { size: 11, color: COLORS.ink } },
+          { x: Math.log10(1), y: 1, yref: "paper", text: "P99", showarrow: false, yanchor: "bottom", font: { size: 11, color: COLORS.ink } },
+          { x: Math.log10(5), y: stats.p95After ?? 0, text: `após ${pct(stats.p95After)}`, showarrow: true, arrowhead: 0, ax: 46, ay: -26, font: { color: COLORS.after } },
+          { x: Math.log10(5), y: stats.p95Now ?? 0, text: `hoje ${pct(stats.p95Now)}`, showarrow: true, arrowhead: 0, ax: 46, ay: 22, font: { color: COLORS.today } },
+        ],
+        legend: { orientation: "h", y: -0.3, x: 0 },
+      } as never} />
+    </Paper>
+
+    <Paper variant="outlined" sx={{ p: 2.5 }}>
+      <Typography variant="subtitle1" fontWeight={700}>Picos após a mudança, por dia e hora</Typography>
+      <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>
+        Cada célula é o maior pico daquela hora, já projetado no tamanho recomendado ({view.capacityAfter} {view.unit}); vermelho é acima da capacidade.
+        Veja se os picos coincidem com rotinas (backups, fechamentos, horário comercial). À direita, quantas horas de cada dia teriam pico acima de 100%.
+      </Typography>
+      <Plot data={[
+        {
+          type: "heatmap", x: HOUR_LABELS, y: dayLabels, z: view.heatAfter, zmin: 0, zmax: 130, xgap: 1, ygap: 1,
+          colorscale: [[0, "#eef6f4"], [view.target / 130, "#7cc9b8"], [100 / 130, "#f2b45c"], [101 / 130, "#e06c6c"], [1, "#a83232"]],
+          hovertemplate: "%{y} às %{x}: pico de %{z:.0f}% no novo tamanho<extra></extra>",
+          colorbar: { thickness: 12, len: 0.9, x: 0.79, tickvals: [0, view.target, 100, 130], ticktext: ["0%", `alvo ${view.target.toFixed(0)}%`, "100%", "130%+"] },
+          xaxis: "x", yaxis: "y",
+        },
+        {
+          type: "bar", orientation: "h", x: view.saturatedHoursPerDay, y: dayLabels, xaxis: "x2", yaxis: "y",
+          marker: { color: view.saturatedHoursPerDay.map((count) => (count ? COLORS.limit : "#cfd8df")) },
+          hovertemplate: "%{y}: %{x} hora(s) com pico > 100%<extra></extra>",
+          text: view.saturatedHoursPerDay.map((count) => (count ? String(count) : "")), textposition: "outside",
+        },
+      ] as never} layout={{
+        ...commonLayout, height: Math.max(380, view.days.length * 24 + 90), hovermode: "closest", margin: { l: 60, r: 24, t: 10, b: 44 },
+        xaxis: { domain: [0, 0.74], tickangle: 0, dtick: 2 },
+        xaxis2: { domain: [0.86, 1], title: { text: "horas > 100%" }, rangemode: "tozero", showgrid: false },
+        yaxis: { autorange: "reversed", type: "category" },
+        showlegend: false,
+      } as never} />
+      <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap sx={{ mt: 1 }}>
+        <Chip size="small" variant="outlined" color={view.saturatedHoursPerDay.some(Boolean) ? "warning" : "success"}
+              label={`Dias com algum pico acima de 100%: ${view.saturatedHoursPerDay.filter(Boolean).length} de ${view.days.length}`} />
+        <Chip size="small" variant="outlined" label={`Horas com pico acima de 100%: ${view.saturatedHoursPerDay.reduce((a, b) => a + b, 0)}`} />
+      </Stack>
+    </Paper>
   </Stack>;
 }

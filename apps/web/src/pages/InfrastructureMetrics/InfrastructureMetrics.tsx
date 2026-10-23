@@ -167,7 +167,7 @@ export default function InfrastructureMetrics() {
     {sources.length > 0 && !resources.length && !error && <Alert severity="info">A Silver ainda não tem dados desta fonte. Rode a Extração da fonte e o Reprocessar da tabela “Métricas de uso de computação”.</Alert>}
     {error && <Alert severity="error">{error}</Alert>}
 
-    {profile && <Box sx={{ display: "grid", gridTemplateColumns: { xs: "repeat(2, minmax(0,1fr))", md: "repeat(6, minmax(0,1fr))" }, gap: 1.5 }}>
+    {profile && <Box sx={{ display: "grid", gridTemplateColumns: { xs: "repeat(2, minmax(0,1fr))", md: "repeat(3, minmax(0,1fr))", xl: "repeat(6, minmax(0,1fr))" }, gap: 1.5 }}>
       {[
         ["P50 (mediana)", profile.p50, "Metade do tempo abaixo deste valor"],
         ["P95", profile.p95, "95% dos buckets abaixo; 5% do tempo acima"],

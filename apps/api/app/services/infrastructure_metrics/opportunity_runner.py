@@ -7,7 +7,7 @@ catalog and price books.
 """
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 import re
 from typing import Any
 
@@ -33,6 +33,15 @@ def _literal(value: str) -> str:
     return f"'{value}'"
 
 
+def _periods(start: datetime, end: datetime) -> list[str]:
+    """Billing periods (YYYYMM) touched by [start, end)."""
+    periods, month = [], start.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+    while month < end:
+        periods.append(month.strftime("%Y%m"))
+        month = (month + timedelta(days=32)).replace(day=1)
+    return periods
+
+
 def read_series(
     connection_id: int, resource_id: str, metric: str, start: datetime, end: datetime,
     resolution_seconds: int = 300,
@@ -46,9 +55,11 @@ def read_series(
         f"FROM {layers.detail_layer()}.{SILVER_TABLE} "
         f"WHERE source_connection_id = {int(connection_id)} AND resource_id = {_literal(resource_id)} "
         f"AND metric = {_literal(metric)} AND CAST(resolution_seconds AS INTEGER) = {int(resolution_seconds)} "
-        # TIMESTAMPTZ destination columns land as ISO-8601 text in Iceberg.
-        f"AND from_iso8601_timestamp(bucket_start_utc) >= TIMESTAMP '{start:%Y-%m-%d %H:%M:%S} UTC' "
-        f"AND from_iso8601_timestamp(bucket_start_utc) < TIMESTAMP '{end:%Y-%m-%d %H:%M:%S} UTC'",
+        # TIMESTAMPTZ destination columns land as ISO-8601 UTC text
+        # ("2026-10-01T00:05:00+00:00"): comparing the text keeps the order and
+        # lets Iceberg prune files; the month filter prunes partitions.
+        f"AND _billing_period IN ({', '.join(repr(period) for period in _periods(start, end))}) "
+        f"AND bucket_start_utc >= '{start:%Y-%m-%dT%H:%M:%S}' AND bucket_start_utc < '{end:%Y-%m-%dT%H:%M:%S}'",
         timeout_s=180,
     )
     by_bucket: dict[str, dict] = {}
