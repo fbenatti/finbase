@@ -278,6 +278,7 @@ export default function Connections() {
     setError("");
     setFormTestMessage(null);
     const cfg = conn.config_json as Record<string, string>;
+    const infraCfg = cfg.infrastructure_metrics as unknown as Record<string, unknown> | undefined;
     if (conn.connector_type === "azure_mca_invoice") {
       const latestPeriod = latestMcaInvoiceMonth();
       setForm({
@@ -350,10 +351,10 @@ export default function Connections() {
         oci_region: cfg.region || "sa-saopaulo-1",
         oci_private_key: cfg.private_key || cfg.key_content || "",
         oci_genai_compartments: (Array.isArray(cfg.generative_ai_compartment_ids) ? cfg.generative_ai_compartment_ids : []).join("\n"),
-        infraMetricsEnabled: (cfg.infrastructure_metrics as Record<string, unknown> | undefined)?.enabled === true,
-        infraMetricsCompartment: String((cfg.infrastructure_metrics as Record<string, unknown> | undefined)?.compartment_id || ""),
-        infraMetricsResourceIds: Array.isArray((cfg.infrastructure_metrics as Record<string, unknown> | undefined)?.resource_ids) ? ((cfg.infrastructure_metrics as Record<string, unknown>).resource_ids as string[]).join("\n") : "",
-        infraMetricsResolutions: Array.isArray((cfg.infrastructure_metrics as Record<string, unknown> | undefined)?.resolutions_seconds) ? ((cfg.infrastructure_metrics as Record<string, unknown>).resolutions_seconds as number[]) : [60, 300, 900],
+        infraMetricsEnabled: infraCfg?.enabled === true,
+        infraMetricsCompartment: String(infraCfg?.compartment_id || ""),
+        infraMetricsResourceIds: Array.isArray(infraCfg?.resource_ids) ? infraCfg.resource_ids.join("\n") : "",
+        infraMetricsResolutions: Array.isArray(infraCfg?.resolutions_seconds) ? infraCfg.resolutions_seconds as number[] : [60, 300, 900],
         blob_prefixes: prefixesToText(conn.blob_prefixes),
       });
     } else if (conn.connector_type === "mongodb_atlas") {
