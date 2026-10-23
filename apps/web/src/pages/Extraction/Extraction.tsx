@@ -14,6 +14,8 @@ import {
   processDestinationTables,
   getAvailablePeriods, AvailablePeriod,
   getSourcePreview, SourcePreview,
+  planInfrastructureMetricsCollection, collectInfrastructureMetrics, getInfrastructureMetricsTaskStatus,
+  InfrastructureMetricsPlan, InfrastructureMetricsTaskStatus,
   SourceConnection, BlobScanResult, BlobScanItem, IngestedBlob, SkippedBlob, TaskStatus,
   SCANNABLE_CONNECTOR_TYPES, formatApiError,
 } from "../../services/api";
@@ -35,6 +37,11 @@ function formatFileSize(bytes: number): string {
   let size = bytes;
   while (size >= 1024 && i < units.length - 1) { size /= 1024; i++; }
   return `${size.toFixed(i === 0 ? 0 : 1)} ${units[i]}`;
+}
+
+function toLocalDateTimeInput(value: Date): string {
+  const local = new Date(value.getTime() - value.getTimezoneOffset() * 60000);
+  return local.toISOString().slice(0, 16);
 }
 
 // Seção da barra de extração: rótulo e explicação à esquerda, ações à direita.
@@ -77,6 +84,13 @@ export default function Extraction({ embedded = false }: { embedded?: boolean })
   const [previewData, setPreviewData] = useState<SourcePreview | null>(null);
   const [previewLoading, setPreviewLoading] = useState(false);
   const [previewError, setPreviewError] = useState("");
+  const [infraStart, setInfraStart] = useState(() => toLocalDateTimeInput(new Date(Date.now() - 60 * 60 * 1000)));
+  const [infraEnd, setInfraEnd] = useState(() => toLocalDateTimeInput(new Date()));
+  const [infraResolution, setInfraResolution] = useState<60 | 300 | 900>(60);
+  const [infraPlan, setInfraPlan] = useState<InfrastructureMetricsPlan | null>(null);
+  const [infraTaskStatus, setInfraTaskStatus] = useState<InfrastructureMetricsTaskStatus | null>(null);
+  const [infraPlanning, setInfraPlanning] = useState(false);
+  const [infraCollecting, setInfraCollecting] = useState(false);
 
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
@@ -101,6 +115,15 @@ export default function Extraction({ embedded = false }: { embedded?: boolean })
     () => extractableConnections.some((c) => c.id === connId && c.connector_type === "databricks"),
     [extractableConnections, connId],
   );
+  const selectedConnection = useMemo(
+    () => extractableConnections.find((connection) => connection.id === connId) || null,
+    [extractableConnections, connId],
+  );
+  const infraConfig = (selectedConnection?.config_json?.infrastructure_metrics || {}) as Record<string, unknown>;
+  const isInfraMetricsSelected = selectedConnection?.connector_type === "oci" && infraConfig.enabled === true;
+  const enabledInfraResolutions = Array.isArray(infraConfig.resolutions_seconds)
+    ? (infraConfig.resolutions_seconds as number[]).filter((value): value is 60 | 300 | 900 => [60, 300, 900].includes(value as number))
+    : [];
   const [ptuPeriods, setPtuPeriods] = useState<AvailablePeriod[]>([]);
   const [selPtuPeriods, setSelPtuPeriods] = useState<string[]>([]);
   const [loadingPtuPeriods, setLoadingPtuPeriods] = useState(false);
@@ -267,6 +290,75 @@ export default function Extraction({ embedded = false }: { embedded?: boolean })
     };
     void fetchStatus();
     pollRef.current = setInterval(fetchStatus, 2000);
+  };
+
+  const infrastructureMetricsRequest = () => {
+    if (!connId || !infraStart || !infraEnd) throw new Error("Informe a conexão e o período da coleta.");
+    const start = new Date(infraStart);
+    const end = new Date(infraEnd);
+    if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime()) || end <= start || end.getTime() - start.getTime() > 24 * 60 * 60 * 1000) {
+      throw new Error("O período deve ser válido, crescente e ter no máximo 24 horas.");
+    }
+    return {
+      connection_id: connId as number,
+      start_utc: start.toISOString(),
+      end_utc: end.toISOString(),
+      resolution_seconds: infraResolution,
+    };
+  };
+
+  const doPlanInfrastructureMetrics = async () => {
+    setInfraPlanning(true);
+    setError("");
+    try {
+      const plan = await planInfrastructureMetricsCollection(infrastructureMetricsRequest());
+      setInfraPlan(plan);
+      setInfraTaskStatus(null);
+    } catch (e: unknown) {
+      setInfraPlan(null);
+      setError(formatApiError(e, "Não foi possível estimar a coleta de métricas"));
+    } finally {
+      setInfraPlanning(false);
+    }
+  };
+
+  const doCollectInfrastructureMetrics = async () => {
+    setInfraCollecting(true);
+    setError("");
+    try {
+      const result = await collectInfrastructureMetrics(infrastructureMetricsRequest());
+      const initial: InfrastructureMetricsTaskStatus = {
+        task_id: result.task_id, status: result.status, phase: "Na fila para coletar e publicar na Silver",
+        rows_raw: 0, rows_destination: 0, errors: [], summary: {}, started_at: null, finished_at: null,
+      };
+      setInfraPlan(result.plan);
+      setInfraTaskStatus(initial);
+      setTask({
+        id: result.task_id, status: result.status, total_blobs: 0, processed_blobs: 0,
+        rows_destination: 0, current_blob: null, task_type: "infrastructure_metrics_collection",
+        phase: initial.phase,
+      });
+      stopPolling();
+      const fetchMetricsStatus = async () => {
+        try {
+          const status = await getInfrastructureMetricsTaskStatus(result.task_id);
+          setInfraTaskStatus(status);
+          setTask((previous) => previous ? {
+            ...previous, status: status.status, phase: status.phase || "", rows_destination: status.rows_destination,
+          } : previous);
+          if (["COMPLETED", "COMPLETED_WITH_ERRORS", "FAILED", "CANCELLED"].includes(status.status)) stopPolling();
+        } catch (e: unknown) {
+          setError(formatApiError(e, "Não foi possível consultar o status da coleta de métricas"));
+          stopPolling();
+        }
+      };
+      void fetchMetricsStatus();
+      pollRef.current = setInterval(fetchMetricsStatus, 2000);
+    } catch (e: unknown) {
+      setError(formatApiError(e, "Não foi possível iniciar a coleta de métricas"));
+    } finally {
+      setInfraCollecting(false);
+    }
   };
 
   const toggleSelect = (path: string) => {
@@ -444,7 +536,7 @@ export default function Extraction({ embedded = false }: { embedded?: boolean })
             <Stack direction={{ xs: "column", md: "row" }} spacing={2} alignItems={{ md: "center" }} justifyContent="space-between">
               <FormControl size="small" sx={{ minWidth: 280 }}>
                 <InputLabel>Conexão</InputLabel>
-                <Select value={connId} label="Conexão de origem" onChange={(e) => { setConnId(e.target.value as number); setScanResult(null); setTask(null); }}>
+                <Select value={connId} label="Conexão de origem" onChange={(e) => { setConnId(e.target.value as number); setScanResult(null); setTask(null); setInfraPlan(null); setInfraTaskStatus(null); }}>
                   {extractableConnections.map((c) => (
                     <MenuItem key={c.id} value={c.id}>{c.name} ({c.code})</MenuItem>
                   ))}
@@ -464,6 +556,42 @@ export default function Extraction({ embedded = false }: { embedded?: boolean })
             </Stack>
             {connections.length > 0 && extractableConnections.length === 0 && (
               <Alert severity="warning" sx={{ mt: 2 }}>Nenhuma conexão disponível para coleta.</Alert>
+            )}
+
+            {selectedConnection?.connector_type === "oci" && (
+              <ToolbarSection
+                title="Métricas de infraestrutura"
+                description="Consulta a OCI e publica os buckets coletados na base preparada (Silver)."
+              >
+                {!isInfraMetricsSelected ? (
+                  <Alert severity="info" sx={{ width: "100%" }}>
+                    Habilite <strong>Coletar recursos de infraestrutura</strong> ao editar esta conexão OCI. Informe o compartimento e até duas instâncias permitidas; a tela da conexão mostra a policy mínima e os detalhes da coleta.
+                  </Alert>
+                ) : (
+                  <>
+                    <TextField size="small" type="datetime-local" label="Início" value={infraStart} onChange={(event) => { setInfraStart(event.target.value); setInfraPlan(null); }} InputLabelProps={{ shrink: true }} sx={{ minWidth: 220 }} />
+                    <TextField size="small" type="datetime-local" label="Fim" value={infraEnd} onChange={(event) => { setInfraEnd(event.target.value); setInfraPlan(null); }} InputLabelProps={{ shrink: true }} sx={{ minWidth: 220 }} />
+                    <FormControl size="small" sx={{ minWidth: 145 }}>
+                      <InputLabel>Resolução</InputLabel>
+                      <Select label="Resolução" value={infraResolution} onChange={(event) => { setInfraResolution(Number(event.target.value) as 60 | 300 | 900); setInfraPlan(null); }}>
+                        {[60, 300, 900].filter((value) => enabledInfraResolutions.includes(value as 60 | 300 | 900)).map((seconds) => <MenuItem key={seconds} value={seconds}>{seconds / 60} minuto(s)</MenuItem>)}
+                      </Select>
+                    </FormControl>
+                    <Button variant="outlined" startIcon={infraPlanning ? <CircularProgress size={18} /> : <Refresh />} onClick={() => void doPlanInfrastructureMetrics()} disabled={infraPlanning || infraCollecting || isActive}>
+                      {infraPlanning ? "Estimando..." : "Estimar consultas"}
+                    </Button>
+                    <Button variant="contained" startIcon={infraCollecting ? <CircularProgress size={18} /> : <PlayArrow />} onClick={() => void doCollectInfrastructureMetrics()} disabled={!infraPlan || infraPlanning || infraCollecting || isActive}>
+                      {infraCollecting ? "Enfileirando..." : "Coletar e gravar na Silver"}
+                    </Button>
+                    {infraPlan && <Alert severity="info" sx={{ width: "100%" }}>
+                      Plano: {infraPlan.resource_count} recurso(s), {infraPlan.metric_names.length} métricas, {infraPlan.statistics.join(", ")} por bucket de {infraPlan.resolution_seconds / 60} minuto(s), até {infraPlan.estimated_api_calls} chamadas OCI. Janela em UTC; retenção planejada: {infraPlan.retention_days} dias.
+                    </Alert>}
+                    {infraTaskStatus && <Alert severity={infraTaskStatus.status === "FAILED" ? "error" : infraTaskStatus.status === "COMPLETED_WITH_ERRORS" ? "warning" : ["COMPLETED", "CANCELLED"].includes(infraTaskStatus.status) ? "success" : "info"} sx={{ width: "100%" }}>
+                      Tarefa #{infraTaskStatus.task_id}: {infraTaskStatus.status} — {infraTaskStatus.phase || ""}. Consultas concluídas: {infraTaskStatus.summary.completed_query_count ?? infraTaskStatus.rows_raw}; falhas: {infraTaskStatus.summary.failed_query_count ?? infraTaskStatus.errors.length}; linhas publicadas na Silver: {infraTaskStatus.rows_destination}.
+                    </Alert>}
+                  </>
+                )}
+              </ToolbarSection>
             )}
 
         {isManualCsvSelected ? (
