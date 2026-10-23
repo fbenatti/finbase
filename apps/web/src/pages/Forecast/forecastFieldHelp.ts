@@ -43,9 +43,9 @@ export const FORECAST_RULE_FIELD_HELP = {
     "Filtro adicional por dimensão (formato dim=valor, separado por vírgula).\n\nEx.: cloud_origem=ibm-ti restringe a regra a essa origem.",
   chargeEndColumn: "Coluna com o fim do período de cobrança usada na alocação (ex.: ChargePeriodEnd). Obrigatória para comportamento de alocação.",
   valueColumn: "Coluna numérica usada como base do valor da regra (geralmente a mesma medida do forecast).",
-  replacementValue: "Valor fixado que substitui a previsão quando o comportamento é Substituir por valor fixado.",
+  replacementValue: "Valor fixado que substitui o Forecast quando o comportamento é Substituir por valor fixado.",
   startPeriod: "Primeiro mês (AAAA-MM) em que a regra passa a valer.",
   endPeriod: "Último mês (AAAA-MM) da regra. Vazio = sem data de término.",
   priority: "Ordem de aplicação quando várias regras coincidem. Menor número = maior prioridade.",
-  active: "Regras inativas são ignoradas na execução da previsão.",
+  active: "Regras inativas são ignoradas na execução do Forecast.",
 } as const;

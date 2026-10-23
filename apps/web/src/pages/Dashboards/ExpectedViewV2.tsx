@@ -317,7 +317,7 @@ export default function ExpectedViewV2({
   // otherwise the current month shows only the partial spend and the
   // remaining projection disappears from the chart, cards and cumulative.
   // O mês aberto segue o cutoff D-2 do forecast, não o calendário local.
-  // No início de outubro, setembro ainda pode carregar previsão dos dias restantes.
+  // No início de outubro, setembro ainda pode carregar Forecast dos dias restantes.
   // Keep only the latest overlap as the D-2 anchor. Older periods can retain
   // forecast rows from previous runs and must not be stacked again.
   const forecastAnchorPeriod = filteredRows.reduce<string | null>(
@@ -438,7 +438,7 @@ export default function ExpectedViewV2({
         )
       : 0,
   );
-  // Previsão manual is its own stacked layer on top of the Gold forecast.
+  // Forecast manual is its own stacked layer on top of the Gold forecast.
   const forecastManualBars = filteredRows.map((row) =>
     row.actual_value == null || isForecastAnchor(row)
       ? Math.max(0, forecastManualOf(row))
@@ -527,7 +527,7 @@ export default function ExpectedViewV2({
                 y: forecastBaseFilled,
                 type: "scatter",
                 mode: "lines",
-                name: "Previsão base",
+                name: "Forecast base",
                 showlegend: false,
                 hoverinfo: "skip",
                 fill: "tozeroy",
@@ -565,7 +565,7 @@ export default function ExpectedViewV2({
           y: forecastManualFilled,
           type: "scatter",
           mode: "lines+markers",
-          name: "Previsão manual",
+          name: "Forecast manual",
           fill: "tonexty",
           fillcolor: "rgba(134,239,172,.30)",
           line: { color: "#4ADE80", width: 2 },
@@ -603,7 +603,7 @@ export default function ExpectedViewV2({
           x: labels,
           y: forecastManualBars,
           type: "bar",
-          name: "Previsão manual",
+          name: "Forecast manual",
           marker: { color: "#86EFAC" },
         },
         ...(sharedOn
@@ -1067,7 +1067,7 @@ export default function ExpectedViewV2({
         sx={{ mb: 1.5, "& .MuiBreadcrumbs-separator": { mx: 0.5 } }}
       >
         <Typography color="text.secondary">Visão prevista</Typography>
-        <Typography color="text.secondary">Variação da previsão</Typography>
+        <Typography color="text.secondary">Variação da Forecast</Typography>
         {pathParts.map((name, index) => {
           const path = pathParts.slice(0, index + 1).join(" > ");
           const last = index === pathParts.length - 1;
@@ -1167,7 +1167,7 @@ export default function ExpectedViewV2({
       <Alert severity="info" sx={{ mb: 2 }}>
         Forecast = efetivado dos meses fechados + no mês corrente, realizado
         parcial com o forecast do restante empilhado + forecast dos meses
-        futuros. Previsão manual compõe o total projetado. Variação = orçamento
+        futuros. Forecast manual compõe o total projetado. Variação = orçamento
         menos o total projetado consolidado. Com o interruptor ligado,
         o custo compartilhado aparece empilhado em laranja sobre o consumo real
         — não mistura as duas barras. O card Efetivado soma os dois.
@@ -1190,7 +1190,7 @@ export default function ExpectedViewV2({
           <CircularProgress />
           <Typography color="text.secondary">
 
-            Consultando custos realizados e previsões…
+            Consultando custos realizados e forecasts…
           </Typography>
         </Stack>
       ) : (
@@ -1199,14 +1199,14 @@ export default function ExpectedViewV2({
           <Stack direction="row" gap={2} flexWrap="wrap" mb={2}>
             {card("Efetivado", actual, "#F2A900", () => { setDrillTipo("realizado"); setDrillLabelsManualForecast(false); setDrillPeriod(undefined); setDrillOpen(true); })}
             {card("Forecast", forecastOnly, "#64748B", () => { setDrillTipo("forecast"); setDrillLabelsManualForecast(false); setDrillPeriod(undefined); setDrillOpen(true); }, `Efetivado / orçamento: ${realizedBudgetPct} · horizonte até ${filteredRows[filteredRows.length - 1] ? monthLong(filteredRows[filteredRows.length - 1].period) : "—"}`)}
-            {card("Previsão manual", budgetAvailable ? forecastManual : "Sem previsão manual para este filtro", colors.info, undefined, "Metas manuais consolidadas")}
+            {card("Forecast manual", budgetAvailable ? forecastManual : "Sem Forecast manual para este filtro", colors.info, undefined, "Metas manuais consolidadas")}
             {card("Orçamento", budgetAvailable ? budget : "Sem meta para este filtro", colors.textSecondary)}
             {card(
               "Total estimado",
               forecast,
               "#16A34A",
               () => { setDrillTipo("ambos"); setDrillLabelsManualForecast(true); setDrillPeriod(undefined); setDrillOpen(true); },
-              "Efetivado + Previsão + Previsão manual",
+              "Efetivado + Forecast + Forecast manual",
             )}
             {card("Variação", budgetAvailable ? variance : "Sem referência", variance >= 0 ? "#16A34A" : "#EF4444")}
           </Stack>
@@ -1292,8 +1292,8 @@ export default function ExpectedViewV2({
             <Grid item xs={12} md={6}>
               <Paper variant="outlined" sx={{ p: 2, height: "100%", borderRadius: "18px", borderColor: colors.border, boxShadow: "0 8px 24px rgba(24, 39, 75, 0.045)" }}>
                 <Typography variant="overline" color="primary" fontWeight={800} sx={{ letterSpacing: ".08em" }}>TENDÊNCIA</Typography>
-                <Typography variant="h6" fontWeight={750} sx={{ color: colors.text }}>Tendência mensal · previsão × efetivado</Typography>
-                <Typography variant="caption" color="text.secondary">Consumo efetivado e previsão por competência; a série começa no primeiro valor disponível, sem preencher meses iniciais com zero.</Typography>
+                <Typography variant="h6" fontWeight={750} sx={{ color: colors.text }}>Tendência mensal · Forecast × efetivado</Typography>
+                <Typography variant="caption" color="text.secondary">Consumo efetivado e Forecast por competência; a série começa no primeiro valor disponível, sem preencher meses iniciais com zero.</Typography>
                 <Plot useResizeHandler style={{ width: "100%", height: 320 }} data={[
                   { x: trendActual.map((point) => point.period), y: trendActual.map((point) => point.value), type: "scatter", mode: "lines+markers", name: "Efetivado", line: { color: colors.brandDark, width: 3 }, marker: { color: colors.brandDark, size: 7 } },
                   { x: trendForecast.map((point) => point.period), y: trendForecast.map((point) => point.value), type: "scatter", mode: "lines+markers", name: "Forecast", line: { color: colors.brandLight, width: 3, dash: "dash" }, marker: { color: colors.brandLight, size: 7 } },
@@ -1360,7 +1360,7 @@ export default function ExpectedViewV2({
         <Box sx={{ mb: 2 }}>
           <Typography variant="h4">Visão para diretoria</Typography>
           <Typography color="text.secondary" sx={{ mt: 0.5 }}>
-            Efetivado × previsão × meta por unidade, com alocação de
+            Efetivado × Forecast × meta por unidade, com alocação de
             custo compartilhado.
           </Typography>
         </Box>

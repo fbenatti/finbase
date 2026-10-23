@@ -271,7 +271,7 @@ export default function FinancialContractsDashboard() {
   return <Box ref={exportRootRef} sx={{ p: { xs: 2, md: 4 }, bgcolor: colors.canvas, minHeight: "calc(100vh - 64px)" }}>
     <Stack direction={{ xs: "column", md: "row" }} justifyContent="space-between" alignItems={{ md: "center" }} spacing={2} sx={{ mb: 3 }}>
       <Box>
-        <Typography variant="overline" color="text.secondary" fontWeight={700}>Meta e previsão · Uso de compromissos</Typography>
+        <Typography variant="overline" color="text.secondary" fontWeight={700}>Meta e Forecast · Uso de compromissos</Typography>
         <Typography variant="h4" fontWeight={800} color={colors.text}>Uso de compromissos</Typography>
         <Typography color="text.secondary" sx={{ mt: 0.5 }}>Quanto do valor contratado já foi consumido, quanto resta e para onde o consumo caminha até o fim da vigência.</Typography>
         {summary && <Chip size="small" label={`Período ${windowLabel}`} sx={{ mt: 1.5, fontWeight: 700, bgcolor: colors.brandTint, color: colors.brandDark }} />}

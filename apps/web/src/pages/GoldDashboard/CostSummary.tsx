@@ -371,7 +371,7 @@ export default function CostSummary({ table, director, departmentId, path, inclu
       }] : [];
       return [
         { type: "bar", name: "Realizado diário", x, y: daily.actual, marker: { color: "rgba(15, 98, 254, 0.55)" } },
-        { type: "bar", name: "Previsão diária", x, y: daily.forecast, marker: { color: chartSemantic.forecast, opacity: 0.45 } },
+        { type: "bar", name: "Forecast diária", x, y: daily.forecast, marker: { color: chartSemantic.forecast, opacity: 0.45 } },
         { type: "scatter", mode: "lines", name: "Média móvel 7 dias", x, y: daily.movingAverage, line: { color: colors.text, width: 2 } },
         ...markers,
       ];
@@ -390,7 +390,7 @@ export default function CostSummary({ table, director, departmentId, path, inclu
       }] : [];
       return [
         { type: "scatter", mode: "lines", name: "Custo efetivado", x, y: cumulative.map((row) => row.actual), line: { color: chartSemantic.actual, width: 3, shape: "spline", smoothing: 0.4 }, fill: "tozeroy", fillcolor: "rgba(15, 98, 254, 0.16)" },
-        { type: "scatter", mode: "lines", name: "Previsão", x, y: cumulative.map((row) => row.forecast), line: { color: chartSemantic.forecast, width: 2.25, dash: "dot" } },
+        { type: "scatter", mode: "lines", name: "Forecast", x, y: cumulative.map((row) => row.forecast), line: { color: chartSemantic.forecast, width: 2.25, dash: "dot" } },
         { type: "scatter", mode: "lines", name: "Orçamento", x, y: cumulative.map((row) => row.budget), line: { color: chartSemantic.budget, width: 2, dash: "dash" } },
         ...markers,
       ];
@@ -424,7 +424,7 @@ export default function CostSummary({ table, director, departmentId, path, inclu
         marker: { color: "#CBD5E1" },
       });
     }
-    traces.push({ type: "bar", name: "Previsão", x: labels, y: series.map((row) => row.forecast), marker: { color: chartSemantic.forecast, opacity: 0.45 } });
+    traces.push({ type: "bar", name: "Forecast", x: labels, y: series.map((row) => row.forecast), marker: { color: chartSemantic.forecast, opacity: 0.45 } });
     traces.push({ type: "scatter", mode: "lines+markers", name: "Orçamento", x: labels, y: series.map((row) => row.budget), line: { color: chartSemantic.budget, width: 2, dash: "dash" }, marker: { size: 5 } });
     return [...traces, ...markers];
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -445,7 +445,7 @@ export default function CostSummary({ table, director, departmentId, path, inclu
     return [
       {
         type: "bar",
-        name: "Real − previsão",
+        name: "Real − Forecast",
         x,
         y: forecastDeviation.months.map((m) => m.delta),
         marker: { color: forecastDeviation.months.map((m) => (m.delta > 0 ? SIGN_UP : SIGN_DOWN)) },
@@ -564,16 +564,16 @@ export default function CostSummary({ table, director, departmentId, path, inclu
           full={brlFull(totals.actual)}
           accent={chartSemantic.actual}
           ratio={totals.forecast ? totals.actual / totals.forecast : 0}
-          sub={`${shareOf(totals.actual, totals.forecast)} da previsão do período`}
+          sub={`${shareOf(totals.actual, totals.forecast)} da Forecast do período`}
         />
         <Kpi
-          label="Previsão"
+          label="Forecast"
           value={totals.forecast}
-          onClick={() => openFocus(series.map((row) => row.key), `Previsão · ${periodText}`)}
+          onClick={() => openFocus(series.map((row) => row.key), `Forecast · ${periodText}`)}
           full={brlFull(totals.forecast)}
           accent={chartSemantic.forecast}
           ratio={totals.budget ? totals.forecast / totals.budget : 0}
-          delta={{ value: forecastDeviation.delta, pct: forecastDeviation.pct, base: "Desvio real vs previsão (meses fechados)" }}
+          delta={{ value: forecastDeviation.delta, pct: forecastDeviation.pct, base: "Desvio real vs Forecast (meses fechados)" }}
         />
         <Kpi
           label="Meta orçamentária"
@@ -590,7 +590,7 @@ export default function CostSummary({ table, director, departmentId, path, inclu
           <Box>
             <Typography variant="subtitle1" fontWeight={800} color={colors.text}>{chartType === "daily" ? CHART_LABELS.daily : chartType === "area" ? "Custo acumulado" : "Custo mensal"}</Typography>
             <Typography variant="caption" color="text.secondary">
-              {chartType === "daily" ? "Realizado por dia, média móvel de 7 dias e anomalias. Clique em um dia para ver onde está o custo do mês." : "Efetivado, previsão, orçamento e anomalias. Clique em um mês ou em um valor para ver onde está o custo."}
+              {chartType === "daily" ? "Realizado por dia, média móvel de 7 dias e anomalias. Clique em um dia para ver onde está o custo do mês." : "Efetivado, Forecast, orçamento e anomalias. Clique em um mês ou em um valor para ver onde está o custo."}
             </Typography>
           </Box>
           <Stack direction="row" gap={1} flexWrap="wrap">

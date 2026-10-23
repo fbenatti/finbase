@@ -24,6 +24,6 @@ export const FIELD_LABELS: Record<string, Record<string, string>> = {
     blob_prefixes: "Prefixos de arquivo",
     active: "Ativo",
   },
-  forecast: { growth_rate: "Crescimento mensal", horizon_months: "Horizonte de previsão (meses)", cutoff_days: "Janela de corte (dias)" },
+  forecast: { growth_rate: "Crescimento mensal", horizon_months: "Horizonte do Forecast (meses)", cutoff_days: "Janela de corte (dias)" },
   planning: { name: "Nome", parent_id: "Unidade pai" },
 };

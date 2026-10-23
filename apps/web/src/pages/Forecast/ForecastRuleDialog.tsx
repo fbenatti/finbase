@@ -32,7 +32,7 @@ const BEHAVIOR_HINTS: Record<string, string> = {
   SOURCE_MEAN_30D_PREFIX: "Separa o prefixo e projeta pela média diária dos últimos 30 dias.",
   SOURCE_MAX_PREVIOUS_MONTH_PREFIX: "Projeta o mês corrente com o maior entre o ritmo atual e a média do mês fechado anterior.",
   SOURCE_GITHUB_COPILOT_OVERAGE_2_PHASE: "Antes da primeira cobrança do mês, usa a média dos dias cobrados (30 dias). Depois, usa a maior média.",
-  SOURCE_VALIDITY: "Suspende a previsão do escopo quando o último efetivado estiver além da validade.",
+  SOURCE_VALIDITY: "Suspende o Forecast do escopo quando o último efetivado estiver além da validade.",
 };
 
 const isChargeIntervalRule = (behavior: string) => behavior === "CHARGE_INTERVAL";
@@ -220,7 +220,7 @@ export default function ForecastRuleDialog({ open, initial, config, meta, onClos
     <Dialog open={open} onClose={onClose} maxWidth="lg" fullWidth>
       <DialogTitle>
         <Stack direction="row" alignItems="center" spacing={1.5}>
-          <span>{initial ? "Alterar regra de negócio" : "Nova regra de previsão"}</span>
+          <span>{initial ? "Alterar regra de negócio do Forecast" : "Nova regra de negócio do Forecast"}</span>
           <Chip size="small" variant="outlined" label={rule.active !== false ? "Ativa" : "Inativa"} />
         </Stack>
         <Typography variant="body2" color="text.secondary">Perfil: {config.name}</Typography>
@@ -364,7 +364,7 @@ export default function ForecastRuleDialog({ open, initial, config, meta, onClos
               />
             </Step>
 
-            <Step n={3} title="Valor da regra" hint="De onde vem o número e como ele entra na previsão.">
+            <Step n={3} title="Valor da regra" hint="De onde vem o número e como ele entra no Forecast.">
               <Stack direction={{ xs: "column", sm: "row" }} gap={1.5}>
                 <FormControl fullWidth>
                   <InputLabel>Tipo de cobrança</InputLabel>

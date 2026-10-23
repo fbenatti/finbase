@@ -327,7 +327,7 @@ export default function ExpectedView({
   // otherwise the current month shows only the partial spend and the
   // remaining projection disappears from the chart, cards and cumulative.
   // O mês aberto segue o cutoff D-2 do forecast, não o calendário local.
-  // No início de outubro, setembro ainda pode carregar previsão dos dias restantes.
+  // No início de outubro, setembro ainda pode carregar Forecast dos dias restantes.
   // Keep only the latest overlap as the D-2 anchor. Older periods can retain
   // forecast rows from previous runs and must not be stacked again.
   const forecastAnchorPeriod = filteredRows.reduce<string | null>(
@@ -447,7 +447,7 @@ export default function ExpectedView({
         )
       : 0,
   );
-  // Previsão manual is its own stacked layer on top of the Gold forecast.
+  // Forecast manual is its own stacked layer on top of the Gold forecast.
   const forecastManualBars = filteredRows.map((row) =>
     row.actual_value == null || isForecastAnchor(row)
       ? Math.max(0, forecastManualOf(row))
@@ -536,7 +536,7 @@ export default function ExpectedView({
                 y: forecastBaseFilled,
                 type: "scatter",
                 mode: "lines",
-                name: "Previsão base",
+                name: "Forecast base",
                 showlegend: false,
                 hoverinfo: "skip",
                 fill: "tozeroy",
@@ -574,7 +574,7 @@ export default function ExpectedView({
           y: forecastManualFilled,
           type: "scatter",
           mode: "lines+markers",
-          name: "Previsão manual",
+          name: "Forecast manual",
           fill: "tonexty",
           fillcolor: "rgba(134,239,172,.30)",
           line: { color: "#4ADE80", width: 2 },
@@ -612,7 +612,7 @@ export default function ExpectedView({
           x: labels,
           y: forecastManualBars,
           type: "bar",
-          name: "Previsão manual",
+          name: "Forecast manual",
           marker: { color: "#86EFAC" },
         },
         ...(sharedOn
@@ -733,7 +733,7 @@ export default function ExpectedView({
       marker: { color: ["#F2A900", colors.brandDark, colors.info, "#0f9f83", "#ec8b13", "#d9468d"][index] },
     };
   }) : [];
-  const chartDataForRender = chartGranularity === "daily" ? dailyChartData : groupBy ? [...groupedActualTraces, ...chartData.filter((trace) => ["Forecast", "Previsão manual", "Orçamento", "Custo rateado"].includes(trace.name)).map((trace) => ({ ...trace, x: groupedLabels }))] : chartData;
+  const chartDataForRender = chartGranularity === "daily" ? dailyChartData : groupBy ? [...groupedActualTraces, ...chartData.filter((trace) => ["Forecast", "Forecast manual", "Orçamento", "Custo rateado"].includes(trace.name)).map((trace) => ({ ...trace, x: groupedLabels }))] : chartData;
   const [groupQueryLoading, setGroupQueryLoading] = useState(false);
   useEffect(() => {
     if (!embedded || !table || chartGranularity === "daily" || !groupBy) {
@@ -1116,8 +1116,8 @@ export default function ExpectedView({
     return [
       toRow("realizado", "Efetivado", realized),
       toRow("forecast", "Forecast", forecast),
-      toRow("forecast_manual", "Previsão manual", forecastManual),
-      toRow("projetado", "Total estimado (Efetivado + Previsão + Previsão manual)", projected),
+      toRow("forecast_manual", "Forecast manual", forecastManual),
+      toRow("projetado", "Total estimado (Efetivado + Forecast + Forecast manual)", projected),
       ...(showBudget ? [toRow("orcamento", "Orçamento", budget)] : []),
       ...(showBudget
         ? [toRow("delta", "Delta vs Orçamento (Projetado − Orçamento)", delta)]
@@ -1222,7 +1222,7 @@ export default function ExpectedView({
         sx={{ mb: 1.5, "& .MuiBreadcrumbs-separator": { mx: 0.5 } }}
       >
         <Typography color="text.secondary">Visão prevista</Typography>
-        <Typography color="text.secondary">Variação da previsão</Typography>
+        <Typography color="text.secondary">Variação da Forecast</Typography>
         {pathParts.map((name, index) => {
           const path = pathParts.slice(0, index + 1).join(" > ");
           const last = index === pathParts.length - 1;
@@ -1322,7 +1322,7 @@ export default function ExpectedView({
       <Alert severity="info" sx={{ mb: 2 }}>
         Forecast = efetivado dos meses fechados + no mês corrente, realizado
         parcial com o forecast do restante empilhado + forecast dos meses
-        futuros. Previsão manual compõe o total projetado. Variação = orçamento
+        futuros. Forecast manual compõe o total projetado. Variação = orçamento
         menos o total projetado consolidado. Com o interruptor ligado,
         o custo compartilhado aparece empilhado em laranja sobre o consumo real
         — não mistura as duas barras. O card Efetivado soma os dois.
@@ -1345,15 +1345,15 @@ export default function ExpectedView({
           <CircularProgress />
           <Typography color="text.secondary">
 
-            Consultando custos realizados e previsões…
+            Consultando custos realizados e forecasts…
           </Typography>
         </Stack>
       ) : (
         <>
           <Stack direction="row" gap={2} flexWrap="wrap" mb={2}>
             {card("Efetivado", actual, "#F2A900", () => openConsumptionDetails("realizado"))}
-            {card("Forecast", forecastOnly, "#64748B", () => openConsumptionDetails("forecast"), "Previsão adicional ao realizado")}
-            {card("Previsão manual", forecastManual, colors.info, undefined, "Metas manuais consolidadas")}
+            {card("Forecast", forecastOnly, "#64748B", () => openConsumptionDetails("forecast"), "Forecast adicional ao realizado")}
+            {card("Forecast manual", forecastManual, colors.info, undefined, "Metas manuais consolidadas")}
             {card(
               "Total estimado",
               forecast,
@@ -1497,7 +1497,7 @@ export default function ExpectedView({
                   {pathParts.join(" > ") || "Consumo Cloud"}
                 </Typography>
                 <Typography variant="caption" display="block" color="text.secondary">
-                  Total estimado = Efetivado + Previsão + Previsão manual · Delta vs Orçamento = Total estimado − Orçamento (positivo indica valor acima do orçamento)
+                  Total estimado = Efetivado + Forecast + Forecast manual · Delta vs Orçamento = Total estimado − Orçamento (positivo indica valor acima do orçamento)
                 </Typography>
               </Box>
               <Stack direction="row" gap={1} alignItems="center">
@@ -1641,7 +1641,7 @@ export default function ExpectedView({
         <Box sx={{ mb: 2 }}>
           <Typography variant="h4">Visão para diretoria</Typography>
           <Typography color="text.secondary" sx={{ mt: 0.5 }}>
-            Efetivado × previsão × meta por unidade, com alocação de
+            Efetivado × Forecast × meta por unidade, com alocação de
             custo compartilhado.
           </Typography>
         </Box>

@@ -40,9 +40,10 @@ type GridQuery = {
 export default function Forecast() {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
-  // Precisão is the primary Forecast view; an explicit URL tab still wins.
+  // When opened at the Forecast section, show configuration first so profiles
+  // and business rules are discoverable; the accuracy pages have direct links.
   const requestedTab = searchParams.get("tab");
-  const tab = ["accuracy", "config", "rules", "history"].includes(requestedTab || "") ? requestedTab! : "accuracy";
+  const tab = ["accuracy", "config", "rules", "history"].includes(requestedTab || "") ? requestedTab! : "config";
   const [tables, setTables] = useState<DestinationTable[]>([]);
   const [configs, setConfigs] = useState<ForecastConfig[]>([]);
   const [error, setError] = useState("");
@@ -104,7 +105,7 @@ export default function Forecast() {
       setConfigsGridRows(data.items);
       setConfigsGridTotal(data.total);
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Não foi possível carregar os perfis de previsão");
+      setError(e instanceof Error ? e.message : "Não foi possível carregar os perfis de Forecast");
     } finally {
       setConfigsGridLoading(false);
     }
@@ -199,7 +200,7 @@ export default function Forecast() {
       setGridRows(data.items);
       setGridTotal(data.total);
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Não foi possível carregar as execuções de previsão");
+      setError(e instanceof Error ? e.message : "Não foi possível carregar as execuções de Forecast");
     } finally {
       setGridLoading(false);
     }
@@ -231,7 +232,7 @@ export default function Forecast() {
       const result = await createForecastRun(config.id);
       setMessage("Execução " + result.run_id + " entrou na fila para " + config.name);
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Não foi possível enfileirar a previsão");
+      setError(e instanceof Error ? e.message : "Não foi possível enfileirar o Forecast");
     } finally {
       setRunningConfigId(null);
     }
@@ -287,9 +288,9 @@ export default function Forecast() {
       {/* Faixa de contexto branca */}
       <Box sx={{ mb: 3 }}>
         <Box sx={{ mb: 2 }}>
-          <Typography variant="h4" component="h1">{tab === "rules" ? "Regras de previsão" : tab === "history" ? "Histórico de previsões" : tab === "accuracy" ? "Precisão das previsões" : "Executar previsões"}</Typography>
+          <Typography variant="h4" component="h1">{tab === "rules" ? "Regras de negócio do Forecast" : tab === "history" ? "Histórico do Forecast" : tab === "accuracy" ? "Precisão do Forecast" : "Perfis de Forecast"}</Typography>
           <Typography color="text.secondary" sx={{ mt: 0.5 }}>
-            Previsões de custo sobre as bases consolidadas, com regras de negócio e alocação por intervalo.
+            Forecast de custos sobre as bases consolidadas, com regras de negócio e alocação por intervalo.
           </Typography>
         </Box>
       </Box>
@@ -315,9 +316,9 @@ export default function Forecast() {
           <Paper elevation={0} sx={{ p: { xs: 1.5, md: 2 }, borderRadius: 2, bgcolor: "background.paper", border: "1px solid", borderColor: "divider" }}>
             <Stack direction={{ xs: "column", md: "row" }} justifyContent="space-between" alignItems={{ md: "flex-start" }} sx={{ mb: 2, gap: 2 }}>
               <Box>
-                <Typography variant="h6">Perfis de previsão</Typography>
+                <Typography variant="h6">Perfis de Forecast</Typography>
                 <Typography variant="body2" color="text.secondary">
-                  Cada perfil define como uma base consolidada é projetada. Rode um perfil quando quiser atualizar a previsão.
+                  Cada perfil define como uma base consolidada é projetada. Rode um perfil quando quiser atualizar o Forecast.
                 </Typography>
               </Box>
               <Stack direction="row" spacing={1} flexShrink={0}>
@@ -333,7 +334,7 @@ export default function Forecast() {
               {[
                 { label: "Perfis criados", value: configsGridTotal },
                 { label: "Em execução", value: runningConfigId !== null ? 1 : 0 },
-                { label: "Bases sem perfil de previsão", value: Math.max(0, tables.length - configs.length) },
+                { label: "Bases sem perfil de Forecast", value: Math.max(0, tables.length - configs.length) },
               ].map((kpi) => (
                 <Paper key={kpi.label} variant="outlined" sx={{ p: 1.5, borderRadius: 2, bgcolor: "#FAFBFD" }}>
                   <Typography variant="caption" color="text.secondary">{kpi.label}</Typography>
@@ -389,14 +390,14 @@ export default function Forecast() {
               <Box>
                 <Typography variant="h6">Ajustes do perfil</Typography>
                 <Typography variant="body2" color="text.secondary">
-                  Cada regra corrige a previsão depois do cálculo matemático: exclui parcelas, troca valores ou suspende o escopo.
+                  Cada regra de negócio ajusta o Forecast depois do cálculo matemático: exclui parcelas, troca valores ou suspende o escopo.
                 </Typography>
               </Box>
               <Stack direction={{ xs: "column", sm: "row" }} spacing={1} alignItems={{ sm: "center" }} flexShrink={0}>
                 <FormControl sx={{ minWidth: 260 }}>
-                  <InputLabel>Perfil de previsão ativo</InputLabel>
+                  <InputLabel>Perfil de Forecast</InputLabel>
                   <Select
-                    label="Perfil de previsão"
+                    label="Perfil de Forecast"
                     value={rulesConfigId}
                     onChange={(e) => void selectRulesConfig(Number(e.target.value))}
                   >
@@ -429,7 +430,7 @@ export default function Forecast() {
               ))}
             </Box>
             {configs.length === 0 ? (
-              <Alert severity="info">Nenhum perfil de previsão. Crie um em Perfis e execução.</Alert>
+              <Alert severity="info">Nenhum perfil de Forecast. Crie um em Perfis de Forecast.</Alert>
             ) : !rulesConfigId ? (
               <Alert severity="info">Escolha um perfil para ver as regras.</Alert>
             ) : (
@@ -506,7 +507,7 @@ export default function Forecast() {
             {!gridLoading && gridRows.length === 0 ? (
               <Box sx={{ py: 7 }}>
                 <EmptyState
-                  message={search ? "Nenhuma execução encontrada na busca." : "Nenhuma execução de previsão registrada."}
+                  message={search ? "Nenhuma execução encontrada na busca." : "Nenhuma execução de Forecast registrada."}
                 />
               </Box>
             ) : (

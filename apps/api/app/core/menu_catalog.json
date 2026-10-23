@@ -185,7 +185,7 @@
   {
     "code": "section_planejamento",
     "parent_code": null,
-    "label": "Orçamento e previsão",
+    "label": "Orçamento e Forecast",
     "path": "/planejamento/inicio",
     "renderer": "ModuleIndex",
     "view_params": {},
@@ -290,7 +290,7 @@
   {
     "code": "planejamento_projecoes_manuais",
     "parent_code": "section_planejamento",
-    "label": "Previsões manuais",
+    "label": "Forecast manual",
     "path": "/planejamento/projecoes-manuais",
     "renderer": "FinancialPlanning",
     "view_params": {
@@ -342,7 +342,7 @@
   {
     "code": "projecoes_acuracia_desvios",
     "parent_code": "section_planejamento",
-    "label": "Variações da previsão",
+    "label": "Variações do Forecast",
     "path": "/projecoes/precisao/desvios",
     "renderer": "ForecastAccuracy",
     "view_params": {
@@ -376,7 +376,7 @@
   {
     "code": "projecoes_configuracao",
     "parent_code": "section_planejamento",
-    "label": "Rodar modelos de previsão",
+    "label": "Perfis de Forecast",
     "path": "/projecoes/configuracao",
     "renderer": "Forecast",
     "view_params": {
@@ -393,7 +393,7 @@
   {
     "code": "projecoes_regras",
     "parent_code": "section_planejamento",
-    "label": "Regras de projeção",
+    "label": "Regras de negócio do Forecast",
     "path": "/projecoes/regras",
     "renderer": "Forecast",
     "view_params": {
@@ -410,7 +410,7 @@
   {
     "code": "projecoes_historico",
     "parent_code": "section_planejamento",
-    "label": "Arquivo de previsões",
+    "label": "Histórico do Forecast",
     "path": "/projecoes/historico",
     "renderer": "Forecast",
     "view_params": {
@@ -466,60 +466,6 @@
     "permission_module": "savings",
     "position": 2,
     "icon": "EventAvailableOutlined",
-    "required": false,
-    "development_only": false,
-    "legacy_path": "/otimizacao",
-    "api_prefixes": []
-  },
-  {
-    "code": "otimizacao_desligamento_painel",
-    "parent_code": "section_panorama",
-    "label": "Painel de desligamentos",
-    "path": "/otimizacao/desligamento/painel",
-    "renderer": "Savings",
-    "view_params": {
-      "tab": "desligue",
-      "subview": "dashboard"
-    },
-    "permission_module": "savings",
-    "position": 7,
-    "icon": "DashboardOutlined",
-    "required": false,
-    "development_only": false,
-    "legacy_path": "/otimizacao",
-    "api_prefixes": []
-  },
-  {
-    "code": "otimizacao_desligamento_governanca",
-    "parent_code": "section_otimizacao",
-    "label": "Regras de desligamento",
-    "path": "/otimizacao/desligamento/governanca",
-    "renderer": "Savings",
-    "view_params": {
-      "tab": "desligue",
-      "subview": "governance"
-    },
-    "permission_module": "savings",
-    "position": 3,
-    "icon": "RuleOutlined",
-    "required": false,
-    "development_only": false,
-    "legacy_path": "/otimizacao",
-    "api_prefixes": []
-  },
-  {
-    "code": "otimizacao_desligamento_excecoes",
-    "parent_code": "section_otimizacao",
-    "label": "Exceções de desligamento",
-    "path": "/otimizacao/desligamento/excecoes",
-    "renderer": "Savings",
-    "view_params": {
-      "tab": "desligue",
-      "subview": "exceptions"
-    },
-    "permission_module": "savings",
-    "position": 4,
-    "icon": "FactCheckOutlined",
     "required": false,
     "development_only": false,
     "legacy_path": "/otimizacao",
@@ -678,7 +624,7 @@
   {
     "code": "operacoes_projecoes",
     "parent_code": "section_dados",
-    "label": "Previsão",
+    "label": "Forecast",
     "path": "/operacoes/projecoes",
     "renderer": "Reprocess",
     "view_params": {
@@ -696,7 +642,7 @@
   {
     "code": "operacoes_acuracia",
     "parent_code": "section_dados",
-    "label": "Qualidade da previsão",
+    "label": "Qualidade do Forecast",
     "path": "/operacoes/precisao",
     "renderer": "Reprocess",
     "view_params": {

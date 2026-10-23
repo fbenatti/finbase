@@ -12,7 +12,7 @@ const TABS = [
   { code: "dashboard", label: "Painel executivo", title: "Painel executivo", help: "Histórico consolidado do planejamento financeiro." },
   { code: "orcamento", label: "Cadastro de metas", title: "Orçamentos", help: "Valores aprovados e carregados por unidade.", budget: true },
   { code: "aderencia-orcamento", label: "Aderência à meta", title: "Aderência à meta", help: "Meta vigente contra o efetivado por mês." },
-  { code: "forecast-manual", label: "Previsões manuais", title: "Previsões manuais", help: "Previsões mensais inseridas manualmente." },
+  { code: "forecast-manual", label: "Forecasts manuais", title: "Forecasts manuais", help: "Forecasts mensais inseridas manualmente." },
   // Temporariamente oculto na interface; implementação e rota permanecem disponíveis.
   // { code: "base-line-contratual", label: "Base Line Contratual", title: "Base Line Contratual", help: "Referência financeira contratual por departamento." },
   { code: "carta-credito", label: "Carta de crédito", title: "Carta de crédito", help: "Créditos planejados por unidade." },

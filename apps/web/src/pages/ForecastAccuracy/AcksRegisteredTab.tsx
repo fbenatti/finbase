@@ -414,7 +414,7 @@ export default function AcksRegisteredTab({ defaultMonth, department }: { defaul
           <TextField
             fullWidth multiline minRows={3} label="Justificativa da variação"
             value={editReason} onChange={e => setEditReason(e.target.value)}
-            placeholder="Ex.: migração de cargas anunciada após o fechamento da previsão..."
+            placeholder="Ex.: migração de cargas anunciada após o fechamento da Forecast..."
           />
           {editTarget?.history && editTarget.history.length > 0 && (
             <Box sx={{ mt: 2 }}>

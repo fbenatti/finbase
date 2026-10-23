@@ -227,7 +227,7 @@ export default function ManualCsvUploadDialog({
 
         {result && (
           <Alert severity={result.skip_gold_realizado ? "warning" : "success"} sx={{ mb: 3 }} onClose={() => setResult(null)}>
-            <strong>{result.skip_gold_realizado ? "CSV gravado na base de origem (consolidação e previsão bloqueadas)." : "CSV importado com sucesso."}</strong><br />
+            <strong>{result.skip_gold_realizado ? "CSV gravado na base de origem (consolidação e Forecast bloqueadas)." : "CSV importado com sucesso."}</strong><br />
             {result.row_count.toLocaleString()} linhas gravadas em {result.table_name} para o período {result.billing_period}.
             {result.warning_message && (
               <>
@@ -246,13 +246,13 @@ export default function ManualCsvUploadDialog({
           >
             <strong>
               {batchResult.length} arquivo(s) gravados na base de origem
-              {batchResult.some(r => r.skip_gold_realizado) ? " (alguns com consolidação e previsão bloqueadas)." : "."}
+              {batchResult.some(r => r.skip_gold_realizado) ? " (alguns com consolidação e Forecast bloqueadas)." : "."}
             </strong>
             <ul style={{ margin: "4px 0 0", paddingLeft: 18 }}>
               {batchResult.map((r, i) => (
                 <li key={i}>
                   {r.billing_period}: {r.row_count.toLocaleString()} linhas em {r.table_name}
-                  {r.skip_gold_realizado && " — não entra em efetivado nem em previsão"}
+                  {r.skip_gold_realizado && " — não entra em efetivado nem em Forecast"}
                   {r.warning_message && !r.skip_gold_realizado && ` — ${r.warning_message}`}
                 </li>
               ))}

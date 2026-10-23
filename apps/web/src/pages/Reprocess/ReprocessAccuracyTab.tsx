@@ -118,7 +118,7 @@ export default function ReprocessAccuracyTab() {
   return (
     <Stack spacing={2}>
       <Box>
-        <Typography variant="h6">Acerto das previsões</Typography>
+        <Typography variant="h6">Acerto das forecasts</Typography>
         <Typography variant="body2" color="text.secondary">
           Mostra apenas meses com efetivado no mês e no mês anterior, necessário para o forecast simulado em 02/MM
           (cutoff D-2). O painel de precisão usa automaticamente o snapshot mais recente de cada mês.
@@ -131,10 +131,10 @@ export default function ReprocessAccuracyTab() {
       <Paper variant="outlined" sx={{ p: 2 }}>
         <Stack direction={{ xs: "column", md: "row" }} spacing={2} alignItems={{ md: "center" }} justifyContent="space-between">
           <FormControl size="small" sx={{ minWidth: 320 }}>
-            <InputLabel id="acc-reproc-config-label">Configuração de previsão</InputLabel>
+            <InputLabel id="acc-reproc-config-label">Configuração de Forecast</InputLabel>
             <Select
               labelId="acc-reproc-config-label"
-              label="Configuração de previsão"
+              label="Configuração de Forecast"
               value={configId}
               onChange={(e) => setConfigId(e.target.value as number)}
             >

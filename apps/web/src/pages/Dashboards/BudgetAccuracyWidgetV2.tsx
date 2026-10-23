@@ -421,7 +421,7 @@ function BudgetPanel({ department }: { department?: string }) {
             >
               <Chip label={`Orçamento: ${money.format(totals.budget_value)}`} />
               <Chip
-                label={`${period === "annual" ? "Efetivado + Previsão" : "Efetivado"}: ${money.format(totals.comparison_value ?? totals.actual_value)}`}
+                label={`${period === "annual" ? "Efetivado + Forecast" : "Efetivado"}: ${money.format(totals.comparison_value ?? totals.actual_value)}`}
                 color="primary"
               />
               <Chip
@@ -477,7 +477,7 @@ function BudgetPanel({ department }: { department?: string }) {
                       />
                       <Chip
                         color="primary"
-                        label={`Efetivado + Previsão: ${money.format(detailProjected)}`}
+                        label={`Efetivado + Forecast: ${money.format(detailProjected)}`}
                       />
                       <Chip
                         label={`Efetivado: ${money.format(detailActual)}`}
@@ -722,7 +722,7 @@ export default function AccuracyWidgetV2({
     return <Paper elevation={0} sx={{ p: 2, borderRadius: 2, border: "1px solid", borderColor: "divider" }}>
       <Typography variant="h6" sx={{ mb: 1 }}>Precisão</Typography>
       <ToggleButtonGroup exclusive size="small" value={tab} onChange={(_, value: number | null) => { if (value !== null) setTab(value); }} sx={{ mb: 2 }}>
-        <ToggleButton value={0}>Precisão das previsões</ToggleButton>
+        <ToggleButton value={0}>Precisão das forecasts</ToggleButton>
         <ToggleButton value={1}>Aderência à meta</ToggleButton>
       </ToggleButtonGroup>
       <Alert severity="info">Precisão indisponível para este filtro dimensional: os snapshots atuais não guardam esta dimensão.</Alert>
@@ -739,7 +739,7 @@ export default function AccuracyWidgetV2({
       }}
     >
       <ToggleButtonGroup exclusive size="small" value={tab} onChange={(_, value: number | null) => { if (value !== null) setTab(value); }} sx={{ mb: 2 }}>
-        <ToggleButton value={0}>Precisão das previsões</ToggleButton>
+        <ToggleButton value={0}>Precisão das forecasts</ToggleButton>
         <ToggleButton value={1}>Aderência à meta</ToggleButton>
       </ToggleButtonGroup>
       {tab === 0 ? (

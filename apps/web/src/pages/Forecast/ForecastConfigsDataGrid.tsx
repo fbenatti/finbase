@@ -175,7 +175,7 @@ export default function ForecastConfigsDataGrid({
       headerAlign: "center",
       renderCell: ({ row }: { row: ForecastConfig }) => (
         <Stack direction="row" alignItems="center" justifyContent="center" sx={{ height: "100%" }}>
-          <Tooltip title="Executar previsão">
+          <Tooltip title="Executar Forecast">
             <span>
               <RowAction kind="run" label={"Executar " + row.name} onClick={(event) => { event.stopPropagation(); onRun(row); }} disabled={runningConfigId === row.id} aria-label={"Executar " + row.name} />
             </span>
@@ -322,7 +322,7 @@ export default function ForecastConfigsDataGrid({
     const url = URL.createObjectURL(blob);
     const link = document.createElement("a");
     link.setAttribute("href", url);
-    link.setAttribute("download", "perfis-previsao-" + new Date().toISOString().slice(0, 10) + ".csv");
+    link.setAttribute("download", "perfis-forecast-" + new Date().toISOString().slice(0, 10) + ".csv");
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);

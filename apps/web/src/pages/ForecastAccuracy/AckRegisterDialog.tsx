@@ -165,7 +165,7 @@ export default function AckRegisterDialog({
         <TextField
           fullWidth multiline minRows={3} label="Justificativa da variação"
           value={reason} onChange={e => setReason(e.target.value)}
-          placeholder="Ex.: projeto novo contratado após o fechamento da previsão..."
+          placeholder="Ex.: projeto novo contratado após o fechamento da Forecast..."
         />
       </DialogContent>
       <DialogActions sx={{ px: 3, pb: 2 }}>

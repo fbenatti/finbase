@@ -24,7 +24,7 @@ const PURPLE = "#7A5AF8";
 const KINDS: Array<{ kind: Kind; title: string; question: string; color: string; icon: React.ReactNode }> = [
   { kind: "behavior", title: "Comportamento", question: "Gastamos fora do padrão?", color: ORANGE, icon: <TroubleshootOutlined fontSize="small" /> },
   { kind: "budget", title: "Orçamento", question: "Cabe no que foi aprovado?", color: GREEN, icon: <AccountBalanceWalletOutlined fontSize="small" /> },
-  { kind: "accuracy", title: "Acurácia da projeção", question: "Acertamos a previsão?", color: PURPLE, icon: <GpsFixedOutlined fontSize="small" /> },
+  { kind: "accuracy", title: "Acurácia da projeção", question: "Acertamos a Forecast?", color: PURPLE, icon: <GpsFixedOutlined fontSize="small" /> },
 ];
 
 const brl = (value: number) => new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL", notation: "compact", maximumFractionDigits: 1 }).format(value);

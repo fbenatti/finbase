@@ -28,7 +28,7 @@ type Props = {
 };
 
 const emptyState = {
-  name: "Novo perfil de previsão",
+  name: "Novo perfil de Forecast",
   tableId: "" as number | "",
   meta: null as ForecastMetadata | null,
   measure: "",
@@ -158,7 +158,7 @@ export default function ForecastConfigDialog({ open, initial, tables, usedDestin
     setError("");
     setLoading(true);
     if (!config) {
-      setName("Novo perfil de previsão");
+      setName("Novo perfil de Forecast");
       setTableId("");
       setMeta(null);
       setMeasure("");
@@ -319,7 +319,7 @@ export default function ForecastConfigDialog({ open, initial, tables, usedDestin
     <Dialog open={open} onClose={onClose} maxWidth="lg" fullWidth>
       <DialogTitle>
         <Stack direction="row" alignItems="center" spacing={1.5}>
-          <span>{initial ? "Alterar perfil de previsão" : "Novo perfil de previsão"}</span>
+          <span>{initial ? "Alterar perfil de Forecast" : "Novo perfil de Forecast"}</span>
           {profile !== "custom" && <Chip size="small" variant="outlined" label={profileLabel} />}
         </Stack>
       </DialogTitle>
@@ -391,9 +391,9 @@ export default function ForecastConfigDialog({ open, initial, tables, usedDestin
               )}
             </Step>
 
-            <Step n={2} title="Janela da previsão" hint="Até onde prever e quanto histórico recente considerar.">
+            <Step n={2} title="Janela do Forecast" hint="Até onde prever e quanto histórico recente considerar.">
               <Stack direction={{ xs: "column", sm: "row" }} spacing={1.5}>
-                <TextField label="Horizonte de previsão" type="number" fullWidth value={horizon}
+                <TextField label="Horizonte do Forecast" type="number" fullWidth value={horizon}
                   slotProps={{ htmlInput: { min: 1, max: 36 }, input: { endAdornment: <InputAdornment position="end">meses</InputAdornment> } }}
                   helperText="Quantos meses prever à frente."
                   onChange={(e) => setHorizon(safeInt(e.target.value, emptyState.horizon, 1, 36))} />

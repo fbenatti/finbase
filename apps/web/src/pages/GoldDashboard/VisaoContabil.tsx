@@ -224,7 +224,7 @@ export default function VisaoContabil({ table, filters, filterKey, dollarEvoluti
               })}
             </Stack>
           ) : (
-            <Alert severity="info">Nenhum par disponível (efetivado do mês e previsão do mês seguinte). Reprocesse a precisão das previsões (Operações → Precisão das previsões) para gerar os snapshots.</Alert>
+            <Alert severity="info">Nenhum par disponível (efetivado do mês e Forecast do mês seguinte). Reprocesse a precisão das forecasts (Operações → Precisão das forecasts) para gerar os snapshots.</Alert>
           )}
         </LoadingBlock>
       </SectionPanel>
@@ -287,7 +287,7 @@ export default function VisaoContabil({ table, filters, filterKey, dollarEvoluti
               </Stack>
             ) : (
               <Alert severity="info">
-                {det.loading ? "Carregando o detalhamento…" : "Nenhum dado para o par selecionado. Se a versão salva da previsão ainda não tiver centro_custo, aguarde o reprocessamento do Forecast Accuracy full."}
+                {det.loading ? "Carregando o detalhamento…" : "Nenhum dado para o par selecionado. Se a versão salva da Forecast ainda não tiver centro_custo, aguarde o reprocessamento do Forecast Accuracy full."}
               </Alert>
             )}
           </LoadingBlock>

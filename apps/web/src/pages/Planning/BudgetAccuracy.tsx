@@ -268,7 +268,7 @@ export default function BudgetAccuracy() {
       <Typography variant="h4">Execução do orçamento</Typography>
       <Typography color="text.secondary" sx={{ mb: 2 }}>
         {period === "annual"
-          ? "Visão do ano: soma de previsão + efetivado comparada à meta anual por unidade."
+          ? "Visão do ano: soma de Forecast + efetivado comparada à meta anual por unidade."
           : "Visão mensal da meta vigente contra o efetivado por unidade."}
       </Typography>
       <Paper
@@ -360,7 +360,7 @@ export default function BudgetAccuracy() {
             />
             {period === "annual" ? (
               <Metric
-                label="Previsão mais realizado"
+                label="Forecast mais realizado"
                 value={money(totals?.comparison_value || 0)}
                 color="#0F62FE"
               />
@@ -373,7 +373,7 @@ export default function BudgetAccuracy() {
             )}
             {period === "annual" && (
               <Metric
-                label="Previsão"
+                label="Forecast"
                 value={money(totals?.forecast_value || 0)}
                 color="#64748B"
               />
@@ -415,7 +415,7 @@ export default function BudgetAccuracy() {
                 </Typography>
                 <Typography variant="body2" color="text.secondary">
                   {period === "annual"
-                    ? "Soma dos 12 meses: previsão + efetivado comparados à meta anual."
+                    ? "Soma dos 12 meses: Forecast + efetivado comparados à meta anual."
                     : "Efetivado mensal comparado à meta do mês."}{" "}
                   Variação: {percent(totals?.variance_pct ?? null)} · consumido:{" "}
                   {percent(totals?.consumed_pct ?? null)}
@@ -441,10 +441,10 @@ export default function BudgetAccuracy() {
                       : "Meta do mês"}
                   </TableCell>
                   <TableCell align="right">
-                    {period === "annual" ? "Previsão + realizado" : "Efetivado"}
+                    {period === "annual" ? "Forecast + realizado" : "Efetivado"}
                   </TableCell>
                   {period === "annual" && (
-                    <TableCell align="right">Previsão</TableCell>
+                    <TableCell align="right">Forecast</TableCell>
                   )}
                   <TableCell align="right">Variação</TableCell>
                   <TableCell align="right">Variação %</TableCell>
@@ -602,7 +602,7 @@ export default function BudgetAccuracy() {
                         color="#0F62FE"
                       />
                       <Metric
-                        label="Efetivado mais previsão"
+                        label="Efetivado mais Forecast"
                         value={money(detailProjected)}
                         color="#0F62FE"
                       />
@@ -612,7 +612,7 @@ export default function BudgetAccuracy() {
                         color="#f2a900"
                       />
                       <Metric
-                        label="Previsão"
+                        label="Forecast"
                         value={money(detailForecast)}
                         color="#64748B"
                       />
@@ -640,7 +640,7 @@ export default function BudgetAccuracy() {
                         <Typography variant="body2" color="text.secondary">
                           Evolução mensal: meta como linha; efetivado e
                           forecast como barras empilhadas. No mês corrente, a
-                          altura representa a previsão total.
+                          altura representa a Forecast total.
                         </Typography>
                         <Box
                           sx={{
@@ -672,7 +672,7 @@ export default function BudgetAccuracy() {
                                   (item) => item.forecast_value,
                                 ),
                                 type: "bar" as const,
-                                name: "Previsão",
+                                name: "Forecast",
                                 marker: { color: "#22C55E" },
                               },
                               {
@@ -834,7 +834,7 @@ export default function BudgetAccuracy() {
                             </MenuItem>
                             <MenuItem value="Migração">Migração</MenuItem>
                             <MenuItem value="Erro de planejamento">
-                              Erro de previsão
+                              Erro de Forecast
                             </MenuItem>
                             <MenuItem value="Outro">Outro</MenuItem>
                           </Select>
@@ -891,7 +891,7 @@ export default function BudgetAccuracy() {
                     <MenuItem value="Projeto novo">Projeto novo</MenuItem>
                     <MenuItem value="Migração">Migração</MenuItem>
                     <MenuItem value="Erro de planejamento">
-                      Erro de previsão
+                      Erro de Forecast
                     </MenuItem>
                     <MenuItem value="Outro">Outro</MenuItem>
                   </Select>

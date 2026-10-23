@@ -52,7 +52,7 @@ function titleFor(task: TaskStatus, connections: SourceConnection[]): string {
   const k = kindOf(task);
   if (k === "backup") return "Backup diário completo · nº " + task.id;
   if (k === "shared_cost") return "Rateio de custo compartilhado";
-  if (k === "forecast") return "Previsão";
+  if (k === "forecast") return "Forecast";
   if (String(task.task_type || task.type || "") === "gold_reprocess") {
     return "Base de custos consolidada nº " + task.id;
   }
@@ -160,8 +160,8 @@ function progressCaption(task: TaskStatus): string {
         : "0 linhas · nenhuma série prevista";
     }
     return Number(task.rows_destination || 0) > 0
-      ? `${rows} linhas · previsão em finalização`
-      : "Calculando séries da previsão";
+      ? `${rows} linhas · Forecast em finalização`
+      : "Calculando séries do Forecast";
   }
   if (String(task.task_type || task.type || "") === "backup") {
     const bytes = Number(task.downloaded_bytes_total || 0);

@@ -76,7 +76,7 @@ function aggregateTreeChildren(rows: Record<string, unknown>[], field: string, f
     const rawKey = String(rawValue ?? EMPTY_DIMENSION_LABEL);
     const isManualForecast = labelManualForecast && tipo === "forecast-manual" && isOrgField(field) &&
       (rawValue == null || rawKey.trim() === "" || rawKey.trim().toLowerCase() === EMPTY_DIMENSION_LABEL.toLowerCase());
-    const k = isManualForecast ? "Previsão manual" : rawKey;
+    const k = isManualForecast ? "Forecast manual" : rawKey;
     if (!map.has(k)) map.set(k, { cost: 0, byMonth: new Map(), manualForecast: false });
     const o = map.get(k)!;
     o.manualForecast ||= isManualForecast;

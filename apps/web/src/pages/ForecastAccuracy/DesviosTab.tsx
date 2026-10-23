@@ -340,9 +340,9 @@ export default function DesviosTab({ runId, targetMonth, department }: { runId: 
             </Select>
           </FormControl>
           <TextField
-            fullWidth multiline minRows={3} label="Justificativa da variação vs previsão do início do mês"
+            fullWidth multiline minRows={3} label="Justificativa da variação vs Forecast do início do mês"
             value={ackReason} onChange={e => setAckReason(e.target.value)}
-            placeholder="Ex.: migração de cargas anunciada após o fechamento da previsão..."
+            placeholder="Ex.: migração de cargas anunciada após o fechamento da Forecast..."
           />
           {ackEditing && ackEditing.history && ackEditing.history.length > 0 && (
             <Box sx={{ mt: 2 }}>

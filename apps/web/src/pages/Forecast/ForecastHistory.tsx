@@ -99,7 +99,7 @@ export default function ForecastHistory() {
                 result={result}
                 loading={loading}
                 onQuery={(search, offset, filters = {}, sort) => void query(search, offset, filters, sort)}
-                measureLabel={comparison ? "Previsão × Efetivado" : String(metadata?.snapshot?.measure_column || "Valor")}
+                measureLabel={comparison ? "Forecast × Efetivado" : String(metadata?.snapshot?.measure_column || "Valor")}
               />
             )}
           </Paper>

@@ -24,7 +24,7 @@ export default function ReprocessForecastTab() {
       const nextConfigs = await getForecastConfigs();
       setConfigs(nextConfigs);
     } catch (e: unknown) {
-      setError(e instanceof Error ? e.message : "Não foi possível carregar a previsão");
+      setError(e instanceof Error ? e.message : "Não foi possível carregar o Forecast");
     }
   }, []);
 
@@ -40,7 +40,7 @@ export default function ReprocessForecastTab() {
       await notifications.addTaskById(result.task_id, { kind: "forecast", title: "Forecast" });
       await load();
     } catch (e: unknown) {
-      setError(e instanceof Error ? e.message : "Não foi possível enviar a previsão para a fila");
+      setError(e instanceof Error ? e.message : "Não foi possível enviar o Forecast para a fila");
     } finally {
       setRunningConfig(null);
     }
@@ -50,7 +50,7 @@ export default function ReprocessForecastTab() {
     <Stack spacing={2}>
       {subtab === "accuracy" ? <ReprocessAccuracyTab /> : <>
       <Box>
-        <Typography variant="h6">Execuções da previsão</Typography>
+        <Typography variant="h6">Execuções do Forecast</Typography>
         <Typography variant="body2" color="text.secondary">
           Reprocessa o forecast da base consolidada. Depois, o worker publica o rateio de custo compartilhado
           e enfileira a materialização da <strong>base consolidada de visão total</strong> (efetivado + forecast + rateio).
@@ -61,7 +61,7 @@ export default function ReprocessForecastTab() {
       {error && <Alert severity="error" onClose={() => setError("")}>{dataDisplayText(error)}</Alert>}
 
       {configs.length === 0 ? (
-        <Typography color="text.secondary">Nenhuma configuração de previsão. Crie em Previsão.</Typography>
+        <Typography color="text.secondary">Nenhuma configuração de Forecast. Crie em Perfis de Forecast.</Typography>
       ) : (
         <Stack spacing={1}>
           {configs.map(config => (

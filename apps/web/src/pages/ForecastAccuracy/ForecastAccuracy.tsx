@@ -352,7 +352,7 @@ export default function ForecastAccuracy({ embedded = false }: { embedded?: bool
       <Box sx={{ px: 3, pt: 3, bgcolor: "background.paper", borderBottom: "1px solid", borderColor: "divider", borderRadius: embedded ? "12px 12px 0 0" : 0 }}>
         <Box sx={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 2, mb: 2, flexWrap: "wrap" }}>
           <Box>
-            <Typography variant={embedded ? "h6" : "h4"}>{embedded ? "Precisão" : tab === "desvios" ? "Variações da previsão" : tab === "acks" ? "Justificativas de variação" : "Precisão das previsões"}</Typography>
+            <Typography variant={embedded ? "h6" : "h4"}>{embedded ? "Precisão" : tab === "desvios" ? "Variações da Forecast" : tab === "acks" ? "Justificativas de variação" : "Precisão das forecasts"}</Typography>
             <Typography color="text.secondary" sx={{ mt: 0.5 }}>
               O que foi projetado no início do mês × o que realmente foi efetivado.
             </Typography>
@@ -730,7 +730,7 @@ export default function ForecastAccuracy({ embedded = false }: { embedded?: bool
           <Alert severity="info">
             Nenhum simulado de precisão encontrado. Crie um com
             <Box component="code" sx={{ mx: 1 }}>POST /forecast/runs?config_id=&lt;id&gt;&amp;simulated_as_of=YYYY-MM-DD</Box>
-            ou na aba <b>Precisão da previsão</b> de Operações de dados.
+            ou na aba <b>Precisão da Forecast</b> de Operações de dados.
           </Alert>
         )}
         {!loading && months.length > 0 && !error && !months.some(m => Number(m.forecast_value) || Number(m.actual_value)) && (

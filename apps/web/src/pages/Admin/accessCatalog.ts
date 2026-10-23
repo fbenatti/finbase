@@ -36,7 +36,7 @@ export const ACCESS_AREAS: AccessArea[] = [
     area: "Projeções",
     screens: [
       { route: "/projecoes", label: "Projeções", module: "forecast" },
-      { route: "/projecoes/precisao", label: "Precisão das previsões", module: "forecast" },
+      { route: "/projecoes/precisao", label: "Precisão das forecasts", module: "forecast" },
     ],
   },
   {

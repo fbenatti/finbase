@@ -15,7 +15,7 @@ type ConsumptionType = "realizado" | "forecast" | "ambos";
 const TYPE_LABELS: Record<ConsumptionType, string> = {
   realizado: "Efetivado",
   forecast: "Forecast",
-  ambos: "Efetivado + previsão",
+  ambos: "Efetivado + Forecast",
 };
 
 function selectionFromType(tipo: ConsumptionType) {
@@ -141,7 +141,7 @@ export default function ConsumptionDrillDialog({
                   onChange={(_, checked) => toggleType("forecast", checked)}
                 />
               )}
-              label="Previsão do período"
+              label="Forecast do período"
             />
           </FormGroup>
         </Stack>

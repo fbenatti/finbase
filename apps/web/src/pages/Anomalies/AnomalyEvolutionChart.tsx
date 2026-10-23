@@ -88,7 +88,7 @@ export default function AnomalyEvolutionChart({ series, kase, currency }: {
             </>}
       </Typography>
     </Box>
-    {points.length > 0 ? <Box sx={{ mt: 1, width: "100%", height: 410, minHeight: 410, minWidth: 0 }} aria-label="Gráfico único de efetivado e previsão, com desvio empilhado">
+    {points.length > 0 ? <Box sx={{ mt: 1, width: "100%", height: 410, minHeight: 410, minWidth: 0 }} aria-label="Gráfico único de efetivado e Forecast, com desvio empilhado">
       <Plot
         data={[
           { type: "scatter", mode: "lines", x, y: points.map((point) => point.lower_cloud), line: { width: 0 }, hoverinfo: "skip", showlegend: false, connectgaps: false },
@@ -144,7 +144,7 @@ export default function AnomalyEvolutionChart({ series, kase, currency }: {
       {monthly ? "Barras nas datas de cobrança; acumulado reiniciado a cada mês. " : "Verde mostra o efetivado anterior ao desvio como contexto histórico; esses dias podem não ter forecast comparável. Cinza indica efetivado sem comparação a partir da data do desvio. "}
       {comparable.length > 0 ? "Vermelho é o desvio positivo; custo anômalo considera somente a parcela acima do limite tolerado." : "Sem referência completa, o gráfico mostra o efetivado sem quantificar o desvio."} Dias sem coleta ficam vazios.
       {future.length > 0 && " A área azul mostra a projeção, sem criar efetivado futuro."} Clique em uma data para ver os valores.
-      {(series.contributor_series_count ?? 1) > 1 && " Efetivado e previsão somam o mesmo conjunto de séries do caso."}
+      {(series.contributor_series_count ?? 1) > 1 && " Efetivado e Forecast somam o mesmo conjunto de séries do caso."}
       {reference?.data_cutoff && <> Referência congelada com corte em {dateLabel(reference.data_cutoff)}.</>}
       {historicalReference && " O desvio em curso não é usado para recalcular a referência do episódio."}
     </Typography>

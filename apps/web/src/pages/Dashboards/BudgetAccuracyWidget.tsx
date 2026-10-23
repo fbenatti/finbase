@@ -505,7 +505,7 @@ function BudgetPanel({ department }: { department?: string }) {
                       />
                       <Chip
                         color="primary"
-                        label={`Efetivado + Previsão: ${money.format(detailProjected)}`}
+                        label={`Efetivado + Forecast: ${money.format(detailProjected)}`}
                       />
                       <Chip
                         label={`Efetivado: ${money.format(detailActual)}`}
@@ -755,7 +755,7 @@ export default function AccuracyWidget({
       }}
     >
       <ToggleButtonGroup exclusive size="small" value={tab} onChange={(_, value: number | null) => { if (value !== null) setTab(value); }} sx={{ mb: 2 }}>
-        <ToggleButton value={0}>Precisão das previsões</ToggleButton>
+        <ToggleButton value={0}>Precisão das forecasts</ToggleButton>
         <ToggleButton value={1}>Aderência à meta</ToggleButton>
       </ToggleButtonGroup>
       {tab === 0 ? (

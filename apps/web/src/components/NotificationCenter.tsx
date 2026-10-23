@@ -37,7 +37,7 @@ type Tone = "running" | "queued" | "success" | "error" | "neutral";
 const KIND: Record<NotificationKind, { label: string; Icon: typeof InfoOutlined }> = {
   extraction: { label: "Coleta", Icon: CloudDownloadOutlined },
   reprocess: { label: "Reprocessamento", Icon: AutorenewOutlined },
-  forecast: { label: "Previsão", Icon: InsightsOutlined },
+  forecast: { label: "Forecast", Icon: InsightsOutlined },
   shared_cost: { label: "Rateio", Icon: CallSplitOutlined },
   backup: { label: "Backup", Icon: BackupOutlined },
   other: { label: "Tarefa", Icon: InfoOutlined },
@@ -280,7 +280,7 @@ function EmptyState() {
         Tudo em dia
       </Typography>
       <Typography sx={{ mt: 0.5, fontSize: "0.875rem", color: "text.secondary", maxWidth: 280 }}>
-        Coletas, reprocessamentos e previsões aparecem aqui enquanto rodam e quando terminam.
+        Coletas, reprocessamentos e execuções de Forecast aparecem aqui enquanto rodam e quando terminam.
       </Typography>
     </Box>
   );

@@ -1420,7 +1420,7 @@ function Investigacao({ table, filters, filterKey }: { table: string; filters: F
 // Aba 7 — Decisão (Decision Intelligence)
 // Widgets portados do cockpit de referência (ABRIR_FINOPS.html):
 // Executive Pulse, Risk Index, Waterfall executivo,
-// Ponte financeira: realizado, previsão e gap, Attention, Cost Drivers, Anomaly, Forecast Bias,
+// Ponte financeira: realizado, Forecast e gap, Attention, Cost Drivers, Anomaly, Forecast Bias,
 // v42 (Run Rate/Reliability/Opportunity), Governance/Data Quality,
 // Comparator e Decomposição hierárquica.
 // ═══════════════════════════════════════════════════════════════════
@@ -1676,7 +1676,7 @@ function Decisao({ table, filters, filterKey, setFilters }: {
   // ── attention ──
   const attention = useMemo(() => {
     const items: Array<{ sev: "P1" | "P2" | "P3"; title: string; desc: string; impact: string }> = [];
-    if (globalAcc != null && globalAcc < 85) items.push({ sev: globalAcc < 70 ? "P1" : "P2", title: "Acerto da previsão", desc: `Confiabilidade global abaixo de 85% (${pct(globalAcc)}).`, impact: pct(globalAcc) });
+    if (globalAcc != null && globalAcc < 85) items.push({ sev: globalAcc < 70 ? "P1" : "P2", title: "Acerto da Forecast", desc: `Confiabilidade global abaixo de 85% (${pct(globalAcc)}).`, impact: pct(globalAcc) });
     if (momPct != null && Math.abs(momPct) >= 15) items.push({ sev: Math.abs(momPct) >= 25 ? "P1" : "P2", title: "Mudança mensal material", desc: `Última competência (${monthLabel(latestMonth)}) variou ${pct(momPct)} contra a anterior.`, impact: compact(Math.abs(latestReal - prevReal)) });
     if (top5Pct > 70) items.push({ sev: "P2", title: "Concentração Financeira", desc: `Top 5 de ${dimLabel} concentram ${pct(top5Pct)} do custo.`, impact: "Top 5" });
     if (govScore < 90) items.push({ sev: govScore < 75 ? "P1" : "P2", title: "Governance Completeness", desc: "Classificação incompleta reduz rastreabilidade executiva.", impact: pct(govScore) });
@@ -1812,18 +1812,18 @@ function Decisao({ table, filters, filterKey, setFilters }: {
 
   // ── ações do risk board ──
   const actions: Array<[string, string, string, string]> = [];
-  if (Math.abs(gapPct) > 10) actions.push(["Previsão x efetivado", compact(gap), `Desvio de ${pct(gapPct)}`, "Revisar premissas e maiores desvios."]);
+  if (Math.abs(gapPct) > 10) actions.push(["Forecast x efetivado", compact(gap), `Desvio de ${pct(gapPct)}`, "Revisar premissas e maiores desvios."]);
   if (top5Pct > 50) actions.push(["Peso das 5 maiores", pct(top5Pct), "Dependência de custo relevante", "Priorizar a governança dos itens de maior peso."]);
   if (aiCost > 0) actions.push(["Custo de IA", compact(aiCost), "Consumo de IA mapeado", "Validar retorno e tendência."]);
 
   const bridgeSteps = [
     { key: "Efetivado", value: latestReal, kind: "total" as const },
-    { key: "Previsão (Δ)", value: latestFc - latestReal, kind: (latestFc - latestReal >= 0 ? "inc" : "dec") as "inc" | "dec" },
+    { key: "Forecast (Δ)", value: latestFc - latestReal, kind: (latestFc - latestReal >= 0 ? "inc" : "dec") as "inc" | "dec" },
     { key: "Forecast", value: latestFc, kind: "total" as const },
   ];
 
   const riskCards = [
-    ["Acerto da previsão", globalAcc != null ? pct(globalAcc) : "N/A", globalAcc == null ? "green" : globalAcc < 85 ? "red" : globalAcc < 95 ? "yellow" : "green"],
+    ["Acerto da Forecast", globalAcc != null ? pct(globalAcc) : "N/A", globalAcc == null ? "green" : globalAcc < 85 ? "red" : globalAcc < 95 ? "yellow" : "green"],
     ["Cobertura de governança", pct(govScore), govScore < 70 ? "red" : govScore < 90 ? "yellow" : "green"],
     ["Concentração de custo", pct(top5Pct), top5Pct > 70 ? "red" : top5Pct > 50 ? "yellow" : "green"],
     ["Custo de IA", aiCost > 0 ? compact(aiCost) : "—", aiCost > 0 ? "yellow" : "green"],
@@ -1853,11 +1853,11 @@ function Decisao({ table, filters, filterKey, setFilters }: {
         <SectionPanel title="Posição financeira agora" subtitle={`Executive Pulse · Efetivado ${monthLabel(latestMonth) || "—"} · Forecast horizonte ${monthLabel(fcMonths[fcMonths.length - 1]) || "—"}`}>
           <Grid container spacing={1.5}>
             <Grid item xs={6} sm={4} md={2}><KpiCard label="Efetivado" value={compact(latestReal)} sub={`${monthLabel(latestMonth)} · ${momPct == null ? "sem base" : `${momPct >= 0 ? "+" : ""}${pct(momPct)} MoM`}`} color={PURPLE} full={moneyFull(latestReal)} /></Grid>
-            <Grid item xs={6} sm={4} md={2}><KpiCard label="Previsão" value={compact(latestFc)} sub={`${monthLabel(fcMonths[fcMonths.length - 1]) || "—"}`} color={ORANGE} full={moneyFull(latestFc)} /></Grid>
-            <Grid item xs={6} sm={4} md={2}><KpiCard label="Desvio da previsão" value={`${gap >= 0 ? "+" : ""}${compact(gap)}`} sub={latestReal ? `${gapPct >= 0 ? "+" : ""}${pct(gapPct)} do efetivado` : "sem base"} color={gap >= 0 ? RED : GREEN} full={moneyFull(gap)} /></Grid>
+            <Grid item xs={6} sm={4} md={2}><KpiCard label="Forecast" value={compact(latestFc)} sub={`${monthLabel(fcMonths[fcMonths.length - 1]) || "—"}`} color={ORANGE} full={moneyFull(latestFc)} /></Grid>
+            <Grid item xs={6} sm={4} md={2}><KpiCard label="Desvio da Forecast" value={`${gap >= 0 ? "+" : ""}${compact(gap)}`} sub={latestReal ? `${gapPct >= 0 ? "+" : ""}${pct(gapPct)} do efetivado` : "sem base"} color={gap >= 0 ? RED : GREEN} full={moneyFull(gap)} /></Grid>
             <Grid item xs={6} sm={4} md={2}><KpiCard label="Tendência por mês" value={momPct == null ? "N/A" : `${momPct >= 0 ? "+" : ""}${pct(momPct)}`} sub="última vs anterior" color={BLUE} /></Grid>
             <Grid item xs={6} sm={4} md={2}><KpiCard label="Peso das 5 maiores" value={pct(top5Pct)} sub={dimLabel} color="#6EA8FE" /></Grid>
-            <Grid item xs={6} sm={4} md={2}><KpiCard label="Acerto da previsão" value={globalAcc != null ? pct(globalAcc) : "N/A"} sub="global (último mês com ambos)" color={globalAcc != null && globalAcc < 85 ? RED : GREEN} /></Grid>
+            <Grid item xs={6} sm={4} md={2}><KpiCard label="Acerto da Forecast" value={globalAcc != null ? pct(globalAcc) : "N/A"} sub="global (último mês com ambos)" color={globalAcc != null && globalAcc < 85 ? RED : GREEN} /></Grid>
           </Grid>
         </SectionPanel>
 
@@ -1951,8 +1951,8 @@ function Decisao({ table, filters, filterKey, setFilters }: {
           </Grid>
         </SectionPanel>
 
-        {/* 06 · Ponte financeira: realizado, previsão e gap */}
-        <SectionPanel title="Ponte financeira: efetivado, previsão e desvio" subtitle="Efetivado → previsão → desvio, neste recorte">
+        {/* 06 · Ponte financeira: realizado, Forecast e gap */}
+        <SectionPanel title="Ponte financeira: efetivado, Forecast e desvio" subtitle="Efetivado → Forecast → desvio, neste recorte">
           <Grid container spacing={1.5}>
             <Grid item xs={12} md={8}>
               <Chart
@@ -1973,7 +1973,7 @@ function Decisao({ table, filters, filterKey, setFilters }: {
             </Grid>
             <Grid item xs={12} md={4}>
               <Stack spacing={1}>
-                <KpiCard label="Desvio da previsão" value={`${gap >= 0 ? "+" : ""}${compact(gap)}`} sub={`${gapPct >= 0 ? "+" : ""}${pct(gapPct)} do efetivado`} color={gap >= 0 ? RED : GREEN} full={moneyFull(gap)} />
+                <KpiCard label="Desvio da Forecast" value={`${gap >= 0 ? "+" : ""}${compact(gap)}`} sub={`${gapPct >= 0 ? "+" : ""}${pct(gapPct)} do efetivado`} color={gap >= 0 ? RED : GREEN} full={moneyFull(gap)} />
                 <KpiCard label="Ritmo de referência" value={compact(runRate.annualized)} sub={`média ${compact(runRate.avgReal)}/mês × 12 · ${runRate.meses} mês(es) efetivado`} color={BLUE} full={moneyFull(runRate.annualized)} />
               </Stack>
             </Grid>
@@ -2049,10 +2049,10 @@ function Decisao({ table, filters, filterKey, setFilters }: {
           </Grid>
         </SectionPanel>
 
-        {/* 09 · Viés e confiabilidade da previsão */}
-        <SectionPanel title="Viés e acerto da previsão" subtitle={`Ranking por ${dimLabel}: acerto médio (previsão x efetivado), viés e erro acumulado`}>
+        {/* 09 · Viés e confiabilidade da Forecast */}
+        <SectionPanel title="Viés e acerto da Forecast" subtitle={`Ranking por ${dimLabel}: acerto médio (Forecast x efetivado), viés e erro acumulado`}>
           <Grid container spacing={1.5} sx={{ mb: 1.5 }}>
-            <Grid item xs={6} sm={3}><KpiCard label="Itens avaliados" value={String(biasRows.length)} sub="com pares previsão/efetivado" color={BLUE} /></Grid>
+            <Grid item xs={6} sm={3}><KpiCard label="Itens avaliados" value={String(biasRows.length)} sub="com pares Forecast/efetivado" color={BLUE} /></Grid>
             <Grid item xs={6} sm={3}><KpiCard label="Pior acerto" value={biasRows[0] ? pct(biasRows[0].accuracy) : "—"} sub={biasRows[0]?.key || "N/A"} color={biasRows[0] && biasRows[0].accuracy < 70 ? RED : GREEN} /></Grid>
             <Grid item xs={6} sm={3}><KpiCard label="Viés (pior caso)" value={biasRows[0] ? `${biasRows[0].bias >= 0 ? "+" : ""}${pct(biasRows[0].bias)}` : "—"} sub="+ over / − under forecast" color={ORANGE} /></Grid>
             <Grid item xs={6} sm={3}><KpiCard label="Erro absoluto (maior caso)" value={biasRows[0] ? compact(biasRows[0].absErr) : "—"} sub={biasRows[0]?.key || "N/A"} color={PURPLE} /></Grid>
@@ -2073,14 +2073,14 @@ function Decisao({ table, filters, filterKey, setFilters }: {
                     <TableCell sx={{ fontSize: 12, fontWeight: 900 }}>{compact(x.absErr)}</TableCell>
                   </TableRow>
                 ))}
-                {!biasRows.length && <TableRow><TableCell colSpan={6} align="center" sx={{ color: "text.secondary", py: 2 }}>Não há pares previsão/efetivado suficientes por {dimLabel.toLowerCase()} no histórico.</TableCell></TableRow>}
+                {!biasRows.length && <TableRow><TableCell colSpan={6} align="center" sx={{ color: "text.secondary", py: 2 }}>Não há pares Forecast/efetivado suficientes por {dimLabel.toLowerCase()} no histórico.</TableCell></TableRow>}
               </TableBody>
             </Table>
           </TableContainer>
         </SectionPanel>
 
         {/* 10 · v42: Forecast Reliability / Opportunity Gap / Run Rate */}
-        <SectionPanel title="Prioridade preliminar de análise" subtitle="Acerto, desvios positivos da previsão e ritmo anualizado — indicação para direcionar investigação, não economia garantida">
+        <SectionPanel title="Prioridade preliminar de análise" subtitle="Acerto, desvios positivos da Forecast e ritmo anualizado — indicação para direcionar investigação, não economia garantida">
           <Grid container spacing={1.5}>
             <Grid item xs={12} md={6}>
               <Typography variant="subtitle2" sx={{ fontWeight: 950, mb: 0.5 }}>Maiores gaps por {dimLabel}</Typography>
@@ -2096,14 +2096,14 @@ function Decisao({ table, filters, filterKey, setFilters }: {
               )) : <Typography variant="body2" color="text.secondary">Nenhum desvio positivo por serviço.</Typography>}
             </Grid>
             <Grid item xs={12} md={6}>
-              <Typography variant="subtitle2" sx={{ fontWeight: 950, mb: 0.5 }}>Acerto da previsão (piores)</Typography>
+              <Typography variant="subtitle2" sx={{ fontWeight: 950, mb: 0.5 }}>Acerto da Forecast (piores)</Typography>
               {biasRows.slice(0, 5).map((x, i) => (
                 <Box key={i} sx={{ mb: 0.6 }}>
                   <Stack direction="row" justifyContent="space-between"><Typography variant="caption" sx={{ fontWeight: 900 }}>{i + 1}. {x.key}</Typography><Typography variant="caption" sx={{ fontWeight: 950, color: x.accuracy < 70 ? RED : x.accuracy < 90 ? YELLOW : GREEN }}>{pct(x.accuracy)} · erro {compact(x.absErr)}</Typography></Stack>
                   <Box sx={{ height: 8, borderRadius: 99, bgcolor: "#EEF3F8", overflow: "hidden" }}><Box sx={{ height: "100%", width: `${Math.max(2, Math.min(100, 100 - x.accuracy))}%`, bgcolor: x.accuracy < 70 ? RED : x.accuracy < 90 ? YELLOW : GREEN }} /></Box>
                 </Box>
               ))}
-              {!biasRows.length && <Typography variant="body2" color="text.secondary">Sem pares de previsão e efetivado.</Typography>}
+              {!biasRows.length && <Typography variant="body2" color="text.secondary">Sem pares de Forecast e efetivado.</Typography>}
               <Box sx={{ mt: 1.5 }}>
                 <KpiCard label="Ritmo de referência" value={compact(runRate.annualized)} sub={`média ${compact(runRate.avgReal)}/mês × 12`} color={BLUE} full={moneyFull(runRate.annualized)} />
               </Box>

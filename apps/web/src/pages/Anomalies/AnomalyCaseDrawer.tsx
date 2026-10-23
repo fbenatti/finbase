@@ -321,7 +321,7 @@ export default function AnomalyCaseDrawer({ caseId, onClose, onChanged, config }
             </Alert>}
             {caseTab === 0 && <>
             {series ? <AnomalyCaseScope key={selected.id} kase={selected} series={series} currency={currency} />
-              : <Box sx={{ py: 8, textAlign: "center" }}><CircularProgress size={28} /><Typography color="text.secondary" sx={{ mt: 1 }}>Carregando efetivado e previsão…</Typography></Box>}
+              : <Box sx={{ py: 8, textAlign: "center" }}><CircularProgress size={28} /><Typography color="text.secondary" sx={{ mt: 1 }}>Carregando efetivado e Forecast…</Typography></Box>}
 
             <Accordion disableGutters sx={{ mt: 2 }}>
             <AccordionSummary expandIcon={<ExpandMoreIcon />}>Critérios do detector e regras acionadas</AccordionSummary>

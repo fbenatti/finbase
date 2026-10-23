@@ -79,7 +79,7 @@ export default function AnomalyCaseScope({ kase, series, currency }: {
         {monthlyCase ? "Média dos meses passados" : "Mediana dos últimos dias"} <strong>{money(expected, currency)}</strong> → efetivado <strong>{money(actual, currency)}</strong>{relative != null && ` · ${relative > 0 ? "+" : ""}${pct(relative)}`}
       </Typography>
       {expected != null && actual != null && expected >= 0 && actual > 0 && delta != null && delta > 1 && !withinBand && <Box sx={{ mt: 1.5 }}>
-        <Box sx={{ height: 10, borderRadius: 2, overflow: "hidden", display: "flex", bgcolor: "#E1E8F0" }} aria-label="Composição do efetivado entre previsão e desvio">
+        <Box sx={{ height: 10, borderRadius: 2, overflow: "hidden", display: "flex", bgcolor: "#E1E8F0" }} aria-label="Composição do efetivado entre Forecast e desvio">
           <Box sx={{ width: `${Math.min(100, expected / actual * 100)}%`, bgcolor: "#0F62FE" }} />
           {delta != null && delta > 0 && <Box sx={{ flex: 1, bgcolor: "#db525e" }} />}
         </Box>
@@ -96,7 +96,7 @@ export default function AnomalyCaseScope({ kase, series, currency }: {
       </Stack>
     </Paper>
 
-    <Typography variant="subtitle2" sx={{ mt: 2.5 }}>Efetivado × previsão</Typography>
+    <Typography variant="subtitle2" sx={{ mt: 2.5 }}>Efetivado × Forecast</Typography>
     <AnomalyEvolutionChart key={`${kase.id}-${JSON.stringify(filters)}`} series={selectedSeries} kase={kase} currency={currency} />
 
     <Paper variant="outlined" sx={{ mt: 2, p: { xs: 2, sm: 2.5 }, borderRadius: 3 }}>
@@ -110,7 +110,7 @@ export default function AnomalyCaseScope({ kase, series, currency }: {
         {/** IDs técnicos e dimensões de baixo valor foram retirados do caminho em detailScopeChain. */}
         <Stack direction="row" justifyContent="space-between" alignItems="center" gap={1}>
           <Typography variant="caption" fontWeight={700} color="text.secondary">TRAJETO DO GASTO</Typography>
-          <Chip size="small" variant="outlined" label={filters.length ? `Forecast no nível: ${forecastScopeLabel}` : "Previsão e desvio neste ramo"} sx={{ maxWidth: "70%", "& .MuiChip-label": { overflow: "hidden", textOverflow: "ellipsis" } }} />
+          <Chip size="small" variant="outlined" label={filters.length ? `Forecast no nível: ${forecastScopeLabel}` : "Forecast e desvio neste ramo"} sx={{ maxWidth: "70%", "& .MuiChip-label": { overflow: "hidden", textOverflow: "ellipsis" } }} />
         </Stack>
         <Box sx={{ mt: 1, pl: 1.5, position: "relative", "&:before": { content: '""', position: "absolute", left: 5, top: 10, bottom: 10, width: 2, bgcolor: "#E1E8F0" } }}>
           {lineageNodes.map((node, index) => {
@@ -179,6 +179,6 @@ export default function AnomalyCaseScope({ kase, series, currency }: {
         </Box>
       </Box>
     </Paper>
-    {rawDetailSelected && <Typography variant="caption" color="text.secondary" sx={{ display: "block", mt: 1.5 }}>O custo detalhado é observado na data do evento. Forecast e linha do tempo continuam no nível {forecastScopeLabel}, a granularidade que a previsão sustenta.</Typography>}
+    {rawDetailSelected && <Typography variant="caption" color="text.secondary" sx={{ display: "block", mt: 1.5 }}>O custo detalhado é observado na data do evento. Forecast e linha do tempo continuam no nível {forecastScopeLabel}, a granularidade que a Forecast sustenta.</Typography>}
   </Box>;
 }
