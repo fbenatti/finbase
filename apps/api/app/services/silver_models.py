@@ -166,6 +166,53 @@ METRIC_SERIES = SilverModel(
 )
 
 
+# ── Modelo: cobertura de coleta de métricas ──────────────────────────────────
+# Uma linha por série/resolução/origem/dia, inclusive quando não houve pontos.
+METRIC_COVERAGE = SilverModel(
+    name="resource_metric_coverage",
+    table="resource_metric_coverage",
+    description="Cobertura, lacunas e estado da coleta de métricas por dia UTC.",
+    grain=("_source_connection_id", "series_id", "resolution_seconds", "origin_kind", "metric_day"),
+    time_field="window_start_utc",
+    fields=(
+        _f("cloud_provider", "varchar", ROLE_IDENTITY, required=True),
+        _f("provider_account_id", "varchar", ROLE_IDENTITY),
+        _f("sub_account_id", "varchar", ROLE_IDENTITY),
+        _f("region_id", "varchar", ROLE_DIMENSION),
+        _f("resource_id", "varchar", ROLE_IDENTITY, required=True),
+        _f("series_id", "varchar", ROLE_IDENTITY, required=True),
+        _f("metric_namespace", "varchar", ROLE_IDENTITY),
+        _f("source_metric_name", "varchar", ROLE_IDENTITY),
+        _f("metric_scope", "varchar", ROLE_DIMENSION),
+        _f("dimensions_hash", "varchar", ROLE_IDENTITY),
+        _f("resolution_seconds", "bigint", ROLE_IDENTITY, required=True),
+        _f("origin_kind", "varchar", ROLE_IDENTITY, required=True),
+        _f("metric_day", "varchar", ROLE_TIME, required=True,
+           notes="Dia UTC YYYYMMDD; não representa período financeiro."),
+        _f("window_start_utc", "timestamp", ROLE_TIME, required=True),
+        _f("window_end_utc", "timestamp", ROLE_TIME, required=True),
+        _f("effective_start_utc", "timestamp", ROLE_TIME),
+        _f("effective_end_utc", "timestamp", ROLE_TIME),
+        _f("expected_buckets", "bigint", ROLE_MEASURE),
+        _f("observed_buckets", "bigint", ROLE_MEASURE),
+        _f("duplicate_buckets", "bigint", ROLE_MEASURE),
+        _f("missing_buckets", "bigint", ROLE_MEASURE),
+        _f("first_point_utc", "timestamp", ROLE_TIME),
+        _f("last_point_utc", "timestamp", ROLE_TIME),
+        _f("largest_gap_seconds", "bigint", ROLE_MEASURE),
+        _f("gap_spans_json", "varchar", ROLE_QUALITY),
+        _f("statistics_status_json", "varchar", ROLE_QUALITY),
+        _f("coverage_ratio", "double", ROLE_MEASURE),
+        _f("coverage_status", "varchar", ROLE_QUALITY, required=True),
+        _f("coverage_reason", "varchar", ROLE_QUALITY),
+        _f("collection_run_id", "varchar", ROLE_QUALITY),
+        _f("_source_connection_id", "bigint", ROLE_QUALITY, required=True),
+        _f("_silver_owner", "varchar", ROLE_QUALITY, required=True),
+        _f("_processed_at", "varchar", ROLE_QUALITY),
+    ),
+)
+
+
 # ── Modelo: inventário de recursos ────────────────────────────────────────────
 # Azure Resource Graph, AWS Config, GCP Cloud Asset, OCI Search. Responde
 # "quais recursos existem, com que atributos, a partir de quando".
@@ -846,6 +893,7 @@ RESOURCE_PROFILE_DAILY_WINDOW = SilverModel(
 
 MODELS: dict[str, SilverModel] = {
     METRIC_SERIES.name: METRIC_SERIES,
+    METRIC_COVERAGE.name: METRIC_COVERAGE,
     RESOURCE_INVENTORY.name: RESOURCE_INVENTORY,
     RESOURCE_COST.name: RESOURCE_COST,
     PRICE_CATALOG.name: PRICE_CATALOG,
