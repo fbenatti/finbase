@@ -85,7 +85,8 @@ def test_real_normalizer_rows_merge_without_optional_identity_keys():
         (result,), source_owner="oci_infrastructure_metrics", collection_run_id="test-run")
 
     assert len(rows) == 1
-    assert "cloud_partition" not in rows[0]
+    assert rows[0]["cloud_partition"] is None
+    assert rows[0]["sub_account_id"] is None
     assert len(merge_metric_rows([], rows)) == 1
 
 
