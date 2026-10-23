@@ -418,7 +418,7 @@ async def _execute_detection_v2(
             session,
             config_id=config_id,
             incidents=incidents,
-            watches=watches,
+            watches=[{**scope_meta.get(str(watch["scope_id"]), {}), **watch} for watch in watches],
             as_of=as_of,
             detected_at=detected_at,
             config_row=config_row,
@@ -554,7 +554,7 @@ async def _sync_cases(
     detected_at: datetime,
     config_row: Any,
 ) -> dict[str, int]:
-    """Cria casos a partir de incidentes v2 (sem atribuição automática)."""
+    """Registra alertas e desvios em observação como casos rastreáveis."""
     from sqlalchemy import select
 
     from app.models.anomaly import AnomalyCase, AnomalyCaseEvent
@@ -568,16 +568,19 @@ async def _sync_cases(
     # Every alerted leaf remains accessible; a parent grouping must not hide
     # all contributors except its largest one.
     leaves = [leaf for incident in incidents for leaf in (incident.get("contributors") or [incident["leader"]])]
+    leaves.extend(watches)
     for leader in leaves:
         sid = str(leader["scope_id"])
-        meta = {k: v for k, v in leader.items() if k != "tier"}
+        meta = dict(leader)
+        meta["detection_tier"] = str(leader.get("tier") or TIER_ALERT)
         disp = display_scope(meta)
         family = "|".join(f"{k}={v}" for k, v in disp.items() if v) or sid
         event_type = str(leader.get("detector") or "SPIKE")
         event_day = str(leader.get("day") or as_of.isoformat())[:10]
         event_period = event_day[:7].replace("-", "")
         episode_start = str(leader.get("episode_start") or event_day)[:10]
-        identity = f"config={config_id}|{family}|episode={episode_start}" if event_type != "MONTHLY_ACCUMULATED" else f"config={config_id}|{family}"
+        stable_episode = event_day if event_type == "SPIKE" else episode_start
+        identity = f"config={config_id}|{family}|episode={stable_episode}" if event_type != "MONTHLY_ACCUMULATED" else f"config={config_id}|{family}"
         case_key = case_key_for(sid, identity, event_type, period=event_period)
         existing = (
             await session.execute(select(AnomalyCase).where(
@@ -585,6 +588,7 @@ async def _sync_cases(
                 AnomalyCase.series_id == sid,
                 AnomalyCase.detector == event_type,
                 (AnomalyCase.period == event_period) if event_type == "MONTHLY_ACCUMULATED"
+                else (AnomalyCase.event_date == event_day) if event_type == "SPIKE"
                 else (AnomalyCase.episode_start == episode_start),
             ).order_by(AnomalyCase.id).limit(1))
         ).scalar_one_or_none()
@@ -625,6 +629,9 @@ async def _sync_cases(
                     payload={"before": before, "after": changed, "model_version": MODEL_VERSION},
                     note="Reavaliação do desvio; referência e workflow preservados"))
                 updated += 1
+            if leader.get("tier") == TIER_ALERT and existing.series_dimensions.get("detection_tier") == TIER_WATCH:
+                existing.series_dimensions = {**existing.series_dimensions, "detection_tier": TIER_ALERT}
+                await enqueue_case(session, case=existing, reason="Desvio elevado a alerta")
             continue
         routing = resolve_routing(config_row.routing_rules or [], meta)
         reason_raw = leader.get("reason_codes") or ""
@@ -679,7 +686,7 @@ async def _sync_cases(
                                    "incident_parent": next((incident["parent_key"] for incident in incidents
                                        if any(str(item["scope_id"]) == sid for item in incident.get("contributors", []))), None)},
             note="Detecção v2 com referência anterior ao evento"))
-        if not returned:
+        if not returned and leader.get("tier") == TIER_ALERT:
             await enqueue_case(session, case=case, reason="Novo desvio v2")
         created += 1
     return {"cases_created": created, "cases_updated": updated, "closed_cases_preserved": ignored}
