@@ -13,6 +13,7 @@ import {
   MenuItem,
   Select,
   Stack,
+  TextField,
   ToggleButton,
   ToggleButtonGroup,
   Tooltip,
@@ -24,6 +25,7 @@ import {
   CommitmentConnection,
   CommitmentProfile,
   CommitmentRecommendation,
+  createNegotiatedOffer,
   listCommitmentConnections,
   listCommitmentRecommendations,
   runCommitmentEngine,
@@ -37,7 +39,7 @@ const PROFILES: { value: CommitmentProfile; label: string }[] = [
   { value: "AGGRESSIVE", label: "Agressivo" },
 ];
 const READINESS_LABELS: Record<string, string> = {
-  INSUFFICIENT_HOURLY_DATA: "Dado horário insuficiente",
+  INSUFFICIENT_HOURLY_DATA: "Dado insuficiente",
   MISSING_OFFER: "Sem oferta cadastrada",
   NO_UNCOVERED_USAGE: "Uso já coberto",
   NO_ALWAYS_ON_USAGE: "Sem recurso ligado 24h",
@@ -65,6 +67,46 @@ function Metric({ title, value, detail }: { title: string; value: string; detail
         {detail && <Typography variant="body2" color="text.secondary" sx={{ mt: 0.5 }}>{detail}</Typography>}
       </CardContent>
     </Card>
+  );
+}
+
+// Spend commitments are negotiated: the saving needs the discount of the deal, never an assumed one.
+function NegotiatedOfferForm({ item, onSaved }: { item: CommitmentRecommendation; onSaved: () => Promise<void> }) {
+  const [discount, setDiscount] = useState("");
+  const [term, setTerm] = useState(12);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState("");
+  const value = Number(discount.replace(",", "."));
+  const valid = value > 0 && value < 100;
+
+  const save = async () => {
+    setSaving(true);
+    setError("");
+    try {
+      await createNegotiatedOffer({ instrument: item.instrument, term_months: term, discount_pct: value / 100 });
+      await onSaved();
+    } catch (cause) {
+      setError(formatApiError(cause));
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <Stack direction={{ xs: "column", sm: "row" }} gap={1} alignItems={{ sm: "center" }} sx={{ mt: 1, ml: 2 }}>
+      <TextField size="small" label="Desconto negociado (%)" value={discount} sx={{ width: 190 }}
+                 onChange={(event) => setDiscount(event.target.value)} inputProps={{ inputMode: "decimal" }} />
+      <FormControl size="small" sx={{ width: 130 }}>
+        <InputLabel>Prazo</InputLabel>
+        <Select label="Prazo" value={term} onChange={(event) => setTerm(Number(event.target.value))}>
+          {[12, 36].map((months) => <MenuItem key={months} value={months}>{months} meses</MenuItem>)}
+        </Select>
+      </FormControl>
+      <Button size="small" variant="outlined" disabled={!valid || saving} onClick={save}>
+        {saving ? "Salvando…" : "Salvar e reanalisar"}
+      </Button>
+      {error && <Typography variant="body2" color="error">{error}</Typography>}
+    </Stack>
   );
 }
 
@@ -183,7 +225,8 @@ export default function CommitmentRecommendations() {
         <Box>
           <Typography variant="subtitle1" fontWeight={700}>Recomendações do motor de compromissos</Typography>
           <Typography variant="body2" color="text.secondary">
-            Saving gerado se a proposta for executada, calculado da fatura horária. O motor só recomenda; nada é comprado.
+            Saving gerado se a proposta for executada, calculado da quantidade faturada (por hora ou por dia, conforme a
+            cloud) e do preço unitário efetivo. O motor só recomenda; nada é comprado.
           </Typography>
         </Box>
         {connections && connections.length > 0 && (
@@ -209,7 +252,7 @@ export default function CommitmentRecommendations() {
       {error && <Alert severity="error" sx={{ mb: 2 }}>{error}</Alert>}
       {connections && connections.length === 0 && (
         <Alert severity="info" sx={{ mb: 2 }}>
-          Nenhuma conexão de faturamento com dado horário. Hoje o motor lê a OCI pelos relatórios de custo (CSV).
+          Nenhuma conexão de faturamento com leitor do motor. Hoje o motor lê a OCI pela fatura diária da Silver.
         </Alert>
       )}
       {connection && !run && (
@@ -257,9 +300,13 @@ export default function CommitmentRecommendations() {
             <Typography variant="subtitle2" fontWeight={600} mb={1}>Sem proposta</Typography>
             <Stack spacing={0.75}>
               {notReady.map((item) => (
-                <Typography key={item.id} variant="body2">
-                  <strong>{item.instrument_label}</strong> — {READINESS_LABELS[item.readiness_status] || item.readiness_status}: {item.rationale[0]}
-                </Typography>
+                <Box key={item.id}>
+                  <Typography variant="body2">
+                    <strong>{item.instrument_label}</strong> — {READINESS_LABELS[item.readiness_status] || item.readiness_status}: {item.rationale[0]}
+                  </Typography>
+                  {item.readiness_status === "MISSING_OFFER" && item.purchase_path === "negotiated" &&
+                    <NegotiatedOfferForm item={item} onSaved={execute} />}
+                </Box>
               ))}
             </Stack>
           </CardContent></Card>

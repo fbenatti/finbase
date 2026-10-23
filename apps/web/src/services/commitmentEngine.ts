@@ -77,3 +77,18 @@ export async function setCommitmentRecommendationState(
 ): Promise<CommitmentRecommendation> {
   return (await api.patch(`${BASE}/recomendacoes/${id}/estado`, { state })).data;
 }
+
+export interface NegotiatedOfferInput {
+  instrument: string;
+  term_months: number;
+  discount_pct: number;
+  min_commit_annual?: number | null;
+  notes?: string | null;
+}
+
+// A negotiated deal (spend commitment): the discount the customer obtained or is quoted.
+export async function createNegotiatedOffer(input: NegotiatedOfferInput): Promise<void> {
+  await api.post(`${BASE}/ofertas`, {
+    ...input, source: "NEGOTIATED", payment_option: "CONTRACT", pricing_mode: "DISCOUNT",
+  });
+}
