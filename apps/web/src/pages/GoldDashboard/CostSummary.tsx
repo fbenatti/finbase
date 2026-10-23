@@ -299,11 +299,21 @@ export default function CostSummary({ table, director, departmentId, path, inclu
     let actual = 0;
     let forecast = 0;
     let budget = 0;
-    return series.map((row) => {
+    const anchor = series.reduce((last, row, index) => row.closed && row.forecast !== 0 ? index : last, -1);
+    const firstProjected = anchor >= 0 ? anchor : series.findIndex((row) => !row.closed);
+    const actualEnd = firstProjected >= 0 ? firstProjected - 1 : series.length - 1;
+    return series.map((row, index) => {
       actual += row.actual;
-      forecast += row.total;
+      forecast += index < firstProjected || firstProjected < 0
+        ? row.actual
+        : row.closed ? row.actual + row.forecast : row.forecast;
       budget += row.budget;
-      return { label: row.label, actual, forecast, budget };
+      return {
+        label: row.label,
+        actual: index <= actualEnd ? actual : null,
+        forecast: firstProjected >= 0 && index >= Math.max(0, firstProjected - 1) ? forecast : null,
+        budget,
+      };
     });
   }, [series]);
 
