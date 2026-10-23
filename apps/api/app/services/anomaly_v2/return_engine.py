@@ -38,7 +38,11 @@ def evaluate_return(
     cursor = episode_start
     while cursor <= as_of:
         observations = [row for row in scope_daily if str(row.get("day") or "")[:10] == cursor.isoformat()]
-        if not observations or (valid_days is not None and cursor.isoformat() not in valid_days):
+        if valid_days is not None and cursor.isoformat() not in valid_days:
+            valid_streak = 0
+            cursor += timedelta(days=1)
+            continue
+        if not observations and valid_days is None:
             valid_streak = 0
             cursor += timedelta(days=1)
             continue
