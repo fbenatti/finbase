@@ -6,7 +6,6 @@ import {
   FormControl, InputLabel, Select, MenuItem, Stack, TextField, Autocomplete, Popover,
   Table, TableBody, TableCell, TableContainer, TableHead, TableRow,
   Divider, Tooltip, LinearProgress, Menu, List, ListItemButton, ListItemText, Collapse, IconButton,
-  FormControlLabel, Switch,
 } from "@mui/material";
 import { RefreshOutlined, ContentCopyOutlined, FilterAltOffOutlined, ExpandMoreOutlined, ChevronRightOutlined, BusinessOutlined, FileDownloadOutlined, CalendarMonthOutlined, AddOutlined, CloseOutlined } from "@mui/icons-material";
 import Plot from "@/components/Plot";
@@ -457,7 +456,7 @@ export default function GoldDashboard() {
   const [draftFrom, setDraftFrom] = useState(`${currentYear}-01-01`);
   const [draftTo, setDraftTo] = useState(`${currentYear}-12-31`);
   const [filterMenuAnchor, setFilterMenuAnchor] = useState<HTMLElement | null>(null);
-  const [includeSharedCost, setIncludeSharedCost] = useState(false);
+  const includeSharedCost = false;
   const [error, setError] = useState("");
   const [refreshTick, setRefreshTick] = useState(0);
   // Árvore do organograma para o filtro global de departamento.
@@ -711,7 +710,6 @@ export default function GoldDashboard() {
           <Tooltip title="Filtra por qualquer dimensão. Valores da mesma dimensão somam (OU); dimensões diferentes se combinam (E).">
             <Button size="small" variant="outlined" startIcon={<AddOutlined />} onClick={(event) => setFilterMenuAnchor(event.currentTarget)} sx={{ height: 34, borderRadius: "10px", textTransform: "none" }}>Filtro</Button>
           </Tooltip>
-          <FormControlLabel control={<Switch size="small" checked={includeSharedCost} onChange={(_, checked) => setIncludeSharedCost(checked)} />} label={<Typography variant="body2">Incluir custo rateado</Typography>} sx={{ ml: 0.5, mr: 0 }} />
           <Box sx={{ flexGrow: 1 }} />
           <Button size="small" startIcon={<FilterAltOffOutlined />} onClick={() => { setHighlightsDepartment(""); setIncludeSharedCost(false); clearFilters(); }} sx={{ textTransform: "none" }}>Limpar</Button>
         <Box>
