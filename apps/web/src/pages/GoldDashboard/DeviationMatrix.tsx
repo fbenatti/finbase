@@ -291,7 +291,7 @@ function DrillPanel({ kind, monthKey, monthLabel, runId, anomalies, table, filte
             value: Number(item.variance || 0),
             base: Number(item.forecast_value || 0),
             actual: Number(item.actual_value || 0),
-            drillable: !result.leaf && item.path.length > depth,
+            drillable: !result.leaf && (item.path?.length ?? 0) > depth,
           })),
         };
       }
