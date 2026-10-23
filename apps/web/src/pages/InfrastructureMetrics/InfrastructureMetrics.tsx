@@ -55,7 +55,7 @@ function MetricSparkline({ rows }: { rows: MetricRow[] }) {
       <line x1="28" y1="154" x2="772" y2="154" stroke="#e4e9ed" />
       <polyline points={coords} fill="none" stroke="#087f8c" strokeWidth="3" strokeLinejoin="round" strokeLinecap="round" />
       <text x="28" y="178" fill="#66747d" fontSize="11">{new Date(points[0].bucket_start_utc).toLocaleString()}</text>
-      <text x="772" y="178" textAnchor="end" fill="#66747d" fontSize="11">{new Date(points.at(-1)!.bucket_start_utc).toLocaleString()}</text>
+      <text x="772" y="178" textAnchor="end" fill="#66747d" fontSize="11">{new Date(points[points.length - 1].bucket_start_utc).toLocaleString()}</text>
       <text x="28" y="17" fill="#66747d" fontSize="11">máx. {max.toPrecision(4)}</text>
       <text x="28" y="148" fill="#66747d" fontSize="11">mín. {min.toPrecision(4)}</text>
     </svg>
