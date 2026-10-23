@@ -83,7 +83,15 @@ export type OpportunityDetail = Opportunity & {
     cpu: SeriesStats | null;
     memory: SeriesStats | null;
     capacity: Record<string, unknown>;
-    prices: { ocpu_hour: number; memory_gb_hour: number; currency: string; billing_period: string; meters: Record<string, string>; basis: string } | null;
+    /** Base do preço de cada provedor: preços unitários, fórmula e origem. */
+    prices: {
+      currency?: string | null;
+      billing_period?: string;
+      unit_prices?: Record<string, number>;
+      meters?: Record<string, string>;
+      formula?: string;
+      source?: string;
+    } | null;
     policy: Record<string, number | string>;
     projected_utilization?: Record<string, number>;
   };

@@ -16,6 +16,8 @@ import {
   ACTION_COLOR, ACTION_LABEL, CONFIDENCE_COLOR, CONFIDENCE_LABEL, READINESS_LABEL, STATE_LABEL, money, pct, sizeLabel,
 } from "./opportunityLabels";
 
+const UNIT_PRICE_LABEL: Record<string, string> = { ocpu_hour: "OCPU-h", memory_gb_hour: "GB-h", vcpu_hour: "vCPU-h", sku_hour: "hora" };
+
 const unitPrice = (value: number, currency: string) =>
   value.toLocaleString("pt-BR", { style: "currency", currency, minimumFractionDigits: 4, maximumFractionDigits: 4 });
 
@@ -136,7 +138,7 @@ export default function OpportunityDrawer({ opportunityId, onClose, onChanged }:
           <Box><Typography variant="caption" color="text.secondary">Redução do custo do recurso</Typography><Typography variant="h6">{item.current_monthly_cost && item.monthly_saving != null ? `${(item.monthly_saving / item.current_monthly_cost * 100).toFixed(0)}%` : "—"}</Typography></Box>
         </Stack>
         {evidence?.prices && <Typography variant="caption" color="text.secondary">
-          Preço efetivo do billing ({evidence.prices.billing_period}): {unitPrice(evidence.prices.ocpu_hour, currency)}/OCPU-h e {unitPrice(evidence.prices.memory_gb_hour, currency)}/GB-h · 730 h/mês · {evidence.prices.meters?.ocpu_hour} / {evidence.prices.meters?.memory_gb_hour}
+          Preço {evidence.prices.billing_period ? `efetivo (${evidence.prices.billing_period})` : "comparável"}: {Object.entries(evidence.prices.unit_prices ?? {}).map(([unit, value]) => `${unitPrice(value, currency)} por ${UNIT_PRICE_LABEL[unit] ?? unit}`).join(" · ")} · {evidence.prices.formula ?? "preço por hora"} × 730 h/mês · {evidence.prices.source ?? ""}
         </Typography>}
       </Paper>
 
