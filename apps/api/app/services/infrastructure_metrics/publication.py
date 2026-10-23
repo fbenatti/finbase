@@ -63,6 +63,7 @@ def _merge_statistics_status(old_value, new_value) -> str | None:
 def merge_metric_rows(existing: Iterable[Mapping], incoming: Iterable[Mapping]) -> list[dict]:
     """Merge one connection/day slice; absent values never erase valid history."""
     merged: dict[tuple, dict] = {}
+    incoming_keys: set[tuple] = set()
     for source_name, source_rows in (("existing", existing), ("incoming", incoming)):
         for source in source_rows:
             row = dict(source)
@@ -73,6 +74,18 @@ def merge_metric_rows(existing: Iterable[Mapping], incoming: Iterable[Mapping]) 
                 continue
             if source_name == "existing":
                 raise ValueError("existing Silver slice contains duplicate metric series buckets")
+            if key in incoming_keys:
+                conflicts = [
+                    field for field in _PRESERVE_IF_MISSING
+                    if prior.get(field) is not None and row.get(field) is not None
+                    and prior[field] != row[field]
+                ]
+                if conflicts:
+                    raise ValueError(
+                        "incoming metric batch has conflicting duplicate bucket values: "
+                        + ", ".join(conflicts)
+                    )
+            incoming_keys.add(key)
             for field, value in row.items():
                 if field in _PRESERVE_IF_MISSING and value is None:
                     continue
