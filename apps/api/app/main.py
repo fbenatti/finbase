@@ -174,12 +174,6 @@ async def lifespan(app: FastAPI):
             AnomalyCase, AnomalyCaseEvent, AnomalyAction, AnomalyNotification,
         )
         await conn.run_sync(Base.metadata.create_all)
-        # Remove the retired contract story feature and all of its persisted data/configuration.
-        await conn.execute(text("DROP TABLE IF EXISTS contract_story_ledger"))
-        await conn.execute(text("DELETE FROM customer_module WHERE module_code = 'planejamento_historia_dos_contratos'"))
-        await conn.execute(text("DELETE FROM role_permission WHERE scope = 'planejamento_historia_dos_contratos'"))
-        await conn.execute(text("DELETE FROM user_grant WHERE scope = 'planejamento_historia_dos_contratos'"))
-        await conn.execute(text("DELETE FROM navigation_module WHERE code = 'planejamento_historia_dos_contratos'"))
         # As migrações são DDL: `ALTER TABLE` pede ACCESS EXCLUSIVE e fica atrás
         # de qualquer worker que esteja no meio de uma transação. Sem limite, o
         # startup esperava minutos — e, com a API já servindo, travava as coletas
@@ -187,6 +181,12 @@ async def lifespan(app: FastAPI):
         # erro rápido; o retry abaixo tenta de novo.
         await conn.execute(text("SET LOCAL lock_timeout = '5s'"))
         await conn.execute(text("SET LOCAL statement_timeout = '120s'"))
+        # Remove the retired contract story feature and all of its persisted data/configuration.
+        await conn.execute(text("DROP TABLE IF EXISTS contract_story_ledger"))
+        await conn.execute(text("DELETE FROM customer_module WHERE module_code = 'planejamento_historia_dos_contratos'"))
+        await conn.execute(text("DELETE FROM role_permission WHERE scope = 'planejamento_historia_dos_contratos'"))
+        await conn.execute(text("DELETE FROM user_grant WHERE scope = 'planejamento_historia_dos_contratos'"))
+        await conn.execute(text("DELETE FROM navigation_module WHERE code = 'planejamento_historia_dos_contratos'"))
         await _execute_migration(conn, "ALTER TABLE processing_log ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ NOT NULL DEFAULT now()")
         await _execute_migration(conn, "CREATE INDEX IF NOT EXISTS ix_processing_log_updated ON processing_log (updated_at)")
         await _execute_migration(conn, "ALTER TABLE navigation_module ADD COLUMN IF NOT EXISTS visible BOOLEAN NOT NULL DEFAULT true")

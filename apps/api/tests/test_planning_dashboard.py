@@ -2,7 +2,6 @@ import io
 from types import SimpleNamespace
 
 import openpyxl
-import pandas as pd
 import pytest
 from fastapi import HTTPException
 
