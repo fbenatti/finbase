@@ -21,6 +21,7 @@ _STAT_FIELD = {
 def query_results_to_silver_rows(
     results: Iterable[QueryResult], *, source_owner: str,
     collection_run_id: str, observed_at: datetime | None = None,
+    bronze_persisted: bool = False,
 ) -> list[dict]:
     """Return one wide row per provider stream and bucket, without writing data."""
     observed_at = observed_at or datetime.now(timezone.utc)
@@ -32,6 +33,10 @@ def query_results_to_silver_rows(
         plan = result.plan
         descriptor = plan.descriptor
         scope = plan.scope
+        raw_by_statistic = {
+            (str(raw.get("resource_id") or ""), str(raw.get("statistic") or "unknown")): raw
+            for raw in result.raw_payloads
+        }
         descriptor_payload = asdict(descriptor)
         if descriptor_payload["verified_at"] is not None:
             descriptor_payload["verified_at"] = descriptor_payload["verified_at"].isoformat()
@@ -95,11 +100,7 @@ def query_results_to_silver_rows(
                         stat in point.values for stat in ("p90", "p95", "p99")
                     ) else None,
                     "native_quantile_basis": "bucket",
-                    "statistic_lineage_json": canonical_json({
-                        stat: {"request_id": plan.request_id, "payload_hash": None,
-                               "bronze_path": None, "source_status": result.status_code}
-                        for stat in point.values
-                    }),
+                    "statistic_lineage_json": canonical_json({}),
                     "statistics_status_json": canonical_json({
                         "requested": list(plan.statistics),
                         "returned": sorted(point.values),
@@ -139,12 +140,26 @@ def query_results_to_silver_rows(
             # Each provider statistic query contributes to the same wide row.
             lineage = json.loads(row["statistic_lineage_json"])
             for statistic in point.values:
+                raw = raw_by_statistic.get((str(resource_id), statistic), {})
+                payload_text = json.dumps(
+                    raw.get("payload"), default=str, ensure_ascii=False,
+                    sort_keys=True, separators=(",", ":"),
+                ) if "payload" in raw else None
+                payload_hash = hashlib.sha256(payload_text.encode("utf-8")).hexdigest() if payload_text else None
+                resource_alias = hashlib.sha256(str(resource_id).encode("utf-8")).hexdigest()[:16]
+                bronze_path = "/".join((
+                    "infrastructure_metrics", str(collection_run_id),
+                    str(descriptor.name), str(plan.resolution_seconds), resource_alias,
+                    str(statistic),
+                )) if bronze_persisted else None
                 lineage[statistic] = {
-                    "request_id": plan.request_id,
-                    "payload_hash": None,
-                    "bronze_path": None,
-                    "source_status": result.status_code,
+                    "request_id": raw.get("request_id") or plan.request_id,
+                    "payload_hash": payload_hash if bronze_persisted else None,
+                    "bronze_path": bronze_path,
+                    "source_status": int(raw.get("status_code") or result.status_code),
                 }
+                if bronze_persisted:
+                    row.setdefault("_bronze_blob_path", bronze_path)
             row["statistic_lineage_json"] = canonical_json(lineage)
             status = json.loads(row["statistics_status_json"])
             status["returned"] = sorted(set(status.get("returned", ())) | set(point.values))
