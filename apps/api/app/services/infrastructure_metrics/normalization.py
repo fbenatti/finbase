@@ -35,7 +35,7 @@ def query_results_to_silver_rows(
         scope = plan.scope
         raw_by_statistic = {
             (str(raw.get("resource_id") or ""), str(raw.get("statistic") or "unknown")): raw
-            for raw in result.raw_payloads
+            for raw in getattr(result, "raw_payloads", ())
         }
         descriptor_payload = asdict(descriptor)
         if descriptor_payload["verified_at"] is not None:
