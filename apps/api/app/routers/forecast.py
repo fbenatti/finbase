@@ -563,10 +563,6 @@ async def duplicate_config(config_id: int, db: AsyncSession = Depends(get_db)):
     src = await db.get(ForecastConfig, config_id)
     if not src: raise HTTPException(404, "Configuração não encontrada")
     raise HTTPException(409, "O Forecast aceita apenas um perfil. Edite o perfil existente.")
-    values = {c.name: getattr(src, c.name) for c in src.__table__.columns if c.name not in {"id", "created_at", "updated_at"}}
-    values.update(name=f"{src.name} (cópia)", version=1)
-    row = ForecastConfig(**values); db.add(row); await db.commit(); await db.refresh(row)
-    return _out(row)
 
 @router.post("/configuracoes/{config_id}/validar")
 async def validate(config_id: int, db: AsyncSession = Depends(get_db)):
