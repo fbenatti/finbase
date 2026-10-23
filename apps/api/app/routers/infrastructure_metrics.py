@@ -369,6 +369,7 @@ async def read_metric_series(
     end_utc: datetime,
     resource_id: str | None = None,
     metric: str | None = None,
+    source_metric_name: str | None = None,
     resolution_seconds: Literal[60, 300, 900] | None = None,
     limit: int = Query(5000, ge=1, le=20000),
     user=Depends(get_current_user),
@@ -381,6 +382,20 @@ async def read_metric_series(
     if start >= end or end - start > timedelta(days=60):
         raise HTTPException(422, "A janela deve ser positiva e ter no máximo 60 dias")
     await _authorize_connection(user, db, connection_id, "read")
+    connection = await db.get(SourceConnection, connection_id)
+    if not connection or connection.connector_type != "oci":
+        raise HTTPException(404, "Conexão OCI não encontrada")
+    if resource_id or source_metric_name:
+        try:
+            config = config_from_connection(connection)
+            if resource_id and resource_id not in config.resource_ids:
+                raise ValueError("recurso fora da allowlist desta conexão")
+            if source_metric_name:
+                descriptor = get_metric("oci", "oci_computeagent", source_metric_name)
+                if descriptor.name not in config.metric_names:
+                    raise ValueError("métrica fora da allowlist desta conexão")
+        except (ValueError, LookupError) as exc:
+            raise HTTPException(422, str(exc)) from exc
     filters = {
         "_source_connection_id": connection_id,
         "bucket_start_utc__gte": start.replace(tzinfo=None),
@@ -390,6 +405,8 @@ async def read_metric_series(
         filters["resource_id"] = resource_id
     if metric:
         filters["metric"] = metric
+    if source_metric_name:
+        filters["source_metric_name"] = source_metric_name
     if resolution_seconds:
         filters["resolution_seconds"] = resolution_seconds
     try:

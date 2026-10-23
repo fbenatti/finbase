@@ -108,7 +108,7 @@ export default function InfrastructureMetrics() {
     setLoading(true); setError(""); setMessage("");
     const params = {
       connection_id: Number(connectionId), start_utc: asUtc(start), end_utc: asUtc(end),
-      resource_id: resourceId || undefined, resolution_seconds: resolution,
+      resource_id: resourceId || undefined, source_metric_name: metric || undefined, resolution_seconds: resolution,
     };
     Promise.all([
       api.get("/custos/metricas-infra/series", { params, signal: controller.signal }),
@@ -116,11 +116,11 @@ export default function InfrastructureMetrics() {
       api.get("/custos/metricas-infra/perfis", { params: { connection_id: Number(connectionId), start_utc: params.start_utc, end_utc: params.end_utc }, signal: controller.signal }),
     ]).then(([series, coverage, profile]) => {
       if (!active) return;
-      setRows((series.data.rows || []).filter((row: MetricRow) =>
-        (!resourceId || row.resource_id === resourceId) && (!metric || row.source_metric_name === metric) && row.resolution_seconds === resolution,
-      ));
+      setRows((series.data.rows || []).filter((row: MetricRow) => row.resolution_seconds === resolution));
       setCoverageRows((coverage.data.rows || []).filter((row: Record<string, unknown>) => !resourceId || row.resource_id === resourceId));
-      setProfiles((profile.data.profiles || []).filter((row: Profile & { metric?: string }) => !metric || row.metric === metric));
+      setProfiles((profile.data.profiles || []).filter((row: Profile & { source_metric_name?: string; resolution_seconds?: number }) =>
+        (!metric || row.source_metric_name === metric) && (!resolution || row.resolution_seconds === resolution),
+      ));
     }).catch((reason: unknown) => {
       if (!active || controller.signal.aborted) return;
       setError("A Silver não conseguiu responder. Verifique se há dados para esta conexão e janela.");

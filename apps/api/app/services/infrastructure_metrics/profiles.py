@@ -102,6 +102,7 @@ def build_window_profiles(
             "resource_type": row.get("resource_type"),
             "region_id": row.get("region_id"),
             "metric": row.get("metric"),
+            "source_metric_name": row.get("source_metric_name"),
             "series_id": row.get("series_id"),
             "dimensions_hash": row.get("dimensions_hash"),
             "metric_scope": row.get("metric_scope"),

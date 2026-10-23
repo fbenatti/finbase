@@ -877,6 +877,7 @@ RESOURCE_PROFILE_DAILY_WINDOW = SilverModel(
         _f("dimensions_hash", "varchar", ROLE_IDENTITY),
         _f("metric_scope", "varchar", ROLE_DIMENSION),
         _f("metric", "varchar", ROLE_IDENTITY, required=True),
+        _f("source_metric_name", "varchar", ROLE_IDENTITY),
         _f("billing_period", "varchar", ROLE_IDENTITY, notes="Mês de custo associado; distinto da janela de perfil."),
         _f("window_from_day", "varchar", ROLE_TIME, required=True),
         _f("window_to_day", "varchar", ROLE_TIME, required=True),
