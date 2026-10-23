@@ -62,6 +62,8 @@ def _run_dict(run: InfraOpportunityRun) -> dict:
 def _opportunity_dict(item: InfraOpportunity, *, full: bool = False) -> dict:
     evidence = item.evidence or {}
     cpu, memory = evidence.get("cpu") or {}, evidence.get("memory") or {}
+    recurring = evidence.get("recurring_peaks") or {}
+    detection, conditional = recurring.get("detection") or {}, recurring.get("conditional") or {}
     data = {
         "id": item.id, "run_id": item.run_id, "connection_id": item.connection_id, "provider": item.provider,
         "resource_id": item.resource_id, "resource_name": item.resource_name,
@@ -79,6 +81,13 @@ def _opportunity_dict(item: InfraOpportunity, *, full: bool = False) -> dict:
         "risks": item.risks or [], "state_note": item.state_note,
         "state_changed_at": _iso(item.state_changed_at), "created_at": _iso(item.created_at),
         "inputs_hash": item.inputs_hash, "engine_version": item.engine_version,
+        # Recurring-peak insight: saving conditional on capping/rescheduling the job.
+        "conditional_action_type": item.conditional_action_type,
+        "conditional_monthly_saving": item.conditional_monthly_saving,
+        "conditional_state": item.conditional_state, "conditional_state_note": item.conditional_state_note,
+        "conditional_to_config": conditional.get("to_config"),
+        "conditional_confidence": conditional.get("confidence"),
+        "recurring_peaks_label": detection.get("label") if detection.get("detected") else None,
     }
     if full:
         data.update({"rationale": item.rationale or [], "evidence": evidence})
@@ -175,7 +184,13 @@ async def summary(connection_id: int = Query(..., gt=0), user=Depends(get_curren
     actionable = [item for item in items if item.action_type == "RIGHTSIZE_DOWN"
                   and item.readiness_status == "READY_FOR_CAPACITY_ANALYSIS" and (item.monthly_saving or 0) > 0]
     pick = lambda states: round(sum(i.monthly_saving for i in actionable if i.state in states), 2)
-    projected = pick(("NEW", "ACCEPTED", "IMPLEMENTED"))
+    # Conditional savings (recurring peaks) are on top of the main
+    # recommendation and only count in the projection once accepted.
+    conditionals = [item for item in items if item.conditional_action_type
+                    and item.readiness_status == "READY_FOR_CAPACITY_ANALYSIS" and (item.conditional_monthly_saving or 0) > 0]
+    pick_conditional = lambda states: round(
+        sum(i.conditional_monthly_saving for i in conditionals if i.conditional_state in states), 2)
+    projected = round(pick(("NEW", "ACCEPTED", "IMPLEMENTED")) + pick_conditional(("ACCEPTED", "IMPLEMENTED")), 2)
     current_cost = sum(item.current_monthly_cost or 0 for item in items)
     return {
         "run": _run_dict(run),
@@ -189,6 +204,10 @@ async def summary(connection_id: int = Query(..., gt=0), user=Depends(get_curren
         "implemented_saving_monthly": pick(("IMPLEMENTED",)),
         "accepted_saving_monthly": pick(("ACCEPTED",)),
         "dismissed_saving_monthly": pick(("DISMISSED",)),
+        "conditional_opportunities": sum(1 for item in conditionals if item.conditional_state != "DISMISSED"),
+        "conditional_saving_monthly": pick_conditional(("NEW", "ACCEPTED", "IMPLEMENTED")),
+        "conditional_pending_saving_monthly": pick_conditional(("NEW",)),
+        "conditional_accepted_saving_monthly": pick_conditional(("ACCEPTED", "IMPLEMENTED")),
         "avg_saving_per_opportunity": round(projected / len(actionable), 2) if actionable else None,
         "analyzed_monthly_cost": round(current_cost, 2),
         "saving_ratio": round(projected / current_cost, 4) if current_cost else None,
@@ -346,6 +365,24 @@ async def opportunity_series(
         return await asyncio.to_thread(_read_chart_series, item, run, resolution_seconds)
     except Exception as exc:
         raise HTTPException(503, f"Silver indisponível para consulta ({type(exc).__name__})") from exc
+
+
+@router.post("/{opportunity_id}/estado-condicional")
+async def set_conditional_state(opportunity_id: int, body: StateRequest, user=Depends(get_current_user),
+                                db: AsyncSession = Depends(get_db)):
+    """Decision on the recurring-peak conditional (cap or reschedule the job)."""
+    item = await db.get(InfraOpportunity, opportunity_id)
+    if not item:
+        raise HTTPException(404, "Oportunidade não encontrada")
+    if not item.conditional_action_type:
+        raise HTTPException(409, "Esta oportunidade não tem ajuste de job condicionado")
+    await _authorize(user, db, item.connection_id, "update")
+    item.conditional_state = body.state
+    item.conditional_state_note = body.note
+    item.conditional_state_changed_at = datetime.now(timezone.utc)
+    await db.commit()
+    await db.refresh(item)
+    return _opportunity_dict(item, full=True)
 
 
 @router.post("/{opportunity_id}/estado")

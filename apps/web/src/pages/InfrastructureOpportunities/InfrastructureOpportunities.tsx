@@ -23,6 +23,7 @@ import {
 } from "../../services/infraOpportunitiesApi";
 import AllResourcesView from "./AllResourcesView";
 import OpportunityDrawer from "./OpportunityDrawer";
+import { PEAK_SLOT_COLOR } from "./RecurringPeaksPanel";
 import {
   ACTION_COLOR, ACTION_LABEL, AGGRESSIVENESS_LABEL, CONFIDENCE_COLOR, CONFIDENCE_LABEL, READINESS_LABEL, STATE_LABEL, money, pct, sizeLabel,
 } from "./opportunityLabels";
@@ -99,6 +100,9 @@ export default function InfrastructureOpportunities() {
   const currency = summary?.currency ?? "BRL";
   const visibleItems = useMemo(() => items.filter((item) =>
     (!actionFilter || item.action_type === actionFilter) && (!stateFilter || item.state === stateFilter)), [items, actionFilter, stateFilter]);
+  const conditionals = useMemo(() => items
+    .filter((item) => item.conditional_action_type && (item.conditional_monthly_saving ?? 0) > 0)
+    .sort((a, b) => (b.conditional_monthly_saving ?? 0) - (a.conditional_monthly_saving ?? 0)), [items]);
   const openList = (filters: { action?: string; state?: string }) => {
     setActionFilter(filters.action ?? "");
     setStateFilter(filters.state ?? "");
@@ -178,7 +182,7 @@ export default function InfrastructureOpportunities() {
           </Typography>
           <Stack direction="row" spacing={2} flexWrap="wrap" useFlexGap sx={{ mt: 1.5 }}>
             {[
-              { label: "Economia projetada / mês", value: money(summary.projected_saving_monthly, currency), note: "Reduções prontas, não descartadas", go: { action: "RIGHTSIZE_DOWN" } },
+              { label: "Economia projetada / mês", value: money(summary.projected_saving_monthly, currency), note: summary.conditional_accepted_saving_monthly ? "Reduções prontas e ajustes de job aceitos" : "Reduções prontas, não descartadas", go: { action: "RIGHTSIZE_DOWN" } },
               { label: "Economia projetada / ano", value: money(summary.projected_saving_annual, currency), note: "12 × a projeção mensal", go: { action: "RIGHTSIZE_DOWN" } },
               { label: "Saving médio por oportunidade", value: money(summary.avg_saving_per_opportunity, currency), note: "Média mensal da última execução", go: { action: "RIGHTSIZE_DOWN" } },
               { label: "Saving médio por execução", value: money(summary.avg_saving_per_run, currency), note: `Média de ${summary.completed_runs} execução(ões) concluída(s)`, go: null },
@@ -193,6 +197,39 @@ export default function InfrastructureOpportunities() {
             </Paper>)}
           </Stack>
         </Paper>
+
+        {conditionals.length > 0 && <Paper variant="outlined" sx={{ p: 2, mb: 2, borderColor: "#c9b3f5", background: "linear-gradient(110deg,#f8f5fe,#fff)" }}>
+          <Typography variant="subtitle2">Oportunidades condicionadas a ajuste de job</Typography>
+          <Typography variant="caption" color="text.secondary">
+            Picos recorrentes (cron, backup, ETL) que seguram o tamanho da VM. A economia só vale se o job for limitado (CPUQuota/cgroups/nice) ou reagendado,
+            por isso fica fora da economia projetada até ser aceita no painel do recurso.
+          </Typography>
+          <Stack direction="row" spacing={2} flexWrap="wrap" useFlexGap sx={{ mt: 1.5, mb: 1.5 }}>
+            {[
+              { label: "Economia condicionada / mês", value: money(summary.conditional_saving_monthly, currency), note: `${summary.conditional_opportunities ?? 0} recurso(s), além das reduções acima` },
+              { label: "Aguardando decisão / mês", value: money(summary.conditional_pending_saving_monthly, currency), note: "Ainda fora da projeção" },
+              { label: "Aceita / mês", value: money(summary.conditional_accepted_saving_monthly, currency), note: "Já somada à economia projetada" },
+            ].map((kpi) => <Paper key={kpi.label} variant="outlined" sx={{ p: 1.25, minWidth: 180, flex: "1 1 180px" }}>
+              <Typography variant="caption" color="text.secondary">{kpi.label}</Typography>
+              <Typography variant="h6" sx={{ color: PEAK_SLOT_COLOR }}>{kpi.value}</Typography>
+              <Typography variant="caption" color="text.secondary">{kpi.note}</Typography>
+            </Paper>)}
+          </Stack>
+          <Table size="small">
+            <TableHead><TableRow>
+              <TableCell>Recurso</TableCell><TableCell>Picos recorrentes</TableCell><TableCell>Recomendado hoje</TableCell><TableCell>Sem os picos</TableCell>
+              <TableCell>Decisão</TableCell><TableCell align="right">Economia condicionada / mês</TableCell>
+            </TableRow></TableHead>
+            <TableBody>{conditionals.map((item) => <TableRow key={item.id} hover sx={{ cursor: "pointer" }} onClick={() => setOpenId(item.id)}>
+              <TableCell>{item.resource_name}</TableCell>
+              <TableCell>{item.recurring_peaks_label}</TableCell>
+              <TableCell>{sizeLabel(item.to_config)}</TableCell>
+              <TableCell>{sizeLabel(item.conditional_to_config)}</TableCell>
+              <TableCell>{STATE_LABEL[item.conditional_state ?? "NEW"]}</TableCell>
+              <TableCell align="right"><Typography variant="body2" fontWeight={700} sx={{ color: PEAK_SLOT_COLOR }}>+ {money(item.conditional_monthly_saving, currency)}</Typography></TableCell>
+            </TableRow>)}</TableBody>
+          </Table>
+        </Paper>}
 
         <Stack direction="row" spacing={2} flexWrap="wrap" useFlexGap sx={{ mb: 2 }}>
           {[

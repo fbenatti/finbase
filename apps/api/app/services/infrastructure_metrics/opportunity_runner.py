@@ -18,6 +18,7 @@ from .opportunities import (
     analyze_resource, summarize_series, window_bounds,
 )
 from .policy import PARAMETER_KEYS, load_active_policy
+from .peak_patterns import conditional_rightsizing
 from .registry import provider_for_connection, rightsizing_for
 from .sizing import CapacitySnapshot
 
@@ -111,6 +112,9 @@ def read_hourly_profiles(
             "p95": row["p95"], "peak": row["peak"],
         }
     return profiles
+def _conditional_target(item: Any) -> dict | None:
+    conditional = ((item.evidence or {}).get("recurring_peaks") or {}).get("conditional") or {}
+    return conditional.get("to_config")
 
 
 def run_opportunity_engine(
@@ -162,24 +166,39 @@ def run_opportunity_engine(
                 .order_by(InfraOpportunity.id)
             ).scalars()
         }
+        # The conditional decision follows its own target size across runs.
+        conditional_previous = {
+            (item.resource_id, str(_conditional_target(item))): item
+            for item in previous.values() if item.conditional_action_type
+        }
         results = []
         for resource_id in config.resource_ids:
-            stats = {
-                metric: summarize_series(
-                    series_reader(int(connection.id), resource_id, metric, start, end, resolution_seconds),
-                    window_start=start, window_end=end, resolution_seconds=resolution_seconds,
-                )
+            series = {
+                metric: series_reader(int(connection.id), resource_id, metric, start, end, resolution_seconds)
                 for metric in ANALYZED_METRICS
             }
+            stats = {
+                metric: summarize_series(rows, window_start=start, window_end=end, resolution_seconds=resolution_seconds)
+                for metric, rows in series.items()
+            }
             snapshot = capacity.get(resource_id)
+            snapshot = snapshot if isinstance(snapshot, CapacitySnapshot) else None
+            memory = stats[MEMORY_METRIC] if stats[MEMORY_METRIC]["samples"] else None
             result = analyze_resource(
-                resource_id=resource_id,
-                capacity=snapshot if isinstance(snapshot, CapacitySnapshot) else None,
-                cpu=stats[CPU_METRIC] if stats[CPU_METRIC]["samples"] else None,
-                memory=stats[MEMORY_METRIC] if stats[MEMORY_METRIC]["samples"] else None,
+                resource_id=resource_id, capacity=snapshot,
+                cpu=stats[CPU_METRIC] if stats[CPU_METRIC]["samples"] else None, memory=memory,
                 catalog=rightsizing.sizing_catalog, price_book=price_books.get(resource_id), policy=policy,
             )
+            insight = conditional_rightsizing(
+                result, capacity=snapshot, cpu_rows=series[CPU_METRIC], memory=memory,
+                catalog=rightsizing.sizing_catalog, price_book=price_books.get(resource_id), policy=policy,
+                window_start=start, window_end=end, resolution_seconds=resolution_seconds,
+            )
+            conditional = (insight or {}).get("conditional")
+            if insight:
+                result["evidence"]["recurring_peaks"] = insight
             prior = previous.get((resource_id, result["action_type"], str(result["to_config"])))
+            prior_conditional = conditional and conditional_previous.get((resource_id, str(conditional["to_config"])))
             session.add(InfraOpportunity(
                 run_id=run.id, connection_id=int(connection.id), provider=registration.provider,
                 resource_id=resource_id, resource_name=result["resource_name"],
@@ -191,6 +210,10 @@ def run_opportunity_engine(
                 currency=result["currency"], rationale=result["rationale"], risks=result["risks"],
                 evidence=result["evidence"], inputs_hash=result["inputs_hash"],
                 engine_version=result["engine_version"],
+                conditional_action_type=conditional["action_type"] if conditional else None,
+                conditional_monthly_saving=conditional["incremental_monthly_saving"] if conditional else None,
+                conditional_state=(prior_conditional.conditional_state if prior_conditional else "NEW") if conditional else None,
+                conditional_state_note=prior_conditional.conditional_state_note if prior_conditional else None,
             ))
             results.append(result)
         savings = [

@@ -71,4 +71,12 @@ class InfraOpportunity(Base):
     state_note = Column(String(2000))
     state_changed_by = Column(Integer)
     state_changed_at = Column(DateTime(timezone=True))
+    # Recurring-peak insight (evidence["recurring_peaks"]): the extra saving if
+    # the job is capped or rescheduled. Conditional, so it has its own state
+    # and stays out of the projected totals until accepted.
+    conditional_action_type = Column(String(30))
+    conditional_monthly_saving = Column(Float)
+    conditional_state = Column(String(30))
+    conditional_state_note = Column(String(2000))
+    conditional_state_changed_at = Column(DateTime(timezone=True))
     created_at = Column(DateTime(timezone=True), server_default=func.now())

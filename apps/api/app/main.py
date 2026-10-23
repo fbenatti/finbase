@@ -860,6 +860,17 @@ async def lifespan(app: FastAPI):
         ):
             await _execute_migration(conn, statement)
 
+        # Recurring-peak insight of a rightsizing opportunity: its saving is
+        # conditional on changing the job and has its own decision state.
+        for statement in (
+            "ALTER TABLE infra_opportunity ADD COLUMN IF NOT EXISTS conditional_action_type VARCHAR(30)",
+            "ALTER TABLE infra_opportunity ADD COLUMN IF NOT EXISTS conditional_monthly_saving DOUBLE PRECISION",
+            "ALTER TABLE infra_opportunity ADD COLUMN IF NOT EXISTS conditional_state VARCHAR(30)",
+            "ALTER TABLE infra_opportunity ADD COLUMN IF NOT EXISTS conditional_state_note VARCHAR(2000)",
+            "ALTER TABLE infra_opportunity ADD COLUMN IF NOT EXISTS conditional_state_changed_at TIMESTAMPTZ",
+        ):
+            await _execute_migration(conn, statement)
+
         # The Projects feature was removed (UI, API and metadata).  Drop the
         # legacy table and its columns.  Classification rules keep their
         # department target; the project_id column is dropped with its values.
