@@ -550,6 +550,21 @@
     "api_prefixes": []
   },
   {
+    "code": "dados_metricas_infra",
+    "parent_code": "section_dados",
+    "label": "Consumo de infraestrutura",
+    "path": "/dados/metricas-infra",
+    "renderer": "InfrastructureMetrics",
+    "view_params": {},
+    "permission_module": "infrastructure_metrics",
+    "position": 2,
+    "icon": "TimelineOutlined",
+    "required": false,
+    "development_only": false,
+    "legacy_path": null,
+    "api_prefixes": ["/custos/metricas-infra"]
+  },
+  {
     "code": "dados_catalogo_tabelas",
     "parent_code": "section_regras_negocio",
     "label": "Catálogo de dados",

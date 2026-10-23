@@ -13,6 +13,7 @@ import ChangePassword from "./auth/ChangePassword";
 const Modules = lazy(() => import("./pages/Admin/Modules"));
 const Login = lazy(() => import("./pages/Login/Login"));
 const Connections = lazy(() => import("./pages/Connections/Connections"));
+const InfrastructureMetrics = lazy(() => import("./pages/InfrastructureMetrics/InfrastructureMetrics"));
 const Explorer = lazy(() => import("./pages/Explorer/Explorer"));
 const Mappings = lazy(() => import("./pages/Mappings/Mappings"));
 const Governance = lazy(() => import("./pages/Governance/Governance"));
@@ -100,7 +101,7 @@ function LegacyExplorer() {
   return <LegacyRedirect to={`/dados/fontes/${connectionId}/explorar`} />;
 }
 
-const CATALOG_RENDERERS = { Modules, Connectors, GoldDashboard, Anomalies, FinancialPlanning, ForecastAccuracy, Forecast, Savings, Connections, Tables, PipelineBuilder, Reprocess, Analysis, Reports, Dashboards, Governance, Admin, Audit, SsoProviders };
+const CATALOG_RENDERERS = { Modules, Connectors, GoldDashboard, Anomalies, FinancialPlanning, ForecastAccuracy, Forecast, Savings, Connections, InfrastructureMetrics, Tables, PipelineBuilder, Reprocess, Analysis, Reports, Dashboards, Governance, Admin, Audit, SsoProviders };
 
 function ApplicationRoutes() {
   const { user } = useAuth();
