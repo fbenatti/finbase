@@ -8,7 +8,7 @@ import uuid
 
 from .catalog import get_metric
 from .collector import collect, estimated_api_calls, plan_queries
-from .config import InfrastructureMetricsConfig, config_from_connection, max_collection_window
+from .config import InfrastructureMetricsConfig, config_from_connection, max_collection_window, validate_collection_age
 from .contracts import CollectionCancelled, QueryResult
 from .coverage import build_coverage_rows
 from .credentials import build_oci_adapter
@@ -51,6 +51,7 @@ def collect_oci_metrics(
         raise ValueError("collection window must be positive and within the resolution limit")
     if resolution_seconds not in config.resolutions_seconds:
         raise ValueError("requested resolution is not enabled in pilot configuration")
+    validate_collection_age(start_utc, resolution_seconds)
     descriptors = tuple(
         get_metric("oci", "oci_computeagent", metric_name)
         for metric_name in config.metric_names

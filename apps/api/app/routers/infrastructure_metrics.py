@@ -17,7 +17,7 @@ from app.models.etl_task import EtlTask
 from app.models.source_connection import SourceConnection
 from app.services.infrastructure_metrics.catalog import get_metric
 from app.services.infrastructure_metrics.collector import DEFAULT_STATISTICS, estimated_api_calls, plan_queries
-from app.services.infrastructure_metrics.config import config_from_connection, max_collection_window
+from app.services.infrastructure_metrics.config import config_from_connection, max_collection_window, validate_collection_age
 
 router = APIRouter(prefix="/custos/metricas-infra", tags=["infrastructure-metrics"])
 MAX_API_CALLS = 128
@@ -94,6 +94,12 @@ async def _validated_plan(body: CollectionRequest, db: AsyncSession, user, actio
         raise HTTPException(
             422, f"A janela deve ser positiva e ter no máximo {int(limit.total_seconds() // 3600)} horas nesta resolução",
         )
+    try:
+        validate_collection_age(start, body.resolution_seconds)
+    except ValueError:
+        raise HTTPException(
+            422, f"A OCI só entrega buckets de {body.resolution_seconds // 60} min dos últimos 30 dias; colete dias mais antigos em 1 min",
+        ) from None
     conn = await db.get(SourceConnection, body.connection_id)
     if not conn or conn.connector_type != "oci":
         raise HTTPException(404, "Conexão OCI não encontrada")

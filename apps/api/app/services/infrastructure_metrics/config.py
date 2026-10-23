@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from .catalog import OCI_METRICS
@@ -12,6 +12,24 @@ from .contracts import MetricScope
 # Longest window one collection may request per resolution. Coarser buckets
 # return fewer points per call, so a 5m/15m run can span several days.
 MAX_WINDOW_BY_RESOLUTION = {60: timedelta(hours=24), 300: timedelta(days=7), 900: timedelta(days=7)}
+
+
+# Oldest start OCI Monitoring accepts per resolution, measured on 23/10/2026:
+# 5m/15m with start 30 days back return 400 "Invalid time range for given
+# interval"; 1m (59 days) and 1h are accepted. Older days use 1m.
+MAX_AGE_BY_RESOLUTION = {300: timedelta(days=30), 900: timedelta(days=30)}
+
+
+def validate_collection_age(start_utc: datetime, resolution_seconds: int, *, now: datetime | None = None) -> None:
+    limit = MAX_AGE_BY_RESOLUTION.get(int(resolution_seconds))
+    if limit is None:
+        return
+    oldest = (now or datetime.now(timezone.utc)) - limit
+    if start_utc < oldest:
+        raise ValueError(
+            f"OCI only serves {resolution_seconds // 60}m buckets for the last {limit.days} days; "
+            "collect older days at 1m"
+        )
 
 
 def max_collection_window(resolution_seconds: int) -> timedelta:

@@ -168,3 +168,13 @@ def test_window_limit_depends_on_resolution():
     assert max_collection_window(300) == timedelta(days=7)
     with pytest.raises(ValueError):
         max_collection_window(120)
+
+
+def test_5m_collection_rejects_days_older_than_oci_serves():
+    from app.services.infrastructure_metrics.config import validate_collection_age
+
+    now = datetime(2026, 10, 23, 14, tzinfo=timezone.utc)
+    validate_collection_age(now - timedelta(days=29), 300, now=now)
+    validate_collection_age(now - timedelta(days=59), 60, now=now)
+    with pytest.raises(ValueError, match="collect older days at 1m"):
+        validate_collection_age(now - timedelta(days=31), 300, now=now)
