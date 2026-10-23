@@ -641,6 +641,19 @@ async def start_scheduler():
             coalesce=True,
             max_instances=1,
         )
+        # Manutenção Iceberg pedida pelas publicações (Silver/Gold). Por padrão
+        # só registra o plano no log; ICEBERG_MAINTENANCE_APPLY=true executa.
+        from app.services import iceberg_maintenance
+        _scheduler.add_job(
+            _iceberg_maintenance_job,
+            "interval",
+            minutes=iceberg_maintenance.INTERVAL_MINUTES,
+            id="iceberg_maintenance",
+            name="Manutenção Iceberg pós-publicação",
+            replace_existing=True,
+            coalesce=True,
+            max_instances=1,
+        )
         # API replicas are intentionally stateless, so edits made through any
         # replica are reconciled from PostgreSQL by this singleton scheduler.
         _scheduler.add_job(_sync_schedules_job, "interval", seconds=15,
@@ -689,6 +702,18 @@ def _sync_schedules_job() -> None:
         logger.warning("Could not reconcile schedules: %s", exc)
     finally:
         session.close()
+
+
+def _iceberg_maintenance_job() -> None:
+    """Drena a fila de tabelas publicadas desde a última rodada (ver iceberg_maintenance)."""
+    try:
+        from app.services import iceberg_maintenance
+
+        reports = iceberg_maintenance.run_pending_maintenance_sync()
+        if reports:
+            logger.info("Manutenção Iceberg: %d tabela(s) avaliada(s)", len(reports))
+    except Exception as exc:  # noqa: BLE001
+        logger.error("Falha na rodada de manutenção Iceberg: %s", exc)
 
 
 def _iceberg_orphan_cleanup_job() -> None:

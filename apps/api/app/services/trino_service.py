@@ -114,6 +114,7 @@ async def execute(
     timeout_s: float = 60.0,
     max_retries: int | None = None,
     cancel_event: asyncio.Event | None = None,
+    session_properties: dict[str, str] | None = None,
 ) -> list[dict[str, Any]]:
     """
     Execute a SQL statement against Trino and return rows as list of dicts.
@@ -134,7 +135,7 @@ async def execute(
                 # every retry instead of shrinking it — a restart can take
                 # several minutes, and a shrinking budget wastes retries.
                 await wait_until_ready(timeout_s=TRINO_READY_WAIT_S)
-            return await _execute_once(sql, catalog, timeout_s, cancel_event)
+            return await _execute_once(sql, catalog, timeout_s, cancel_event, session_properties)
         except TrinoCancelled:
             raise
         except Exception as exc:
@@ -258,6 +259,7 @@ async def _execute_once(
     catalog: str | None = None,
     timeout_s: float = 60.0,
     cancel_event: asyncio.Event | None = None,
+    session_properties: dict[str, str] | None = None,
 ) -> list[dict[str, Any]]:
     effective_catalog = catalog or TRINO_CATALOG
     effective_sql = qualify_sql_catalog(sql, effective_catalog)
@@ -266,6 +268,10 @@ async def _execute_once(
         "X-Trino-Catalog": effective_catalog,
         "X-Trino-Schema": "bronze",
     }
+    if session_properties:
+        # Propriedades de sessão (ex.: retenção mínima de snapshots) vão no
+        # cabeçalho do protocolo, como `SET SESSION` faria numa conexão.
+        headers["X-Trino-Session"] = ",".join(f"{key}={value}" for key, value in session_properties.items())
     kind = sql_kind(effective_sql)
     started = time.monotonic()
     query_id: str | None = None
@@ -371,11 +377,12 @@ def execute_sync(
     sql: str,
     catalog: str | None = None,
     timeout_s: float = 60.0,
+    session_properties: dict[str, str] | None = None,
 ) -> list[dict[str, Any]]:
     """Synchronous wrapper for execute (convenience)."""
     import asyncio
 
-    return asyncio.run(execute(sql, catalog, timeout_s))
+    return asyncio.run(execute(sql, catalog, timeout_s, session_properties=session_properties))
 
 
 def _raise_trino_error(resp: httpx.Response) -> None:
