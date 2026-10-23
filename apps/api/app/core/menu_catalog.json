@@ -167,7 +167,7 @@
   },
   {
     "code": "alertas_configuracao",
-    "parent_code": "section_alertas",
+    "parent_code": "section_regras_negocio",
     "label": "Parâmetros de detecção",
     "path": "/alertas/configuracao",
     "renderer": "Anomalies",
@@ -175,7 +175,7 @@
       "tab": "7"
     },
     "permission_module": "anomalies",
-    "position": 7,
+    "position": 1,
     "icon": "SettingsOutlined",
     "required": false,
     "development_only": true,
@@ -192,6 +192,21 @@
     "permission_module": null,
     "position": 200,
     "icon": "AccountBalanceWalletOutlined",
+    "required": false,
+    "development_only": false,
+    "legacy_path": null,
+    "api_prefixes": []
+  },
+  {
+    "code": "section_regras_negocio",
+    "parent_code": null,
+    "label": "Regras de negócio",
+    "path": "/regras-de-negocio/inicio",
+    "renderer": "ModuleIndex",
+    "view_params": {},
+    "permission_module": null,
+    "position": 250,
+    "icon": "RuleOutlined",
     "required": false,
     "development_only": false,
     "legacy_path": null,
@@ -341,7 +356,7 @@
   },
   {
     "code": "projecoes_acuracia_desvios",
-    "parent_code": "section_planejamento",
+    "parent_code": "section_regras_negocio",
     "label": "Variações do Forecast",
     "path": "/projecoes/precisao/desvios",
     "renderer": "ForecastAccuracy",
@@ -349,7 +364,7 @@
       "aba": "desvios"
     },
     "permission_module": "forecast",
-    "position": 8,
+    "position": 7,
     "icon": "WarningAmberOutlined",
     "required": false,
     "development_only": false,
@@ -358,7 +373,7 @@
   },
   {
     "code": "projecoes_acuracia_justificativas",
-    "parent_code": "section_planejamento",
+    "parent_code": "section_regras_negocio",
     "label": "Justificativas de variação",
     "path": "/projecoes/precisao/justificativas",
     "renderer": "ForecastAccuracy",
@@ -366,7 +381,7 @@
       "aba": "acks"
     },
     "permission_module": "forecast",
-    "position": 9,
+    "position": 8,
     "icon": "FactCheckOutlined",
     "required": false,
     "development_only": false,
@@ -375,7 +390,7 @@
   },
   {
     "code": "projecoes_configuracao",
-    "parent_code": "section_planejamento",
+    "parent_code": "section_regras_negocio",
     "label": "Perfis de Forecast",
     "path": "/projecoes/configuracao",
     "renderer": "Forecast",
@@ -383,7 +398,7 @@
       "tab": "config"
     },
     "permission_module": "forecast",
-    "position": 4,
+    "position": 2,
     "icon": "SettingsOutlined",
     "required": false,
     "development_only": false,
@@ -392,7 +407,7 @@
   },
   {
     "code": "projecoes_regras",
-    "parent_code": "section_planejamento",
+    "parent_code": "section_regras_negocio",
     "label": "Regras de negócio do Forecast",
     "path": "/projecoes/regras",
     "renderer": "Forecast",
@@ -400,7 +415,7 @@
       "tab": "rules"
     },
     "permission_module": "forecast",
-    "position": 5,
+    "position": 3,
     "icon": "RuleOutlined",
     "required": false,
     "development_only": false,
@@ -916,7 +931,7 @@
   },
   {
     "code": "governanca_classificacao_de_projetos",
-    "parent_code": "section_governanca",
+    "parent_code": "section_regras_negocio",
     "label": "Classificação por projeto",
     "path": "/governanca/classificacao-de-projetos",
     "renderer": "Governance",
@@ -924,7 +939,7 @@
       "tab": "classification"
     },
     "permission_module": "rules",
-    "position": 2,
+    "position": 4,
     "icon": "LocalOfferOutlined",
     "required": false,
     "development_only": false,
@@ -933,7 +948,7 @@
   },
   {
     "code": "governanca_regras_de_ajuste",
-    "parent_code": "section_governanca",
+    "parent_code": "section_regras_negocio",
     "label": "Regras financeiras",
     "path": "/governanca/regras-de-ajuste",
     "renderer": "Governance",
@@ -942,7 +957,7 @@
       "subtab": "adjustments"
     },
     "permission_module": "rules",
-    "position": 3,
+    "position": 5,
     "icon": "SettingsOutlined",
     "required": false,
     "development_only": false,
@@ -951,7 +966,7 @@
   },
   {
     "code": "governanca_compromissos",
-    "parent_code": "section_governanca",
+    "parent_code": "section_regras_negocio",
     "label": "Compromissos de tarifa (RI e Savings Plans)",
     "path": "/governanca/compromissos",
     "renderer": "Governance",
@@ -960,7 +975,7 @@
       "subtab": "clone-rules"
     },
     "permission_module": "reservations",
-    "position": 4,
+    "position": 6,
     "icon": "SavingsOutlined",
     "required": false,
     "development_only": false,
@@ -969,7 +984,7 @@
   },
   {
     "code": "governanca_contratos",
-    "parent_code": "section_governanca",
+    "parent_code": "section_regras_negocio",
     "label": "Contratos financeiros",
     "path": "/governanca/contratos",
     "renderer": "Governance",
@@ -977,7 +992,7 @@
       "tab": "financial-contracts"
     },
     "permission_module": "rules",
-    "position": 5,
+    "position": 9,
     "icon": "ReceiptLongOutlined",
     "required": false,
     "development_only": false,
