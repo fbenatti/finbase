@@ -14,9 +14,10 @@ from typing import Any
 from sqlalchemy import select
 
 from .opportunities import (
-    CPU_METRIC, DEFAULT_POLICY, ENGINE_VERSION, MEMORY_METRIC, READY, RIGHTSIZE_DOWN,
+    CPU_METRIC, ENGINE_VERSION, MEMORY_METRIC, READY, RIGHTSIZE_DOWN,
     analyze_resource, summarize_series, window_bounds,
 )
+from .policy import PARAMETER_KEYS, load_active_policy
 from .registry import provider_for_connection, rightsizing_for
 from .sizing import CapacitySnapshot
 
@@ -75,9 +76,13 @@ def read_series(
 def run_opportunity_engine(
     session: Any, connection: Any, *, days: int = 7, resolution_seconds: int = 300,
     user_id: int | None = None, as_of: datetime | None = None, rightsizing=None,
-    series_reader=read_series,
+    series_reader=read_series, policy: dict | None = None,
 ):
-    """Analyze every allowlisted resource and persist one run with its results."""
+    """Analyze every allowlisted resource and persist one run with its results.
+
+    The policy is the saved active revision (``DEFAULT_POLICY`` when none was
+    saved); the run records its revision and exact values.
+    """
     from app.models.infrastructure_opportunity import InfraOpportunity, InfraOpportunityRun
 
     if resolution_seconds not in (60, 300, 900):
@@ -96,9 +101,13 @@ def run_opportunity_engine(
         oldest = earliest(as_of)
         if oldest is not None and oldest > start:
             start = oldest
+    policy = policy or load_active_policy(session)
     run = InfraOpportunityRun(
         connection_id=int(connection.id), status="RUNNING", engine_version=ENGINE_VERSION,
-        policy_version=DEFAULT_POLICY["version"], window_start_utc=start, window_end_utc=end,
+        policy_version=policy["version"], policy_revision=policy.get("revision"),
+        policy_aggressiveness=policy.get("aggressiveness"),
+        policy_params={key: policy[key] for key in PARAMETER_KEYS},
+        window_start_utc=start, window_end_utc=end,
         resolution_seconds=resolution_seconds, created_by=user_id, readiness_counts={},
     )
     session.add(run)
@@ -128,7 +137,7 @@ def run_opportunity_engine(
                 capacity=snapshot if isinstance(snapshot, CapacitySnapshot) else None,
                 cpu=stats[CPU_METRIC] if stats[CPU_METRIC]["samples"] else None,
                 memory=stats[MEMORY_METRIC] if stats[MEMORY_METRIC]["samples"] else None,
-                catalog=rightsizing.sizing_catalog, price_book=price_books.get(resource_id),
+                catalog=rightsizing.sizing_catalog, price_book=price_books.get(resource_id), policy=policy,
             )
             prior = previous.get((resource_id, result["action_type"], str(result["to_config"])))
             session.add(InfraOpportunity(

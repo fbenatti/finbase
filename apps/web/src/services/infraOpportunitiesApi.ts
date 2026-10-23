@@ -31,6 +31,10 @@ export type OpportunityRun = {
   status: "RUNNING" | "COMPLETED" | "FAILED";
   engine_version: string;
   policy_version: string;
+  /** Revisão da política gravada usada na execução (null = padrão do motor). */
+  policy_revision: number | null;
+  policy_aggressiveness: RightsizingAggressiveness | null;
+  policy_params: RightsizingPolicyParams | null;
   window_start_utc: string;
   window_end_utc: string;
   resolution_seconds: number;
@@ -171,5 +175,48 @@ export async function runOpportunityEngine(connectionId: number, days: number, r
 
 export async function setOpportunityState(id: number, state: Opportunity["state"], note?: string): Promise<OpportunityDetail> {
   const { data } = await api.post(`${BASE}/${id}/estado`, { state, note: note || null });
+  return data;
+}
+
+export type RightsizingAggressiveness = "CONSERVATIVE" | "BALANCED" | "AGGRESSIVE" | "CUSTOM";
+
+export type RightsizingPolicyParams = {
+  cpu_target_p95: number;
+  cpu_target_p99: number;
+  memory_target_p95: number;
+  memory_target_p99: number;
+  cpu_peak_quantile: number;
+  cpu_peak_limit: number;
+  memory_peak_limit: number;
+  min_change_ratio: number;
+  min_days: number;
+  min_coverage: number;
+  high_confidence_coverage: number;
+};
+
+export type RightsizingPolicy = {
+  policy_version: string;
+  revision: number | null;
+  aggressiveness: RightsizingAggressiveness;
+  params: RightsizingPolicyParams;
+  note: string | null;
+  updated_by: string | null;
+  updated_at: string | null;
+  is_default: boolean;
+  presets: Record<Exclude<RightsizingAggressiveness, "CUSTOM">, RightsizingPolicyParams>;
+  peak_quantiles: number[];
+};
+
+const POLICY = "/custos/metricas-infra/politica-rightsizing";
+
+export async function getRightsizingPolicy(): Promise<RightsizingPolicy> {
+  const { data } = await api.get(POLICY);
+  return data;
+}
+
+export async function updateRightsizingPolicy(
+  aggressiveness: RightsizingAggressiveness, params: RightsizingPolicyParams, note?: string,
+): Promise<RightsizingPolicy> {
+  const { data } = await api.put(POLICY, { aggressiveness, params, note: note || null });
   return data;
 }

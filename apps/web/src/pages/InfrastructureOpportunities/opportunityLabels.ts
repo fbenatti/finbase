@@ -1,4 +1,8 @@
-import type { Opportunity } from "../../services/infraOpportunitiesApi";
+import type { Opportunity, RightsizingAggressiveness } from "../../services/infraOpportunitiesApi";
+
+export const AGGRESSIVENESS_LABEL: Record<RightsizingAggressiveness, string> = {
+  CONSERVATIVE: "Conservador", BALANCED: "Equilibrado", AGGRESSIVE: "Agressivo", CUSTOM: "Personalizado",
+};
 
 export const ACTION_LABEL: Record<Opportunity["action_type"], string> = {
   RIGHTSIZE_DOWN: "Reduzir tamanho",

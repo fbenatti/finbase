@@ -11,6 +11,10 @@ class InfraOpportunityRun(Base):
     status = Column(String(30), nullable=False, default="RUNNING", index=True)
     engine_version = Column(String(60), nullable=False)
     policy_version = Column(String(60), nullable=False)
+    # Saved policy revision used (NULL = DEFAULT_POLICY) and its exact values.
+    policy_revision = Column(Integer)
+    policy_aggressiveness = Column(String(20))
+    policy_params = Column(JSON)
     window_start_utc = Column(DateTime(timezone=True), nullable=False)
     window_end_utc = Column(DateTime(timezone=True), nullable=False)
     # 60 = NATIVE 1m buckets; 300 = 5m rollups derived from 1m (max preserved).
@@ -25,6 +29,19 @@ class InfraOpportunityRun(Base):
     created_by = Column(Integer)
     started_at = Column(DateTime(timezone=True), server_default=func.now())
     finished_at = Column(DateTime(timezone=True))
+
+
+class InfraRightsizingPolicy(Base):
+    """Append-only revisions of the rightsizing policy; the highest version is active."""
+    __tablename__ = "infra_rightsizing_policy"
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    version = Column(Integer, nullable=False, unique=True)
+    aggressiveness = Column(String(20), nullable=False)
+    params = Column(JSON, nullable=False)
+    note = Column(String(500))
+    created_by = Column(Integer)
+    created_by_name = Column(String(255))
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
 
 
 class InfraOpportunity(Base):

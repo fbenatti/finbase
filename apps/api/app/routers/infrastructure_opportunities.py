@@ -48,6 +48,8 @@ def _run_dict(run: InfraOpportunityRun) -> dict:
     return {
         "id": run.id, "connection_id": run.connection_id, "status": run.status,
         "engine_version": run.engine_version, "policy_version": run.policy_version,
+        "policy_revision": run.policy_revision, "policy_aggressiveness": run.policy_aggressiveness,
+        "policy_params": run.policy_params,
         "window_start_utc": _iso(run.window_start_utc), "window_end_utc": _iso(run.window_end_utc),
         "resolution_seconds": run.resolution_seconds,
         "resources_analyzed": run.resources_analyzed, "opportunities_count": run.opportunities_count,
