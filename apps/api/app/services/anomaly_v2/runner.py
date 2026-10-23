@@ -295,14 +295,6 @@ async def _execute_detection_v2(
         commitment_scope_ids = {str(e["scope_id"]) for e in ledger}
 
         report(4, 8, "Classificando séries")
-        history_by_cloud: dict[str, list[dict[str, Any]]] = defaultdict(list)
-        for row in history:
-            history_by_cloud[str(row.get("cloud_origem") or row.get("cloud") or "")].append(row)
-        profiles = {}
-        for cloud, rows in history_by_cloud.items():
-            profiles.update(classify_scopes(rows, as_of=date.fromisoformat(current_max[cloud]),
-                                           commitment_scope_ids=commitment_scope_ids,
-                                           settings=engine_settings))
         scope_meta: dict[str, dict[str, Any]] = {}
         for row in history:
             sid = str(row["scope_id"])
@@ -314,7 +306,7 @@ async def _execute_detection_v2(
         quality_by_day: dict[str, dict[str, float]] = {}
         valid_days = valid_days_by_cloud(history, settings=engine_settings)
 
-        report(5, 8, "Detectando desvios")
+        report(5, 8, "Detectando desvios dos últimos 90 dias")
         all_signals: list[dict[str, Any]] = []
         rows_by_scope: dict[str, list[dict[str, Any]]] = defaultdict(list)
         for row in history:
@@ -325,23 +317,20 @@ async def _execute_detection_v2(
         for sid, scope_rows in rows_by_scope.items():
             if should_abort and should_abort():
                 return await _finish_cancelled(session, run_id)
-            profile = profiles.get(sid, {"cost_nature": "CONTINUOUS", "history_days": 0})
             cloud = str(scope_meta.get(sid, {}).get("cloud_origem") or scope_meta.get(sid, {}).get("cloud") or "")
             scope_end = date.fromisoformat(current_max.get(cloud, as_of.isoformat()))
             scope_ledger = ledger_by_scope.get(sid, [])
-            raw = run_detectors_for_scope(
-                scope_id=sid,
-                daily=scope_rows,
-                profile=profile,
-                as_of=scope_end,
+            raw = detect_scope_window(
+                scope_id=sid, rows=scope_rows, end=scope_end, window_days=90,
                 materiality=mat_daily,
                 min_pct=min_pct,
                 ledger_entries=scope_ledger,
                 valid_days=valid_days.get(cloud, set()),
+                commitment_scope_ids=commitment_scope_ids,
                 settings=engine_settings,
             )
-            conf = "HIGH" if int(profile.get("history_days") or 0) >= int(engine_settings["high_confidence_history_days"]) else "LOW"
-            for sig in raw:
+            for sig, profile in raw:
+                conf = "HIGH" if int(profile.get("history_days") or 0) >= int(engine_settings["high_confidence_history_days"]) else "LOW"
                 event_day = str(sig["day"])[:10]
                 if event_day not in quality_by_day:
                     day = date.fromisoformat(event_day)
@@ -469,7 +458,7 @@ async def _execute_detection_v2(
                 run.rows_written = int(result.get("rows_written") or 0)
                 run.source_snapshot_id = source_snapshot_id
                 run.data_cutoff = as_of.isoformat()
-                run.evaluation_start = (as_of - timedelta(days=history_days - 1)).isoformat()
+                run.evaluation_start = (as_of - timedelta(days=89)).isoformat()
                 run.evaluation_end = as_of.isoformat()
                 run.reference_kind = "V2_BASELINE"
                 run.assessment_table = SIGNAL_TABLE
