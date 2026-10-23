@@ -58,6 +58,11 @@ def test_discovery_is_limited_to_the_allowlist_and_fetch_preserves_partial_stats
     assert result.points[0].dimensions["nicId"] == "nic-a"
     assert result.sanitized_request["resource_count"] == 1
     assert "private-ocid" not in str(result.sanitized_request)
+    assert result.response_bytes > 0
+    assert len(result.raw_payloads) == 2
+    assert result.raw_payloads[0]["resource_id"] == "private-ocid"
+    assert result.raw_payloads[0]["payload"]
+    assert result.raw_payloads[1]["error_code"] == "InvalidParameter"
     assert len(client.requests) == 2
     assert all(request[0] == "compartment-ocid" for request in client.requests)
 
