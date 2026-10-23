@@ -7,6 +7,7 @@ export const DATA_LAYER_LABELS: Record<string, string> = {
 
 export const DATA_SERVICE_LABELS: Record<string, string> = {
   trino: "Serviço de consultas",
+  iceberg_catalog: "Catálogo de dados",
   nessie: "Catálogo de dados",
   minio: "Armazenamento de arquivos",
 };

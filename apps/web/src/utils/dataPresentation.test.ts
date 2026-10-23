@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { DATA_LAYER_LABELS, dataDisplayText, moduleDisplayName } from "./dataPresentation";
+import { DATA_LAYER_LABELS, DATA_SERVICE_LABELS, dataDisplayText, moduleDisplayName } from "./dataPresentation";
 
 describe("data presentation boundaries", () => {
   it("translates operational messages returned by services", () => {
@@ -34,5 +34,9 @@ describe("data presentation boundaries", () => {
     expect(message).toContain("ambiente configurado");
     expect(message).toContain("serviço de consultas");
     expect(message).toContain("banco de dados");
+  });
+
+  it("uses a customer-facing label for the Iceberg catalog health key", () => {
+    expect(DATA_SERVICE_LABELS.iceberg_catalog).toBe("Catálogo de dados");
   });
 });
