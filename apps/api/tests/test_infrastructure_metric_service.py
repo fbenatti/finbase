@@ -30,7 +30,7 @@ class CounterAdapter:
 
 def test_service_plans_bounded_queries_and_returns_rows_without_persistence(monkeypatch):
     connection = SimpleNamespace(
-        id=4, connector_type="oci", config_json={
+        id=4, code="oci_test", connector_type="oci", config_json={
             "tenancy": "tenancy-a", "region": "sa-saopaulo-1",
             "infrastructure_metrics": {
                 "enabled": True, "compartment_id": "compartment-a",
@@ -93,7 +93,7 @@ def test_service_rejects_windows_larger_than_the_pilot_budget():
 
 def test_service_can_opt_in_to_day_slice_publication(monkeypatch):
     connection = SimpleNamespace(
-        id=4, connector_type="oci", config_json={
+        id=4, code="oci_test", connector_type="oci", config_json={
             "tenancy": "tenancy-a", "region": "sa-saopaulo-1",
             "infrastructure_metrics": {
                 "enabled": True, "compartment_id": "compartment-a",
@@ -110,6 +110,8 @@ def test_service_can_opt_in_to_day_slice_publication(monkeypatch):
         return len(rows)
 
     from app.services.infrastructure_metrics import publication
+    from app.services.infrastructure_metrics import bronze
+    monkeypatch.setattr(bronze, "persist_raw_query_results", lambda **kwargs: 1)
     monkeypatch.setattr(publication, "publish_metric_rows", fake_publish)
     start = datetime(2026, 1, 1, tzinfo=timezone.utc)
     result = service.collect_oci_metrics(
