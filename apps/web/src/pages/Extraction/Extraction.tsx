@@ -336,7 +336,7 @@ export default function Extraction({ embedded = false }: { embedded?: boolean })
       setTask({
         id: result.task_id, status: result.status, total_blobs: 0, processed_blobs: 0,
         rows_destination: 0, current_blob: null, task_type: "infrastructure_metrics_collection",
-        phase: initial.phase,
+        phase: initial.phase || "",
       });
       stopPolling();
       const fetchMetricsStatus = async () => {
@@ -587,7 +587,7 @@ export default function Extraction({ embedded = false }: { embedded?: boolean })
                       Plano: {infraPlan.resource_count} recurso(s), {infraPlan.metric_names.length} métricas, {infraPlan.statistics.join(", ")} por bucket de {infraPlan.resolution_seconds / 60} minuto(s), até {infraPlan.estimated_api_calls} chamadas OCI. Janela em UTC; retenção planejada: {infraPlan.retention_days} dias.
                     </Alert>}
                     {infraTaskStatus && <Alert severity={infraTaskStatus.status === "FAILED" ? "error" : infraTaskStatus.status === "COMPLETED_WITH_ERRORS" ? "warning" : ["COMPLETED", "CANCELLED"].includes(infraTaskStatus.status) ? "success" : "info"} sx={{ width: "100%" }}>
-                      Tarefa #{infraTaskStatus.task_id}: {infraTaskStatus.status} — {infraTaskStatus.phase || ""}. Consultas concluídas: {infraTaskStatus.summary.completed_query_count ?? infraTaskStatus.rows_raw}; falhas: {infraTaskStatus.summary.failed_query_count ?? infraTaskStatus.errors.length}; linhas publicadas na Silver: {infraTaskStatus.rows_destination}.
+                      Tarefa #{infraTaskStatus.task_id}: {infraTaskStatus.status} — {infraTaskStatus.phase || ""}. Consultas concluídas: {Number(infraTaskStatus.summary.completed_query_count ?? infraTaskStatus.rows_raw)}; falhas: {Number(infraTaskStatus.summary.failed_query_count ?? infraTaskStatus.errors.length)}; linhas publicadas na Silver: {infraTaskStatus.rows_destination}.
                     </Alert>}
                   </>
                 )}
