@@ -1,14 +1,14 @@
-"""OCI adapter of the commitment engine: hourly compute from the cost reports.
+"""OCI adapter of the commitment engine: hourly compute from the billing.
 
-The cost reports carry one line per hour (``lineItem/intervalUsageStart``),
-but the cost Bronze is folded to days to save volume. Before that fold, the
-compute lines are kept at hour grain in ``oci_compute_hourly`` (Silver), the
-only source the engine reads for OCI.
+The cost Bronze is folded to days to save volume, so compute is kept at hour
+grain in ``oci_compute_hourly`` (Silver), the only source the engine reads for
+OCI. It is filled from the cost reports (``lineItem/intervalUsageStart``,
+before the daily fold) or, in Usage API mode, from an HOURLY query of the
+recent days (``OciExtractor.fetch_compute_hourly_month``).
 
-Cost basis: ``cost/myCost`` is what the tenancy pays today, contract discounts
-included. OCI offers in the catalog are therefore a discount over the current
-billed rate, not over list price. The Usage API mode only returns daily data,
-so its connections have no hourly series and stay ``INSUFFICIENT_HOURLY_DATA``.
+Cost basis: the billed cost (``cost/myCost`` / ``computedAmount``) is what the
+tenancy pays today, contract discounts included. OCI offers in the catalog are
+therefore a discount over the current billed rate, not over list price.
 """
 from __future__ import annotations
 
@@ -84,11 +84,6 @@ def read_usage(connection: Any, start: datetime, end: datetime, *, execute=None)
     """Hourly compute usage of the connection in [start, end)."""
     from app.services import lakehouse_layers as layers
 
-    if (getattr(connection, "config_json", None) or {}).get("extraction_mode") == "usage_api":
-        raise LookupError(
-            "Esta conexão OCI lê a Usage API, que hoje é ingerida por dia. O motor precisa da fatura por hora: "
-            "use os relatórios de custo (CSV) ou habilite a leitura horária da Usage API."
-        )
     if execute is None:
         from app.services.trino_service import execute_sync as execute
     try:
@@ -104,8 +99,8 @@ def read_usage(connection: Any, start: datetime, end: datetime, *, execute=None)
     except Exception as exc:
         if "does not exist" in str(exc).lower():
             raise LookupError(
-                "Ainda não há fatura horária da OCI: reprocesse os meses desta conexão "
-                "(relatórios de custo CSV) para preencher o compute por hora."
+                "Ainda não há fatura horária da OCI: reprocesse os meses recentes desta conexão "
+                "para preencher o compute por hora."
             ) from exc
         raise
     return _build(connection, rows)

@@ -133,10 +133,48 @@ def test_missing_hourly_table_explains_the_reprocess():
         read_usage(CONNECTION, START, AS_OF, execute=execute)
 
 
-def test_usage_api_connection_is_told_it_has_no_hourly_billing():
-    import pytest
+def _usage(hour, service="Compute", cost=1.0, resource="ocid1.instance.a"):
+    return SimpleNamespace(time_usage_started=datetime.fromisoformat(f"{hour}:00:00+00:00"), service=service,
+                           resource_id=resource, region="sa-saopaulo-1", sku_part_number="B93113",
+                           currency="BRL", computed_amount=cost, computed_quantity=1.0)
 
-    connection = SimpleNamespace(id=4, code="oci", cloud_scope="oci", connector_type="oci",
-                                 config_json={"extraction_mode": "usage_api"})
-    with pytest.raises(LookupError, match="Usage API"):
-        read_usage(connection, START, AS_OF, execute=lambda sql, timeout_s: _silver())
+
+def test_usage_api_hourly_keeps_only_compute_and_queries_one_day_at_a_time(monkeypatch):
+    from app.services import oci_extractor
+    from app.services.oci_extractor import OciExtractor
+
+    class FrozenDatetime(datetime):
+        @classmethod
+        def now(cls, tz=None):
+            return datetime(2026, 9, 3, 15, tzinfo=timezone.utc)
+
+    monkeypatch.setattr(oci_extractor, "datetime", FrozenDatetime)
+    calls = []
+
+    def summarized(self, start, end, granularity, group_by):
+        calls.append((start, end, granularity))
+        day = start.strftime("%Y-%m-%d")
+        return [_usage(f"{day}T03", cost=0.5), _usage(f"{day}T03", cost=0.25),
+                _usage(f"{day}T03", service="Block Storage", cost=9.0)]
+
+    monkeypatch.setattr(OciExtractor, "_summarized_usages", summarized)
+    frame = OciExtractor.fetch_compute_hourly_month(object.__new__(OciExtractor), "202609", 4)
+    # 1 Sep → 4 Sep (today + 1 day), one query per day, all HOURLY.
+    assert [(start.day, (end - start).days, granularity) for start, end, granularity in calls] == [
+        (1, 1, "HOURLY"), (2, 1, "HOURLY"), (3, 1, "HOURLY")]
+    assert sorted(frame["usage_hour"]) == ["2026-09-01T03", "2026-09-02T03", "2026-09-03T03"]
+    assert set(frame["billed_cost"]) == {0.75}
+    assert set(frame["source_connection_id"]) == {4} and set(frame["_billing_period"]) == {"202609"}
+    # A month entirely before the lookback keeps whatever series is stored.
+    assert OciExtractor.fetch_compute_hourly_month(object.__new__(OciExtractor), "202501", 4) is None
+
+
+def test_failed_usage_api_hourly_fetch_keeps_the_stored_series(monkeypatch):
+    from app.services import task_runner
+
+    class Broken:
+        def fetch_compute_hourly_month(self, billing_period, connection_id):
+            raise RuntimeError("429 TooManyRequests")
+
+    monkeypatch.setattr(task_runner, "_persist_download_progress", lambda *args, **kwargs: None)
+    assert task_runner._fetch_oci_usage_api_hourly(None, Broken(), 4, "202609") is None

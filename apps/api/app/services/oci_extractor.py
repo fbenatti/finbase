@@ -107,6 +107,12 @@ USAGE_API_COMPARTMENT_GROUP_BY = ["compartmentId", "compartmentName"]
 USAGE_API_ZONE_GROUP_BY = ["resourceId", "logicalAd"]
 USAGE_API_TAG_GROUP_BY = ["resourceId", "tagNamespace", "tagKey", "tagValue"]
 USAGE_API_ACCOUNT_GROUP_BY = ["subscriptionId", "tenantName"]
+# Compute por hora para o motor de compromissos. Uma consulta por dia: a
+# granularidade horária aceita janelas curtas. O serviço é filtrado depois
+# (sem diferenciar maiúsculas) para não depender da grafia exata na API.
+USAGE_API_HOURLY_GROUP_BY = ["resourceId", "service", "skuPartNumber", "region"]
+# Só os dias recentes viram série horária: o motor analisa até 90 dias.
+USAGE_API_HOURLY_LOOKBACK_DAYS = 100
 
 
 def _availability_zone(ad: str | None) -> str | None:
@@ -478,6 +484,44 @@ class OciExtractor:
         # Linhas sem custo nem quantidade não acrescentam nada ao bronze.
         frame = frame[(pd.to_numeric(frame["cost/myCost"]) != 0) | (pd.to_numeric(frame["usage/billedQuantity"]) != 0)]
         return _sanitize_df(frame.reset_index(drop=True))
+
+    def fetch_compute_hourly_month(self, billing_period: str, connection_id: int) -> pd.DataFrame | None:
+        """Compute por hora, recurso e SKU no mês ``YYYYMM`` (só os dias recentes).
+
+        Mesmas colunas que ``compute_hourly_rows`` gera a partir dos relatórios CSV.
+        ``None`` quando o mês todo está fora da janela: a série já gravada é mantida.
+        """
+        start = datetime(int(billing_period[:4]), int(billing_period[4:6]), 1, tzinfo=timezone.utc)
+        end = datetime(start.year + (start.month == 12), start.month % 12 + 1, 1, tzinfo=timezone.utc)
+        today = datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0)
+        start = max(start, today - timedelta(days=USAGE_API_HOURLY_LOOKBACK_DAYS))
+        end = min(end, today + timedelta(days=1))
+        if start >= end:
+            return None
+        rows: list[dict] = []
+        day = start
+        while day < end:
+            for item in self._summarized_usages(day, day + timedelta(days=1), "HOURLY", USAGE_API_HOURLY_GROUP_BY):
+                if str(item.service or "").strip().lower() != "compute" or not item.time_usage_started:
+                    continue
+                cost, quantity = float(item.computed_amount or 0.0), float(item.computed_quantity or 0.0)
+                if not cost and not quantity:
+                    continue
+                rows.append({
+                    "usage_hour": item.time_usage_started.astimezone(timezone.utc).strftime("%Y-%m-%dT%H"),
+                    "resource_id": item.resource_id, "region": item.region, "sku": item.sku_part_number,
+                    "sku_description": None, "currency": item.currency,
+                    "billed_cost": cost, "billed_quantity": quantity,
+                })
+            day += timedelta(days=1)
+        if not rows:
+            return pd.DataFrame()
+        frame = pd.DataFrame(rows)
+        keys = ["usage_hour", "resource_id", "region", "sku", "sku_description", "currency"]
+        frame = frame.groupby(keys, as_index=False, dropna=False)[["billed_cost", "billed_quantity"]].sum()
+        frame["source_connection_id"] = int(connection_id)
+        frame["_billing_period"] = str(billing_period)
+        return frame
 
     def _summarized_usages(self, start: datetime, end: datetime, granularity: str, group_by: list[str]) -> list:
         """Todas as páginas de uma consulta de custo da Usage API."""

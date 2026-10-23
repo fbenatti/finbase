@@ -1159,6 +1159,19 @@ def _process_databricks_month_sync_worker(
             pass
 
 
+def _fetch_oci_usage_api_hourly(
+    task_id, extractor: OciExtractor, connection_id: int, billing_period: str,
+) -> list[pd.DataFrame] | None:
+    """Hourly compute from the Usage API; None keeps the stored series (failure or month out of range)."""
+    try:
+        _persist_download_progress(task_id, phase=f"Usage API OCI ({billing_period}): compute por hora")
+        frame = extractor.fetch_compute_hourly_month(billing_period, connection_id)
+    except Exception as exc:
+        logger.error("Hourly OCI Usage API fetch failed (%s/%s): %s", connection_id, billing_period, exc)
+        return None
+    return None if frame is None else [frame]
+
+
 def _write_oci_compute_hourly(task_id, connection_id: int, billing_period: str, parts: list[pd.DataFrame]) -> None:
     """Hourly compute Silver for the commitment engine; a failure never fails the cost load."""
     frames = [part for part in parts if part is not None and not part.empty]
@@ -1207,6 +1220,7 @@ def _process_oci_blob_sync(
             if full_df.empty:
                 logger.warning("Nenhum dado na Usage API para o período OCI %s", billing_period)
                 return 0, 0, 0, [f"Nenhum registro para {billing_period}"]
+            hourly_parts = _fetch_oci_usage_api_hourly(task_id, extractor, conn.id, billing_period)
             full_df = OciExtractor.aggregate_df_daily(full_df)
             raw_df_bronze = full_df.copy()
         else:
@@ -1323,7 +1337,7 @@ def _process_oci_blob_sync(
             session.flush()
             return len(full_df), 0, 0, [f"Bronze write failed: {exc}"]
 
-    if not extractor.uses_usage_api():
+    if hourly_parts is not None:
         _write_oci_compute_hourly(task_id, conn.id, billing_period, hourly_parts)
 
     _persist_download_progress(task_id, phase=f"Carga Bronze OCI ({billing_period}) concluída com {len(full_df)} linhas")
