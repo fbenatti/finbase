@@ -394,6 +394,7 @@ def _apply_destination_suggestions(dest: DestinationTable, metadata: dict[str, A
     # Do not suggest ResourceName/PricingCategory by default: GCP instance/SKU values explode the series.
     focus_order = (
         "cloud_origem",
+        "skumeter",
         "marketplaceproductname",
         "marketplacebillingmodel",
         "servicename",
