@@ -111,8 +111,10 @@ def query_results_to_silver_rows(
                     "mapping_version": "oci_metrics_v1",
                     "schema_version": 1,
                     "metric_day": timestamp.strftime("%Y%m%d"),
-                    "quality_status": "OK",
-                    "quality_reason": None,
+                    "quality_status": "PARTIAL" if result.error_code or result.status_code >= 400 else "OK",
+                    "quality_reason": result.error_code if result.error_code else (
+                        "PARTIAL_PROVIDER_RESPONSE" if result.status_code >= 400 else None
+                    ),
                     "source_api_version": None,
                     "_silver_ingested_at": observed_at.astimezone(timezone.utc).isoformat(),
                     "_silver_owner": source_owner,
@@ -146,6 +148,8 @@ def query_results_to_silver_rows(
                 status.setdefault("errors", []).append({
                     "status": result.status_code, "code": result.error_code,
                 })
+                row["quality_status"] = "PARTIAL"
+                row["quality_reason"] = result.error_code
             row["statistics_status_json"] = canonical_json(status)
 
     return list(rows_by_key.values())
