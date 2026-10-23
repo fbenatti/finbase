@@ -72,8 +72,9 @@ def _opportunity_dict(item: InfraOpportunity, *, full: bool = False) -> dict:
         "monthly_saving": item.monthly_saving,
         "annual_saving": round(item.monthly_saving * 12, 2) if item.monthly_saving is not None else None,
         "currency": item.currency,
-        "cpu_p95": cpu.get("p95"), "cpu_p99": cpu.get("p99"), "cpu_max": cpu.get("max"),
-        "memory_p95": memory.get("p95"), "memory_p99": memory.get("p99"),
+        "cpu_p50": cpu.get("p50"), "cpu_p95": cpu.get("p95"), "cpu_p99": cpu.get("p99"), "cpu_max": cpu.get("max"),
+        "memory_p50": memory.get("p50"), "memory_p95": memory.get("p95"), "memory_p99": memory.get("p99"),
+        "memory_max": memory.get("max"),
         "coverage": min([s["coverage"] for s in (cpu, memory) if s.get("coverage") is not None], default=None),
         "risks": item.risks or [], "state_note": item.state_note,
         "state_changed_at": _iso(item.state_changed_at), "created_at": _iso(item.created_at),
@@ -212,6 +213,70 @@ async def list_opportunities(connection_id: int = Query(..., gt=0), run_id: int 
         .order_by(InfraOpportunity.monthly_saving.desc().nulls_last())
     )).scalars().all()
     return {"run_id": run_id, "items": [_opportunity_dict(item) for item in items]}
+
+
+# Runs freeze their window, so the hourly profiles of a run can be reused.
+_PROFILE_CACHE: dict[int, dict] = {}
+_PROFILE_CACHE_SIZE = 8
+
+
+def _hourly_profiles(run: InfraOpportunityRun, items: list[InfraOpportunity]) -> dict:
+    from datetime import timedelta
+
+    from app.services.infrastructure_metrics.opportunities import CPU_METRIC, MEMORY_METRIC
+    from app.services.infrastructure_metrics.opportunity_runner import read_hourly_profiles
+
+    profiles = read_hourly_profiles(
+        run.connection_id, sorted({item.resource_id for item in items}),
+        run.window_start_utc, run.window_end_utc, run.resolution_seconds,
+    )
+    hours, cursor = [], run.window_start_utc.replace(minute=0, second=0, microsecond=0)
+    while cursor < run.window_end_utc:
+        hours.append(cursor.strftime("%Y-%m-%dT%H"))
+        cursor += timedelta(hours=1)
+    rounded = lambda value: round(float(value), 2) if value is not None else None
+    result = []
+    for item in items:
+        by_metric = profiles.get(item.resource_id, {})
+        entry = {"opportunity_id": item.id, "resource_id": item.resource_id}
+        for metric, key in ((CPU_METRIC, "cpu"), (MEMORY_METRIC, "memory")):
+            series = by_metric.get(metric, {})
+            entry[f"{key}_p95"] = [rounded((series.get(hour) or {}).get("p95")) for hour in hours]
+            entry[f"{key}_peak"] = [rounded((series.get(hour) or {}).get("peak")) for hour in hours]
+            entry[f"{key}_hours"] = len(series)
+        result.append(entry)
+    return {
+        "run_id": run.id, "window_start_utc": _iso(run.window_start_utc), "window_end_utc": _iso(run.window_end_utc),
+        "resolution_seconds": run.resolution_seconds, "hours": hours, "items": result,
+    }
+
+
+@router.get("/perfis-horarios")
+async def hourly_profiles(connection_id: int = Query(..., gt=0), run_id: int | None = None,
+                          user=Depends(get_current_user), db: AsyncSession = Depends(get_db)):
+    """Hourly CPU/memory profile (P95 and peak per hour, UTC) of every resource of a run.
+
+    Feeds the mini charts of the "all resources" view with one aggregated
+    Trino query instead of each host's 5-minute buckets.
+    """
+    await _authorize(user, db, connection_id, "read")
+    run = (await db.get(InfraOpportunityRun, run_id)) if run_id is not None else await _latest_run(db, connection_id)
+    if run is None or run.connection_id != connection_id:
+        return {"run_id": None, "hours": [], "items": []}
+    if run.id in _PROFILE_CACHE:
+        return _PROFILE_CACHE[run.id]
+    items = (await db.execute(
+        select(InfraOpportunity).where(InfraOpportunity.run_id == run.id).order_by(InfraOpportunity.id)
+    )).scalars().all()
+    try:
+        data = await asyncio.to_thread(_hourly_profiles, run, list(items))
+    except Exception as exc:
+        raise HTTPException(503, f"Silver indisponível para consulta ({type(exc).__name__})") from exc
+    if run.status == "COMPLETED":
+        while len(_PROFILE_CACHE) >= _PROFILE_CACHE_SIZE:
+            _PROFILE_CACHE.pop(next(iter(_PROFILE_CACHE)))
+        _PROFILE_CACHE[run.id] = data
+    return data
 
 
 @router.get("/{opportunity_id}")
