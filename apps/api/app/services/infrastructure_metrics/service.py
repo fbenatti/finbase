@@ -42,6 +42,10 @@ def collect_oci_metrics(
         resolution_seconds=resolution_seconds, statistics=statistics,
     )
     estimated_calls = estimated_api_calls(plans)
+    if persist:
+        from .publication import ensure_metric_series_table
+
+        ensure_metric_series_table()
     adapter = build_oci_adapter(connection, config)
     results: tuple[QueryResult, ...] = collect(adapter, plans)
     run_id = collection_run_id or str(uuid.uuid4())
