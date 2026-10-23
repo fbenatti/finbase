@@ -195,7 +195,7 @@ export default function Anomalies() {
     if (tab === 3) void loadExpected();
     if (tab === 4) void loadQuality();
     if (tab === 5) {
-      void listAnomalyCases({ limit: 200, order_by: "score", deviation_status: ["AUTOCORRIGIDO", "CORRIGIDO_COM_ACAO"] })
+      void listAnomalyCases({ limit: 200, order_by: "score", state: ["CLOSED"] })
         .then((page) => setRetrospectiveItems(page.items))
         .catch(() => setRetrospectiveItems([]));
     }
@@ -521,45 +521,9 @@ export default function Anomalies() {
         <Paper variant="outlined" sx={{ p: 2 }}>
           <Typography variant="subtitle2" gutterBottom>Retrospectiva</Typography>
           <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>
-            Anomalias validadas (com ação ou aceitas), autocorrigidas e corrigidas com ação. O custo observado soma os dias anômalos; savings são projeções do ritmo recente após correção, não economia realizada auditada.
+            Casos encerrados para consulta retrospectiva. Clique em uma linha para ver os detalhes e o histórico da investigação.
           </Typography>
-          <Table size="small">
-            <TableHead>
-              <TableRow>
-                <TableCell>#</TableCell>
-                <TableCell>Período</TableCell>
-                <TableCell>Estado</TableCell>
-                <TableCell>Duração</TableCell>
-                <TableCell>Gasto da anomalia</TableCell>
-                <TableCell>Economia / mês</TableCell>
-                <TableCell>Economia / ano</TableCell>
-                <TableCell>Causa</TableCell>
-                <TableCell>Decisão</TableCell>
-                <TableCell>Aprendizado</TableCell>
-                <TableCell>Ação preventiva</TableCell>
-              </TableRow>
-            </TableHead>
-            <TableBody>
-              {retrospectiveCases.map((item) => (
-                <TableRow key={item.id}>
-                  <TableCell>#{item.id}</TableCell>
-                  <TableCell>{item.episode_start ?? item.event_date} → {item.episode_end ?? "em andamento"}</TableCell>
-                  <TableCell>{item.deviation_status === "AUTOCORRIGIDO" ? "Voltou ao patamar normal" : item.deviation_status === "CORRIGIDO_COM_ACAO" ? "Resolvido com ação" : STATE_LABEL[item.state] ?? item.state}</TableCell>
-                  <TableCell>{daysBetween(item.episode_start, item.episode_end)}</TableCell>
-                  <TableCell>{money(item.impact_to_date ?? item.anomalous_cost_cloud, currency)}</TableCell>
-                  <TableCell>{item.deviation_status === "AUTOCORRIGIDO" || item.deviation_status === "CORRIGIDO_COM_ACAO" ? money(item.projected_month_impact, currency) : "—"}</TableCell>
-                  <TableCell>{item.deviation_status === "AUTOCORRIGIDO" || item.deviation_status === "CORRIGIDO_COM_ACAO" ? money((item.projected_month_impact ?? 0) * 12, currency) : "—"}</TableCell>
-                  <TableCell>{item.cause_category ? CAUSE_LABEL[item.cause_category] ?? item.cause_category : "—"}</TableCell>
-                  <TableCell>{item.decision ? DECISION_LABEL[item.decision] ?? item.decision : "—"}</TableCell>
-                  <TableCell>{item.learning ?? "—"}</TableCell>
-                  <TableCell>{item.preventive_measure ?? item.no_preventive_measure_reason ?? "—"}</TableCell>
-                </TableRow>
-              ))}
-              {retrospectiveCases.length === 0 && <TableRow><TableCell colSpan={11}>
-                <Typography variant="body2" color="text.secondary">Nenhum caso corrigido ou autorregulado no histórico carregado.</Typography>
-              </TableCell></TableRow>}
-            </TableBody>
-          </Table>
+          <AnomaliesCasesDataGrid cases={retrospectiveCases} currency={currency} onOpen={openCase} />
         </Paper>
       )}
 
