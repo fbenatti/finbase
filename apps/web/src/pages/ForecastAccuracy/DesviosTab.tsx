@@ -215,6 +215,10 @@ export default function DesviosTab({ runId, targetMonth, department }: { runId: 
     acks.forEach(ack => map.set(ack.department_path.join(" > "), ack));
     return map;
   }, [acks]);
+  const displayedItems = [...(data?.positive ?? []), ...(data?.negative ?? [])];
+  const acknowledgedDisplayedCount = displayedItems.filter(item => ackByPath.has(item.path.join(" > "))).length;
+  const largestDeviation = displayedItems.reduce<ForecastDesvioItem | null>((largest, item) =>
+    !largest || Math.abs(Number(item.variance || 0)) > Math.abs(Number(largest.variance || 0)) ? item : largest, null);
 
   const loadAcks = useCallback(async (month: string) => {
     try {
@@ -294,10 +298,7 @@ export default function DesviosTab({ runId, targetMonth, department }: { runId: 
       {error && <Alert severity="error" sx={{ mb: 2 }} onClose={() => setError("")}>{dataDisplayText(error)}</Alert>}
       <Stack direction="row" justifyContent="space-between" alignItems="flex-start" sx={{ mb: 2 }} gap={1} flexWrap="wrap">
         <Typography variant="body2" color="text.secondary">
-          Variações do mês selecionado no último nível de cada unidade, respeitando a unidade filtrada.
-          <Box component="span" sx={{ color: "#DC2626" }}> Vermelho = subestimou</Box> (efetivado acima do projetado — gastou mais) ·{" "}
-          <Box component="span" sx={{ color: "#16A34A" }}>verde = superestimou</Box> (efetivado abaixo do projetado — gastou menos). Use o <b>+</b> à esquerda do nome
-          para detalhar por ServiceSubcategory e o botão <b>Justificar</b> para explicar a variação.
+          Compare as unidades com maior diferença entre o forecast e o efetivado. Abra uma linha para investigar as subcategorias.
         </Typography>
         <Button variant="outlined" size="small" startIcon={<AddOutlined fontSize="small" />} onClick={() => setRegisterOpen(true)}>
           Cadastrar item
@@ -312,10 +313,35 @@ export default function DesviosTab({ runId, targetMonth, department }: { runId: 
         </Box>
       ) : data ? (
         <>
-          <DesvioTable title={`Top 10 positivos (subestimou) · ${data.positive.length}`} items={data.positive} color="#DC2626"
-            expanded={expanded} onToggle={toggle} subcats={subcats} subcatLoading={subcatLoading} onAck={openAck} ackByPath={ackByPath} onSubcatSeries={openSubcatSeries} onDeactivateAck={setDeactivateTarget} />
-          <DesvioTable title={`Top 10 negativos (superestimou) · ${data.negative.length}`} items={data.negative} color="#16A34A"
-            expanded={expanded} onToggle={toggle} subcats={subcats} subcatLoading={subcatLoading} onAck={openAck} ackByPath={ackByPath} onSubcatSeries={openSubcatSeries} onDeactivateAck={setDeactivateTarget} />
+          <Box sx={{ display: "grid", gridTemplateColumns: { xs: "1fr", md: "repeat(3, minmax(0, 1fr))" }, gap: 1, mb: 2 }}>
+            <Paper variant="outlined" sx={{ px: 1.5, py: 1.25, borderRadius: 1.5, borderLeft: "3px solid #DC2626" }}>
+              <Typography variant="caption" color="text.secondary">Unidades acima do previsto</Typography>
+              <Typography variant="h6" sx={{ lineHeight: 1.25, color: "#B42318" }}>{data.positive.length}</Typography>
+            </Paper>
+            <Paper variant="outlined" sx={{ px: 1.5, py: 1.25, borderRadius: 1.5, borderLeft: "3px solid #16A34A" }}>
+              <Typography variant="caption" color="text.secondary">Unidades abaixo do previsto</Typography>
+              <Typography variant="h6" sx={{ lineHeight: 1.25, color: "#15803D" }}>{data.negative.length}</Typography>
+            </Paper>
+            <Paper variant="outlined" sx={{ px: 1.5, py: 1.25, borderRadius: 1.5 }}>
+              <Typography variant="caption" color="text.secondary">Variações justificadas</Typography>
+              <Typography variant="h6" sx={{ lineHeight: 1.25 }}>{acknowledgedDisplayedCount} de {displayedItems.length}</Typography>
+            </Paper>
+          </Box>
+          {largestDeviation && (
+            <Paper variant="outlined" sx={{ display: "flex", alignItems: "center", gap: 1, px: 1.5, py: 1, mb: 2, borderRadius: 1.5, bgcolor: "action.hover" }}>
+              <Typography variant="body2" color="text.secondary">Maior variação exibida</Typography>
+              <Typography variant="body2" fontWeight={700}>{largestDeviation.name}</Typography>
+              <Typography variant="body2" fontWeight={750} sx={{ color: Number(largestDeviation.variance || 0) >= 0 ? "#B42318" : "#15803D", ml: "auto" }}>
+                {Number(largestDeviation.variance || 0) > 0 ? "+" : ""}{money.format(Number(largestDeviation.variance || 0))} ({pct(largestDeviation.variance_pct)})
+              </Typography>
+            </Paper>
+          )}
+          <Box sx={{ display: "grid", gridTemplateColumns: { xs: "1fr", xl: "repeat(2, minmax(0, 1fr))" }, alignItems: "start", gap: 2 }}>
+            <DesvioTable title="Acima do previsto · maior gasto" items={data.positive} color="#DC2626"
+              expanded={expanded} onToggle={toggle} subcats={subcats} subcatLoading={subcatLoading} onAck={openAck} ackByPath={ackByPath} onSubcatSeries={openSubcatSeries} onDeactivateAck={setDeactivateTarget} />
+            <DesvioTable title="Abaixo do previsto · menor gasto" items={data.negative} color="#16A34A"
+              expanded={expanded} onToggle={toggle} subcats={subcats} subcatLoading={subcatLoading} onAck={openAck} ackByPath={ackByPath} onSubcatSeries={openSubcatSeries} onDeactivateAck={setDeactivateTarget} />
+          </Box>
           {data.positive.length === 0 && data.negative.length === 0 && (
             <Typography variant="body2" color="text.secondary">Sem variações para o mês/unidade selecionados.</Typography>
           )}
