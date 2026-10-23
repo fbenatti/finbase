@@ -30,10 +30,12 @@ import {
 const TABS = ["Visão geral", "Oportunidades", "Execuções do motor"];
 
 export default function InfrastructureOpportunities() {
-  const [searchParams, setSearchParams] = useSearchParams();
+  // A aba inicial pode vir do menu (view_params); a troca de aba é local.
+  const [searchParams] = useSearchParams();
   const requestedTab = Number(searchParams.get("tab"));
-  const tab = Number.isInteger(requestedTab) && requestedTab >= 0 && requestedTab < TABS.length ? requestedTab : 0;
-  const setTab = (next: number) => setSearchParams({ tab: String(next) }, { replace: true });
+  const [tab, setTab] = useState(
+    Number.isInteger(requestedTab) && requestedTab >= 0 && requestedTab < TABS.length ? requestedTab : 0,
+  );
 
   const [connections, setConnections] = useState<SourceConnection[]>([]);
   const [connectionId, setConnectionId] = useState<number | null>(null);
