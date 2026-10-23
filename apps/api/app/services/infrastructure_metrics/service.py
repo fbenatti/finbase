@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 from collections import defaultdict
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Any
 import uuid
 
@@ -27,6 +27,10 @@ def collect_oci_metrics(
     """
     config = config_from_connection(connection)
     scope = config.scope(int(connection.id))
+    if start_utc.tzinfo is None or end_utc.tzinfo is None:
+        raise ValueError("collection window must use timezone-aware datetimes")
+    if end_utc <= start_utc or end_utc - start_utc > timedelta(hours=24):
+        raise ValueError("pilot collection window must be positive and at most 24 hours")
     if resolution_seconds not in config.resolutions_seconds:
         raise ValueError("requested resolution is not enabled in pilot configuration")
     descriptors = tuple(
@@ -69,6 +73,7 @@ def collect_oci_metrics(
         "statistics": list(statistics),
         "estimated_api_calls": estimated_calls,
         "completed_query_count": len(results),
+        "failed_query_count": sum(result.status_code >= 400 for result in results),
         "rows_prepared": rows,
         "persistence_enabled": persist,
         "persisted_by_day": persisted_by_day,
