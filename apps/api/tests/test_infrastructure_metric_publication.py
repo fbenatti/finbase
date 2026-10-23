@@ -113,3 +113,31 @@ def test_initializes_empty_multicloud_metric_series_table(monkeypatch):
     assert created["table_id"] == ("silver", "resource_metric_series")
     assert {field.name for field in created["schema"].fields} == {field.name for field in METRIC_SERIES.fields}
     assert {field.name for field in created["partition_spec"].fields} == {"metric_day", "_source_connection_id"}
+
+
+def test_initializes_empty_metric_coverage_table(monkeypatch):
+    from contextlib import nullcontext
+
+    from app.services import iceberg_service, write_lock
+    from app.services.infrastructure_metrics.publication import ensure_metric_coverage_table
+    from app.services.silver_models import METRIC_COVERAGE
+
+    created = {}
+
+    class FakeCatalog:
+        def create_table(self, table_id, *, schema, partition_spec):
+            created.update(table_id=table_id, schema=schema, partition_spec=partition_spec)
+
+    monkeypatch.setattr(iceberg_service, "table_exists", lambda _name, namespace: False)
+    monkeypatch.setattr(iceberg_service, "ensure_namespace", lambda _namespace: None)
+    monkeypatch.setattr(iceberg_service, "get_catalog", lambda: FakeCatalog())
+    monkeypatch.setattr(write_lock, "exclusive_write_lock", nullcontext)
+
+    assert ensure_metric_coverage_table() is True
+    assert created["table_id"] == ("silver", "resource_metric_coverage")
+    assert {field.name for field in created["schema"].fields} == {
+        field.name for field in METRIC_COVERAGE.fields
+    }
+    assert {field.name for field in created["partition_spec"].fields} == {
+        "metric_day", "_source_connection_id",
+    }
