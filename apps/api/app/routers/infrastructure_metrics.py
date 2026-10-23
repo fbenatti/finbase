@@ -9,7 +9,8 @@ from pydantic import BaseModel, ConfigDict
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.deps import require
+from app.core.deps import get_current_user
+from app.core.rbac import get_effective_permissions, has_permission
 from app.database import get_db
 from app.models.etl_task import EtlTask
 from app.models.source_connection import SourceConnection
@@ -30,7 +31,15 @@ class CollectionRequest(BaseModel):
     statistics: tuple[str, ...] = DEFAULT_STATISTICS
 
 
-async def _validated_plan(body: CollectionRequest, db: AsyncSession):
+async def _authorize_connection(user, db: AsyncSession, connection_id: int, action: str) -> None:
+    permissions = await get_effective_permissions(db, user.id)
+    if not has_permission(
+        permissions, "infrastructure_metrics", action, f"connection:{int(connection_id)}",
+    ):
+        raise HTTPException(403, "Sem permissão para esta conexão de métricas")
+
+
+async def _validated_plan(body: CollectionRequest, db: AsyncSession, user, action: str):
     if body.start_utc.tzinfo is None or body.end_utc.tzinfo is None:
         raise HTTPException(422, "start_utc e end_utc devem incluir fuso horário")
     start = body.start_utc.astimezone(timezone.utc)
@@ -40,6 +49,7 @@ async def _validated_plan(body: CollectionRequest, db: AsyncSession):
     conn = await db.get(SourceConnection, body.connection_id)
     if not conn or conn.connector_type != "oci":
         raise HTTPException(404, "Conexão OCI não encontrada")
+    await _authorize_connection(user, db, conn.id, action)
     try:
         config = config_from_connection(conn)
         if not config.enabled:
@@ -81,20 +91,20 @@ def _safe_plan(conn, config, plans, calls: int, start: datetime, end: datetime) 
 @router.post("/planejar")
 async def plan_collection(
     body: CollectionRequest,
-    _user=Depends(require("infrastructure_metrics", "read")),
+    user=Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    conn, config, plans, calls, start, end = await _validated_plan(body, db)
+    conn, config, plans, calls, start, end = await _validated_plan(body, db, user, "read")
     return _safe_plan(conn, config, plans, calls, start, end)
 
 
 @router.post("/coletar", status_code=202)
 async def queue_collection(
     body: CollectionRequest,
-    _user=Depends(require("infrastructure_metrics", "create")),
+    user=Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    conn, config, plans, calls, start, end = await _validated_plan(body, db)
+    conn, config, plans, calls, start, end = await _validated_plan(body, db, user, "create")
     active = (await db.execute(
         select(EtlTask).where(
             EtlTask.task_type == "infrastructure_metrics_collection",
@@ -123,12 +133,13 @@ async def queue_collection(
 @router.get("/tarefas/{task_id}")
 async def collection_task_status(
     task_id: int,
-    _user=Depends(require("infrastructure_metrics", "read")),
+    user=Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
     task = await db.get(EtlTask, task_id)
     if not task or task.task_type != "infrastructure_metrics_collection":
         raise HTTPException(404, "Tarefa de métricas não encontrada")
+    await _authorize_connection(user, db, int(task.connection_id), "read")
     result = task.result_json if isinstance(task.result_json, dict) else {}
     summary = {
         key: result[key] for key in (
