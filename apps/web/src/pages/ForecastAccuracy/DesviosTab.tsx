@@ -27,38 +27,30 @@ function DesvioTable({
   onDeactivateAck: (ack: ForecastAck) => void;
 }) {
   if (items.length === 0) return null;
+  const maxVariance = Math.max(...items.map(item => Math.abs(Number(item.variance || 0))), 1);
   return (
-    <Box sx={{ mb: 3 }}>
-      <Typography variant="subtitle1" fontWeight={700} sx={{ color, mb: 1 }}>{title}</Typography>
-      <TableContainer>
-        <Table size="small">
-          <TableHead>
-            <TableRow>
-              <TableCell>Unidade (último nível)</TableCell>
-              <TableCell align="right">Previsto</TableCell>
-              <TableCell align="right">Efetivado</TableCell>
-              <TableCell align="right">Variação (R$)</TableCell>
-              <TableCell align="right">Variação (%)</TableCell>
-              <TableCell align="right">Precisão</TableCell>
-              <TableCell align="center">Justificativa</TableCell>
-            </TableRow>
-          </TableHead>
-          <TableBody>
-            {items.map(item => {
-              const key = item.path.join(" > ");
-              const open = expanded === key;
-              const ack = ackByPath.get(key);
-              return (
-                <FragmentRow key={key} item={item} color={color} open={open} ack={ack}
-                  onToggle={() => onToggle(key)} subcats={subcats[key]} subcatLoading={subcatLoading && open}
-                  onAck={() => onAck(item)} onSubcatSeries={sub => onSubcatSeries(item, sub)}
-                  onDeactivateAck={() => ack && onDeactivateAck(ack)} />
-              );
-            })}
-          </TableBody>
-        </Table>
-      </TableContainer>
-    </Box>
+    <Paper variant="outlined" sx={{ minWidth: 0, overflow: "hidden", borderRadius: 2 }}>
+      <Box sx={{ px: 2, py: 1.5, borderBottom: "1px solid", borderColor: "divider", display: "flex", alignItems: "center", justifyContent: "space-between", gap: 1 }}>
+        <Stack direction="row" alignItems="center" spacing={1}>
+          <Box sx={{ width: 9, height: 9, borderRadius: "50%", bgcolor: color }} />
+          <Typography variant="subtitle1" fontWeight={750}>{title}</Typography>
+        </Stack>
+        <Chip size="small" label={`${items.length} ${items.length === 1 ? "unidade" : "unidades"}`} sx={{ fontWeight: 650 }} />
+      </Box>
+      <Stack spacing={0}>
+        {items.map(item => {
+          const key = item.path.join(" > ");
+          const open = expanded === key;
+          const ack = ackByPath.get(key);
+          return (
+            <FragmentRow key={key} item={item} color={color} open={open} ack={ack} maxVariance={maxVariance}
+              onToggle={() => onToggle(key)} subcats={subcats[key]} subcatLoading={subcatLoading && open}
+              onAck={() => onAck(item)} onSubcatSeries={sub => onSubcatSeries(item, sub)}
+              onDeactivateAck={() => ack && onDeactivateAck(ack)} />
+          );
+        })}
+      </Stack>
+    </Paper>
   );
 }
 
