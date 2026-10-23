@@ -11,7 +11,7 @@ import json
 import time
 from typing import Any
 
-from ..contracts import MetricPoint, MetricScope, QueryPlan, QueryResult
+from ..contracts import CollectionCancelled, MetricPoint, MetricScope, QueryPlan, QueryResult
 
 
 _STATISTIC_QUERY = {
@@ -24,11 +24,12 @@ _STATISTIC_QUERY = {
 class OciMetricsAdapter:
     provider = "oci"
 
-    def __init__(self, monitoring_client: Any, compartment_id: str):
+    def __init__(self, monitoring_client: Any, compartment_id: str, *, should_abort=None):
         if not compartment_id:
             raise ValueError("compartment_id is required")
         self._client = monitoring_client
         self._compartment_id = compartment_id
+        self._should_abort = should_abort
 
     def discover(self, scope: MetricScope) -> tuple[str, ...]:
         """Return only the caller's explicit allowlist; do not expand scope."""
@@ -64,6 +65,8 @@ class OciMetricsAdapter:
             if query.resolution_seconds % 60:
                 raise ValueError("OCI resolution must be a whole number of minutes")
             for statistic in query.statistics:
+                if self._should_abort and self._should_abort():
+                    raise CollectionCancelled("infrastructure metric collection cancelled")
                 expression = _STATISTIC_QUERY[statistic]
                 metric_query = (
                     f'{query.descriptor.name}[{resolution_minutes}m]'
