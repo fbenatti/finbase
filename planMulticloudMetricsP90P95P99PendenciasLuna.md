@@ -557,6 +557,8 @@ nem reduz o aceite T00–T15. O estado continua **ENTREGA PARCIAL**.
 | Perfis calculam lacunas ausentes incluindo bordas e emitem dias/perfil serializáveis; modelo declara expected_buckets e quantile_method. | `a7ea546b`, `f9733e38`, `022fb0ca` | `test_infrastructure_metric_profiles.py` |
 | Bucket com resposta agregada parcialmente falha recebe `PARTIAL` e motivo. | `f7953bed` | Suíte de métricas abaixo. |
 | Router verifica RBAC por `connection:<id>` para leitura/criação, mantém grant global e serializa enqueue com advisory lock; tarefas novas guardam snapshot do plano. | `307e674b`, `2fab3455`, `ba2895c6`, `ea646c03` | Testes unitários de permissão; concorrência do endpoint ainda sem integração de banco. |
+| Worker preserva snapshot do pedido e usa allowlist/região/métricas congeladas no enqueue, sem gravar credenciais no job. | `94d4f40d`, `ddcdbed5`, `dfa4d879`, `b7e6ba09`, `5f7c0c59` | Teste de serviço edita a conexão depois do snapshot; escopo do worker usa a configuração original. |
+| Inicialização/evolução da tabela de séries usa o lock de escrita compartilhado. | `da89ce14` | Teste de schema com catálogo fake; sem inspeção física. |
 
 Commits de implementação foram feitos logo após cada incremento de código,
 conforme instrução do usuário. As alterações simultâneas observadas em telas de
@@ -575,9 +577,9 @@ python -m pytest -q \
 ```
 
 Resultado inicial após os primeiros incrementos: **85 passed**. Após identidade v2,
-conflitos de lote, lineage por estatística, autorização e fila: **92 passed**.
-Também passou `compileall` do router/worker/pacote. Permanece aviso de configuração
-de `pytest-asyncio`.
+conflitos de lote, lineage por estatística, autorização, fila e config congelada:
+**93 passed**. Também passou `compileall` do router/worker/pacote. Permanece aviso
+de configuração de `pytest-asyncio`.
 Não foi executada build web nesta continuidade porque nenhuma tela web de
 métricas foi implementada. Não foram chamadas APIs OCI nem feitas consultas ou
 escritas no catálogo real.
@@ -588,11 +590,11 @@ escritas no catálogo real.
 | --- | --- | --- |
 | T00 | PARCIAL | Inventário operacional de conexões, catálogo físico, dependências e divergências ainda não foi produzido. |
 | T01 | PARCIAL | Identidade v2 contempla namespace/scope/owner e campos opcionais, preservando a chave de bucket baseada em dimensões v1; faltam conversões por descriptor, integração completa do protocolo e compatibilidade de leitores que guardaram series_id v1. |
-| T02 | PARCIAL | RBAC por connection id e lock de enqueue implementados; falta autorização de organização, versão auditável da configuração, budgets persistidos e teste integrado de concorrência. |
+| T02 | PARCIAL | RBAC por connection id, lock de enqueue e snapshot da configuração implementados; falta autorização de organização, histórico de versões/auditoria e budgets persistidos, além de teste integrado de concorrência. |
 | T03 | PARCIAL — físico não comprovado | Só o initializer da série existe; falta preparar/evoluir todos os modelos, relações, schema diff real e compatibilidade legado. |
 | T04 | PARCIAL | Corrigidos chaves opcionais e conflitos de valores duplicados no lote; falta isolamento/concorrência/rerun e publicação Iceberg real. |
 | T05 | PARCIAL | Adapter ainda cobre consulta de métricas; sem inventário/capacity/attachments/capabilities nem validação viva. |
-| T06 | PARCIAL | Cancelamento cooperativo e preservação de CANCELLED implementados; faltam checkpoints persistidos, retomada, progresso durante chunks, retry/backoff, budgets de pontos/bytes/RPS e teste concorrente integrado. |
+| T06 | PARCIAL | Cancelamento cooperativo, preservação de CANCELLED e snapshot de escopo implementados; faltam checkpoints persistidos, retomada, progresso durante chunks, retry/backoff, budgets de pontos/bytes/RPS e teste concorrente integrado. |
 | T07 | PENDENTE — evidência operacional | Nenhum piloto do worker atual com Bronze/Silver reais foi executado nesta sessão. |
 | T08 | NÃO IMPLEMENTADO no fluxo novo | Ainda sem backfill de 60 dias, planner/chunks, cutoff/lifecycle e reconciliação real. |
 | T09 | PARCIAL | Cálculo isolado de perfil/gaps melhorado; ainda sem coverage writer, rollups, job leitor/publicador, schema/consumidor integrado e taxa entre chunks. |
@@ -614,6 +616,9 @@ escritas no catálogo real.
   publicação Iceberg. A tabela física e seus field IDs continuam sem evidência.
 - O cancelamento não fornece checkpoints nem retomada; a operação inteira ainda
   não foi integrada com progresso real e concorrência do worker.
+- O snapshot da configuração evita mudança de allowlist/região entre enqueue e
+  execução, mas ainda não guarda histórico de versões no banco nem mede todos os
+  budgets exigidos pelo PLAN.
 - O perfil corrigido segue sendo função sem consumidor operacional; ausência de
   amostras ainda não gera linha de coverage.
 
