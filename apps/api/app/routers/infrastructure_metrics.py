@@ -1,10 +1,11 @@
 """Manual, bounded entry points for the OCI infrastructure metric pilot."""
 from __future__ import annotations
 
+import asyncio
 from datetime import datetime, timedelta, timezone
 from typing import Literal
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, ConfigDict
 from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -29,6 +30,32 @@ class CollectionRequest(BaseModel):
     end_utc: datetime
     resolution_seconds: Literal[60, 300, 900]
     statistics: tuple[str, ...] = DEFAULT_STATISTICS
+
+
+def _read_silver_slice(table_name: str, filters: dict, limit: int) -> list[dict]:
+    """Read a bounded allowlisted Iceberg slice without accepting SQL text."""
+    from pyiceberg.expressions import And, EqualTo, GreaterThanOrEqual, LessThan
+
+    from app.services import iceberg_service
+
+    if not iceberg_service.table_exists(table_name, namespace="silver"):
+        return []
+    table = iceberg_service.get_catalog().load_table(("silver", table_name))
+    predicates = []
+    for field, value in filters.items():
+        if field.endswith("__gte"):
+            predicates.append(GreaterThanOrEqual(field[:-5], value))
+        elif field.endswith("__lt"):
+            predicates.append(LessThan(field[:-4], value))
+        else:
+            predicates.append(EqualTo(field, value))
+    expression = And(*predicates) if len(predicates) > 1 else predicates[0]
+    arrow = table.scan(row_filter=expression).limit(limit).to_arrow()
+    return [
+        {key: value.isoformat() if isinstance(value, datetime) else value
+         for key, value in row.items()}
+        for row in arrow.to_pylist()
+    ]
 
 
 async def _authorize_connection(user, db: AsyncSession, connection_id: int, action: str) -> None:
@@ -190,3 +217,73 @@ async def collection_task_status(
         "started_at": task.started_at,
         "finished_at": task.finished_at,
     }
+
+
+@router.get("/series")
+async def read_metric_series(
+    connection_id: int,
+    start_utc: datetime,
+    end_utc: datetime,
+    resource_id: str | None = None,
+    metric: str | None = None,
+    resolution_seconds: Literal[60, 300, 900] | None = None,
+    limit: int = Query(5000, ge=1, le=20000),
+    user=Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    if start_utc.tzinfo is None or end_utc.tzinfo is None:
+        raise HTTPException(422, "A janela deve incluir fuso horário")
+    start = start_utc.astimezone(timezone.utc)
+    end = end_utc.astimezone(timezone.utc)
+    if start >= end or end - start > timedelta(days=60):
+        raise HTTPException(422, "A janela deve ser positiva e ter no máximo 60 dias")
+    await _authorize_connection(user, db, connection_id, "read")
+    filters = {
+        "_source_connection_id": connection_id,
+        "bucket_start_utc__gte": start.replace(tzinfo=None),
+        "bucket_start_utc__lt": end.replace(tzinfo=None),
+    }
+    if resource_id:
+        filters["resource_id"] = resource_id
+    if metric:
+        filters["metric"] = metric
+    if resolution_seconds:
+        filters["resolution_seconds"] = resolution_seconds
+    try:
+        rows = await asyncio.to_thread(_read_silver_slice, "resource_metric_series", filters, limit)
+    except Exception as exc:
+        raise HTTPException(503, f"Silver indisponível para consulta ({type(exc).__name__})") from exc
+    return {"connection_id": connection_id, "start_utc": start.isoformat(),
+            "end_utc": end.isoformat(), "limit": limit, "rows": rows}
+
+
+@router.get("/coverage")
+async def read_metric_coverage(
+    connection_id: int,
+    start_utc: datetime,
+    end_utc: datetime,
+    resource_id: str | None = None,
+    limit: int = Query(5000, ge=1, le=20000),
+    user=Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    if start_utc.tzinfo is None or end_utc.tzinfo is None:
+        raise HTTPException(422, "A janela deve incluir fuso horário")
+    start = start_utc.astimezone(timezone.utc)
+    end = end_utc.astimezone(timezone.utc)
+    if start >= end or end - start > timedelta(days=60):
+        raise HTTPException(422, "A janela deve ser positiva e ter no máximo 60 dias")
+    await _authorize_connection(user, db, connection_id, "read")
+    filters = {
+        "_source_connection_id": connection_id,
+        "window_start_utc__gte": start.replace(tzinfo=None),
+        "window_start_utc__lt": end.replace(tzinfo=None),
+    }
+    if resource_id:
+        filters["resource_id"] = resource_id
+    try:
+        rows = await asyncio.to_thread(_read_silver_slice, "resource_metric_coverage", filters, limit)
+    except Exception as exc:
+        raise HTTPException(503, f"Silver indisponível para consulta ({type(exc).__name__})") from exc
+    return {"connection_id": connection_id, "start_utc": start.isoformat(),
+            "end_utc": end.isoformat(), "limit": limit, "rows": rows}
