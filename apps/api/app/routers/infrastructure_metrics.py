@@ -139,6 +139,8 @@ async def collection_task_status(
     task = await db.get(EtlTask, task_id)
     if not task or task.task_type != "infrastructure_metrics_collection":
         raise HTTPException(404, "Tarefa de métricas não encontrada")
+    if task.connection_id is None:
+        raise HTTPException(404, "Tarefa de métricas sem conexão associada")
     await _authorize_connection(user, db, int(task.connection_id), "read")
     result = task.result_json if isinstance(task.result_json, dict) else {}
     summary = {
