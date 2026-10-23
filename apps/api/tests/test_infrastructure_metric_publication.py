@@ -50,3 +50,26 @@ def test_new_rows_append_to_preserved_existing_day_and_duplicate_old_key_fails()
     assert {row["resource_id"] for row in result} == {"vm-a", "vm-b"}
     with pytest.raises(ValueError, match="duplicate metric series buckets"):
         merge_metric_rows([old, old], [new])
+
+
+def test_initializes_empty_multicloud_metric_series_table(monkeypatch):
+    from app.services import iceberg_service
+    from app.services.infrastructure_metrics.publication import ensure_metric_series_table
+    from app.services.silver_models import METRIC_SERIES
+
+    created = {}
+    namespaces = []
+
+    class FakeCatalog:
+        def create_table(self, table_id, *, schema, partition_spec):
+            created.update(table_id=table_id, schema=schema, partition_spec=partition_spec)
+
+    monkeypatch.setattr(iceberg_service, "table_exists", lambda _name, namespace: False)
+    monkeypatch.setattr(iceberg_service, "ensure_namespace", namespaces.append)
+    monkeypatch.setattr(iceberg_service, "get_catalog", lambda: FakeCatalog())
+
+    assert ensure_metric_series_table() is True
+    assert namespaces == ["silver"]
+    assert created["table_id"] == ("silver", "resource_metric_series")
+    assert {field.name for field in created["schema"].fields} == {field.name for field in METRIC_SERIES.fields}
+    assert {field.name for field in created["partition_spec"].fields} == {"metric_day", "_source_connection_id"}
