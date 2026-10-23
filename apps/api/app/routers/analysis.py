@@ -2788,7 +2788,7 @@ async def delete_staging_table(table_name: str, db: AsyncSession = Depends(get_d
 @router.post("/consulta", response_model=QueryResponse)
 async def run_query(req: QueryRequest, request: Request, db: AsyncSession = Depends(get_db)):
     """
-    Execute a SQL query against Trino + Iceberg.
+    Execute a read-only query against the data catalog.
 
     Examples:
       SELECT * FROM iceberg.bronze.raw_oci WHERE _billing_period = '202504' LIMIT 10
