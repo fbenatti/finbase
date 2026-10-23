@@ -25,7 +25,7 @@ from app.services.anomaly_v2.query_control import execute as trino_execute
 
 logger = logging.getLogger(__name__)
 
-MODEL_VERSION = "v2.2"
+MODEL_VERSION = "v2.3"
 
 
 class AnomalyV2RunError(RuntimeError):
@@ -38,6 +38,61 @@ def _materiality(config: Mapping[str, Any]) -> tuple[float, float]:
     daily = float(by_cur.get(currency, 500.0))
     monthly = float(config.get("materiality_monthly") or daily * 6)
     return daily, monthly
+
+
+def detect_scope_window(
+    *,
+    scope_id: str,
+    rows: list[dict[str, Any]],
+    end: date,
+    window_days: int,
+    materiality: float,
+    min_pct: float,
+    ledger_entries: list[dict[str, Any]],
+    valid_days: set[str],
+    commitment_scope_ids: set[str],
+    settings: Mapping[str, Any],
+) -> list[tuple[dict[str, Any], dict[str, Any]]]:
+    """Avalia cada desvio da janela, mantendo um sinal por episódio/competência."""
+    start = end - timedelta(days=window_days - 1)
+    daily_totals: dict[str, float] = defaultdict(float)
+    for row in rows:
+        daily_totals[str(row["day"])[:10]] += float(row.get("cost_cloud") or 0)
+    last_day_by_month: dict[str, str] = {}
+    for day in daily_totals:
+        if start.isoformat() <= day <= end.isoformat():
+            last_day_by_month[day[:7]] = max(day, last_day_by_month.get(day[:7], day))
+    candidates = {
+        day for day, amount in daily_totals.items()
+        if start.isoformat() <= day <= end.isoformat() and amount >= materiality
+    }
+    candidates.update(last_day_by_month.values())
+    candidates.add(end.isoformat())
+    found: dict[tuple[str, str], tuple[dict[str, Any], dict[str, Any]]] = {}
+    for day_text in sorted(candidates):
+        if day_text not in valid_days:
+            continue
+        day = date.fromisoformat(day_text)
+        profile = classify_scopes(
+            rows, as_of=day, commitment_scope_ids=commitment_scope_ids, settings=settings,
+        ).get(scope_id)
+        if not profile:
+            continue
+        for signal in run_detectors_for_scope(
+            scope_id=scope_id, daily=rows, profile=profile, as_of=day,
+            materiality=materiality, min_pct=min_pct, ledger_entries=ledger_entries,
+            valid_days=valid_days, settings=settings,
+        ):
+            detector = str(signal.get("detector") or "")
+            if detector == "MONTHLY_ACCUMULATED":
+                identity = day_text[:7]
+            elif detector == "NEW_SPEND":
+                identity = (day - timedelta(days=int(profile["history_days"]) - 1)).isoformat()
+                signal["episode_start"] = identity
+            else:
+                identity = str(signal.get("episode_start") or signal.get("day") or day_text)[:10]
+            found[(detector, identity)] = (signal, profile)
+    return list(found.values())
 
 
 async def _ensure_tables() -> None:
