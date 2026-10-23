@@ -219,6 +219,25 @@ def ensure_metric_coverage_table(*, namespace: str = "silver") -> bool:
                 with table.update_schema() as update:
                     update.union_by_name(target)
             return False
+        iceberg_service.ensure_namespace(namespace)
+        config = resolve_destination_slice_config_for_fields(
+            table_name, {"grain": "metric_day", "connection_column": "_source_connection_id"}, fields,
+        )
+        partition_spec = build_iceberg_partition_spec(target, config, pyarrow_safe=True)
+        try:
+            iceberg_service.get_catalog().create_table(
+                (namespace, table_name), schema=target, partition_spec=partition_spec,
+            )
+            return True
+        except Exception:
+            if not iceberg_service.table_exists(table_name, namespace=namespace):
+                raise
+            table = iceberg_service.get_catalog().load_table((namespace, table_name))
+            existing = {field.name for field in table.schema().fields}
+            if not fields.issubset(existing):
+                with table.update_schema() as update:
+                    update.union_by_name(target)
+            return False
 
 
 def ensure_metric_profile_table(*, namespace: str = "silver") -> bool:
@@ -302,25 +321,6 @@ def publish_metric_profile_rows(
             namespace=namespace, partition_spec_json=spec, column_types=columns,
         )
     return len(merged)
-        iceberg_service.ensure_namespace(namespace)
-        config = resolve_destination_slice_config_for_fields(
-            table_name, {"grain": "metric_day", "connection_column": "_source_connection_id"}, fields,
-        )
-        partition_spec = build_iceberg_partition_spec(target, config, pyarrow_safe=True)
-        try:
-            iceberg_service.get_catalog().create_table(
-                (namespace, table_name), schema=target, partition_spec=partition_spec,
-            )
-            return True
-        except Exception:
-            if not iceberg_service.table_exists(table_name, namespace=namespace):
-                raise
-            table = iceberg_service.get_catalog().load_table((namespace, table_name))
-            existing = {field.name for field in table.schema().fields}
-            if not fields.issubset(existing):
-                with table.update_schema() as update:
-                    update.union_by_name(target)
-            return False
 
 
 def publish_metric_coverage_rows(
