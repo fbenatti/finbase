@@ -71,6 +71,8 @@ def merge_metric_rows(existing: Iterable[Mapping], incoming: Iterable[Mapping]) 
             prior = merged.get(key)
             if prior is None:
                 merged[key] = row
+                if source_name == "incoming":
+                    incoming_keys.add(key)
                 continue
             if source_name == "existing":
                 raise ValueError("existing Silver slice contains duplicate metric series buckets")
