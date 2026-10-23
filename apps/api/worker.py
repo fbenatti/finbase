@@ -1680,7 +1680,8 @@ def consumer_main(worker_id: int):
                             task_row.rows_normalized = len(result.get("rows_prepared") or [])
                             task_row.rows_destination = persisted_count
                             task_row.errors = [f"{failed} query(s) failed"] if failed else []
-                            task_row.result_json = {
+                            task_result = dict(task_row.result_json or {})
+                            task_result.update({
                                 "provider": "oci",
                                 "region": result.get("region"),
                                 "resource_count": result.get("resource_count"),
@@ -1692,7 +1693,8 @@ def consumer_main(worker_id: int):
                                 "failed_query_count": failed,
                                 "rows_prepared": len(result.get("rows_prepared") or []),
                                 "persisted_by_day": persisted,
-                            }
+                            })
+                            task_row.result_json = task_result
                             task_row.finished_at = datetime.now(timezone.utc)
                             sync_etl_task_log(metrics_session, task_row)
                             metrics_session.commit()
