@@ -100,6 +100,68 @@ def _column_types() -> dict[str, str]:
             if field.type in mapping}
 
 
+def ensure_metric_series_table(*, namespace: str = "silver") -> bool:
+    """Create the empty shared Silver table, or evolve it to the declared model.
+
+    Returns True when a new table was registered. This runs before provider
+    queries on the first persisted collection, so an empty/unsupported metric
+    response still leaves the agreed schema visible in the catalog.
+    """
+    import pyarrow as pa
+    from pyiceberg.io.pyarrow import pyarrow_to_schema
+
+    from app.services import iceberg_service
+    from app.services.destination_slice import (
+        build_iceberg_partition_spec,
+        resolve_destination_slice_config_for_fields,
+    )
+    from app.services.silver_models import METRIC_SERIES
+
+    arrow_types = {
+        "varchar": pa.string(), "decimal": pa.float64(), "double": pa.float64(),
+        "bigint": pa.int64(), "boolean": pa.bool_(), "timestamp": pa.timestamp("us"),
+    }
+    arrow_schema = pa.schema([
+        pa.field(field.name, arrow_types[field.type], nullable=not field.required)
+        for field in METRIC_SERIES.fields
+    ])
+    target_schema = pyarrow_to_schema(arrow_schema)
+    table_name = METRIC_SERIES.table
+    if iceberg_service.table_exists(table_name, namespace=namespace):
+        table = iceberg_service.get_catalog().load_table((namespace, table_name))
+        existing = {field.name for field in table.schema().fields}
+        expected = {field.name for field in target_schema.fields}
+        if not expected.issubset(existing):
+            with table.update_schema() as update:
+                update.union_by_name(target_schema)
+        return False
+
+    iceberg_service.ensure_namespace(namespace)
+    fields = {field.name for field in target_schema.fields}
+    slice_config = resolve_destination_slice_config_for_fields(
+        table_name,
+        {"grain": "metric_day", "connection_column": "_source_connection_id"},
+        fields,
+    )
+    partition_spec = build_iceberg_partition_spec(target_schema, slice_config, pyarrow_safe=True)
+    table_id = (namespace, table_name)
+    try:
+        iceberg_service.get_catalog().create_table(
+            table_id, schema=target_schema, partition_spec=partition_spec,
+        )
+        return True
+    except Exception:
+        # Another API/worker can initialize the shared table at the same time.
+        if not iceberg_service.table_exists(table_name, namespace=namespace):
+            raise
+        table = iceberg_service.get_catalog().load_table(table_id)
+        existing = {field.name for field in table.schema().fields}
+        if not fields.issubset(existing):
+            with table.update_schema() as update:
+                update.union_by_name(target_schema)
+        return False
+
+
 def publish_metric_rows(
     rows: Iterable[Mapping], *, connection_id: int, metric_day: str,
     namespace: str = "silver",
