@@ -30,6 +30,7 @@ from app.models.ingested_blob import IngestedBlob
 from app.models.skipped_blob import SkippedBlob
 from app.models.source_connection import SourceConnection
 from app.schemas.schemas import BlobScanItem, BlobScanResult
+from app.services.infrastructure_metrics.catalog import OCI_RESOURCE_TYPE_BY_NAMESPACE
 
 logger = logging.getLogger(__name__)
 
@@ -98,18 +99,25 @@ def month_chunks(month_start: datetime) -> list[tuple[datetime, datetime]]:
     return bounds
 
 
-def blob_path_for(resolution: str, start: datetime, end: datetime) -> str:
-    return f"{BLOB_ROOT}/{resolution}/{start:%Y-%m-%d}_{end:%Y-%m-%d}"
+def blob_path_for(resolution: str, start: datetime, end: datetime, asset: str | None = None) -> str:
+    """Unit path: one window, or one asset in one window (``collection_unit = asset``)."""
+    path = f"{BLOB_ROOT}/{resolution}/{start:%Y-%m-%d}_{end:%Y-%m-%d}"
+    return f"{path}/{asset}" if asset else path
 
 
 def parse_blob_path(blob_path: str) -> tuple[str, datetime, datetime]:
-    root, resolution, window = blob_path.split("/")
-    if root != BLOB_ROOT:
+    resolution, start, end, _asset = parse_unit(blob_path)
+    return resolution, start, end
+
+
+def parse_unit(blob_path: str) -> tuple[str, datetime, datetime, str | None]:
+    parts = blob_path.split("/")
+    if len(parts) not in (3, 4) or parts[0] != BLOB_ROOT:
         raise ValueError(f"Unidade OCI Monitoring inválida: {blob_path}")
-    start_text, end_text = window.split("_")
+    start_text, end_text = parts[2].split("_")
     start = datetime.fromisoformat(start_text).replace(tzinfo=timezone.utc)
     end = datetime.fromisoformat(end_text).replace(tzinfo=timezone.utc)
-    return resolution, start, end
+    return parts[1], start, end, (parts[3] if len(parts) == 4 else None)
 
 
 def _text(value: Any) -> str | None:
@@ -234,6 +242,33 @@ class OciMonitoringExtractor:
         region = self.config.get("region") or (credentials.config_json or {}).get("region")
         return {**config, "region": region} if region else config
 
+    def asset_resources(self, instance_id: str) -> tuple[dict[str, list[str]], list[str]]:
+        """The instance and its attached VNICs and volumes (boot included), by resource type."""
+        import oci
+
+        entry = next((item for item in self.instances() if item["resource_id"] == instance_id), None)
+        resources: dict[str, list[str]] = {"compute.instance": [instance_id], "network.vnic": [], "storage.volume": []}
+        errors: list[str] = []
+        if entry is None:
+            return resources, [f"{instance_id}: instância não encontrada na descoberta"]
+        instance, compartment = entry["instance"], entry["compartment_id"]
+        compute = oci.core.ComputeClient(self.oci_config(), retry_strategy=oci.retry.DEFAULT_RETRY_STRATEGY, timeout=(5, 60))
+        lookups = (
+            ("network.vnic", lambda: compute.list_vnic_attachments(compartment, instance_id=instance_id), "vnic_id"),
+            ("storage.volume", lambda: compute.list_volume_attachments(compartment, instance_id=instance_id), "volume_id"),
+            ("storage.volume", lambda: compute.list_boot_volume_attachments(
+                instance.availability_domain, compartment, instance_id=instance_id), "boot_volume_id"),
+        )
+        for kind, lookup, field in lookups:
+            try:
+                # An instance has a handful of attachments: one page holds them.
+                for attachment in lookup().data:
+                    if getattr(attachment, "lifecycle_state", "ATTACHED") == "ATTACHED" and getattr(attachment, field, None):
+                        resources[kind].append(getattr(attachment, field))
+            except oci.exceptions.ServiceError as exc:
+                errors.append(f"{instance_id}: anexos {field} {exc.status} {exc.code}")
+        return resources, errors
+
     def _new_client(self):
         import oci
 
@@ -272,10 +307,30 @@ class OciMonitoringExtractor:
             month = (month + timedelta(days=32)).replace(day=1)
         return units
 
+    @property
+    def per_asset(self) -> bool:
+        """``collection_unit = asset``: one unit per instance and window, collected in sequence."""
+        return str(self.config.get("collection_unit") or "") == "asset"
+
+    def _unit_paths(self, start: datetime, end: datetime) -> list[str]:
+        if not self.per_asset:
+            return [blob_path_for(self.resolution, start, end)]
+        return [blob_path_for(self.resolution, start, end, asset) for asset in self.resource_ids]
+
     def _build_scan_items(self, existing: dict[str, IngestedBlob], skipped: set[str]) -> list[BlobScanItem]:
         items = []
-        for start, end, _effective_start, effective_end in self.windows():
-            blob_path = blob_path_for(self.resolution, start, end)
+        windows = self.windows()
+        # Per asset the order is asset by asset (all its windows), so each VM
+        # is complete in Bronze before the next one starts.
+        units = [
+            (path, start, effective_end)
+            for start, end, _effective_start, effective_end in windows
+            for path in self._unit_paths(start, end)
+        ]
+        if self.per_asset:
+            order = {asset: index for index, asset in enumerate(self.resource_ids)}
+            units.sort(key=lambda unit: (order.get(parse_unit(unit[0])[3], 0), unit[1]))
+        for blob_path, start, effective_end in units:
             if blob_path in skipped:
                 continue
             previous = existing.get(blob_path)
@@ -358,19 +413,34 @@ class OciMonitoringExtractor:
         # Tenancy discovery asks once from the root covering every subcompartment;
         # compartment discovery once per compartment; an allowlist per resource.
         # Each answer has one stream per resource.
-        if self.discovers_tenancy:
-            targets = [(str(self.oci_config()["tenancy"]), None, True)]
-        elif self.discovers_compartment:
-            targets = [(compartment_id, None, False) for compartment_id in
-                       sorted({item["compartment_id"] for item in self.instances()})]
+        asset = parse_unit(blob_path)[3]
+        if asset:
+            # One asset: every namespace filtered by the asset's own resources,
+            # asked from the discovery root so attachments in other
+            # compartments are found too.
+            root = str(self.oci_config()["tenancy"]) if self.discovers_tenancy else str(self.config["compartment_id"])
+            resources, attachment_errors = self.asset_resources(asset)
+            errors.extend(attachment_errors)
+            calls = [
+                (namespace, metric, statistic, root, resource_id, True)
+                for namespace, metric, statistics in self.collection_plan()
+                for resource_id in resources.get(OCI_RESOURCE_TYPE_BY_NAMESPACE.get(namespace, "compute.instance"), [])
+                for statistic in statistics
+            ]
         else:
-            targets = [(str(self.config["compartment_id"]), resource_id, False) for resource_id in self.resource_ids]
-        calls = [
-            (namespace, metric, statistic, compartment_id, resource_id, subtree)
-            for namespace, metric, statistics in self.collection_plan()
-            for compartment_id, resource_id, subtree in targets
-            for statistic in statistics
-        ]
+            if self.discovers_tenancy:
+                targets = [(str(self.oci_config()["tenancy"]), None, True)]
+            elif self.discovers_compartment:
+                targets = [(compartment_id, None, False) for compartment_id in
+                           sorted({item["compartment_id"] for item in self.instances()})]
+            else:
+                targets = [(str(self.config["compartment_id"]), resource_id, False) for resource_id in self.resource_ids]
+            calls = [
+                (namespace, metric, statistic, compartment_id, resource_id, subtree)
+                for namespace, metric, statistics in self.collection_plan()
+                for compartment_id, resource_id, subtree in targets
+                for statistic in statistics
+            ]
         local = threading.local()
 
         def call(spec):

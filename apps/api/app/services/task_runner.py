@@ -2674,7 +2674,9 @@ def _process_oci_monitoring_sync(
     except Exception as exc:
         logger.error("Falha ao coletar OCI Monitoring %s: %s", blob_path, exc)
         return 0, 0, 0, [f"OCI Monitoring {blob_path}: {exc}"]
-    billing_period = blob_path.split("/")[-1][:7].replace("-", "")
+    from app.services.oci_monitoring_extractor import parse_blob_path
+
+    billing_period = parse_blob_path(blob_path)[1].strftime("%Y%m")
     if call_errors and df.empty:
         return 0, 0, 0, [f"{blob_path}: " + "; ".join(call_errors[:5])]
 
