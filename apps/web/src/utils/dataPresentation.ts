@@ -35,7 +35,11 @@ export function moduleDisplayName(module: string): string {
 export function dataDisplayText(value: string | null | undefined): string {
   if (!value) return "";
   return value
+    .replace(/\biceberg\.(bronze|silver|gold)\.[a-z0-9_$]+/gi, (_, layer: string) => DATA_LAYER_LABELS[layer.toLowerCase()])
     .replace(/\biceberg\.(bronze|silver|gold)\b/gi, (_, layer: string) => DATA_LAYER_LABELS[layer.toLowerCase()])
+    .replace(/\biceberg(?:\.[a-z0-9_]+){1,2}\b/gi, "base de dados")
+    .replace(/\biceberg_catalog\b/gi, "catálogo de dados")
+    .replace(/(^|[_-])(?:4p|tlf|vivo|telef[oó]nica|telefonica|ibm-ti|dimon)(?=$|[_-])/gi, "$1ambiente")
     .replace(/\b(?:4p|tlf|vivo|telef[oó]nica|telefonica|ibm-ti|dimon)\b/gi, "ambiente configurado")
     .replace(/\b(?:Apache\s+)?(?:Py)?Iceberg\b/gi, "acervo de dados")
     .replace(/\bTr(?:i|e)no\b/gi, "serviço de consultas")

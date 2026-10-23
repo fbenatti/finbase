@@ -331,7 +331,7 @@ export default function Extraction({ embedded = false }: { embedded?: boolean })
     try {
       const result = await collectInfrastructureMetrics(infrastructureMetricsRequest());
       const initial: InfrastructureMetricsTaskStatus = {
-        task_id: result.task_id, status: result.status, phase: "Na fila para coletar e publicar na Silver",
+        task_id: result.task_id, status: result.status, phase: "Na fila para coletar e publicar na base preparada",
         rows_raw: 0, rows_destination: 0, errors: [], summary: {}, started_at: null, finished_at: null,
       };
       setInfraPlan(result.plan);
@@ -564,7 +564,7 @@ export default function Extraction({ embedded = false }: { embedded?: boolean })
             {selectedConnection?.connector_type === "oci" && (
               <ToolbarSection
                 title="Métricas de infraestrutura"
-                description="Consulta a OCI e publica os buckets coletados na base preparada (Silver)."
+                description="Consulta a OCI e publica os dados coletados na base preparada."
               >
                 {!isInfraMetricsSelected ? (
                   <Alert severity="info" sx={{ width: "100%" }}>
@@ -584,13 +584,13 @@ export default function Extraction({ embedded = false }: { embedded?: boolean })
                       {infraPlanning ? "Estimando..." : "Estimar consultas"}
                     </Button>
                     <Button variant="contained" startIcon={infraCollecting ? <CircularProgress size={18} /> : <PlayArrow />} onClick={() => void doCollectInfrastructureMetrics()} disabled={!infraPlan || infraPlanning || infraCollecting || isActive}>
-                      {infraCollecting ? "Enfileirando..." : "Coletar e gravar na Silver"}
+                      {infraCollecting ? "Enfileirando..." : "Coletar e gravar"}
                     </Button>
                     {infraPlan && <Alert severity="info" sx={{ width: "100%" }}>
                       Plano: {infraPlan.resource_count} recurso(s), {infraPlan.metric_names.length} métricas, {infraPlan.statistics.join(", ")} por bucket de {infraPlan.resolution_seconds / 60} minuto(s), até {infraPlan.estimated_api_calls} chamadas OCI. Janela em UTC; retenção planejada: {infraPlan.retention_days} dias.
                     </Alert>}
                     {infraTaskStatus && <Alert severity={infraTaskStatus.status === "FAILED" ? "error" : infraTaskStatus.status === "COMPLETED_WITH_ERRORS" ? "warning" : ["COMPLETED", "CANCELLED"].includes(infraTaskStatus.status) ? "success" : "info"} sx={{ width: "100%" }}>
-                      Tarefa #{infraTaskStatus.task_id}: {infraTaskStatus.status} — {infraTaskStatus.phase || ""}. Consultas concluídas: {Number(infraTaskStatus.summary.completed_query_count ?? infraTaskStatus.rows_raw)}; falhas: {Number(infraTaskStatus.summary.failed_query_count ?? infraTaskStatus.errors.length)}; linhas publicadas na Silver: {infraTaskStatus.rows_destination}.
+                      Tarefa #{infraTaskStatus.task_id}: {infraTaskStatus.status} — {dataDisplayText(infraTaskStatus.phase || "")}. Consultas concluídas: {Number(infraTaskStatus.summary.completed_query_count ?? infraTaskStatus.rows_raw)}; falhas: {Number(infraTaskStatus.summary.failed_query_count ?? infraTaskStatus.errors.length)}; linhas publicadas: {infraTaskStatus.rows_destination}.
                     </Alert>}
                   </>
                 )}

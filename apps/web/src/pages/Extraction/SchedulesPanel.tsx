@@ -413,8 +413,8 @@ export default function SchedulesPanel({ connections }: { connections: SourceCon
               <SectionTitle>Processamento pós-coleta</SectionTitle>
               <Box>
                 <FormControl size="small" fullWidth>
-                  <InputLabel>bases consolidadas (camada gold)</InputLabel>
-                  <Select multiple value={form.destination_table_ids} label="Bases consolidadas (gold)"
+                  <InputLabel>Bases consolidadas</InputLabel>
+                  <Select multiple value={form.destination_table_ids} label="Bases consolidadas"
                     onChange={e => setForm({ ...form, destination_table_ids: e.target.value as number[] })}
                     renderValue={ids => (ids as number[]).map(id => destinations.find(d => d.id === id)?.name || `ID ${id}`).join(", ")}>
                     {destinations.map(d => <MenuItem key={d.id} value={d.id}>{d.name}</MenuItem>)}
