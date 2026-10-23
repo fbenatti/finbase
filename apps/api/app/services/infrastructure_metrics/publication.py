@@ -191,6 +191,104 @@ def ensure_metric_series_table(*, namespace: str = "silver") -> bool:
         return _ensure_metric_series_table_locked(namespace=namespace)
 
 
+def ensure_metric_coverage_table(*, namespace: str = "silver") -> bool:
+    """Create/evolve the shared daily coverage model under the write lock."""
+    from pyiceberg.schema import Schema
+    from pyiceberg.types import BooleanType, DoubleType, LongType, NestedField, StringType, TimestampType
+
+    from app.services import iceberg_service
+    from app.services.destination_slice import build_iceberg_partition_spec, resolve_destination_slice_config_for_fields
+    from app.services.silver_models import METRIC_COVERAGE
+    from app.services.write_lock import exclusive_write_lock
+
+    iceberg_types = {
+        "varchar": StringType(), "decimal": DoubleType(), "double": DoubleType(),
+        "bigint": LongType(), "boolean": BooleanType(), "timestamp": TimestampType(),
+    }
+    target = Schema(*[
+        NestedField(index, field.name, iceberg_types[field.type], required=field.required)
+        for index, field in enumerate(METRIC_COVERAGE.fields, start=1)
+    ])
+    table_name = METRIC_COVERAGE.table
+    fields = {field.name for field in target.fields}
+    with exclusive_write_lock():
+        if iceberg_service.table_exists(table_name, namespace=namespace):
+            table = iceberg_service.get_catalog().load_table((namespace, table_name))
+            existing = {field.name for field in table.schema().fields}
+            if not fields.issubset(existing):
+                with table.update_schema() as update:
+                    update.union_by_name(target)
+            return False
+        iceberg_service.ensure_namespace(namespace)
+        config = resolve_destination_slice_config_for_fields(
+            table_name, {"grain": "metric_day", "connection_column": "_source_connection_id"}, fields,
+        )
+        partition_spec = build_iceberg_partition_spec(target, config, pyarrow_safe=True)
+        try:
+            iceberg_service.get_catalog().create_table(
+                (namespace, table_name), schema=target, partition_spec=partition_spec,
+            )
+            return True
+        except Exception:
+            if not iceberg_service.table_exists(table_name, namespace=namespace):
+                raise
+            table = iceberg_service.get_catalog().load_table((namespace, table_name))
+            existing = {field.name for field in table.schema().fields}
+            if not fields.issubset(existing):
+                with table.update_schema() as update:
+                    update.union_by_name(target)
+            return False
+
+
+def publish_metric_coverage_rows(
+    rows: Iterable[Mapping], *, connection_id: int, metric_day: str,
+    namespace: str = "silver",
+) -> int:
+    """Idempotently publish one connection/day coverage snapshot."""
+    import pandas as pd
+
+    from app.services import iceberg_service
+    from app.services.destination_slice import build_slice_row_filter, resolve_destination_slice_config_for_fields
+    from app.services.silver_models import METRIC_COVERAGE
+    from app.services.write_lock import exclusive_write_lock
+
+    incoming = [dict(row) for row in rows]
+    if not incoming:
+        return 0
+    for row in incoming:
+        if int(row.get("_source_connection_id", -1)) != int(connection_id) or str(row.get("metric_day")) != metric_day:
+            raise ValueError("coverage rows mix source connections or metric days")
+    with exclusive_write_lock():
+        table = iceberg_service.get_catalog().load_table((namespace, METRIC_COVERAGE.table))
+        schema_names = {field.name for field in table.schema().fields}
+        slice_config = resolve_destination_slice_config_for_fields(
+            METRIC_COVERAGE.table, {"grain": "metric_day", "connection_column": "_source_connection_id"}, schema_names,
+        )
+        existing = table.scan(row_filter=build_slice_row_filter(
+            slice_config, connection_id=connection_id, metric_day=metric_day,
+        )).to_arrow().to_pylist()
+        key_fields = ("_source_connection_id", "series_id", "resolution_seconds", "origin_kind", "metric_day")
+        merged = {tuple(row.get(name) for name in key_fields): dict(row) for row in existing}
+        for row in incoming:
+            merged[tuple(row.get(name) for name in key_fields)] = row
+        frame = pd.DataFrame(list(merged.values()))
+        for field in METRIC_COVERAGE.fields:
+            if field.type == "timestamp" and field.name in frame.columns:
+                frame[field.name] = pd.to_datetime(frame[field.name], errors="coerce", utc=True).dt.tz_localize(None)
+        column_types = {
+            field.name: {"varchar": "VARCHAR", "bigint": "BIGINT", "double": "DOUBLE",
+                         "decimal": "DOUBLE", "boolean": "BOOLEAN"}.get(field.type, "TIMESTAMP")
+            for field in METRIC_COVERAGE.fields
+        }
+        iceberg_service.publish_silver_dataframe_slice(
+            METRIC_COVERAGE.table, frame, connection_id=connection_id,
+            metric_day=metric_day, namespace=namespace,
+            partition_spec_json={"grain": "metric_day", "connection_column": "_source_connection_id"},
+            column_types=column_types,
+        )
+    return len(merged)
+
+
 def publish_metric_rows(
     rows: Iterable[Mapping], *, connection_id: int, metric_day: str,
     namespace: str = "silver",
