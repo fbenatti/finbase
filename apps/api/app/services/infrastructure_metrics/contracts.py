@@ -105,6 +105,7 @@ class QueryResult:
     plan: QueryPlan
     status_code: int
     points: tuple[MetricPoint, ...] = ()
+    raw_payloads: tuple[Mapping[str, Any], ...] = ()
     sanitized_request: Mapping[str, Any] = field(default_factory=dict)
     safe_headers: Mapping[str, str] = field(default_factory=dict)
     page_count: int = 1
