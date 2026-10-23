@@ -8,7 +8,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import select, text
 from app.config import settings
 from app.database import engine, Base, async_session
-from app.routers import connections, csv_upload, etl, rules, periods, analysis, destinations, schema, forecast, clone_rules, planning, anomalies, savings, azure_tag_policy, gold, reservations, azure_resource_graph, azure_sources, azure_mca_commitment, oci_operational, infrastructure_metrics, ideas, financial_contracts, auth as auth_router, users as users_router, groups as groups_router, roles as roles_router, audit as audit_router, sso as sso_router, sso_providers as sso_providers_router, integrations, processing_logs
+from app.routers import connections, csv_upload, etl, rules, periods, analysis, destinations, schema, forecast, clone_rules, planning, anomalies, savings, azure_tag_policy, gold, reservations, azure_resource_graph, azure_sources, azure_mca_commitment, oci_operational, infrastructure_metrics, ideas, financial_contracts, commitment_engine, auth as auth_router, users as users_router, groups as groups_router, roles as roles_router, audit as audit_router, sso as sso_router, sso_providers as sso_providers_router, integrations, processing_logs
 from app.routers import modules as modules_router
 from app.routers import hierarchy_aliases
 from app.routers import connector_visibility as connector_visibility_router
@@ -147,6 +147,7 @@ async def lifespan(app: FastAPI):
         from app.models.ingested_blob import IngestedBlob  # noqa: F401
         from app.models.rules import EtlMapping, BusinessRule, ClassificationRule, ClassificationFieldValue, OrganizationMoveAudit, DepartmentSharedCost, DepartmentSharedCostTarget  # noqa: F401
         from app.models.financial_contract import FinancialContract, FinancialContractConnection, FinancialContractBudgetScope, ContractSettlementRun, ContractSettlementMonth  # noqa: F401
+        from app.models.commitment import CommitmentOffer, CommitmentRecoRun, CommitmentRecommendation  # noqa: F401
         from app.models.period_status import PeriodStatus  # noqa: F401
         from app.models.etl_task import EtlTask  # noqa: F401
         from app.models.processing_log import ProcessingLog  # noqa: F401
@@ -991,6 +992,7 @@ app.include_router(savings.router)
 app.include_router(azure_tag_policy.router)
 app.include_router(gold.router)
 app.include_router(reservations.router)
+app.include_router(commitment_engine.router)
 app.include_router(azure_resource_graph.router)
 app.include_router(azure_sources.router)
 app.include_router(azure_mca_commitment.router)
