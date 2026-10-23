@@ -42,12 +42,13 @@ def read_series(
     from app.services.trino_service import execute_sync
 
     rows = execute_sync(
-        f"SELECT CAST(bucket_start_utc AS VARCHAR) AS bucket, statistic, CAST(value AS DOUBLE) AS value "
+        f"SELECT bucket_start_utc AS bucket, statistic, CAST(value AS DOUBLE) AS value "
         f"FROM {layers.detail_layer()}.{SILVER_TABLE} "
         f"WHERE source_connection_id = {int(connection_id)} AND resource_id = {_literal(resource_id)} "
         f"AND metric = {_literal(metric)} AND CAST(resolution_seconds AS INTEGER) = {int(resolution_seconds)} "
-        f"AND bucket_start_utc >= TIMESTAMP '{start:%Y-%m-%d %H:%M:%S} UTC' "
-        f"AND bucket_start_utc < TIMESTAMP '{end:%Y-%m-%d %H:%M:%S} UTC'",
+        # TIMESTAMPTZ destination columns land as ISO-8601 text in Iceberg.
+        f"AND from_iso8601_timestamp(bucket_start_utc) >= TIMESTAMP '{start:%Y-%m-%d %H:%M:%S} UTC' "
+        f"AND from_iso8601_timestamp(bucket_start_utc) < TIMESTAMP '{end:%Y-%m-%d %H:%M:%S} UTC'",
         timeout_s=180,
     )
     by_bucket: dict[str, dict] = {}

@@ -6,8 +6,8 @@ OCI cost connection but reuses its credentials by reference
 
 Bronze keeps the response untouched: one row per aggregated datapoint with
 the ``MetricData`` fields (``namespace``, ``name``, ``dimensions``,
-``metadata``, ``resolution``…) plus the request that produced it (``query``,
-``aggregation``, window and region). Renaming to generic columns happens only
+``metadata``…) plus the request that produced it (``query``, ``aggregation``,
+``request_resolution``, window and region — the response does not echo them). Renaming to generic columns happens only
 in the catalog mappings, when the Silver is reprocessed.
 """
 from __future__ import annotations
@@ -269,7 +269,8 @@ class OciMonitoringExtractor:
                             row = {key: _text(value) for key, value in stream.items()}
                             row.update({key: _text(value) for key, value in point.items()})
                             row.update({
-                                "query": query, "aggregation": aggregation, "region": region,
+                                "query": query, "aggregation": aggregation, "request_resolution": resolution,
+                                "region": region,
                                 "request_start_time": effective_start.isoformat(),
                                 "request_end_time": effective_end.isoformat(),
                                 "opc_request_id": request_id,

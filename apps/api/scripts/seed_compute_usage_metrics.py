@@ -90,7 +90,7 @@ def oci_mappings(tenancy: str | None) -> list[dict]:
          "transform_config": {"map": {m.name: m.canonical_unit for m in OCI_METRICS}, "default": None}},
         {"source_column": "aggregation", "destination_column": "statistic", "transform_type": "VALUE_MAP",
          "transform_config": {"map": statistic_of, "default": None}},
-        {"source_column": "resolution", "destination_column": "resolution_seconds", "transform_type": "VALUE_MAP",
+        {"source_column": "request_resolution", "destination_column": "resolution_seconds", "transform_type": "VALUE_MAP",
          "transform_config": {"map": {k: str(v) for k, v in RESOLUTIONS.items()}, "default": None}},
         {"source_column": "timestamp", "destination_column": "bucket_start_utc", "transform_type": "RENAME"},
         {"source_column": "value", "destination_column": "value", "transform_type": "RENAME"},
@@ -160,8 +160,10 @@ def main() -> None:
                 ))
                 print(f"  + coluna {name} {data_type}")
 
+        # Um destino é preenchido por um único mapeamento desta fonte: o seed
+        # corrige a origem/transformação de um mapeamento já existente.
         existing_mappings = {
-            (m.source_column, m.destination_column) for m in session.execute(
+            m.destination_column: m for m in session.execute(
                 select(SourceDestinationMapping).where(
                     SourceDestinationMapping.source_connection_id == source.id,
                     SourceDestinationMapping.destination_table_id == silver.id,
@@ -169,7 +171,13 @@ def main() -> None:
             ).scalars()
         }
         for priority, mapping in enumerate(oci_mappings(tenancy)):
-            if (mapping["source_column"], mapping["destination_column"]) in existing_mappings:
+            current = existing_mappings.get(mapping["destination_column"])
+            if current is not None:
+                wanted = (mapping["source_column"], mapping["transform_type"], mapping.get("transform_config"))
+                if (current.source_column, current.transform_type, current.transform_config) != wanted:
+                    current.source_column, current.transform_type, current.transform_config = wanted
+                    current.name = f"{mapping['source_column']} → {mapping['destination_column']}"
+                    print(f"  ~ mapeamento {mapping['source_column']} → {mapping['destination_column']} atualizado")
                 continue
             session.add(SourceDestinationMapping(
                 source_connection_id=source.id, destination_table_id=silver.id,
