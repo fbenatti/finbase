@@ -33,10 +33,23 @@ export const ACCESS_AREAS: AccessArea[] = [
     ],
   },
   {
-    area: "Projeções",
+    area: "Forecast",
     screens: [
-      { route: "/projecoes", label: "Projeções", module: "forecast" },
-      { route: "/projecoes/precisao", label: "Precisão das forecasts", module: "forecast" },
+      { route: "/projecoes/precisao/visao", label: "Precisão do Forecast", module: "forecast" },
+    ],
+  },
+  {
+    area: "Regras de negócio",
+    screens: [
+      { route: "/alertas/configuracao", label: "Parâmetros de detecção", module: "anomalies" },
+      { route: "/projecoes/configuracao", label: "Perfis de Forecast", module: "forecast" },
+      { route: "/projecoes/regras", label: "Regras de negócio do Forecast", module: "forecast" },
+      { route: "/projecoes/precisao/desvios", label: "Variações do Forecast", module: "forecast" },
+      { route: "/projecoes/precisao/justificativas", label: "Justificativas de variação", module: "forecast" },
+      { route: "/governanca/classificacao-de-projetos", label: "Classificação por projeto", module: "rules" },
+      { route: "/governanca/regras-de-ajuste", label: "Regras financeiras", module: "rules" },
+      { route: "/governanca/compromissos", label: "Compromissos de tarifa (RI e Savings Plans)", module: "reservations" },
+      { route: "/governanca/contratos", label: "Contratos financeiros", module: "rules" },
     ],
   },
   {
@@ -52,7 +65,6 @@ export const ACCESS_AREAS: AccessArea[] = [
     area: "Governança",
     screens: [
       { route: "/governanca?tab=organization", label: "Hierarquia", module: "planning" },
-      { route: "/governanca?tab=rules", label: "Regras e classificação", module: "rules" },
       { route: "/governanca?tab=tags", label: "Política de tags", module: "azure_tag_policy" },
     ],
   },
