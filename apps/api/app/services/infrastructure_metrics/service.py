@@ -72,7 +72,7 @@ def collect_oci_metrics(
             raise RuntimeError("raw metric responses were not fully persisted to Bronze")
     rows = query_results_to_silver_rows(
         results, source_owner="oci_infrastructure_metrics",
-        collection_run_id=run_id,
+        collection_run_id=run_id, bronze_persisted=persist,
     )
     from .counters import derive_counter_rates
 
