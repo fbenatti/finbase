@@ -539,3 +539,79 @@ Essa lista é apenas um retrato: executar `git status --short --branch` de novo
 antes de editar. Não presumir autoria nem incorporar essas alterações ao pacote
 de métricas. Não iniciar outro chat nem enviar mensagens a terceiros a partir
 deste documento; ele é o pedido de implementação/revisão a ser entregue ao Luna.
+
+## 11. Registro de execução — 23/10/2026
+
+Executor desta continuidade: Codex, na branch `main`. Este registro não substitui
+nem reduz o aceite T00–T15. O estado continua **ENTREGA PARCIAL**.
+
+### Incrementos implementados e commits
+
+| Incremento | Commit | Evidência local |
+| --- | --- | --- |
+| Chaves de identidade opcionais usam NULL canônico no merge; teste passa a saída real do normalizador ao merge. | `ef4fce5f`, `3e631f60` | `test_infrastructure_metric_publication.py` |
+| Persistência Bronze acontece antes da normalização/derivação. | `ba8f16d8` | Revisão do fluxo em `service.py`; sem escrita em catálogo real nesta sessão. |
+| Contagens de execução usam status das chamadas registradas, não o número de descriptors; fallback para adapters agregados. | `9366989c`, `26d33f05`, `bcd38a99` | Suíte de métricas abaixo. |
+| Introduzido cancelamento cooperativo entre requisições OCI, antes da publicação diária e preservação do estado CANCELLED no worker. | `21b89f4a`, `b4c8da15`, `3298a66f`, `a4c2734d`, `2aee0349` | Teste de cancelamento do adapter; não houve teste integrado de worker concorrente/retomada. |
+| Perfis calculam lacunas ausentes incluindo bordas e emitem dias/perfil serializáveis; modelo declara expected_buckets e quantile_method. | `a7ea546b`, `f9733e38`, `022fb0ca` | `test_infrastructure_metric_profiles.py` |
+| Bucket com resposta agregada parcialmente falha recebe `PARTIAL` e motivo. | `f7953bed` | Suíte de métricas abaixo. |
+
+Commits de implementação foram feitos logo após cada incremento de código,
+conforme instrução do usuário. As alterações simultâneas observadas em telas de
+Pivot/Analysis/Extraction, `main.py` e `pivot_view.py` foram deixadas fora destes
+commits.
+
+### Validação após os incrementos
+
+Executado em `apps/api`:
+
+```bash
+python -m pytest -q \
+  tests/test_infrastructure_metric_*.py \
+  tests/test_oci_infrastructure_metrics_adapter.py \
+  tests/test_semantic_normalization.py
+```
+
+Resultado: **85 passed**. Permanece aviso de configuração de `pytest-asyncio`.
+Não foi executada build web nesta continuidade porque nenhuma tela web de
+métricas foi implementada. Não foram chamadas APIs OCI nem feitas consultas ou
+escritas no catálogo real.
+
+### Reavaliação honesta T00–T15 após esta execução
+
+| Item | Estado atual | O que ainda impede o aceite |
+| --- | --- | --- |
+| T00 | PARCIAL | Inventário operacional de conexões, catálogo físico, dependências e divergências ainda não foi produzido. |
+| T01 | PARCIAL | Identidade v1 ainda não contempla todos os componentes de namespace/scope/owner/partition/sub-account; falta conversão por descriptor, protocolo e versionamento/migração. |
+| T02 | PARCIAL | Falta autorização por conexão/organização, configuração versionada auditável e budgets persistidos/validados em todos os caminhos. |
+| T03 | PARCIAL — físico não comprovado | Só o initializer da série existe; falta preparar/evoluir todos os modelos, relações, schema diff real e compatibilidade legado. |
+| T04 | PARCIAL | Corrigido o KeyError de chaves opcionais, mas falta conflito de duplicatas no lote, isolamento/concorrência/rerun e publicação Iceberg real. |
+| T05 | PARCIAL | Adapter ainda cobre consulta de métricas; sem inventário/capacity/attachments/capabilities nem validação viva. |
+| T06 | PARCIAL | Cancelamento foi iniciado; faltam checkpoints persistidos, retomada, progresso durante chunks, retry/backoff, budgets de pontos/bytes/RPS e teste concorrente integrado. |
+| T07 | PENDENTE — evidência operacional | Nenhum piloto do worker atual com Bronze/Silver reais foi executado nesta sessão. |
+| T08 | NÃO IMPLEMENTADO no fluxo novo | Ainda sem backfill de 60 dias, planner/chunks, cutoff/lifecycle e reconciliação real. |
+| T09 | PARCIAL | Cálculo isolado de perfil melhorado; ainda sem coverage writer, rollups, job leitor/publicador, schema/consumidor integrado e taxa entre chunks. |
+| T10 | PENDENTE | Sem experimento operacional de sete dias ou ADR derivado dos bytes/custos reais da aplicação. |
+| T11 | PARCIAL | Permanecem rotas de controle; faltam APIs de séries/perfis/comparação, Gold e leitura/exportação autorizada. |
+| T12 | NÃO IMPLEMENTADO | Falta página/menu de monitoramento dedicada. |
+| T13 | NÃO IMPLEMENTADO | Adaptadores Azure/AWS/GCP não foram criados neste incremento. |
+| T14 | NÃO IMPLEMENTADO | Falta contrato versionado de readiness para futura análise de capacidade/savings. |
+| T15 | PARCIAL | Este registro documenta commits/testes e bloqueios locais; faltam runbook, relatório por cloud, rollback e reconciliação final. |
+
+### Correções técnicas ainda necessárias antes de prosseguir com dados reais
+
+- A linhagem Silver ainda não contém hash/caminho/request real por estatística;
+  a mudança de ordem preserva Bronze em falhas posteriores, mas não fecha L02.
+- A chave de série ainda usa identidade `v1` e dimensões completas. Alterá-la sem
+  estratégia versionada pode fragmentar/duplicar as séries existentes.
+- O novo teste normalizador→merge valida o merge em memória; não é teste de
+  publicação Iceberg. A tabela física e seus field IDs continuam sem evidência.
+- O cancelamento não fornece checkpoints nem retomada; a operação inteira ainda
+  não foi integrada com progresso real e concorrência do worker.
+- O perfil corrigido segue sendo função sem consumidor operacional; ausência de
+  amostras ainda não gera linha de coverage.
+
+**Conclusão desta continuidade: ENTREGA PARCIAL.** Antes de declarar concluído,
+reler este documento, o PLAN completo e as solicitações de UI/Extração/Silver;
+executar a revisão da seção 8 inteira e manter explicitamente pendentes os
+aceites que dependem de catálogo, credenciais e medição operacional reais.
