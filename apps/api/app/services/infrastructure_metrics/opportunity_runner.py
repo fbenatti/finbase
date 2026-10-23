@@ -88,6 +88,14 @@ def run_opportunity_engine(
         raise PermissionError("infrastructure metric collection is disabled")
     rightsizing = rightsizing or rightsizing_for(registration.provider)
     start, end = window_bounds(as_of or datetime.now(timezone.utc), days)
+    # A source that only keeps N days at this resolution (OCI 5m: 30 days)
+    # cannot have data before that edge; analyzing from there keeps the
+    # coverage honest instead of counting the provider limit as a gap.
+    earliest = getattr(config, "earliest_available_utc", None)
+    if callable(earliest) and resolution_seconds == 300:
+        oldest = earliest(as_of)
+        if oldest is not None and oldest > start:
+            start = oldest
     run = InfraOpportunityRun(
         connection_id=int(connection.id), status="RUNNING", engine_version=ENGINE_VERSION,
         policy_version=DEFAULT_POLICY["version"], window_start_utc=start, window_end_utc=end,

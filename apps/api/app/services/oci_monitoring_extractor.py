@@ -329,6 +329,11 @@ class MonitoringScope:
     def oci_config(self) -> dict:
         return self.extractor.oci_config()
 
+    def earliest_available_utc(self, now: datetime | None = None) -> datetime | None:
+        """Oldest instant the provider still serves at this resolution."""
+        windows = self.extractor.windows(now)
+        return windows[0][2] if windows else None
+
 
 def monitoring_scope(connection: SourceConnection) -> MonitoringScope:
     extractor = OciMonitoringExtractor(connection)
