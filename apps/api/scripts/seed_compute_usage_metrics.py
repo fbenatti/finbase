@@ -37,7 +37,7 @@ for _module in pkgutil.iter_modules(app.models.__path__):
 from app.database import SyncSession  # noqa: E402
 from app.models.destination import DestinationColumn, DestinationTable, SourceDestinationMapping  # noqa: E402
 from app.models.source_connection import SourceConnection  # noqa: E402
-from app.services.infrastructure_metrics.catalog import OCI_METRICS  # noqa: E402
+from app.services.infrastructure_metrics.catalog import ALL_OCI_METRICS, OCI_RESOURCE_TYPE_BY_NAMESPACE  # noqa: E402
 from app.services.oci_monitoring_extractor import AGGREGATIONS, RESOLUTIONS  # noqa: E402
 
 SILVER_NAME = "Métricas de uso de computação"
@@ -81,13 +81,15 @@ def oci_mappings(tenancy: str | None) -> list[dict]:
         {"source_column": "dimensions.resourceId", "destination_column": "resource_id", "transform_type": "RENAME"},
         {"source_column": "dimensions.resourceDisplayName", "destination_column": "resource_name", "transform_type": "RENAME"},
         {"source_column": "namespace", "destination_column": "resource_type", "transform_type": "VALUE_MAP",
-         "transform_config": {"map": {"oci_computeagent": "compute.instance"}, "default": None}},
+         "transform_config": {"map": dict(OCI_RESOURCE_TYPE_BY_NAMESPACE), "default": None}},
         {"source_column": "namespace", "destination_column": "metric_namespace", "transform_type": "RENAME"},
         {"source_column": "name", "destination_column": "source_metric_name", "transform_type": "RENAME"},
-        {"source_column": "name", "destination_column": "metric", "transform_type": "VALUE_MAP",
-         "transform_config": {"map": {m.name: m.canonical_metric for m in OCI_METRICS}, "default": None}},
-        {"source_column": "name", "destination_column": "metric_unit", "transform_type": "VALUE_MAP",
-         "transform_config": {"map": {m.name: m.canonical_unit for m in OCI_METRICS}, "default": None}},
+        # Names repeat across namespaces (CpuUtilization: agent and hypervisor),
+        # so the canonical name comes from the requested "namespace/Metric".
+        {"source_column": "requested_metric", "destination_column": "metric", "transform_type": "VALUE_MAP",
+         "transform_config": {"map": {f"{m.namespace}/{m.name}": m.canonical_metric for m in ALL_OCI_METRICS}, "default": None}},
+        {"source_column": "requested_metric", "destination_column": "metric_unit", "transform_type": "VALUE_MAP",
+         "transform_config": {"map": {f"{m.namespace}/{m.name}": m.canonical_unit for m in ALL_OCI_METRICS}, "default": None}},
         {"source_column": "aggregation", "destination_column": "statistic", "transform_type": "VALUE_MAP",
          "transform_config": {"map": statistic_of, "default": None}},
         {"source_column": "request_resolution", "destination_column": "resolution_seconds", "transform_type": "VALUE_MAP",

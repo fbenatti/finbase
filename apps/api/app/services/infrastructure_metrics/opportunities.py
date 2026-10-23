@@ -30,6 +30,9 @@ RIGHTSIZE_DOWN = "RIGHTSIZE_DOWN"
 RIGHTSIZE_UP = "RIGHTSIZE_UP"
 
 CPU_METRIC = "cpu.utilization"
+# Hypervisor-measured CPU: present when the in-guest agent is not, so a VM
+# without the agent can still be sized by CPU (memory is then preserved).
+CPU_HYPERVISOR_METRIC = "cpu.utilization.hypervisor"
 MEMORY_METRIC = "memory.utilization"
 
 DEFAULT_POLICY = {

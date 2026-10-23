@@ -37,6 +37,29 @@ DEFAULT_METRICS = (
     "DiskBytesRead", "DiskBytesWritten", "NetworksBytesIn", "NetworksBytesOut",
 )
 DEFAULT_STATISTICS = ("mean", "max", "p95", "p99", "count")
+# What a source collects when it does not list ``metrics`` itself:
+# (namespace, metric, statistics). Utilization gauges keep the percentiles the
+# rightsizing engine and charts read; counters keep totals; status flags only
+# need their worst value per bucket.
+_TOTALS = ("mean", "max", "sum")
+DEFAULT_COLLECTION_PLAN: tuple[tuple[str, str, tuple[str, ...]], ...] = (
+    *(("oci_computeagent", name, DEFAULT_STATISTICS) for name in DEFAULT_METRICS),
+    ("oci_computeagent", "LoadAverage", DEFAULT_STATISTICS),
+    ("oci_computeagent", "MemoryAllocationStalls", ("max", "sum")),
+    ("oci_vmi_resource_utilization", "CpuUtilization", DEFAULT_STATISTICS),
+    *(("oci_compute", name, _TOTALS) for name in ("VolumeReadOps", "VolumeWriteOps", "VolumeReadThroughput", "VolumeWriteThroughput")),
+    ("oci_compute_instance_health", "InstanceAccessibilityStatus", ("max",)),
+    ("oci_compute_instance_health", "InstanceFileSystemStatus", ("max",)),
+    ("oci_compute_infrastructure_health", "instance_status", ("max",)),
+    ("oci_compute_infrastructure_health", "maintenance_status", ("max",)),
+    ("oci_vcn", "VnicFromNetworkBytes", _TOTALS),
+    ("oci_vcn", "VnicToNetworkBytes", _TOTALS),
+    ("oci_vcn", "VnicIngressDropsThrottle", ("max", "sum")),
+    ("oci_vcn", "VnicEgressDropsThrottle", ("max", "sum")),
+    ("oci_vcn", "VnicConntrackUtilPercent", ("mean", "max")),
+    *(("oci_blockstore", name, _TOTALS) for name in ("VolumeReadOps", "VolumeWriteOps", "VolumeReadThroughput", "VolumeWriteThroughput")),
+    ("oci_blockstore", "VolumeThrottledIOs", ("max", "sum")),
+)
 AGGREGATIONS = {
     "mean": "mean()", "min": "min()", "max": "max()", "count": "count()", "sum": "sum()",
     "p90": "percentile(0.90)", "p95": "percentile(0.95)", "p99": "percentile(0.99)",
@@ -286,6 +309,27 @@ class OciMonitoringExtractor:
         )
 
     # ---- acquisition ---------------------------------------------------
+    def collection_plan(self) -> list[tuple[str, str, tuple[str, ...]]]:
+        """(namespace, metric, statistics) to collect.
+
+        ``metrics`` lists "namespace/Metric" entries; the legacy
+        ``namespace`` + ``metric_names`` pair still works; without either, the
+        default plan covers agent, hypervisor, health, VNIC and volume metrics.
+        """
+        statistics = tuple(self._list("statistics", DEFAULT_STATISTICS))
+        configured = self._list("metrics")
+        if configured:
+            plan = []
+            for entry in configured:
+                namespace, _, name = entry.partition("/")
+                default = next((stats for ns, metric, stats in DEFAULT_COLLECTION_PLAN if ns == namespace and metric == name), statistics)
+                plan.append((namespace, name, default))
+            return plan
+        if self.config.get("metric_names"):
+            namespace = str(self.config.get("namespace") or DEFAULT_NAMESPACE)
+            return [(namespace, name, statistics) for name in self._list("metric_names")]
+        return list(DEFAULT_COLLECTION_PLAN)
+
     def fetch_window(self, blob_path: str, now: datetime | None = None, should_abort=None) -> tuple[pd.DataFrame, datetime, list[str]]:
         """Raw datapoints of one unit, plus the effective end and per-call errors."""
         import oci
@@ -296,7 +340,6 @@ class OciMonitoringExtractor:
         if match is None:
             raise ValueError(f"Unidade fora da janela coletável: {blob_path}")
         _start, _end, effective_start, effective_end = match
-        namespace = str(self.config.get("namespace") or DEFAULT_NAMESPACE)
         region = self.oci_config().get("region")
         rows: list[dict[str, Any]] = []
         errors: list[str] = []
@@ -308,9 +351,9 @@ class OciMonitoringExtractor:
                        sorted({item["compartment_id"] for item in self.instances()})]
         else:
             targets = [(str(self.config["compartment_id"]), resource_id) for resource_id in self.resource_ids]
-        for metric in self._list("metric_names", DEFAULT_METRICS):
+        for namespace, metric, statistics in self.collection_plan():
             for compartment_id, resource_id in targets:
-                for statistic in self._list("statistics", DEFAULT_STATISTICS):
+                for statistic in statistics:
                     if should_abort and should_abort():
                         raise RuntimeError("Coleta cancelada")
                     aggregation = AGGREGATIONS[statistic]
@@ -323,7 +366,7 @@ class OciMonitoringExtractor:
                     try:
                         response = self.client().summarize_metrics_data(compartment_id, details)
                     except oci.exceptions.ServiceError as exc:
-                        errors.append(f"{metric}/{statistic}: {exc.status} {exc.code}")
+                        errors.append(f"{namespace}/{metric}/{statistic}: {exc.status} {exc.code}")
                         continue
                     request_id = (getattr(response, "headers", {}) or {}).get("opc-request-id")
                     for stream in oci.util.to_dict(response.data) or []:
@@ -332,6 +375,9 @@ class OciMonitoringExtractor:
                             row = {key: _text(value) for key, value in stream.items()}
                             row.update({key: _text(value) for key, value in point.items()})
                             row.update({
+                                # What was asked: the response repeats names across
+                                # namespaces (CpuUtilization exists in two).
+                                "requested_metric": f"{namespace}/{metric}",
                                 "query": query, "aggregation": aggregation, "request_resolution": resolution,
                                 "region": region,
                                 "request_start_time": effective_start.isoformat(),

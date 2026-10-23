@@ -14,7 +14,7 @@ from typing import Any
 from sqlalchemy import select
 
 from .opportunities import (
-    CPU_METRIC, ENGINE_VERSION, MEMORY_METRIC, READY, RIGHTSIZE_DOWN,
+    CPU_HYPERVISOR_METRIC, CPU_METRIC, ENGINE_VERSION, MEMORY_METRIC, READY, RIGHTSIZE_DOWN,
     analyze_resource, summarize_series, window_bounds,
 )
 from .policy import PARAMETER_KEYS, load_active_policy
@@ -177,6 +177,11 @@ def run_opportunity_engine(
                 metric: series_reader(int(connection.id), resource_id, metric, start, end, resolution_seconds)
                 for metric in ANALYZED_METRICS
             }
+            cpu_source = "agent"
+            if not any(row.get("value_average") is not None for row in series[CPU_METRIC]):
+                hypervisor = series_reader(int(connection.id), resource_id, CPU_HYPERVISOR_METRIC, start, end, resolution_seconds)
+                if hypervisor:
+                    series[CPU_METRIC], cpu_source = hypervisor, "hypervisor"
             stats = {
                 metric: summarize_series(rows, window_start=start, window_end=end, resolution_seconds=resolution_seconds)
                 for metric, rows in series.items()
@@ -189,6 +194,9 @@ def run_opportunity_engine(
                 cpu=stats[CPU_METRIC] if stats[CPU_METRIC]["samples"] else None, memory=memory,
                 catalog=rightsizing.sizing_catalog, price_book=price_books.get(resource_id), policy=policy,
             )
+            result["evidence"]["cpu_source"] = cpu_source
+            if cpu_source == "hypervisor":
+                result["rationale"].insert(0, "Sem o agente de monitoramento na VM: a CPU vem da medição do hypervisor e a memória não pôde ser avaliada (mantida).")
             insight = conditional_rightsizing(
                 result, capacity=snapshot, cpu_rows=series[CPU_METRIC], memory=memory,
                 catalog=rightsizing.sizing_catalog, price_book=price_books.get(resource_id), policy=policy,
