@@ -9,6 +9,9 @@
  *    escala, agregados por hora para não esconder uma série atrás da outra;
  * 3. curva de permanência em seção própria;
  * 4. mapa de picos por dia e hora em seção própria.
+ *
+ * Sem tamanho recomendado (KEEP, capacidade ou telemetria insuficiente) não há
+ * "após": ficam o painel de hoje, a curva e o mapa de picos do tamanho atual.
  */
 import { useEffect, useMemo, useState } from "react";
 import {
@@ -91,11 +94,12 @@ export default function OpportunityCharts({ opportunityId, from, to, targets, co
   }, [opportunityId, resolution]);
 
   const view = useMemo(() => {
-    if (!series || !from || !to) return null;
+    if (!series) return null;
     const unit = metric === "cpu" ? "vCPU" : "GB";
-    const capacityNow = metric === "cpu" ? from.vcpus : from.memory_gb;
-    const capacityAfter = metric === "cpu" ? to.vcpus : to.memory_gb;
-    const ratio = capacityNow / capacityAfter;
+    const hasAfter = Boolean(from && to);
+    const capacityNow = from ? (metric === "cpu" ? from.vcpus : from.memory_gb) : null;
+    const capacityAfter = to ? (metric === "cpu" ? to.vcpus : to.memory_gb) : capacityNow;
+    const ratio = hasAfter && capacityNow && capacityAfter ? capacityNow / capacityAfter : 1;
     const target = (metric === "cpu" ? targets.cpu : targets.memory) * 100;
     const targetP99 = ((metric === "cpu" ? targets.cpuP99 : targets.memoryP99) ?? 0.9) * 100;
     const points = series.points.filter((point) => point[`${metric}_avg`] != null);
@@ -141,7 +145,7 @@ export default function OpportunityCharts({ opportunityId, from, to, targets, co
       saturatedNow: share(maxNow, 100), saturatedAfter: share(maxAfter, 100),
     };
     return {
-      unit, capacityNow, capacityAfter, ratio, target, targetP99, windowHours, stats,
+      hasAfter, unit, capacityNow, capacityAfter, ratio, target, targetP99, windowHours, stats,
       hourKeys, hourP95, hourPeak, days, heatAfter, saturatedHoursPerDay,
       sortedNow: [...avgNow].sort((a, b) => b - a), sortedAfter: [...avgAfter].sort((a, b) => b - a),
     };
@@ -149,10 +153,28 @@ export default function OpportunityCharts({ opportunityId, from, to, targets, co
 
   if (error) return <Alert severity="error">{error}</Alert>;
   if (!series || !view) return <Box sx={{ display: "grid", placeItems: "center", py: 6 }}><CircularProgress size={26} /></Box>;
-  if (!view.hourKeys.length) return <Alert severity="info">Sem buckets na Silver para esta métrica na janela da análise.</Alert>;
 
   const name = metric === "cpu" ? "CPU" : "memória";
+  const metricToggle = <ToggleButtonGroup size="small" exclusive value={metric} onChange={(_, next) => next && setMetric(next)}>
+    <ToggleButton value="cpu">CPU</ToggleButton>
+    <ToggleButton value="memory">Memória</ToggleButton>
+  </ToggleButtonGroup>;
+  if (!view.hourKeys.length) return <Stack spacing={1.5} alignItems="flex-start">
+    {metricToggle}
+    <Alert severity="info" sx={{ alignSelf: "stretch" }}>
+      {series.points.length
+        ? `Sem telemetria de ${name} na janela da análise; veja a outra métrica.`
+        : "Sem telemetria na janela da análise: o host pode ter ficado parado (desligado) ou sem o agente de métricas. Não há consumo para mostrar."}
+    </Alert>
+  </Stack>;
+
   const { stats } = view;
+  const capacityText = (value: number | null) => (value == null ? "capacidade não comprovada" : `${value} ${view.unit}`);
+  // Sem recomendação, os critérios do motor são lidos no tamanho atual.
+  const when = view.hasAfter ? "após a mudança" : "no tamanho atual";
+  const judged = view.hasAfter
+    ? { p95: stats.p95After, p99: stats.p99After, saturated: stats.saturatedAfter }
+    : { p95: stats.p95Now, p99: stats.p99Now, saturated: stats.saturatedNow };
   const checks: Check[] = [
     {
       level: (daysObserved ?? 0) >= 14 ? "ok" : (daysObserved ?? 0) >= 7 ? "warn" : "risk",
@@ -165,21 +187,21 @@ export default function OpportunityCharts({ opportunityId, from, to, targets, co
       detail: "Percentual dos intervalos esperados que chegaram da nuvem. Lacunas podem esconder picos.",
     },
     {
-      level: (stats.p95After ?? 0) <= view.target ? "ok" : "risk",
-      label: `P95 de ${name} após a mudança: ${pct(stats.p95After)} (limite ${view.target.toFixed(0)}%)`,
+      level: (judged.p95 ?? 0) <= view.target ? "ok" : "risk",
+      label: `P95 de ${name} ${when}: ${pct(judged.p95)} (limite ${view.target.toFixed(0)}%)`,
       detail: "Em 95% do tempo o uso fica abaixo deste valor no novo tamanho. É o critério principal do motor.",
     },
     {
-      level: (stats.p99After ?? 0) <= view.targetP99 ? "ok" : "risk",
-      label: `P99 de ${name} após a mudança: ${pct(stats.p99After)} (limite ${view.targetP99.toFixed(0)}%)`,
+      level: (judged.p99 ?? 0) <= view.targetP99 ? "ok" : "risk",
+      label: `P99 de ${name} ${when}: ${pct(judged.p99)} (limite ${view.targetP99.toFixed(0)}%)`,
       detail: "Só 1% do tempo fica acima. Protege contra rajadas frequentes que o P95 não enxerga.",
     },
     {
-      level: stats.saturatedAfter === 0 ? "ok" : stats.saturatedAfter <= 0.005 ? "warn" : "risk",
-      label: `Tempo com pico acima de 100% após a mudança: ${duration(stats.saturatedAfter, view.windowHours)}`,
-      detail: stats.saturatedAfter === 0
-        ? "Nenhum pico observado ultrapassaria a capacidade recomendada."
-        : stats.saturatedAfter <= 0.005
+      level: judged.saturated === 0 ? "ok" : judged.saturated <= 0.005 ? "warn" : "risk",
+      label: `Tempo com pico acima de 100% ${when}: ${duration(judged.saturated, view.windowHours)}`,
+      detail: judged.saturated === 0
+        ? `Nenhum pico observado ultrapassa${view.hasAfter ? "ria a capacidade recomendada" : " a capacidade atual"}.`
+        : judged.saturated <= 0.005
           ? "Dentro da tolerância do motor (até 0,5% do tempo, ≈ 3,6 h/mês). Confira no mapa abaixo em que horários acontecem."
           : `Acima da tolerância de 0,5% do tempo. Nesses momentos a demanda passaria da capacidade: ${metric === "cpu" ? "processos esperam CPU (lentidão), sem queda" : "risco de falta de memória"}. Confira se coincidem com rotinas críticas no mapa abaixo.`,
     },
@@ -205,14 +227,14 @@ export default function OpportunityCharts({ opportunityId, from, to, targets, co
 
   return <Stack spacing={2}>
     <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap alignItems="center">
-      <ToggleButtonGroup size="small" exclusive value={metric} onChange={(_, next) => next && setMetric(next)}>
-        <ToggleButton value="cpu">CPU</ToggleButton>
-        <ToggleButton value="memory">Memória</ToggleButton>
-      </ToggleButtonGroup>
+      {metricToggle}
       <Typography variant="caption" color="text.secondary">
-        {view.days.length} dia(s) · horário local · {name}: {view.capacityNow} → {view.capacityAfter} {view.unit}
+        {view.days.length} dia(s) · horário local · {name}: {view.hasAfter ? `${view.capacityNow} → ${view.capacityAfter} ${view.unit}` : `${capacityText(view.capacityNow)} · sem mudança recomendada`}
       </Typography>
     </Stack>
+    {!view.hasAfter && <Alert severity="info">
+      Sem mudança de tamanho recomendada para este recurso: os gráficos mostram só o consumo no tamanho atual. Padrões de uso (picos diários, rotinas, ociosidade) ainda podem indicar outras oportunidades.
+    </Alert>}
 
     <Paper variant="outlined" sx={{ p: 2.5 }}>
       <Typography variant="subtitle1" fontWeight={700}>Como ler estes números e se a troca é segura</Typography>
@@ -250,27 +272,29 @@ export default function OpportunityCharts({ opportunityId, from, to, targets, co
           <Typography variant="caption" color="text.secondary">{label}</Typography>
           <Stack direction="row" spacing={1} alignItems="baseline" flexWrap="wrap">
             <Typography variant="body2" sx={{ color: COLORS.today, fontWeight: 650 }}>hoje {now}</Typography>
-            <Typography variant="body2" sx={{ color: COLORS.after, fontWeight: 700 }}>após {later}</Typography>
+            {view.hasAfter && <Typography variant="body2" sx={{ color: COLORS.after, fontWeight: 700 }}>após {later}</Typography>}
           </Stack>
         </Paper>)}
       </Box>
     </Paper>
 
     <Paper variant="outlined" sx={{ p: 2.5 }}>
-      <Typography variant="subtitle1" fontWeight={700}>Consumo no tempo — hoje × recomendado</Typography>
+      <Typography variant="subtitle1" fontWeight={700}>{view.hasAfter ? "Consumo no tempo — hoje × recomendado" : "Consumo no tempo — tamanho atual"}</Typography>
       <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>
-        Mesma demanda nos dois painéis, em % da capacidade de cada um. Linha = P95 de cada hora; faixa clara = até o pico daquela hora.
+        {view.hasAfter ? "Mesma demanda nos dois painéis, em % da capacidade de cada um. " : "Em % da capacidade atual. "}Linha = P95 de cada hora; faixa clara = até o pico daquela hora.
         Fundo verde: folga; amarelo: acima do alvo de {view.target.toFixed(0)}%; vermelho: acima da capacidade.
       </Typography>
       <Plot data={[
         { type: "scatter", mode: "lines", x: view.hourKeys, y: todayPeak, line: { width: 0 }, fill: "tozeroy", fillcolor: COLORS.band, hovertemplate: "Pico: %{y:.1f}%<extra>Hoje</extra>", xaxis: "x", yaxis: "y" },
         { type: "scatter", mode: "lines", x: view.hourKeys, y: todayP95, line: { color: COLORS.today, width: 2 }, hovertemplate: "P95 da hora: %{y:.1f}%<extra>Hoje</extra>", xaxis: "x", yaxis: "y" },
-        { type: "scatter", mode: "lines", x: view.hourKeys, y: afterPeak, line: { width: 0 }, fill: "tozeroy", fillcolor: COLORS.bandAfter, hovertemplate: "Pico: %{y:.1f}%<extra>Após</extra>", xaxis: "x", yaxis: "y2" },
-        { type: "scatter", mode: "lines", x: view.hourKeys, y: afterP95, line: { color: COLORS.after, width: 2 }, hovertemplate: "P95 da hora: %{y:.1f}%<extra>Após</extra>", xaxis: "x", yaxis: "y2" },
+        ...(view.hasAfter ? [
+          { type: "scatter", mode: "lines", x: view.hourKeys, y: afterPeak, line: { width: 0 }, fill: "tozeroy", fillcolor: COLORS.bandAfter, hovertemplate: "Pico: %{y:.1f}%<extra>Após</extra>", xaxis: "x", yaxis: "y2" },
+          { type: "scatter", mode: "lines", x: view.hourKeys, y: afterP95, line: { color: COLORS.after, width: 2 }, hovertemplate: "P95 da hora: %{y:.1f}%<extra>Após</extra>", xaxis: "x", yaxis: "y2" },
+        ] : []),
       ] as never} layout={{
-        ...commonLayout, height: 540, margin: { l: 72, r: 20, t: 36, b: 50 }, hovermode: "x unified", showlegend: false,
+        ...commonLayout, height: view.hasAfter ? 540 : 320, margin: { l: 72, r: 20, t: 36, b: 50 }, hovermode: "x unified", showlegend: false,
         xaxis: {
-          type: "date", showgrid: false, anchor: "y2", hoverformat: "%d/%m %H:%M",
+          type: "date", showgrid: false, anchor: view.hasAfter ? "y2" : "y", hoverformat: "%d/%m %H:%M",
           // Mais zoom, mais detalhe: dia → dia e hora → hora e minuto.
           tickformatstops: [
             { dtickrange: [null, 3_600_000], value: "%d/%m %H:%M" },
@@ -278,12 +302,14 @@ export default function OpportunityCharts({ opportunityId, from, to, targets, co
             { dtickrange: [86_400_000, null], value: "%d/%m" },
           ],
         },
-        yaxis: { domain: [0.56, 1], range: [0, yMax], ticksuffix: "%", gridcolor: COLORS.grid, title: { text: `${view.capacityNow} ${view.unit}` } },
-        yaxis2: { domain: [0, 0.44], range: [0, yMax], ticksuffix: "%", gridcolor: COLORS.grid, title: { text: `${view.capacityAfter} ${view.unit}` } },
-        shapes: [...zoneShapes("y"), ...zoneShapes("y2")],
+        yaxis: { domain: view.hasAfter ? [0.56, 1] : [0, 1], range: [0, yMax], ticksuffix: "%", gridcolor: COLORS.grid, title: { text: capacityText(view.capacityNow) } },
+        ...(view.hasAfter ? { yaxis2: { domain: [0, 0.44], range: [0, yMax], ticksuffix: "%", gridcolor: COLORS.grid, title: { text: `${view.capacityAfter} ${view.unit}` } } } : {}),
+        shapes: [...zoneShapes("y"), ...(view.hasAfter ? zoneShapes("y2") : [])],
         annotations: [
-          { xref: "paper", yref: "paper", x: 0, y: 1.05, xanchor: "left", showarrow: false, text: `<b>Hoje</b> · ${view.capacityNow} ${view.unit} · P95 ${pct(stats.p95Now)}`, font: { color: COLORS.today, size: 13 } },
-          { xref: "paper", yref: "paper", x: 0, y: 0.49, xanchor: "left", showarrow: false, text: `<b>Após a mudança</b> · ${view.capacityAfter} ${view.unit} · P95 ${pct(stats.p95After)}`, font: { color: COLORS.after, size: 13 } },
+          { xref: "paper", yref: "paper", x: 0, y: view.hasAfter ? 1.05 : 1.1, xanchor: "left", showarrow: false, text: `<b>Hoje</b> · ${capacityText(view.capacityNow)} · P95 ${pct(stats.p95Now)}`, font: { color: COLORS.today, size: 13 } },
+          view.hasAfter
+            ? { xref: "paper", yref: "paper", x: 0, y: 0.49, xanchor: "left", showarrow: false, text: `<b>Após a mudança</b> · ${view.capacityAfter} ${view.unit} · P95 ${pct(stats.p95After)}`, font: { color: COLORS.after, size: 13 } }
+            : { xref: "paper", yref: "paper", x: 1, y: 1.1, xanchor: "right", showarrow: false, text: "sem mudança recomendada", font: { color: COLORS.muted, size: 12 } },
         ],
       } as never} />
     </Paper>
@@ -291,12 +317,16 @@ export default function OpportunityCharts({ opportunityId, from, to, targets, co
     <Paper variant="outlined" sx={{ p: 2.5 }}>
       <Typography variant="subtitle1" fontWeight={700}>Curva de permanência — quanto tempo o uso fica acima de cada nível</Typography>
       <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>
-        Leia da esquerda para a direita: na marca de 5% do tempo está o P95, na de 1% o P99. Hoje a {name} passa de {view.target.toFixed(0)}% durante {duration(stats.overTargetNow, view.windowHours)};
-        após a mudança, durante {duration(stats.overTargetAfter, view.windowHours)}, e a média dos intervalos passa de 100% durante {duration(share(view.sortedAfter, 100), view.windowHours)}.
+        Leia da esquerda para a direita: na marca de 5% do tempo está o P95, na de 1% o P99. Hoje a {name} passa de {view.target.toFixed(0)}% durante {duration(stats.overTargetNow, view.windowHours)}
+        {view.hasAfter
+          ? <>; após a mudança, durante {duration(stats.overTargetAfter, view.windowHours)}, e a média dos intervalos passa de 100% durante {duration(share(view.sortedAfter, 100), view.windowHours)}.</>
+          : <> e a média dos intervalos passa de 100% durante {duration(share(view.sortedNow, 100), view.windowHours)}.</>}
       </Typography>
       <Plot data={[
-        { type: "scatter", mode: "lines", name: `Hoje — ${view.capacityNow} ${view.unit}`, x: view.sortedNow.map((_, i) => (i + 1) / view.sortedNow.length * 100), y: view.sortedNow, line: { color: COLORS.today, width: 2.5 }, hovertemplate: "%{x:.2f}% do tempo acima de %{y:.1f}%<extra>Hoje</extra>" },
-        { type: "scatter", mode: "lines", name: `Após — ${view.capacityAfter} ${view.unit}`, x: view.sortedAfter.map((_, i) => (i + 1) / view.sortedAfter.length * 100), y: view.sortedAfter, line: { color: COLORS.after, width: 2.5 }, hovertemplate: "%{x:.2f}% do tempo acima de %{y:.1f}%<extra>Após</extra>" },
+        { type: "scatter", mode: "lines", name: `Hoje — ${capacityText(view.capacityNow)}`, x: view.sortedNow.map((_, i) => (i + 1) / view.sortedNow.length * 100), y: view.sortedNow, line: { color: COLORS.today, width: 2.5 }, hovertemplate: "%{x:.2f}% do tempo acima de %{y:.1f}%<extra>Hoje</extra>" },
+        ...(view.hasAfter ? [
+          { type: "scatter", mode: "lines", name: `Após — ${view.capacityAfter} ${view.unit}`, x: view.sortedAfter.map((_, i) => (i + 1) / view.sortedAfter.length * 100), y: view.sortedAfter, line: { color: COLORS.after, width: 2.5 }, hovertemplate: "%{x:.2f}% do tempo acima de %{y:.1f}%<extra>Após</extra>" },
+        ] : []),
       ] as never} layout={{
         ...commonLayout, height: 400, hovermode: "closest", margin: { l: 72, r: 20, t: 16, b: 80 },
         xaxis: { title: { text: "% do tempo (escala logarítmica: detalha os poucos momentos de maior uso)" }, type: "log", range: [Math.log10(0.05), 2], ticksuffix: "%", gridcolor: COLORS.grid, tickvals: [0.1, 0.5, 1, 5, 10, 25, 50, 100] },
@@ -311,7 +341,7 @@ export default function OpportunityCharts({ opportunityId, from, to, targets, co
         annotations: [
           { x: Math.log10(5), y: 1, yref: "paper", text: "P95", showarrow: false, yanchor: "bottom", font: { size: 11, color: COLORS.ink } },
           { x: Math.log10(1), y: 1, yref: "paper", text: "P99", showarrow: false, yanchor: "bottom", font: { size: 11, color: COLORS.ink } },
-          { x: Math.log10(5), y: stats.p95After ?? 0, text: `após ${pct(stats.p95After)}`, showarrow: true, arrowhead: 0, ax: 46, ay: -26, font: { color: COLORS.after } },
+          ...(view.hasAfter ? [{ x: Math.log10(5), y: stats.p95After ?? 0, text: `após ${pct(stats.p95After)}`, showarrow: true, arrowhead: 0, ax: 46, ay: -26, font: { color: COLORS.after } }] : []),
           { x: Math.log10(5), y: stats.p95Now ?? 0, text: `hoje ${pct(stats.p95Now)}`, showarrow: true, arrowhead: 0, ax: 46, ay: 22, font: { color: COLORS.today } },
         ],
         legend: { orientation: "h", y: -0.3, x: 0 },
@@ -319,16 +349,18 @@ export default function OpportunityCharts({ opportunityId, from, to, targets, co
     </Paper>
 
     <Paper variant="outlined" sx={{ p: 2.5 }}>
-      <Typography variant="subtitle1" fontWeight={700}>Picos após a mudança, por dia e hora</Typography>
+      <Typography variant="subtitle1" fontWeight={700}>{view.hasAfter ? "Picos após a mudança, por dia e hora" : "Picos no tamanho atual, por dia e hora"}</Typography>
       <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>
-        Cada célula é o maior pico daquela hora, já projetado no tamanho recomendado ({view.capacityAfter} {view.unit}); vermelho é acima da capacidade.
+        {view.hasAfter
+          ? `Cada célula é o maior pico daquela hora, já projetado no tamanho recomendado (${view.capacityAfter} ${view.unit}); vermelho é acima da capacidade.`
+          : `Cada célula é o maior pico daquela hora no tamanho atual (${capacityText(view.capacityNow)}); vermelho é acima da capacidade.`}{" "}
         Veja se os picos coincidem com rotinas (backups, fechamentos, horário comercial). À direita, quantas horas de cada dia teriam pico acima de 100%.
       </Typography>
       <Plot data={[
         {
           type: "heatmap", x: HOUR_LABELS, y: dayLabels, z: view.heatAfter, zmin: 0, zmax: 130, xgap: 1, ygap: 1,
           colorscale: [[0, "#eef6f4"], [view.target / 130, "#7cc9b8"], [100 / 130, "#f2b45c"], [101 / 130, "#e06c6c"], [1, "#a83232"]],
-          hovertemplate: "%{y} às %{x}: pico de %{z:.0f}% no novo tamanho<extra></extra>",
+          hovertemplate: `%{y} às %{x}: pico de %{z:.0f}% ${view.hasAfter ? "no novo tamanho" : "no tamanho atual"}<extra></extra>`,
           colorbar: { thickness: 12, len: 0.9, x: 0.79, tickvals: [0, view.target, 100, 130], ticktext: ["0%", `alvo ${view.target.toFixed(0)}%`, "100%", "130%+"] },
           xaxis: "x", yaxis: "y",
         },

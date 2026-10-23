@@ -21,12 +21,13 @@ import type { MetricSource, Opportunity, OpportunityRun, OpportunitySummary } fr
 import {
   getOpportunitySummary, listMetricSources, listOpportunities, listOpportunityRuns, runOpportunityEngine,
 } from "../../services/infraOpportunitiesApi";
+import AllResourcesView from "./AllResourcesView";
 import OpportunityDrawer from "./OpportunityDrawer";
 import {
   ACTION_COLOR, ACTION_LABEL, CONFIDENCE_COLOR, CONFIDENCE_LABEL, READINESS_LABEL, STATE_LABEL, money, pct, sizeLabel,
 } from "./opportunityLabels";
 
-const TABS = ["Visão geral", "Oportunidades", "Execuções do motor"];
+const TABS = ["Visão geral", "Oportunidades", "Todos os recursos", "Execuções do motor"];
 
 export default function InfrastructureOpportunities() {
   // A aba inicial pode vir do menu (view_params); a troca de aba é local.
@@ -181,7 +182,7 @@ export default function InfrastructureOpportunities() {
               { label: "Já executado / mês", value: money(summary.implemented_saving_monthly, currency), note: "Oportunidades marcadas como executadas", go: { state: "IMPLEMENTED" } },
               { label: "Custo analisado / mês", value: money(summary.analyzed_monthly_cost, currency), note: summary.saving_ratio != null ? `${(summary.saving_ratio * 100).toFixed(0)}% de redução possível` : "", go: {} },
             ].map((item) => <Paper key={item.label} variant="outlined"
-                                    onClick={() => (item.go ? openList(item.go) : setTab(2))}
+                                    onClick={() => (item.go ? openList(item.go) : setTab(3))}
                                     sx={{ p: 1.25, minWidth: 180, flex: "1 1 180px", cursor: "pointer", "&:hover": { borderColor: "primary.main", bgcolor: "action.hover" } }}>
               <Typography variant="caption" color="text.secondary">{item.label}</Typography>
               <Typography variant="h6">{item.value}</Typography>
@@ -192,7 +193,7 @@ export default function InfrastructureOpportunities() {
 
         <Stack direction="row" spacing={2} flexWrap="wrap" useFlexGap sx={{ mb: 2 }}>
           {[
-            { label: "Recursos analisados", value: summary.resources_analyzed ?? 0, go: {} },
+            { label: "Recursos analisados", value: summary.resources_analyzed ?? 0, go: null },
             { label: "Oportunidades", value: summary.opportunities ?? 0, go: { action: "RIGHTSIZE_DOWN" } },
             { label: "Para aumentar", value: summary.by_action?.RIGHTSIZE_UP ?? 0, go: { action: "RIGHTSIZE_UP" } },
             { label: "Bem dimensionados", value: summary.by_action?.KEEP ?? 0, go: { action: "KEEP" } },
@@ -200,7 +201,7 @@ export default function InfrastructureOpportunities() {
             { label: "Aceitas", value: summary.by_state?.ACCEPTED ?? 0, go: { state: "ACCEPTED" } },
             { label: "Executadas", value: summary.by_state?.IMPLEMENTED ?? 0, go: { state: "IMPLEMENTED" } },
             { label: "Descartadas", value: summary.by_state?.DISMISSED ?? 0, go: { state: "DISMISSED" } },
-          ].map((item) => <Paper key={item.label} variant="outlined" onClick={() => openList(item.go)}
+          ].map((item) => <Paper key={item.label} variant="outlined" onClick={() => (item.go ? openList(item.go) : setTab(2))}
                                   sx={{ p: 1.5, minWidth: 150, cursor: "pointer", transition: "all .15s", "&:hover": { borderColor: "primary.main", bgcolor: "action.hover", transform: "translateY(-1px)" } }}>
             <Typography variant="caption" color="text.secondary">{item.label}</Typography>
             <Typography variant="h6">{item.value}</Typography>
@@ -248,7 +249,9 @@ export default function InfrastructureOpportunities() {
                   sx={{ border: 0, "& .MuiDataGrid-row": { cursor: "pointer" } }} />
       </Box>}
 
-      {tab === 2 && <Paper variant="outlined" sx={{ p: 2 }}>
+      {tab === 2 && connectionId != null && <AllResourcesView connectionId={connectionId} runId={run?.id ?? null} items={items} currency={currency} onOpen={setOpenId} />}
+
+      {tab === 3 && <Paper variant="outlined" sx={{ p: 2 }}>
         <Typography variant="subtitle2" gutterBottom>Execuções do motor</Typography>
         <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>
           Cada execução congela a janela, lê a Silver de métricas, a capacidade OCI e o preço efetivo do billing, e grava o resultado com hash dos insumos.

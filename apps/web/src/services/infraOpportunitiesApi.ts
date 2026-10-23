@@ -63,11 +63,14 @@ export type Opportunity = {
   monthly_saving: number | null;
   annual_saving: number | null;
   currency: string | null;
+  cpu_p50: number | null;
   cpu_p95: number | null;
   cpu_p99: number | null;
   cpu_max: number | null;
+  memory_p50: number | null;
   memory_p95: number | null;
   memory_p99: number | null;
+  memory_max: number | null;
   coverage: number | null;
   risks: string[];
   state_note: string | null;
@@ -137,7 +140,34 @@ export type OpportunitySeries = {
   points: { t: string; cpu_avg?: number | null; cpu_max?: number | null; memory_avg?: number | null; memory_max?: number | null }[];
 };
 
+/** Perfil horário (UTC) de cada recurso da execução: P95 das médias e pico de cada hora. */
+export type HourlyProfile = {
+  opportunity_id: number;
+  resource_id: string;
+  cpu_p95: (number | null)[];
+  cpu_peak: (number | null)[];
+  cpu_hours: number;
+  memory_p95: (number | null)[];
+  memory_peak: (number | null)[];
+  memory_hours: number;
+};
+
+export type HourlyProfiles = {
+  run_id: number | null;
+  window_start_utc?: string;
+  window_end_utc?: string;
+  resolution_seconds?: number;
+  /** Horas da janela em UTC, "YYYY-MM-DDTHH", alinhadas com as listas de cada recurso. */
+  hours: string[];
+  items: HourlyProfile[];
+};
+
 const BASE = "/custos/metricas-infra/oportunidades";
+
+export async function getHourlyProfiles(connectionId: number, runId?: number): Promise<HourlyProfiles> {
+  const { data } = await api.get(`${BASE}/perfis-horarios`, { params: { connection_id: connectionId, run_id: runId }, timeout: 200_000 });
+  return data;
+}
 
 export async function getOpportunitySeries(id: number, resolutionSeconds: number): Promise<OpportunitySeries> {
   const { data } = await api.get(`${BASE}/${id}/serie`, { params: { resolution_seconds: resolutionSeconds } });

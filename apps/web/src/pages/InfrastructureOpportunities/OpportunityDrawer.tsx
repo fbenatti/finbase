@@ -67,7 +67,8 @@ export default function OpportunityDrawer({ opportunityId, onClose, onChanged }:
   const projected = evidence?.projected_utilization ?? {};
   const currency = item?.currency ?? "BRL";
   const from = item?.from_config;
-  const to = item?.to_config;
+  // KEEP may carry the current size as target: there is no "after" to show.
+  const to = item?.action_type === "KEEP" ? null : item?.to_config;
 
   return <Drawer anchor="right" open={opportunityId != null} onClose={onClose}
                  PaperProps={{ sx: { width: { xs: "100%", md: "min(1360px, 94vw)" }, p: { xs: 2, md: 3 } } }}>
@@ -101,9 +102,14 @@ export default function OpportunityDrawer({ opportunityId, onClose, onChanged }:
           <ArrowForwardIcon color="action" />
           <Box>
             <Typography variant="caption" color="text.secondary">Recomendado</Typography>
-            <Typography variant="h6" color={item.action_type === "RIGHTSIZE_DOWN" ? "success.main" : undefined}>{to ? `${to.vcpus} vCPU · ${to.memory_gb} GB` : "—"}</Typography>
-            <Typography variant="body2" color="text.secondary">{to?.sku ?? "—"}{to?.ocpu ? ` · ${to.ocpu} OCPU` : ""}</Typography>
-            <Typography variant="body2" fontWeight={650}>{money(item.target_monthly_cost, currency)} / mês</Typography>
+            {to ? <>
+              <Typography variant="h6" color={item.action_type === "RIGHTSIZE_DOWN" ? "success.main" : undefined}>{`${to.vcpus} vCPU · ${to.memory_gb} GB`}</Typography>
+              <Typography variant="body2" color="text.secondary">{to.sku ?? "—"}{to.ocpu ? ` · ${to.ocpu} OCPU` : ""}</Typography>
+              <Typography variant="body2" fontWeight={650}>{money(item.target_monthly_cost, currency)} / mês</Typography>
+            </> : <>
+              <Typography variant="h6" color="text.secondary">Sem mudança recomendada</Typography>
+              <Typography variant="body2" color="text.secondary">{READINESS_LABEL[item.readiness_status] ?? item.readiness_status}</Typography>
+            </>}
           </Box>
         </Box>
         <Divider sx={{ my: 1.5 }} />
@@ -133,9 +139,11 @@ export default function OpportunityDrawer({ opportunityId, onClose, onChanged }:
       </Paper>
 
       <Box>
-        <Typography variant="h6" sx={{ mb: 0.5 }}>De / para do consumo</Typography>
+        <Typography variant="h6" sx={{ mb: 0.5 }}>{to ? "De / para do consumo" : "Consumo do recurso"}</Typography>
         <Typography variant="body2" color="text.secondary" sx={{ mb: 1.5 }}>
-          Como o recurso está hoje e como ficaria no tamanho recomendado, com a mesma demanda observada na janela da análise.
+          {to
+            ? "Como o recurso está hoje e como ficaria no tamanho recomendado, com a mesma demanda observada na janela da análise."
+            : "Como o recurso foi usado na janela da análise, no tamanho atual."}
         </Typography>
         <OpportunityCharts
           opportunityId={item.id} from={from ?? null} to={to ?? null}
