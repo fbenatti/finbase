@@ -45,6 +45,7 @@ PATH_MODULE: list[tuple[str, str]] = [
     ("/custos/compromisso-mca", "reservations"),
     ("/otimizacao", "savings"),
     ("/custos/oci-operacional", "oci_operational"),
+    ("/custos/metricas-infra", "infrastructure_metrics"),
     ("/custos", "gold"),
     ("/dados/fato", "fact"),
     ("/administracao/usuarios", "users"),
