@@ -59,6 +59,7 @@ const emptyForm = {
   gcp_token: "", table_name: "",
   mongo_group_id: "", mongo_contract_type: "", marketplace: false,
   oci_fingerprint: "", oci_region: "sa-saopaulo-1", oci_private_key: "", oci_genai_compartments: "",
+  infraMetricsEnabled: false, infraMetricsCompartment: "", infraMetricsResourceIds: "", infraMetricsResolutions: [60, 300, 900] as number[],
   github_extraction_type: "token" as "billing" | "license" | "token",
   gemini_extraction_type: "token" as "license" | "token",
   admin_email: "",
@@ -349,6 +350,10 @@ export default function Connections() {
         oci_region: cfg.region || "sa-saopaulo-1",
         oci_private_key: cfg.private_key || cfg.key_content || "",
         oci_genai_compartments: (Array.isArray(cfg.generative_ai_compartment_ids) ? cfg.generative_ai_compartment_ids : []).join("\n"),
+        infraMetricsEnabled: (cfg.infrastructure_metrics as Record<string, unknown> | undefined)?.enabled === true,
+        infraMetricsCompartment: String((cfg.infrastructure_metrics as Record<string, unknown> | undefined)?.compartment_id || ""),
+        infraMetricsResourceIds: Array.isArray((cfg.infrastructure_metrics as Record<string, unknown> | undefined)?.resource_ids) ? ((cfg.infrastructure_metrics as Record<string, unknown>).resource_ids as string[]).join("\n") : "",
+        infraMetricsResolutions: Array.isArray((cfg.infrastructure_metrics as Record<string, unknown> | undefined)?.resolutions_seconds) ? ((cfg.infrastructure_metrics as Record<string, unknown>).resolutions_seconds as number[]) : [60, 300, 900],
         blob_prefixes: prefixesToText(conn.blob_prefixes),
       });
     } else if (conn.connector_type === "mongodb_atlas") {
@@ -542,6 +547,17 @@ export default function Connections() {
       if (form.oci_region) configJson.region = form.oci_region;
       if (form.oci_private_key) configJson.private_key = form.oci_private_key;
       configJson.generative_ai_compartment_ids = form.oci_genai_compartments.split("\n").map(s => s.trim()).filter(Boolean);
+      if (form.infraMetricsEnabled) {
+        configJson.infrastructure_metrics = {
+          enabled: true,
+          compartment_id: form.infraMetricsCompartment.trim(),
+          resource_ids: form.infraMetricsResourceIds.split("\n").map(id => id.trim()).filter(Boolean),
+          metric_names: ["CpuUtilization", "MemoryUtilization", "DiskIopsRead", "DiskIopsWritten", "DiskBytesRead", "DiskBytesWritten", "NetworksBytesIn", "NetworksBytesOut"],
+          resolutions_seconds: form.infraMetricsResolutions,
+          retention_days: 60,
+          schedule_enabled: false,
+        };
+      }
     } else if (form.connector_type === "mongodb_atlas") {
       if (form.tenant_id) configJson.base_url = form.tenant_id;
       if (form.client_id) configJson.public_key = form.client_id;
@@ -617,6 +633,13 @@ export default function Connections() {
 
   const save = async () => {
     if (savingConnection) return;
+    if (form.connector_type === "oci" && form.infraMetricsEnabled) {
+      const resourceIds = form.infraMetricsResourceIds.split("\n").map(id => id.trim()).filter(Boolean);
+      if (!form.infraMetricsCompartment.trim() || resourceIds.length < 1 || resourceIds.length > 2 || form.infraMetricsResolutions.length === 0) {
+        setError("Informe o compartimento, de uma a duas instâncias e ao menos uma resolução para habilitar a coleta.");
+        return;
+      }
+    }
     setSavingConnection(true);
     setError("");
     try {
@@ -1058,6 +1081,27 @@ export default function Connections() {
                   onChange={(e) => setForm({ ...form, oci_private_key: e.target.value })}
                   placeholder={savedSecrets ? "•••••• chave já cadastrada" : undefined}
                   helperText={savedSecrets ? "Chave privada já cadastrada no servidor. Deixe em branco para manter ou cole uma nova para trocar." : "Cole o conteúdo completo do arquivo de chave privada (.pem)."} />
+                <Divider sx={{ gridColumn: "1 / -1", mt: 1 }} />
+                <Typography variant="subtitle1" sx={{ gridColumn: "1 / -1", fontWeight: 700 }}>Métricas de infraestrutura</Typography>
+                <FormControlLabel sx={{ gridColumn: "1 / -1" }} control={<Checkbox checked={form.infraMetricsEnabled} onChange={(e) => setForm({ ...form, infraMetricsEnabled: e.target.checked })} />} label="Coletar recursos de infraestrutura nesta conexão" />
+                {form.infraMetricsEnabled && <>
+                  <Alert severity="info" sx={{ gridColumn: "1 / -1" }}>
+                    Coletaremos utilização de CPU e memória, IOPS e bytes de leitura/escrita de disco, e bytes de rede de entrada/saída. Preservamos mean, min, max, count, sum e P90/P95/P99 nativos; counters de disco/rede também geram taxas por diferença entre buckets. O piloto aceita até 2 instâncias, janela manual de até 24 horas por execução e mantém 60 dias na Silver. Amostras OCI têm período de origem de 10 segundos; a coleta compara buckets de 1, 5 e 15 minutos. Cada execução pode gerar até 128 consultas de métricas (2 recursos × 8 métricas × 8 estatísticas); não há agendamento automático.
+                  </Alert>
+                  <TextField label="OCID do compartimento das métricas" value={form.infraMetricsCompartment} onChange={(e) => setForm({ ...form, infraMetricsCompartment: e.target.value })} helperText="Compartimento no qual as métricas de Compute são consultadas." sx={{ gridColumn: "1 / -1" }} />
+                  <TextField label="OCIDs das instâncias permitidas (uma por linha, máximo 2)" multiline minRows={2} value={form.infraMetricsResourceIds} onChange={(e) => setForm({ ...form, infraMetricsResourceIds: e.target.value })} helperText="A coleta consulta somente estas instâncias; não faz descoberta automática de recursos." sx={{ gridColumn: "1 / -1" }} />
+                  <Box sx={{ gridColumn: "1 / -1" }}>
+                    <Typography variant="body2" sx={{ mb: 0.5 }}>Resoluções habilitadas</Typography>
+                    <Stack direction="row" flexWrap="wrap" useFlexGap>
+                      {[60, 300, 900].map((seconds) => <FormControlLabel key={seconds} control={<Checkbox checked={form.infraMetricsResolutions.includes(seconds)} onChange={(e) => setForm({ ...form, infraMetricsResolutions: e.target.checked ? [...new Set([...form.infraMetricsResolutions, seconds])].sort((a, b) => a - b) : form.infraMetricsResolutions.filter((value) => value !== seconds) })} />} label={`${seconds / 60} min`} />)}
+                    </Stack>
+                  </Box>
+                  <Alert severity="warning" sx={{ gridColumn: "1 / -1" }}>
+                    <strong>Policy OCI necessária:</strong> no Console, abra <em>Identity &amp; Security → Policies</em> e crie a policy no compartimento da tenancy para o grupo do usuário da chave API. Restrinja ao namespace usado pelo piloto:
+                    <Box component="code" sx={{ display: "block", mt: 1, whiteSpace: "normal", overflowWrap: "anywhere" }}>Allow group &lt;grupo_do_usuario_api&gt; to read metrics in compartment &lt;compartimento&gt; where target.metrics.namespace='oci_computeagent'</Box>
+                    <a href="https://docs.oracle.com/en-us/iaas/Content/Identity/Reference/monitoringpolicyreference.htm" target="_blank" rel="noreferrer">Documentação oficial: permissões do Monitoring e QueryMetrics</a>. A policy concede leitura das métricas, sem permissão para publicar métricas ou administrar recursos.
+                  </Alert>
+                </>}
               </>
             )}
 
