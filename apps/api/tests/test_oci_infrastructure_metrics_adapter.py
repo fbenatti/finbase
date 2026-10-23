@@ -6,6 +6,7 @@ import pytest
 from app.services.infrastructure_metrics.catalog import get_metric
 from app.services.infrastructure_metrics.contracts import MetricScope, QueryPlan
 from app.services.infrastructure_metrics.providers import oci as oci_metrics
+from app.services.infrastructure_metrics.normalization import query_results_to_silver_rows
 
 
 class FakeMonitoringClient:
@@ -65,3 +66,36 @@ def test_fetch_fails_closed_when_scope_is_disabled():
     adapter = oci_metrics.OciMetricsAdapter(FakeMonitoringClient(), "compartment-ocid")
     with pytest.raises(PermissionError, match="disabled"):
         adapter.fetch(_plan(enabled=False))
+
+
+def test_metric_results_merge_to_wide_silver_row_and_keep_native_percentiles():
+    plan = _plan()
+    timestamp = plan.start_utc
+    dims = {"resourceId": "private-ocid", "volumeId": "volume-a"}
+    results = [
+        SimpleNamespace(
+            plan=plan, points=[SimpleNamespace(timestamp_utc=timestamp, dimensions=dims,
+                values={"mean": 12.5}, source_sample_period_seconds=10)],
+            status_code=200, error_code=None,
+        ),
+        SimpleNamespace(
+            plan=plan, points=[SimpleNamespace(timestamp_utc=timestamp, dimensions=dims,
+                values={"p90": 20.0, "p95": 25.0, "p99": 30.0},
+                source_sample_period_seconds=10)],
+            status_code=200, error_code=None,
+        ),
+    ]
+
+    row, = query_results_to_silver_rows(
+        results, source_owner="oci_metrics", collection_run_id="run-1",
+        observed_at=timestamp,
+    )
+
+    assert row["value"] == 12.5
+    assert row["native_p90"] == 20.0
+    assert row["native_p95"] == 25.0
+    assert row["native_p99"] == 30.0
+    assert row["resolution_seconds"] == 60
+    assert row["source_sample_period_seconds"] == 10
+    assert row["dimensions_json"] == '{"resourceId":"private-ocid","volumeId":"volume-a"}'
+    assert row["metric_day"] == "20260101"
