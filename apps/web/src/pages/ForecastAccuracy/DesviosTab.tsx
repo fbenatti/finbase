@@ -67,15 +67,12 @@ function FragmentRow({ item, color, open, onToggle, subcats, subcatLoading, onAc
   return (
     <Box sx={{ borderBottom: "1px solid", borderColor: "divider", bgcolor: ack ? "#F5F9FF" : "background.paper", "&:last-of-type": { borderBottom: 0 } }}>
       <Box
-        role="button"
-        tabIndex={0}
-        aria-expanded={open}
+        role="group"
         onClick={onToggle}
-        onKeyDown={event => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); onToggle(); } }}
         sx={{ px: 2, py: 1.5, cursor: "pointer", display: "grid", alignItems: "center", gap: 1.5, gridTemplateColumns: { xs: "minmax(0, 1fr) auto", md: "minmax(145px, 1.5fr) repeat(2, minmax(82px, .8fr)) minmax(118px, 1fr) minmax(64px, .55fr) auto" }, "&:hover": { bgcolor: "action.hover" }, "&:focus-visible": { outline: "2px solid", outlineColor: "primary.main", outlineOffset: -2 } }}
       >
-        <Box sx={{ minWidth: 0, gridColumn: { xs: "1 / -1", md: "auto" }, display: "flex", alignItems: "center", gap: 1 }}>
-          <IconButton size="small" aria-label={open ? "recolher" : "expandir"} tabIndex={-1}>
+        <Box sx={{ minWidth: 0, gridColumn: { xs: "1", md: "auto" }, display: "flex", alignItems: "center", gap: 1 }}>
+          <IconButton size="small" aria-label={`${open ? "Recolher" : "Expandir"} ${item.name}`} onClick={event => { event.stopPropagation(); onToggle(); }}>
             {open ? <RemoveOutlined fontSize="small" /> : <AddOutlined fontSize="small" />}
           </IconButton>
           <Box sx={{ minWidth: 0 }}>
