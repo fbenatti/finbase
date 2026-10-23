@@ -10,6 +10,7 @@ from app.config import settings
 from app.database import engine, Base, async_session
 from app.routers import connections, csv_upload, etl, rules, periods, analysis, destinations, schema, forecast, clone_rules, planning, anomalies, savings, azure_tag_policy, gold, reservations, azure_resource_graph, azure_sources, azure_mca_commitment, oci_operational, ideas, financial_contracts, auth as auth_router, users as users_router, groups as groups_router, roles as roles_router, audit as audit_router, sso as sso_router, sso_providers as sso_providers_router, integrations, processing_logs
 from app.routers import modules as modules_router
+from app.routers import hierarchy_aliases
 from app.routers import connector_visibility as connector_visibility_router
 from app.core.navigation_middleware import NavigationPolicyMiddleware
 from app.seed import seed
@@ -169,6 +170,7 @@ async def lifespan(app: FastAPI):
         from app.models.connector_visibility import ConnectorHidden  # noqa: F401
         from app.models.azure_tag_mapping import AzureTagMapping  # noqa: F401
         from app.models.gold_manifest import GoldManifest  # noqa: F401
+        from app.models.hierarchy_alias import HierarchyRole, HierarchyLevelAlias  # noqa: F401
         from app.models.anomaly import (  # noqa: F401
             AnomalyConfig, AnomalyRun, AnomalyPublication,
             AnomalyCase, AnomalyCaseEvent, AnomalyAction, AnomalyNotification,
@@ -976,6 +978,7 @@ app.include_router(csv_upload.router)
 app.include_router(etl.router)
 app.include_router(processing_logs.router)
 app.include_router(rules.router)
+app.include_router(hierarchy_aliases.router)
 app.include_router(periods.router)
 app.include_router(analysis.router)
 app.include_router(destinations.router)

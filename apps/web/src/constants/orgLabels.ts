@@ -26,8 +26,6 @@ export const ORG = {
   deleteAction: "Excluir nó",
   financialTooltip: "Cadastro financeiro deste nó",
   configureModel: "Configurar hierarquia",
-  /** Nível 5 da hierarquia de custo (coluna hierarquia_5) */
-  level5: "Área",
   directorViewChain: "Segmento → Modelo → Diretoria → Cloud → Projeto → SubProjeto",
   directorViewLevels: "1→2→4→3→5→6",
 } as const;

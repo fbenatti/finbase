@@ -6,7 +6,7 @@ import { Alert, Box, Button, Chip, CircularProgress, Stack, Typography } from "@
 import {
   GoldQueryFilter, GoldQueryResult, formatApiError, getDimonInfo, queryDimonTable,
 } from "../../services/api";
-import { ORG } from "../../constants/orgLabels";
+import { hierarchyLabel } from "../../utils/hierarchyLabels";
 
 export type DecompChainItem = { field: string; label: string };
 export type DecompPathStep = { field: string; value: string };
@@ -24,14 +24,9 @@ const VISAO_DIRETORIA_LEVELS = [
 
 const VISAO_DIRETORIA_DEPTH_TO_NIVEL = [1, 2, 4, 3, 5, 6] as const;
 
-const DIRECTOR_VIEW_LABELS: Record<string, string> = {
-  hierarquia_1: "Segmento",
-  hierarquia_2: "Modelo",
-  hierarquia_4: "Diretoria",
-  hierarquia_3: "Cloud",
-  hierarquia_5: "Projeto",
-  hierarquia_6: "SubProjeto",
-};
+/** Rótulo de um nível hierarquia_N; por padrão, os aliases globais configurados. */
+type LevelLabelOf = (field: string) => string;
+const globalLevelLabel: LevelLabelOf = (field) => hierarchyLabel(field) ?? field;
 
 /** Raiz do organograma na UI — não corresponde a hierarquia_1 nos dados Gold. */
 const DIRECTOR_PATH_ROOT_PREFIXES = ["Consumo de nuvem"] as const;
@@ -143,16 +138,9 @@ export function pathSegmentFilters(path: string[], visaoDiretoria: boolean): Gol
 }
 
 /** Cadeia da aba Decisão (inclui ServiceSubcategory e skumeter). */
-export function buildDecompChain(visaoDiretoria: boolean): DecompChainItem[] {
-  const org: DecompChainItem[] = visaoDiretoria
-    ? VISAO_DIRETORIA_LEVELS.map(field => ({ field, label: DIRECTOR_VIEW_LABELS[field] || field }))
-    : [
-      { field: "hierarquia_1", label: "Segmento" },
-      { field: "hierarquia_2", label: "Modelo" },
-      { field: "hierarquia_3", label: "Plataforma" },
-      { field: "hierarquia_4", label: "Diretoria" },
-      { field: "hierarquia_5", label: ORG.level5 },
-    ];
+export function buildDecompChain(visaoDiretoria: boolean, labelOf: LevelLabelOf = globalLevelLabel): DecompChainItem[] {
+  const fields = visaoDiretoria ? VISAO_DIRETORIA_LEVELS : ["hierarquia_1", "hierarquia_2", "hierarquia_3", "hierarquia_4", "hierarquia_5"];
+  const org: DecompChainItem[] = fields.map(field => ({ field, label: labelOf(field) }));
   return [
     { field: "cloud_origem", label: "Cloud" },
     ...org,
@@ -164,17 +152,9 @@ export function buildDecompChain(visaoDiretoria: boolean): DecompChainItem[] {
 }
 
 /** Cadeia da visão executiva: organograma a partir do escopo já filtrado, até ServiceSubcategory e skumeter. */
-export function buildExecutiveDecompChain(visaoDiretoria: boolean, scopedPathDepth = 0): DecompChainItem[] {
-  const org: DecompChainItem[] = visaoDiretoria
-    ? VISAO_DIRETORIA_LEVELS.map(field => ({ field, label: DIRECTOR_VIEW_LABELS[field] || field }))
-    : [
-      { field: "hierarquia_1", label: "Segmento" },
-      { field: "hierarquia_2", label: "Modelo" },
-      { field: "hierarquia_3", label: "Plataforma" },
-      { field: "hierarquia_4", label: "Diretoria" },
-      { field: "hierarquia_5", label: ORG.level5 },
-      { field: "hierarquia_6", label: "Unidade" },
-    ];
+export function buildExecutiveDecompChain(visaoDiretoria: boolean, scopedPathDepth = 0, labelOf: LevelLabelOf = globalLevelLabel): DecompChainItem[] {
+  const fields = visaoDiretoria ? VISAO_DIRETORIA_LEVELS : ["hierarquia_1", "hierarquia_2", "hierarquia_3", "hierarquia_4", "hierarquia_5", "hierarquia_6"];
+  const org: DecompChainItem[] = fields.map(field => ({ field, label: labelOf(field) }));
   const orgTail = org.slice(Math.max(0, scopedPathDepth));
   return [
     ...orgTail,

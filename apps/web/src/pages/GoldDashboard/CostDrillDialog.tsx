@@ -5,6 +5,7 @@ import Plot from "@/components/Plot";
 import { colors } from "../../theme/tokens";
 import { type GoldQueryFilter, formatApiError, queryDimonTable } from "../../services/api";
 import type { AnomalyCase } from "../../services/anomaliesApi";
+import { useLevelAliases } from "../../utils/hierarchyLabels";
 
 // "Onde esta o custo?": decomposicao com treemap, ranking com variacao contra o periodo
 // anterior e sinais de anomalia. Os dados so sao buscados quando o dialog abre, um nivel
@@ -13,7 +14,6 @@ type Mode = "hierarchy" | "servicename" | "regionname" | "subaccountname";
 type Row = { name: string; value: number; prev: number | null };
 
 const MODE_LABELS: Record<Mode, string> = { hierarchy: "Hierarquia", servicename: "Serviço", regionname: "Região", subaccountname: "Subconta" };
-const LEVEL_LABELS = ["Segmento", "Modelo", "VP", "Diretoria", "Projeto", "Unidade"];
 const ANOMALY_FIELD: Partial<Record<Mode, "service_name" | "region" | "subaccount_name">> = {
   servicename: "service_name",
   regionname: "region",
@@ -70,6 +70,7 @@ export default function CostDrillDialog({ open, onClose, table, measureColumn, f
 
   const basePathKey = JSON.stringify(basePath);
   const level = basePath.length + drill.length + 1;
+  const aliases = useLevelAliases([...basePath, ...drill]);
   const canDrill = mode === "hierarchy" && level <= MAX_LEVEL;
   const filtersKey = JSON.stringify(filters);
   const drillKey = JSON.stringify(drill);
@@ -229,7 +230,7 @@ export default function CostDrillDialog({ open, onClose, table, measureColumn, f
           <Box sx={{ display: "grid", gap: 2, gridTemplateColumns: { xs: "1fr", md: "minmax(0, 1.15fr) minmax(0, 1fr)" } }}>
             <Box>
               <Typography variant="caption" color="text.secondary" display="block" mb={0.5}>
-                {mode === "hierarchy" ? `${LEVEL_LABELS[level - 1]} · clique para descer um nível` : MODE_LABELS[mode]}
+                {mode === "hierarchy" ? `${aliases.levelLabel(level)} · clique para descer um nível` : MODE_LABELS[mode]}
               </Typography>
               <Plot
                 data={[{

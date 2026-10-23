@@ -3,7 +3,7 @@ import { dataDisplayText } from "../../utils/dataPresentation";
 import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { Alert, Box, Breadcrumbs, Button, ButtonBase, Chip, CircularProgress, Divider, FormControl, FormControlLabel, FormLabel, IconButton, InputAdornment, Link, Paper, Radio, RadioGroup, Stack, Switch, TextField, Tooltip, Typography } from "@mui/material";
-import { AddOutlined, AccountBalanceOutlined, AccountTreeOutlined, BusinessOutlined, ChevronRightOutlined, DeleteOutlined, EditOutlined, ExpandMoreOutlined, SearchOutlined, UnfoldLessOutlined, UnfoldMoreOutlined, UploadFileOutlined } from "@mui/icons-material";
+import { AddOutlined, AccountBalanceOutlined, LabelOutlined, AccountTreeOutlined, BusinessOutlined, ChevronRightOutlined, DeleteOutlined, EditOutlined, ExpandMoreOutlined, SearchOutlined, UnfoldLessOutlined, UnfoldMoreOutlined, UploadFileOutlined } from "@mui/icons-material";
 import {
   getDepartments,
   createDepartment,
@@ -28,6 +28,7 @@ import DepartmentTreePicker, {
   descendantIds,
 } from "../../components/DepartmentTreePicker";
 import { ORG } from "../../constants/orgLabels";
+import LevelAliasesDialog from "./LevelAliasesDialog";
 
 const emptyDeptForm = {
   parent_id: null as number | null,
@@ -46,6 +47,7 @@ interface CustomFieldEntry {
 export default function Departments({ embedded = false }: { embedded?: boolean }) {
   const navigate = useNavigate();
   const [departments, setDepartments] = useState<Department[]>([]);
+  const [aliasesOpen, setAliasesOpen] = useState(false);
   const [sharedCosts, setSharedCosts] = useState<SharedCostConfig[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -715,6 +717,7 @@ export default function Departments({ embedded = false }: { embedded?: boolean }
         bgcolor: "#FAFBFD",
       }}
     >
+      <LevelAliasesDialog open={aliasesOpen} onClose={() => setAliasesOpen(false)} departments={departments} />
       {/* Faixa de contexto branca */}
       {!embedded && <Box
         sx={{
@@ -784,6 +787,13 @@ export default function Departments({ embedded = false }: { embedded?: boolean }
               </Typography>
             </Box>
             <Stack direction="row" spacing={1} flexWrap="wrap" flexShrink={0}>
+              <Button
+                size="small"
+                startIcon={<LabelOutlined />}
+                onClick={() => setAliasesOpen(true)}
+              >
+                Aliases de níveis
+              </Button>
               <Button
                 size="small"
                 startIcon={

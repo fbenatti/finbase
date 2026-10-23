@@ -38,6 +38,7 @@ from app.models.financial_contract import FinancialContract
 from app.models.forecast import ForecastAdjustment, ForecastBusinessRule, ForecastConfig
 from app.models.gold_mart_rule import GoldMartRule
 from app.models.identity import Group, Role, SsoProvider, User
+from app.models.hierarchy_alias import HierarchyLevelAlias, HierarchyRole
 from app.models.idea import Idea
 from app.models.pivot_view import PivotView
 from app.models.rules import BusinessRule, ClassificationRule, Department, EtlMapping
@@ -62,6 +63,8 @@ AUDIT_MODELS: dict[str, type] = {
     "contratos-financeiros": FinancialContract,
     "regras-clonagem": CloneRule,
     "hierarquia": Department,
+    "papeis": HierarchyRole,
+    "aliases-niveis": HierarchyLevelAlias,
     "mapeamentos": EtlMapping,
     "classificacoes": ClassificationRule,
     "administracao/provedores": SsoProvider,

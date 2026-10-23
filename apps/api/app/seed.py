@@ -2,6 +2,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import text, select
 from app.models.pivot_view import PivotView
 from app.config import settings
+from app.services.hierarchy_aliases import seed_default_aliases
 
 
 async def seed(db: AsyncSession):
@@ -9,6 +10,7 @@ async def seed(db: AsyncSession):
     if settings.skip_seed:
         return
     await _seed_pivot_views(db)
+    await seed_default_aliases(db)
 
 
 async def _seed_pivot_views(db: AsyncSession):

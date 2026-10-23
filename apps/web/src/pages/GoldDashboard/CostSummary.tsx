@@ -9,6 +9,7 @@ import DeviationMatrix from "./DeviationMatrix";
 import AnomalyCaseDrawer from "../Anomalies/AnomalyCaseDrawer";
 import HierarchicalDecompTree, { buildExecutiveDecompChain } from "./HierarchicalDecompTree";
 import { dayKey, periodKey, useCostSignals } from "./costSignals";
+import { useLevelAliases } from "../../utils/hierarchyLabels";
 
 // Analise de custos no estilo Azure Cost Analysis: escopo e periodo no topo, KPIs com
 // desvios, grafico principal (acumulado, mensal ou diario de 90 dias), desvios por mes,
@@ -29,7 +30,6 @@ type DailyRow = { day: string; realizado: number; tipo?: unknown };
 
 const CHART_LABELS: Record<ChartType, string> = { area: "Área acumulada", column: "Colunas", daily: "Diário (90 dias)" };
 const GROUP_LABELS: Record<GroupBy, string> = { none: "Nenhum", servicename: "Serviço", regionname: "Região", subaccountname: "Subconta" };
-const HIERARCHY_LABELS = ["Segmento", "Modelo", "VP", "Diretoria", "Projeto", "Unidade"];
 const MONTHS = ["Jan", "Fev", "Mar", "Abr", "Mai", "Jun", "Jul", "Ago", "Set", "Out", "Nov", "Dez"];
 const OTHERS = "Outros";
 const UNKNOWN = "Sem classificação";
@@ -170,8 +170,9 @@ export default function CostSummary({ table, director, departmentId, path, inclu
   const [dailyRows, setDailyRows] = useState<DailyRow[]>([]);
   const [dailyLoading, setDailyLoading] = useState(false);
 
+  const aliases = useLevelAliases(path);
   const hierarchyColumn = `hierarquia_${Math.min(path.length + 1, 6)}`;
-  const hierarchyLabel = HIERARCHY_LABELS[Math.min(path.length, 5)];
+  const hierarchyLabel = aliases.columnLabel(hierarchyColumn);
   const breakdownDefs = useMemo(() => [
     { column: "servicename", title: "Por serviço" },
     { column: "regionname", title: "Por região" },
@@ -489,7 +490,7 @@ export default function CostSummary({ table, director, departmentId, path, inclu
     .sort((a, z) => Number(z.anomalous_cost_cloud || 0) - Number(a.anomalous_cost_cloud || 0))
     .slice(0, 3);
 
-  const decompChain = useMemo(() => buildExecutiveDecompChain(false, path.length), [path.length]);
+  const decompChain = useMemo(() => buildExecutiveDecompChain(false, path.length, aliases.columnLabel), [path.length, aliases]);
   const focusFilters = useMemo(() => {
     if (!focus) return scope.filters;
     const months = focus.months;

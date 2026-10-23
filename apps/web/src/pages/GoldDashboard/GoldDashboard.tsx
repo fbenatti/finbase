@@ -27,6 +27,7 @@ import HierarchicalDecompTree, { buildDecompChain, type DecompPathStep } from ".
 import ConsumptionDrillDialog from "./ConsumptionDrillDialog";
 import * as XLSX from "xlsx";
 import { ORG } from "../../constants/orgLabels";
+import { hierarchyLabel, hierarchyLevelLabel, useHierarchyLabels, useLevelAliases } from "../../utils/hierarchyLabels";
 
 // ─────────────────────────────────────────────────────────────────────
 // Constantes e formatadores
@@ -53,7 +54,7 @@ const monthsBetween = (from: string, to: string) => {
   }
   return months;
 };
-const labelDimension = (column: string) => ({ cloud_origem: "Cloud", hierarquia_1: "Segmento", hierarquia_2: "Modelo", hierarquia_3: "VP", hierarquia_4: "Diretoria", hierarquia_5: "Projeto", hierarquia_6: "SubProjeto", servicename: "Serviço", servicecategory: "Família de serviço", regionname: "Região", subaccountname: "Subconta" }[column] || column.replace(/_/g, " ").replace(/^./, (letter) => letter.toUpperCase()));
+const labelDimension = (column: string) => hierarchyLabel(column) ?? ({ cloud_origem: "Cloud", servicename: "Serviço", servicecategory: "Família de serviço", regionname: "Região", subaccountname: "Subconta" }[column] || column.replace(/_/g, " ").replace(/^./, (letter) => letter.toUpperCase()));
 const sourceDimensionLabel = (column: string) => column.replace(/_/g, " ").replace(/^./, (letter) => letter.toUpperCase());
 
 /** Hierarquia da Visão Diretoria: nivel_1 → 2 → 4 → 3 → 5 → 6 */
@@ -147,12 +148,6 @@ const PURPLE = "#0B3FA8", ORANGE = "#ff7a00", BLUE = "#0EA5C6",
 const DIM_LABELS: Record<string, string> = {
   _billing_period: "Mês",
   cloud_origem: "Cloud",
-  hierarquia_1: "Segmento",
-  hierarquia_2: "Modelo",
-  hierarquia_3: "VP",
-  hierarquia_4: "Diretoria",
-  hierarquia_5: ORG.level5,
-  hierarquia_6: "Unidade",
   centro_custo: "Centro de custo",
   ambiente: "Ambiente",
   servicecategory: "Categoria",
@@ -164,23 +159,19 @@ const DIM_LABELS: Record<string, string> = {
   chargecategory: "Tipo de carga",
 };
 
-const DIRECTOR_VIEW_LABELS: Record<string, string> = {
-  hierarquia_1: "Segmento",
-  hierarquia_2: "Modelo",
-  hierarquia_4: "Diretoria",
-  hierarquia_3: "Cloud",
-  hierarquia_5: "Projeto",
-  hierarquia_6: "SubProjeto",
-};
+/** Rótulo de dimensão: níveis hierarquia_N vêm dos aliases configurados. */
+function dimLabel(column: string): string {
+  return hierarchyLabel(column) ?? DIM_LABELS[column] ?? column;
+}
 
 function directorNivelLabel(depth: number): string | null {
   const nivel = VISAO_DIRETORIA_DEPTH_TO_NIVEL[depth];
   if (!nivel) return null;
-  return DIRECTOR_VIEW_LABELS[`hierarquia_${nivel}`] || `Nível ${nivel}`;
+  return hierarchyLevelLabel(nivel);
 }
 
 function visaoDiretoriaChain(): Array<{ field: string; label: string }> {
-  return VISAO_DIRETORIA_LEVELS.map(field => ({ field, label: DIRECTOR_VIEW_LABELS[field] || field }));
+  return VISAO_DIRETORIA_LEVELS.map(field => ({ field, label: dimLabel(field) }));
 }
 
 function analysisDimOptions(visaoDiretoria: boolean): string[] {
@@ -419,7 +410,7 @@ function DataQuality({ table, filters, filterKey }: { table: string; filters: Fi
   const defs = useMemo<QueryDef[]>(() => [{ id: "services", rows: ["servicename"], measures: [{ column: measureFor(filters), aggregation: "SUM" }], filters: base, row_limit: 500 }, { id: "consumers", rows: ["hierarquia_4", "hierarquia_5"], measures: [{ column: measureFor(filters), aggregation: "SUM" }], filters: service ? [...base, { column: "servicename", operator: "IN", values: [service] }] : base, row_limit: 1000 }], [filterKey, service]);
   const { results, loading, error } = useTabQueries(table, defs, "data-quality-" + filterKey + service);
   const services = rowsOf(results.services); const consumers = rowsOf(results.consumers);
-  return <Box><Typography variant="h5" sx={{ fontWeight: 950, mb: .5 }}>Qualidade dos dados</Typography><Typography color="text.secondary" sx={{ mb: 2 }}>Escolha um serviço para ver os projetos e as diretorias que o consomem, com o valor efetivado neste recorte.</Typography><SectionPanel title="Consumidores por serviço" subtitle="Os filtros globais de período, cloud e organização continuam aplicados." right={<FormControl size="small" sx={{ minWidth: 280 }}><InputLabel>Serviço</InputLabel><Select label="Serviço" value={service} onChange={e => setService(e.target.value)}><MenuItem value="">Todos os serviços</MenuItem>{services.map(r => <MenuItem key={String(r.servicename)} value={String(r.servicename)}>{esc(r.servicename)} · {money(r.realizado)}</MenuItem>)}</Select></FormControl>}><LoadingBlock loading={loading} error={error}><TableContainer><Table size="small"><TableHead><TableRow>{["Diretoria", "Projeto", "Efetivado", "% do total do serviço"].map(h => <TableCell key={h} sx={{ fontWeight: 900 }}>{h}</TableCell>)}</TableRow></TableHead><TableBody>{consumers.sort((a, b) => Number(b.realizado || 0) - Number(a.realizado || 0)).map((r, i) => <TableRow key={i}><TableCell>{esc(r.hierarquia_4)}</TableCell><TableCell>{esc(r.hierarquia_5)}</TableCell><TableCell sx={{ fontWeight: 900 }}>{money(r.realizado)}</TableCell><TableCell>{pct(Number(r.realizado || 0) / Math.max(1, consumers.reduce((s, x) => s + Number(x.realizado || 0), 0)) * 100)}</TableCell></TableRow>)}{!consumers.length && <TableRow><TableCell colSpan={4} align="center">Nenhum consumidor no recorte selecionado.</TableCell></TableRow>}</TableBody></Table></TableContainer></LoadingBlock></SectionPanel></Box>;
+  return <Box><Typography variant="h5" sx={{ fontWeight: 950, mb: .5 }}>Qualidade dos dados</Typography><Typography color="text.secondary" sx={{ mb: 2 }}>Escolha um serviço para ver quem o consome, com o valor efetivado neste recorte.</Typography><SectionPanel title="Consumidores por serviço" subtitle="Os filtros globais de período, cloud e organização continuam aplicados." right={<FormControl size="small" sx={{ minWidth: 280 }}><InputLabel>Serviço</InputLabel><Select label="Serviço" value={service} onChange={e => setService(e.target.value)}><MenuItem value="">Todos os serviços</MenuItem>{services.map(r => <MenuItem key={String(r.servicename)} value={String(r.servicename)}>{esc(r.servicename)} · {money(r.realizado)}</MenuItem>)}</Select></FormControl>}><LoadingBlock loading={loading} error={error}><TableContainer><Table size="small"><TableHead><TableRow>{[hierarchyLevelLabel(4), hierarchyLevelLabel(5), "Efetivado", "% do total do serviço"].map(h => <TableCell key={h} sx={{ fontWeight: 900 }}>{h}</TableCell>)}</TableRow></TableHead><TableBody>{consumers.sort((a, b) => Number(b.realizado || 0) - Number(a.realizado || 0)).map((r, i) => <TableRow key={i}><TableCell>{esc(r.hierarquia_4)}</TableCell><TableCell>{esc(r.hierarquia_5)}</TableCell><TableCell sx={{ fontWeight: 900 }}>{money(r.realizado)}</TableCell><TableCell>{pct(Number(r.realizado || 0) / Math.max(1, consumers.reduce((s, x) => s + Number(x.realizado || 0), 0)) * 100)}</TableCell></TableRow>)}{!consumers.length && <TableRow><TableCell colSpan={4} align="center">Nenhum consumidor no recorte selecionado.</TableCell></TableRow>}</TableBody></Table></TableContainer></LoadingBlock></SectionPanel></Box>;
 }
 
 function monthlySeries(r: GoldQueryResult | null | undefined, measure: string) {
@@ -449,6 +440,8 @@ export default function GoldDashboard() {
     visaoDiretoria: false,
   }));
   const [monthsAll, setMonthsAll] = useState<string[]>([]);
+  // Na visão padrão, os rótulos seguem os aliases do ramo selecionado.
+  const scopeAliases = useLevelAliases(filters.visaoDiretoria ? [] : filters.path);
   const currentYear = new Date().getFullYear();
   const [dateFrom, setDateFrom] = useState(`${currentYear}-01-01`);
   const [dateTo, setDateTo] = useState(`${currentYear}-12-31`);
@@ -689,7 +682,7 @@ export default function GoldDashboard() {
             <OrgScopeDrawer
               tree={displayedOrganization}
               path={filters.path}
-              levelLabels={filters.visaoDiretoria ? [0, 1, 2, 3, 4, 5].map((depth) => directorNivelLabel(depth) || `Nível ${depth + 1}`) : ["Segmento", "Modelo", "Plataforma", "Diretoria", ORG.level5, "Unidade"]}
+              levelLabels={filters.visaoDiretoria ? [0, 1, 2, 3, 4, 5].map((depth) => directorNivelLabel(depth) || `Nível ${depth + 1}`) : scopeAliases.labels(6)}
               table={table}
               measure={measureFor(filters)}
               months={filters.months}
@@ -884,7 +877,7 @@ function VisaoGeral({ table, filters, filterKey }: { table: string; filters: Fil
   const healthStatus = health >= 85 ? { label: "CONTROLADO", color: GREEN } : health >= 70 ? { label: "MONITORAR", color: YELLOW } : { label: "AÇÃO", color: RED };
 
   const dirField = filters.visaoDiretoria ? VISAO_DIRETORIA_LEVELS[0] : "hierarquia_4";
-  const dirLabel = DIM_LABELS[dirField] || dirField;
+  const dirLabel = dimLabel(dirField);
 
   const email = useMemo(() => {
     const period = filters.months.length ? `competência(s) ${filters.months.map(monthLong).join(", ")}` : "todo o histórico disponível";
@@ -1020,10 +1013,10 @@ function Evolucao({ table, filters, filterKey }: { table: string; filters: Filte
           </ChartCard>
         </Grid>
         <Grid item xs={12} md={7}>
-          <ChartCard title={`O que mudou? — variação ${cur ? monthLabel(cur) : "—"} vs ${prev ? monthLabel(prev) : "—"} por ${DIM_LABELS[dim] || dim}`} note="Maiores contribuidores absolutos da variação. Não presume causa operacional.">
+          <ChartCard title={`O que mudou? — variação ${cur ? monthLabel(cur) : "—"} vs ${prev ? monthLabel(prev) : "—"} por ${dimLabel(dim)}`} note="Maiores contribuidores absolutos da variação. Não presume causa operacional.">
             <FormControl size="small" sx={{ mb: 1, minWidth: 180 }}>
               <Select value={dim} onChange={e => setDim(e.target.value)}>
-                {dimOptions.map(d => <MenuItem key={d} value={d}>{DIM_LABELS[d] || d}</MenuItem>)}
+                {dimOptions.map(d => <MenuItem key={d} value={d}>{dimLabel(d)}</MenuItem>)}
               </Select>
             </FormControl>
             <Chart
@@ -1117,7 +1110,7 @@ function Organizacao({ table, filters, filterKey }: { table: string; filters: Fi
               return (
                 <Grid item xs={12} sm={6} md={4} key={field}>
                   <RankBars
-                    title={`${DIM_LABELS[field]} (Nível ${nivelNum(field)})`}
+                    title={`${dimLabel(field)} (Nível ${nivelNum(field)})`}
                     rows={rowsOf(results[ids[i]])}
                     measure="realizado"
                     limit={12}
@@ -1131,7 +1124,7 @@ function Organizacao({ table, filters, filterKey }: { table: string; filters: Fi
           <>
             <Grid item xs={12} md={4}><RankBars title="VP (nível 3)" rows={rowsOf(results.n3)} measure="realizado" limit={10} color={PURPLE} /></Grid>
             <Grid item xs={12} md={4}><RankBars title="Diretorias (nível 4)" rows={rowsOf(results.n4)} measure="realizado" limit={12} color={BLUE} /></Grid>
-            <Grid item xs={12} md={4}><RankBars title={`${ORG.level5} (Nível 5)`} rows={rowsOf(results.n5)} measure="realizado" limit={12} color={GREEN} /></Grid>
+            <Grid item xs={12} md={4}><RankBars title={`${hierarchyLevelLabel(5)} (Nível 5)`} rows={rowsOf(results.n5)} measure="realizado" limit={12} color={GREEN} /></Grid>
           </>
         )}
         <Grid item xs={12} md={4}><RankBars title="Centros de custo" rows={rowsOf(results.cc)} measure="realizado" limit={10} color={YELLOW} /></Grid>
@@ -1146,7 +1139,7 @@ function Organizacao({ table, filters, filterKey }: { table: string; filters: Fi
                 <TableHead>
                   <TableRow>
                     {hierLevels.map(level => (
-                      <TableCell key={level} sx={{ fontWeight: 900, fontSize: 11 }}>{DIM_LABELS[level] || level}</TableCell>
+                      <TableCell key={level} sx={{ fontWeight: 900, fontSize: 11 }}>{dimLabel(level)}</TableCell>
                     ))}
                     <TableCell sx={{ fontWeight: 900, fontSize: 11 }}>Efetivado</TableCell>
                   </TableRow>
@@ -1219,10 +1212,10 @@ function Servicos({ table, filters, filterKey }: { table: string; filters: Filte
           </ChartCard>
         </Grid>
         <Grid item xs={12} md={8}>
-          <ChartCard title={`Heatmap ${DIM_LABELS[heatDim] || heatDim} × Mês — Efetivado (BRL)`} note="Top 14 valores da dimensão; célula = soma mensal neste recorte.">
+          <ChartCard title={`Heatmap ${dimLabel(heatDim)} × Mês — Efetivado (BRL)`} note="Top 14 valores da dimensão; célula = soma mensal neste recorte.">
             <FormControl size="small" sx={{ mb: 1, minWidth: 180 }}>
               <Select value={heatDim} onChange={e => setHeatDim(e.target.value)}>
-                {heatOptions.map(d => <MenuItem key={d} value={d}>{DIM_LABELS[d] || d}</MenuItem>)}
+                {heatOptions.map(d => <MenuItem key={d} value={d}>{dimLabel(d)}</MenuItem>)}
               </Select>
             </FormControl>
             <Chart
@@ -1296,7 +1289,7 @@ function Investigacao({ table, filters, filterKey }: { table: string; filters: F
   const attention = useMemo(() => {
     const items: Array<{ sev: "P1" | "P2" | "P3"; title: string; detail: string; color: string }> = [];
     if (topGrow[0] && topGrow[0].mom !== null && Math.abs(topGrow[0].mom) >= 15) {
-      items.push({ sev: Math.abs(topGrow[0].mom) >= 25 ? "P1" : "P2", title: `Crescimento material: ${topGrow[0].key}`, detail: `${DIM_LABELS[dim] || dim} cresceu ${pct(topGrow[0].mom)} no último mês (${money(topGrow[0].delta)}).`, color: Math.abs(topGrow[0].mom) >= 25 ? RED : YELLOW });
+      items.push({ sev: Math.abs(topGrow[0].mom) >= 25 ? "P1" : "P2", title: `Crescimento material: ${topGrow[0].key}`, detail: `${dimLabel(dim)} cresceu ${pct(topGrow[0].mom)} no último mês (${money(topGrow[0].delta)}).`, color: Math.abs(topGrow[0].mom) >= 25 ? RED : YELLOW });
     }
     if (anomalies[0]) {
       items.push({ sev: Math.abs(anomalies[0].z) >= 3 ? "P1" : "P2", title: `Anomalia estatística: ${anomalies[0].key}`, detail: `Z-score ${anomalies[0].z.toFixed(1)} vs histórico (último mês ${money(anomalies[0].last)}).`, color: RED });
@@ -1309,10 +1302,10 @@ function Investigacao({ table, filters, filterKey }: { table: string; filters: F
     if (dirTotal) {
       const top5 = dirSeries.slice(0, 5).reduce((s, r) => s + Math.abs(Number(r.realizado) || 0), 0);
       const conc = top5 / dirTotal * 100;
-      if (conc > 70) items.push({ sev: "P2", title: "Concentração financeira", detail: `Top 5 ${(filters.visaoDiretoria ? DIM_LABELS[VISAO_DIRETORIA_LEVELS[0]] : "diretorias").toLowerCase()} respondem por ${pct(conc)} do custo.`, color: YELLOW });
+      if (conc > 70) items.push({ sev: "P2", title: "Concentração financeira", detail: `Top 5 ${(filters.visaoDiretoria ? dimLabel(VISAO_DIRETORIA_LEVELS[0]) : hierarchyLevelLabel(4, true)).toLowerCase()} respondem por ${pct(conc)} do custo.`, color: YELLOW });
     }
     if (paretoCount > 0 && paretoCount <= Math.max(8, Math.round(paretoRows.length * 0.15))) {
-      items.push({ sev: "P3", title: "Pareto 80/20", detail: `${paretoCount} de ${paretoRows.length} itens de ${DIM_LABELS[dim] || dim} respondem por 80% do custo.`, color: GREEN });
+      items.push({ sev: "P3", title: "Pareto 80/20", detail: `${paretoCount} de ${paretoRows.length} itens de ${dimLabel(dim)} respondem por 80% do custo.`, color: GREEN });
     }
     return items.sort((a, b) => a.sev.localeCompare(b.sev)).slice(0, 10);
   }, [topGrow, anomalies, accelerated, results.dirs, paretoCount, paretoRows.length, dim, filters.visaoDiretoria]);
@@ -1337,10 +1330,10 @@ function Investigacao({ table, filters, filterKey }: { table: string; filters: F
           </Paper>
         </Grid>
         <Grid item xs={12} md={8}>
-          <ChartCard title={`Top Desvios MoM por ${DIM_LABELS[dim] || dim}`} note="Variação absoluta do último mês contra o anterior.">
+          <ChartCard title={`Top Desvios MoM por ${dimLabel(dim)}`} note="Variação absoluta do último mês contra o anterior.">
             <FormControl size="small" sx={{ mb: 1, minWidth: 180 }}>
               <Select value={dim} onChange={e => setDim(e.target.value)}>
-                {dimOptions.map(d => <MenuItem key={d} value={d}>{DIM_LABELS[d] || d}</MenuItem>)}
+                {dimOptions.map(d => <MenuItem key={d} value={d}>{dimLabel(d)}</MenuItem>)}
               </Select>
             </FormControl>
             <Chart
@@ -1380,7 +1373,7 @@ function Investigacao({ table, filters, filterKey }: { table: string; filters: F
         <Grid item xs={12} md={6}>
           <Grid container spacing={1.5}>
             <Grid item xs={12}>
-              <ChartCard title={`Pareto 80/20 — ${DIM_LABELS[dim] || dim}`}>
+              <ChartCard title={`Pareto 80/20 — ${dimLabel(dim)}`}>
                 <Chart
                   data={[
                     { x: paretoRows.slice(0, 30).map(r => esc(r[dim])), y: paretoRows.slice(0, 30).map(r => Number(r.realizado) || 0), type: "bar", name: "Efetivado", marker: { color: PURPLE } },
@@ -1425,18 +1418,18 @@ function Investigacao({ table, filters, filterKey }: { table: string; filters: F
 // ═══════════════════════════════════════════════════════════════════
 
 // Dimensões disponíveis para os widgets de decisão (colunas válidas da Gold).
-const DECISAO_DIMS_BASE: Array<{ field: string; label: string }> = [
+const decisaoDimsBase = (): Array<{ field: string; label: string }> => [
   { field: "cloud_origem", label: "Cloud" },
-  { field: "hierarquia_3", label: "Plataforma" },
-  { field: "hierarquia_4", label: "Diretoria" },
-  { field: "hierarquia_5", label: ORG.level5 },
+  { field: "hierarquia_3", label: dimLabel("hierarquia_3") },
+  { field: "hierarquia_4", label: dimLabel("hierarquia_4") },
+  { field: "hierarquia_5", label: dimLabel("hierarquia_5") },
   { field: "servicename", label: "Serviço" },
   { field: "servicecategory", label: "Categoria" },
   { field: "subaccountname", label: "Subconta" },
 ];
 
 function buildDecisaoDims(visaoDiretoria: boolean): Array<{ field: string; label: string }> {
-  if (!visaoDiretoria) return DECISAO_DIMS_BASE;
+  if (!visaoDiretoria) return decisaoDimsBase();
   return [
     { field: "cloud_origem", label: "Cloud" },
     ...visaoDiretoriaChain(),
@@ -1510,16 +1503,17 @@ function Decisao({ table, filters, filterKey, setFilters }: {
   table: string; filters: Filters; filterKey: string;
   setFilters: React.Dispatch<React.SetStateAction<Filters>>;
 }) {
-  const decisaoDims = useMemo(() => buildDecisaoDims(filters.visaoDiretoria), [filters.visaoDiretoria]);
-  const decompChain = useMemo(() => buildDecompChain(filters.visaoDiretoria), [filters.visaoDiretoria]);
+  const hierarchyLevels = useHierarchyLabels();
+  const decisaoDims = useMemo(() => buildDecisaoDims(filters.visaoDiretoria), [filters.visaoDiretoria, hierarchyLevels]);
+  const decompChain = useMemo(() => buildDecompChain(filters.visaoDiretoria), [filters.visaoDiretoria, hierarchyLevels]);
   const govDeptLevels = useMemo(
     () => (filters.visaoDiretoria
-      ? VISAO_DIRETORIA_LEVELS.map((field, index) => ({ id: `gov${index + 1}`, field, label: DIM_LABELS[field] || field }))
+      ? VISAO_DIRETORIA_LEVELS.map((field, index) => ({ id: `gov${index + 1}`, field, label: dimLabel(field) }))
       : [
-        { id: "gov1", field: "hierarquia_3", label: "Plataforma" },
-        { id: "gov2", field: "hierarquia_4", label: "Diretoria" },
+        { id: "gov1", field: "hierarquia_3", label: dimLabel("hierarquia_3") },
+        { id: "gov2", field: "hierarquia_4", label: dimLabel("hierarquia_4") },
       ]),
-    [filters.visaoDiretoria],
+    [filters.visaoDiretoria, hierarchyLevels],
   );
   const [dim, setDim] = useState("hierarquia_4");
   const [compA, setCompA] = useState("");
@@ -1529,7 +1523,7 @@ function Decisao({ table, filters, filterKey, setFilters }: {
       setDim(VISAO_DIRETORIA_LEVELS[0]);
     }
   }, [filters.visaoDiretoria]);
-  const dimLabel = decisaoDims.find(d => d.field === dim)?.label || dim;
+  const selectedDimLabel = decisaoDims.find(d => d.field === dim)?.label || dim;
 
   // ── consultas base (independentes da árvore) ──
   const baseDefs = useMemo<QueryDef[]>(() => {
@@ -1677,11 +1671,11 @@ function Decisao({ table, filters, filterKey, setFilters }: {
     const items: Array<{ sev: "P1" | "P2" | "P3"; title: string; desc: string; impact: string }> = [];
     if (globalAcc != null && globalAcc < 85) items.push({ sev: globalAcc < 70 ? "P1" : "P2", title: "Acerto da Forecast", desc: `Confiabilidade global abaixo de 85% (${pct(globalAcc)}).`, impact: pct(globalAcc) });
     if (momPct != null && Math.abs(momPct) >= 15) items.push({ sev: Math.abs(momPct) >= 25 ? "P1" : "P2", title: "Mudança mensal material", desc: `Última competência (${monthLabel(latestMonth)}) variou ${pct(momPct)} contra a anterior.`, impact: compact(Math.abs(latestReal - prevReal)) });
-    if (top5Pct > 70) items.push({ sev: "P2", title: "Concentração Financeira", desc: `Top 5 de ${dimLabel} concentram ${pct(top5Pct)} do custo.`, impact: "Top 5" });
+    if (top5Pct > 70) items.push({ sev: "P2", title: "Concentração Financeira", desc: `Top 5 de ${selectedDimLabel} concentram ${pct(top5Pct)} do custo.`, impact: "Top 5" });
     if (govScore < 90) items.push({ sev: govScore < 75 ? "P1" : "P2", title: "Governance Completeness", desc: "Classificação incompleta reduz rastreabilidade executiva.", impact: pct(govScore) });
     const totalDelta = latestReal - prevReal;
     const growth = waterfall.find(s => s.kind === "inc" && s.contrib != null && s.contrib > 35 && s.key !== "Demais motores");
-    if (growth && totalDelta > 0) items.push({ sev: (growth.contrib || 0) > 55 ? "P1" : "P2", title: `Driver de crescimento: ${growth.key}`, desc: `${dimLabel} responde por ${pct(growth.contrib || 0)} do aumento mensal.`, impact: compact(growth.value) });
+    if (growth && totalDelta > 0) items.push({ sev: (growth.contrib || 0) > 55 ? "P1" : "P2", title: `Driver de crescimento: ${growth.key}`, desc: `${selectedDimLabel} responde por ${pct(growth.contrib || 0)} do aumento mensal.`, impact: compact(growth.value) });
     return items.sort((a, b) => a.sev.localeCompare(b.sev)).slice(0, 10);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [dimRowsAll, dim, latestMonth, prevMonth, top5Pct, govScore, globalAcc, momPct, waterfall, latestReal, prevReal]);
@@ -1855,7 +1849,7 @@ function Decisao({ table, filters, filterKey, setFilters }: {
             <Grid item xs={6} sm={4} md={2}><KpiCard label="Forecast" value={compact(latestFc)} sub={`${monthLabel(fcMonths[fcMonths.length - 1]) || "—"}`} color={ORANGE} full={moneyFull(latestFc)} /></Grid>
             <Grid item xs={6} sm={4} md={2}><KpiCard label="Desvio da Forecast" value={`${gap >= 0 ? "+" : ""}${compact(gap)}`} sub={latestReal ? `${gapPct >= 0 ? "+" : ""}${pct(gapPct)} do efetivado` : "sem base"} color={gap >= 0 ? RED : GREEN} full={moneyFull(gap)} /></Grid>
             <Grid item xs={6} sm={4} md={2}><KpiCard label="Tendência por mês" value={momPct == null ? "N/A" : `${momPct >= 0 ? "+" : ""}${pct(momPct)}`} sub="última vs anterior" color={BLUE} /></Grid>
-            <Grid item xs={6} sm={4} md={2}><KpiCard label="Peso das 5 maiores" value={pct(top5Pct)} sub={dimLabel} color="#6EA8FE" /></Grid>
+            <Grid item xs={6} sm={4} md={2}><KpiCard label="Peso das 5 maiores" value={pct(top5Pct)} sub={selectedDimLabel} color="#6EA8FE" /></Grid>
             <Grid item xs={6} sm={4} md={2}><KpiCard label="Acerto da Forecast" value={globalAcc != null ? pct(globalAcc) : "N/A"} sub="global (último mês com ambos)" color={globalAcc != null && globalAcc < 85 ? RED : GREEN} /></Grid>
           </Grid>
         </SectionPanel>
@@ -1916,7 +1910,7 @@ function Decisao({ table, filters, filterKey, setFilters }: {
         </SectionPanel>
 
         {/* 05 · Ponte de variação do custo */}
-        <SectionPanel title="Ponte da variação do custo" subtitle={`${monthLabel(prevMonth)} → ${monthLabel(latestMonth)} por ${dimLabel} (top drivers por variação absoluta)`}>
+        <SectionPanel title="Ponte da variação do custo" subtitle={`${monthLabel(prevMonth)} → ${monthLabel(latestMonth)} por ${selectedDimLabel} (top drivers por variação absoluta)`}>
           <Grid container spacing={1.5}>
             <Grid item xs={12} md={8}>
               {waterfall.length < 2 ? <Typography variant="body2" color="text.secondary">Nenhuma variação no recorte.</Typography> : (
@@ -1980,10 +1974,10 @@ function Decisao({ table, filters, filterKey, setFilters }: {
         </SectionPanel>
 
         {/* 07 · Principais motores do custo */}
-        <SectionPanel title="Motores de maior custo" subtitle={`Maiores motores por ${dimLabel} e por nuvem — custo, participação, Δ e peso na variação mensal`}>
+        <SectionPanel title="Motores de maior custo" subtitle={`Maiores motores por ${selectedDimLabel} e por nuvem — custo, participação, Δ e peso na variação mensal`}>
           <Grid container spacing={1.5}>
             {[
-              { title: dimLabel, rows: driversDim },
+              { title: selectedDimLabel, rows: driversDim },
               { title: "Cloud", rows: driversCloud },
             ].map((card, ci) => (
               <Grid item xs={12} md={6} key={ci}>
@@ -2012,12 +2006,12 @@ function Decisao({ table, filters, filterKey, setFilters }: {
         </SectionPanel>
 
         {/* 08 · Anomalias e aceleração do custo */}
-        <SectionPanel title="Desvios e aceleração de custo" subtitle={`Detecção simples por ${dimLabel}: |Z| ≥ 2 vs histórico anterior; aceleração = variação da velocidade nos últimos 3 meses`}>
+        <SectionPanel title="Desvios e aceleração de custo" subtitle={`Detecção simples por ${selectedDimLabel}: |Z| ≥ 2 vs histórico anterior; aceleração = variação da velocidade nos últimos 3 meses`}>
           <Grid container spacing={1.5}>
             <Grid item xs={12} md={6}>
               <Typography variant="subtitle2" sx={{ fontWeight: 950, mb: 0.5 }}>Desvios (|Z| ≥ 2)</Typography>
               <Table size="small">
-                <TableHead><TableRow><TableCell sx={{ fontWeight: 900, fontSize: 11 }}>{dimLabel}</TableCell><TableCell sx={{ fontWeight: 900, fontSize: 11 }}>Z</TableCell><TableCell sx={{ fontWeight: 900, fontSize: 11 }}>Custo do mês</TableCell></TableRow></TableHead>
+                <TableHead><TableRow><TableCell sx={{ fontWeight: 900, fontSize: 11 }}>{selectedDimLabel}</TableCell><TableCell sx={{ fontWeight: 900, fontSize: 11 }}>Z</TableCell><TableCell sx={{ fontWeight: 900, fontSize: 11 }}>Custo do mês</TableCell></TableRow></TableHead>
                 <TableBody>
                   {anomaly.anomalyList.map((x, i) => (
                     <TableRow key={i}>
@@ -2033,7 +2027,7 @@ function Decisao({ table, filters, filterKey, setFilters }: {
             <Grid item xs={12} md={6}>
               <Typography variant="subtitle2" sx={{ fontWeight: 950, mb: 0.5 }}>Aceleração de custo (maiores mudanças)</Typography>
               <Table size="small">
-                <TableHead><TableRow><TableCell sx={{ fontWeight: 900, fontSize: 11 }}>{dimLabel}</TableCell><TableCell sx={{ fontWeight: 900, fontSize: 11 }}>Aceleração em BRL</TableCell></TableRow></TableHead>
+                <TableHead><TableRow><TableCell sx={{ fontWeight: 900, fontSize: 11 }}>{selectedDimLabel}</TableCell><TableCell sx={{ fontWeight: 900, fontSize: 11 }}>Aceleração em BRL</TableCell></TableRow></TableHead>
                 <TableBody>
                   {anomaly.accelList.map((x, i) => (
                     <TableRow key={i}>
@@ -2049,7 +2043,7 @@ function Decisao({ table, filters, filterKey, setFilters }: {
         </SectionPanel>
 
         {/* 09 · Viés e confiabilidade da Forecast */}
-        <SectionPanel title="Viés e acerto da Forecast" subtitle={`Ranking por ${dimLabel}: acerto médio (Forecast x efetivado), viés e erro acumulado`}>
+        <SectionPanel title="Viés e acerto da Forecast" subtitle={`Ranking por ${selectedDimLabel}: acerto médio (Forecast x efetivado), viés e erro acumulado`}>
           <Grid container spacing={1.5} sx={{ mb: 1.5 }}>
             <Grid item xs={6} sm={3}><KpiCard label="Itens avaliados" value={String(biasRows.length)} sub="com pares Forecast/efetivado" color={BLUE} /></Grid>
             <Grid item xs={6} sm={3}><KpiCard label="Pior acerto" value={biasRows[0] ? pct(biasRows[0].accuracy) : "—"} sub={biasRows[0]?.key || "N/A"} color={biasRows[0] && biasRows[0].accuracy < 70 ? RED : GREEN} /></Grid>
@@ -2059,7 +2053,7 @@ function Decisao({ table, filters, filterKey, setFilters }: {
           <TableContainer>
             <Table size="small">
               <TableHead><TableRow>
-                {[dimLabel, "Acerto", "Viés médio", "Over", "Under", "Erro em R$"].map(h => <TableCell key={h} sx={{ fontWeight: 900, fontSize: 11 }}>{h}</TableCell>)}
+                {[selectedDimLabel, "Acerto", "Viés médio", "Over", "Under", "Erro em R$"].map(h => <TableCell key={h} sx={{ fontWeight: 900, fontSize: 11 }}>{h}</TableCell>)}
               </TableRow></TableHead>
               <TableBody>
                 {biasRows.map((x, i) => (
@@ -2072,7 +2066,7 @@ function Decisao({ table, filters, filterKey, setFilters }: {
                     <TableCell sx={{ fontSize: 12, fontWeight: 900 }}>{compact(x.absErr)}</TableCell>
                   </TableRow>
                 ))}
-                {!biasRows.length && <TableRow><TableCell colSpan={6} align="center" sx={{ color: "text.secondary", py: 2 }}>Não há pares Forecast/efetivado suficientes por {dimLabel.toLowerCase()} no histórico.</TableCell></TableRow>}
+                {!biasRows.length && <TableRow><TableCell colSpan={6} align="center" sx={{ color: "text.secondary", py: 2 }}>Não há pares Forecast/efetivado suficientes por {selectedDimLabel.toLowerCase()} no histórico.</TableCell></TableRow>}
               </TableBody>
             </Table>
           </TableContainer>
@@ -2082,7 +2076,7 @@ function Decisao({ table, filters, filterKey, setFilters }: {
         <SectionPanel title="Prioridade preliminar de análise" subtitle="Acerto, desvios positivos da Forecast e ritmo anualizado — indicação para direcionar investigação, não economia garantida">
           <Grid container spacing={1.5}>
             <Grid item xs={12} md={6}>
-              <Typography variant="subtitle2" sx={{ fontWeight: 950, mb: 0.5 }}>Maiores gaps por {dimLabel}</Typography>
+              <Typography variant="subtitle2" sx={{ fontWeight: 950, mb: 0.5 }}>Maiores gaps por {selectedDimLabel}</Typography>
               {oppDim.length ? oppDim.map((x, i) => (
                 <Box key={i} sx={{ mb: 0.6 }}>
                   <Stack direction="row" justifyContent="space-between"><Typography variant="caption" sx={{ fontWeight: 900 }}>{i + 1}. {x.key}</Typography><Typography variant="caption" sx={{ fontWeight: 950, color: ORANGE }}>Gap {compact(x.gap)}</Typography></Stack>
@@ -2144,7 +2138,7 @@ function Decisao({ table, filters, filterKey, setFilters }: {
         </SectionPanel>
 
         {/* 12 · Comparator */}
-        <SectionPanel title="Compare dois itens no mesmo recorte" subtitle={`Escolha duas entidades de ${dimLabel} e compare trajetória, participação e variação mensal`}
+        <SectionPanel title="Compare dois itens no mesmo recorte" subtitle={`Escolha duas entidades de ${selectedDimLabel} e compare trajetória, participação e variação mensal`}
           right={
             <Stack direction="row" gap={1} flexWrap="wrap">
               <FormControl size="small" sx={{ minWidth: 200 }}><InputLabel>Item A</InputLabel>
@@ -2219,10 +2213,10 @@ function pivotFiltersFrom(filters: Filters): Record<string, HistoryFilter> {
   return out;
 }
 
-const DRILL_CHAIN_BASE: Array<{ field: string; label: string }> = [
+const drillChainBase = (): Array<{ field: string; label: string }> => [
   { field: "cloud_origem", label: "Cloud" },
-  { field: "hierarquia_4", label: "Diretoria" },
-  { field: "hierarquia_5", label: ORG.level5 },
+  { field: "hierarquia_4", label: dimLabel("hierarquia_4") },
+  { field: "hierarquia_5", label: dimLabel("hierarquia_5") },
   { field: "servicename", label: "Serviço" },
   { field: "servicecategory", label: "Categoria" },
   { field: "regionname", label: "Região" },
@@ -2230,7 +2224,7 @@ const DRILL_CHAIN_BASE: Array<{ field: string; label: string }> = [
 ];
 
 function buildDrillChain(visaoDiretoria: boolean): Array<{ field: string; label: string }> {
-  if (!visaoDiretoria) return DRILL_CHAIN_BASE;
+  if (!visaoDiretoria) return drillChainBase();
   return [
     ...visaoDiretoriaChain(),
     { field: "servicename", label: "Serviço" },
@@ -2241,7 +2235,8 @@ function buildDrillChain(visaoDiretoria: boolean): Array<{ field: string; label:
 }
 
 function Drilldown({ table, filters, filterKey }: { table: string; filters: Filters; filterKey: string }) {
-  const drillChain = useMemo(() => buildDrillChain(filters.visaoDiretoria), [filters.visaoDiretoria]);
+  const hierarchyLevels = useHierarchyLabels();
+  const drillChain = useMemo(() => buildDrillChain(filters.visaoDiretoria), [filters.visaoDiretoria, hierarchyLevels]);
   const [path, setPath] = useState<Array<{ field: string; value: string }>>([]);
   useEffect(() => { setPath([]); }, [filters.visaoDiretoria]);
   const level = path.length;

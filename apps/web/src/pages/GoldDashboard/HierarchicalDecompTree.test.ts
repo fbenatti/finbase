@@ -59,11 +59,11 @@ describe("isEmptyOrgLevel", () => {
 });
 
 describe("buildExecutiveDecompChain", () => {
-  it("continua em SubProjeto quando escopo cobre até Projeto", () => {
+  it("continua no nível 6 quando escopo cobre até Projeto", () => {
     const start = executiveChainStartIndex(["Seg", "Mod", "Dir", "Azure", "Projeto A"], true);
     expect(start).toBe(5);
     const chain = buildExecutiveDecompChain(true, start);
-    expect(chain[0]).toEqual({ field: "hierarquia_6", label: "SubProjeto" });
+    expect(chain[0]).toEqual({ field: "hierarquia_6", label: "Subprojeto" });
     expect(chain.map(c => c.field)).toEqual([
       "hierarquia_6",
       "servicename",
@@ -78,16 +78,22 @@ describe("buildExecutiveDecompChain", () => {
     expect(chain[0].field).toBe("hierarquia_1");
   });
 
-  it("após Área (nivel_5) próximo nível é Unidade e depois Serviço", () => {
+  it("após o nível 5 o próximo é o nível 6 e depois Serviço", () => {
     const chain = buildExecutiveDecompChain(false, 5);
-    expect(chain[0]).toEqual({ field: "hierarquia_6", label: "Unidade" });
+    expect(chain[0]).toEqual({ field: "hierarquia_6", label: "Subprojeto" });
     expect(chain[1]).toEqual({ field: "servicename", label: "Serviço" });
   });
 
-  it("escopo Consumo Cloud > Azure começa em Plataforma (nivel_3)", () => {
+  it("escopo Consumo Cloud > Azure começa no nivel_3", () => {
     const path = ["Consumo Cloud", "Azure"];
     expect(executiveChainStartIndex(path, false)).toBe(2);
     const chain = buildExecutiveDecompChain(false, 2);
-    expect(chain[0]).toEqual({ field: "hierarquia_3", label: "Plataforma" });
+    expect(chain[0]).toEqual({ field: "hierarquia_3", label: "Provedor" });
+  });
+
+  it("usa os rótulos do escopo quando informados", () => {
+    const labelOf = (field: string) => (field === "hierarquia_4" ? "Diretoria" : field);
+    const chain = buildExecutiveDecompChain(false, 3, labelOf);
+    expect(chain[0]).toEqual({ field: "hierarquia_4", label: "Diretoria" });
   });
 });

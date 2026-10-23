@@ -3,16 +3,18 @@ import { useEffect, useMemo, useState } from "react";
 import { Alert, Box, Button, ButtonGroup, FormControl, InputLabel, MenuItem, Paper, Select, Stack, ToggleButton, ToggleButtonGroup, Typography } from "@mui/material";
 import Plot from "@/components/Plot";
 import { GoldInfo, GoldQueryFilter, GoldQueryResult, queryDimonTable } from "../../services/api";
+import { hierarchyLabel, useHierarchyLabels } from "../../utils/hierarchyLabels";
 
 // Same order and field path as the consumption decomposition, through SKU.
+// Níveis hierarquia_N ficam sem rótulo aqui: vêm dos aliases configurados.
 const LENSES: Array<{ label: string; field: string }> = [
   { label: "Cloud", field: "cloud_origem" },
-  { label: "Segmento", field: "hierarquia_1" },
-  { label: "Modelo", field: "hierarquia_2" },
-  { label: "Plataforma", field: "hierarquia_3" },
-  { label: "Diretoria", field: "hierarquia_4" },
-  { label: "Projeto", field: "hierarquia_5" },
-  { label: "SubProjeto", field: "hierarquia_6" },
+  { label: "", field: "hierarquia_1" },
+  { label: "", field: "hierarquia_2" },
+  { label: "", field: "hierarquia_3" },
+  { label: "", field: "hierarquia_4" },
+  { label: "", field: "hierarquia_5" },
+  { label: "", field: "hierarquia_6" },
   { label: "Serviço", field: "servicename" },
   { label: "ServiceSubcategory", field: "servicesubcategory" },
   { label: "Subserviço", field: "skumeter" },
@@ -32,7 +34,13 @@ export default function ExecutiveWidgetsV2({ table, info, filters, filterGroups,
   table: string; info: GoldInfo | null; filters: GoldQueryFilter[]; filterGroups: GoldQueryFilter[][];
   refreshKey?: number; onAddFilter: (column: string, value: string) => void; year: number;
 }) {
-  const availableLenses = useMemo(() => LENSES.filter((lens) => info?.dimensions.some((field) => field.toLowerCase() === lens.field)), [info]);
+  const hierarchyLevels = useHierarchyLabels();
+  const availableLenses = useMemo(
+    () => LENSES
+      .filter((lens) => info?.dimensions.some((field) => field.toLowerCase() === lens.field))
+      .map((lens) => ({ ...lens, label: hierarchyLabel(lens.field) ?? lens.label })),
+    [info, hierarchyLevels],
+  );
   const [lens, setLens] = useState("cloud_origem");
   const [tab, setTab] = useState(0);
   const [heatMode, setHeatMode] = useState<"cost" | "percent">("cost");

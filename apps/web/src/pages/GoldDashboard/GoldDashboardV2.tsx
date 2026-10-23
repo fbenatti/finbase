@@ -6,20 +6,22 @@ import ExpectedViewV2 from "../Dashboards/ExpectedViewV2";
 import ExecutiveWidgetsV2 from "./ExecutiveWidgetsV2";
 import { Department, ForecastAck, GoldInfo, GoldQueryFilter, formatApiError, getDepartments, getDimonInfo, getExecutiveManualAcks, getGoldFilterOptions } from "../../services/api";
 import { DepartmentTreeMultiPicker, flattenDepartments } from "../../components/DepartmentTreePicker";
+import { hierarchyLabel, useHierarchyLabels } from "../../utils/hierarchyLabels";
 
 const TABLE = "dest_dm_cost_visao_completa";
 const EXECUTIVE_DEPARTMENT_STORAGE_KEY = "openfinops.executiveDepartmentId";
 const EXECUTIVE_DIRECTOR_VIEW_STORAGE_KEY = "openfinops.executiveDirectorView";
 type DimFilter = { column: string; values: string[] };
-const FRIENDLY: Record<string, string> = { cloud_origem: "Cloud", hierarquia_1: "Segmento", hierarquia_2: "Modelo", hierarquia_3: "VP", hierarquia_4: "Diretoria", hierarquia_5: "Projeto", hierarquia_6: "SubProjeto", servicename: "Serviço", servicecategory: "Família de serviço", regionname: "Região", subaccountname: "Subconta" };
+const FRIENDLY: Record<string, string> = { cloud_origem: "Cloud", servicename: "Serviço", servicecategory: "Família de serviço", regionname: "Região", subaccountname: "Subconta" };
 const MONTHS_PT = ["janeiro", "fevereiro", "março", "abril", "maio", "junho", "julho", "agosto", "setembro", "outubro", "novembro", "dezembro"];
 const toMonthValue = (date: Date) => `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}`;
 const shiftMonth = (value: string, delta: number) => { const [y, m] = value.split("-").map(Number); return toMonthValue(new Date(y, m - 1 + delta, 1)); };
 const labelMonth = (value: string) => { const [y, m] = value.split("-").map(Number); return `${MONTHS_PT[m - 1] || ""} ${y}`; };
-const labelColumn = (column: string) => FRIENDLY[column] || column.replace(/([a-z])([A-Z])/g, "$1 $2").replace(/_/g, " ").replace(/^./, (letter) => letter.toUpperCase());
+const labelColumn = (column: string) => hierarchyLabel(column) ?? FRIENDLY[column] ?? column.replace(/([a-z])([A-Z])/g, "$1 $2").replace(/_/g, " ").replace(/^./, (letter) => letter.toUpperCase());
 
 export default function GoldDashboardV2() {
   const year = new Date().getFullYear();
+  useHierarchyLabels();
   const [info, setInfo] = useState<GoldInfo | null>(null);
   const [org, setOrg] = useState<Department[]>([]);
   const flat = useMemo(() => flattenDepartments(org), [org]);

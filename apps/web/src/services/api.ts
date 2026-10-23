@@ -1580,6 +1580,67 @@ export async function deleteDepartment(id: number): Promise<void> {
   await api.delete(`/governanca/hierarquia/${id}`);
 }
 
+// Aliases de nível da hierarquia (papéis por escopo)
+export interface HierarchyRole {
+  id: number;
+  slug: string;
+  label: string;
+  label_plural: string | null;
+  description: string | null;
+}
+export interface HierarchyLevelAlias {
+  id: number;
+  scope_department_id: number | null;
+  scope_path: string[];
+  depth: number;
+  role_id: number;
+}
+export interface HierarchyLevelLabel {
+  depth: number;
+  column: string;
+  role: Pick<HierarchyRole, "id" | "slug" | "label" | "label_plural"> | null;
+  label: string;
+  label_plural: string;
+  source: "global" | "escopo" | "padrao";
+  scope: string | null;
+  mixed: boolean;
+}
+export async function getHierarchyLevelLabels(path: string[]): Promise<{ path: string[]; matched_depth: number; levels: HierarchyLevelLabel[] }> {
+  const params = new URLSearchParams();
+  path.forEach((name) => params.append("caminho", name));
+  const { data } = await api.get("/custos/hierarquia/rotulos-niveis", { params });
+  return data;
+}
+export async function getHierarchyRoles(): Promise<HierarchyRole[]> {
+  const { data } = await api.get("/governanca/hierarquia/papeis");
+  return data;
+}
+export async function saveHierarchyRole(body: Partial<HierarchyRole>, id?: number): Promise<HierarchyRole> {
+  const { data } = id
+    ? await api.put(`/governanca/hierarquia/papeis/${id}`, body)
+    : await api.post("/governanca/hierarquia/papeis", body);
+  return data;
+}
+export async function deleteHierarchyRole(id: number): Promise<void> {
+  await api.delete(`/governanca/hierarquia/papeis/${id}`);
+}
+export async function getHierarchyLevelAliases(): Promise<HierarchyLevelAlias[]> {
+  const { data } = await api.get("/governanca/hierarquia/aliases-niveis");
+  return data;
+}
+export async function saveHierarchyLevelAlias(
+  body: Pick<HierarchyLevelAlias, "scope_department_id" | "depth" | "role_id">,
+  id?: number,
+): Promise<HierarchyLevelAlias> {
+  const { data } = id
+    ? await api.put(`/governanca/hierarquia/aliases-niveis/${id}`, body)
+    : await api.post("/governanca/hierarquia/aliases-niveis", body);
+  return data;
+}
+export async function deleteHierarchyLevelAlias(id: number): Promise<void> {
+  await api.delete(`/governanca/hierarquia/aliases-niveis/${id}`);
+}
+
 export type SharedCostMode = "consumption" | "equal" | "custom";
 export type AllocationType = "shared_cost" | "rateio";
 export interface SharedCostTarget {
