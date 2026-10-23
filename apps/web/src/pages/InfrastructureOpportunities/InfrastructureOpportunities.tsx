@@ -29,6 +29,8 @@ import {
 } from "./opportunityLabels";
 
 const TABS = ["Visão geral", "Oportunidades", "Todos os recursos", "Execuções do motor"];
+const ENGINE_WINDOW_DAYS = 30;
+const ENGINE_RESOLUTION_SECONDS = 300;
 
 export default function InfrastructureOpportunities() {
   // A aba inicial pode vir do menu (view_params); a troca de aba é local.
@@ -40,8 +42,6 @@ export default function InfrastructureOpportunities() {
 
   const [connections, setConnections] = useState<MetricSource[]>([]);
   const [connectionId, setConnectionId] = useState<number | null>(null);
-  const [days, setDays] = useState(7);
-  const [resolution, setResolution] = useState(300);
   const [summary, setSummary] = useState<OpportunitySummary | null>(null);
   const [items, setItems] = useState<Opportunity[]>([]);
   const [runs, setRuns] = useState<OpportunityRun[]>([]);
@@ -86,7 +86,8 @@ export default function InfrastructureOpportunities() {
     setError(null);
     setMessage(null);
     try {
-      const run = await runOpportunityEngine(connectionId, days, resolution);
+      // The engine reads the metrics Silver: 30 days of 5-minute buckets, what the collection keeps.
+      const run = await runOpportunityEngine(connectionId, ENGINE_WINDOW_DAYS, ENGINE_RESOLUTION_SECONDS);
       if (run.status === "FAILED") setError(`A análise falhou: ${run.error_message ?? "erro desconhecido"}`);
       else setMessage(`Análise #${run.id} concluída: ${run.resources_analyzed} recurso(s), ${run.opportunities_count} oportunidade(s), ${money(run.total_monthly_saving, run.currency ?? "BRL")}/mês.`);
       await load();
@@ -140,25 +141,13 @@ export default function InfrastructureOpportunities() {
           {(busy || running) && <CircularProgress size={18} />}
         </Stack>
         <Stack direction="row" spacing={1} alignItems="center" flexWrap="wrap" useFlexGap>
-          <FormControl size="small" sx={{ minWidth: 200 }}>
-            <InputLabel>Fonte de métricas</InputLabel>
-            <Select label="Fonte de métricas" value={connectionId ?? ""} onChange={(event) => setConnectionId(Number(event.target.value))}>
+          {/* One metrics source per cloud: the choice only appears when there is more than one. */}
+          {connections.length > 1 && <FormControl size="small" sx={{ minWidth: 200 }}>
+            <InputLabel>Nuvem</InputLabel>
+            <Select label="Nuvem" value={connectionId ?? ""} onChange={(event) => setConnectionId(Number(event.target.value))}>
               {connections.map((item) => <MenuItem key={item.id} value={item.id}>{item.name}</MenuItem>)}
             </Select>
-          </FormControl>
-          <FormControl size="small" sx={{ minWidth: 120 }}>
-            <InputLabel>Janela</InputLabel>
-            <Select label="Janela" value={days} onChange={(event) => setDays(Number(event.target.value))}>
-              {[7, 14, 30, 60].map((value) => <MenuItem key={value} value={value}>{value} dias</MenuItem>)}
-            </Select>
-          </FormControl>
-          <FormControl size="small" sx={{ minWidth: 150 }}>
-            <InputLabel>Base do motor</InputLabel>
-            <Select label="Base do motor" value={resolution} onChange={(event) => setResolution(Number(event.target.value))}>
-              <MenuItem value={300}>Buckets de 5 min</MenuItem>
-              <MenuItem value={60}>Buckets de 1 min</MenuItem>
-            </Select>
-          </FormControl>
+          </FormControl>}
           <Button size="small" startIcon={<RefreshIcon />} onClick={() => void load()}>Atualizar</Button>
           <Button size="small" variant="contained" startIcon={<PlayArrowIcon />} disabled={connectionId == null || running} onClick={() => void runNow()}>
             {running ? "Analisando…" : "Executar análise"}
