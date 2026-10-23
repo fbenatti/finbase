@@ -711,7 +711,7 @@ export default function GoldDashboard() {
             <Button size="small" variant="outlined" startIcon={<AddOutlined />} onClick={(event) => setFilterMenuAnchor(event.currentTarget)} sx={{ height: 34, borderRadius: "10px", textTransform: "none" }}>Filtro</Button>
           </Tooltip>
           <Box sx={{ flexGrow: 1 }} />
-          <Button size="small" startIcon={<FilterAltOffOutlined />} onClick={() => { setHighlightsDepartment(""); setIncludeSharedCost(false); clearFilters(); }} sx={{ textTransform: "none" }}>Limpar</Button>
+          <Button size="small" startIcon={<FilterAltOffOutlined />} onClick={() => { setHighlightsDepartment(""); clearFilters(); }} sx={{ textTransform: "none" }}>Limpar</Button>
         <Box>
           <Popover
             anchorEl={filterMenuAnchor}
