@@ -447,3 +447,9 @@ async def read_metric_coverage(
         raise HTTPException(503, f"Silver indisponível para consulta ({type(exc).__name__})") from exc
     return {"connection_id": connection_id, "start_utc": start.isoformat(),
             "end_utc": end.isoformat(), "limit": limit, "rows": rows}
+
+
+# Rightsizing opportunities share this prefix and the same RBAC module.
+from app.routers.infrastructure_opportunities import router as _opportunities_router  # noqa: E402
+
+router.include_router(_opportunities_router)
