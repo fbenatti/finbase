@@ -31,6 +31,10 @@ export type OpportunityRun = {
   status: "RUNNING" | "COMPLETED" | "FAILED";
   engine_version: string;
   policy_version: string;
+  /** Revisão da política gravada usada na execução (null = padrão do motor). */
+  policy_revision: number | null;
+  policy_aggressiveness: RightsizingAggressiveness | null;
+  policy_params: RightsizingPolicyParams | null;
   window_start_utc: string;
   window_end_utc: string;
   resolution_seconds: number;
@@ -63,11 +67,14 @@ export type Opportunity = {
   monthly_saving: number | null;
   annual_saving: number | null;
   currency: string | null;
+  cpu_p50: number | null;
   cpu_p95: number | null;
   cpu_p99: number | null;
   cpu_max: number | null;
+  memory_p50: number | null;
   memory_p95: number | null;
   memory_p99: number | null;
+  memory_max: number | null;
   coverage: number | null;
   risks: string[];
   state_note: string | null;
@@ -75,6 +82,61 @@ export type Opportunity = {
   created_at: string | null;
   inputs_hash: string;
   engine_version: string;
+  /** Picos recorrentes: saving extra condicionado a limitar/reagendar o job. */
+  conditional_action_type: "SCHEDULE_OR_CAP_JOB" | null;
+  conditional_monthly_saving: number | null;
+  conditional_state: Opportunity["state"] | null;
+  conditional_state_note: string | null;
+  conditional_to_config: FlexConfig | null;
+  conditional_confidence: Opportunity["confidence"] | null;
+  recurring_peaks_label: string | null;
+};
+
+export type RecurringPeakWindow = {
+  hours: number[];
+  /** 0 = segunda … 6 = domingo; null = todos os dias. */
+  weekdays: number[] | null;
+  start: string;
+  end: string;
+  days_with_peak: number;
+  days_observed: number;
+  day_ratio: number;
+  typical_duration_minutes: number;
+  typical_peak: number;
+  cpu_time_share: number;
+};
+
+export type RecurringPeaks = {
+  detection: {
+    detected: boolean;
+    timezone: string;
+    windows: RecurringPeakWindow[];
+    threshold?: number;
+    peak_time_share?: number;
+    episode_time_share?: number;
+    cpu_time_share?: number;
+    label?: string;
+    reason?: string;
+    note?: string;
+  };
+  conditional: {
+    action_type: "SCHEDULE_OR_CAP_JOB";
+    readiness_status: string;
+    confidence: Opportunity["confidence"];
+    to_config: FlexConfig;
+    sizing_basis: { cpu: string; memory: string; required_vcpus: number; required_memory_gb: number };
+    cpu_without_recurring_peaks: { p95?: number; p99?: number; max?: number; max_p99?: number; max_p995?: number };
+    projected_cpu_peak_p995: number;
+    target_monthly_cost: number | null;
+    monthly_saving: number | null;
+    incremental_monthly_saving: number | null;
+    baseline_vcpus_p95: number;
+    suggested_cap_vcpus: number;
+    suggested_cpu_quota_percent: number;
+    estimated_job_minutes_capped: number;
+    suggested_actions: string[];
+    rationale: string[];
+  } | null;
 };
 
 export type OpportunityDetail = Opportunity & {
@@ -94,6 +156,7 @@ export type OpportunityDetail = Opportunity & {
     } | null;
     policy: Record<string, number | string>;
     projected_utilization?: Record<string, number>;
+    recurring_peaks?: RecurringPeaks;
   };
   history: {
     run_id: number;
@@ -119,6 +182,10 @@ export type OpportunitySummary = {
   implemented_saving_monthly?: number;
   accepted_saving_monthly?: number;
   dismissed_saving_monthly?: number;
+  conditional_opportunities?: number;
+  conditional_saving_monthly?: number;
+  conditional_pending_saving_monthly?: number;
+  conditional_accepted_saving_monthly?: number;
   avg_saving_per_opportunity?: number | null;
   analyzed_monthly_cost?: number;
   saving_ratio?: number | null;
@@ -137,7 +204,34 @@ export type OpportunitySeries = {
   points: { t: string; cpu_avg?: number | null; cpu_max?: number | null; memory_avg?: number | null; memory_max?: number | null }[];
 };
 
+/** Perfil horário (UTC) de cada recurso da execução: P95 das médias e pico de cada hora. */
+export type HourlyProfile = {
+  opportunity_id: number;
+  resource_id: string;
+  cpu_p95: (number | null)[];
+  cpu_peak: (number | null)[];
+  cpu_hours: number;
+  memory_p95: (number | null)[];
+  memory_peak: (number | null)[];
+  memory_hours: number;
+};
+
+export type HourlyProfiles = {
+  run_id: number | null;
+  window_start_utc?: string;
+  window_end_utc?: string;
+  resolution_seconds?: number;
+  /** Horas da janela em UTC, "YYYY-MM-DDTHH", alinhadas com as listas de cada recurso. */
+  hours: string[];
+  items: HourlyProfile[];
+};
+
 const BASE = "/custos/metricas-infra/oportunidades";
+
+export async function getHourlyProfiles(connectionId: number, runId?: number): Promise<HourlyProfiles> {
+  const { data } = await api.get(`${BASE}/perfis-horarios`, { params: { connection_id: connectionId, run_id: runId }, timeout: 200_000 });
+  return data;
+}
 
 export async function getOpportunitySeries(id: number, resolutionSeconds: number): Promise<OpportunitySeries> {
   const { data } = await api.get(`${BASE}/${id}/serie`, { params: { resolution_seconds: resolutionSeconds } });
@@ -171,5 +265,53 @@ export async function runOpportunityEngine(connectionId: number, days: number, r
 
 export async function setOpportunityState(id: number, state: Opportunity["state"], note?: string): Promise<OpportunityDetail> {
   const { data } = await api.post(`${BASE}/${id}/estado`, { state, note: note || null });
+  return data;
+}
+
+export type RightsizingAggressiveness = "CONSERVATIVE" | "BALANCED" | "AGGRESSIVE" | "CUSTOM";
+
+export type RightsizingPolicyParams = {
+  cpu_target_p95: number;
+  cpu_target_p99: number;
+  memory_target_p95: number;
+  memory_target_p99: number;
+  cpu_peak_quantile: number;
+  cpu_peak_limit: number;
+  memory_peak_limit: number;
+  min_change_ratio: number;
+  min_days: number;
+  min_coverage: number;
+  high_confidence_coverage: number;
+};
+
+export type RightsizingPolicy = {
+  policy_version: string;
+  revision: number | null;
+  aggressiveness: RightsizingAggressiveness;
+  params: RightsizingPolicyParams;
+  note: string | null;
+  updated_by: string | null;
+  updated_at: string | null;
+  is_default: boolean;
+  presets: Record<Exclude<RightsizingAggressiveness, "CUSTOM">, RightsizingPolicyParams>;
+  peak_quantiles: number[];
+};
+
+const POLICY = "/custos/metricas-infra/politica-rightsizing";
+
+export async function getRightsizingPolicy(): Promise<RightsizingPolicy> {
+  const { data } = await api.get(POLICY);
+  return data;
+}
+
+export async function updateRightsizingPolicy(
+  aggressiveness: RightsizingAggressiveness, params: RightsizingPolicyParams, note?: string,
+): Promise<RightsizingPolicy> {
+  const { data } = await api.put(POLICY, { aggressiveness, params, note: note || null });
+  return data;
+}
+
+export async function setConditionalState(id: number, state: Opportunity["state"], note?: string): Promise<OpportunityDetail> {
+  const { data } = await api.post(`${BASE}/${id}/estado-condicional`, { state, note: note || null });
   return data;
 }

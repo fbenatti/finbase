@@ -854,6 +854,20 @@ async def lifespan(app: FastAPI):
             # forecast_run.cutoff_date is now NULL until the engine computes the
             # data-driven cutoff (MAX collected − cutoff_days); never "today".
             "ALTER TABLE forecast_run ALTER COLUMN cutoff_date DROP NOT NULL",
+            "ALTER TABLE infra_opportunity_run ADD COLUMN IF NOT EXISTS policy_revision INTEGER",
+            "ALTER TABLE infra_opportunity_run ADD COLUMN IF NOT EXISTS policy_aggressiveness VARCHAR(20)",
+            "ALTER TABLE infra_opportunity_run ADD COLUMN IF NOT EXISTS policy_params JSON",
+        ):
+            await _execute_migration(conn, statement)
+
+        # Recurring-peak insight of a rightsizing opportunity: its saving is
+        # conditional on changing the job and has its own decision state.
+        for statement in (
+            "ALTER TABLE infra_opportunity ADD COLUMN IF NOT EXISTS conditional_action_type VARCHAR(30)",
+            "ALTER TABLE infra_opportunity ADD COLUMN IF NOT EXISTS conditional_monthly_saving DOUBLE PRECISION",
+            "ALTER TABLE infra_opportunity ADD COLUMN IF NOT EXISTS conditional_state VARCHAR(30)",
+            "ALTER TABLE infra_opportunity ADD COLUMN IF NOT EXISTS conditional_state_note VARCHAR(2000)",
+            "ALTER TABLE infra_opportunity ADD COLUMN IF NOT EXISTS conditional_state_changed_at TIMESTAMPTZ",
         ):
             await _execute_migration(conn, statement)
 

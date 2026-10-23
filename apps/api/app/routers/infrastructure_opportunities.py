@@ -48,6 +48,8 @@ def _run_dict(run: InfraOpportunityRun) -> dict:
     return {
         "id": run.id, "connection_id": run.connection_id, "status": run.status,
         "engine_version": run.engine_version, "policy_version": run.policy_version,
+        "policy_revision": run.policy_revision, "policy_aggressiveness": run.policy_aggressiveness,
+        "policy_params": run.policy_params,
         "window_start_utc": _iso(run.window_start_utc), "window_end_utc": _iso(run.window_end_utc),
         "resolution_seconds": run.resolution_seconds,
         "resources_analyzed": run.resources_analyzed, "opportunities_count": run.opportunities_count,
@@ -60,6 +62,8 @@ def _run_dict(run: InfraOpportunityRun) -> dict:
 def _opportunity_dict(item: InfraOpportunity, *, full: bool = False) -> dict:
     evidence = item.evidence or {}
     cpu, memory = evidence.get("cpu") or {}, evidence.get("memory") or {}
+    recurring = evidence.get("recurring_peaks") or {}
+    detection, conditional = recurring.get("detection") or {}, recurring.get("conditional") or {}
     data = {
         "id": item.id, "run_id": item.run_id, "connection_id": item.connection_id, "provider": item.provider,
         "resource_id": item.resource_id, "resource_name": item.resource_name,
@@ -70,12 +74,20 @@ def _opportunity_dict(item: InfraOpportunity, *, full: bool = False) -> dict:
         "monthly_saving": item.monthly_saving,
         "annual_saving": round(item.monthly_saving * 12, 2) if item.monthly_saving is not None else None,
         "currency": item.currency,
-        "cpu_p95": cpu.get("p95"), "cpu_p99": cpu.get("p99"), "cpu_max": cpu.get("max"),
-        "memory_p95": memory.get("p95"), "memory_p99": memory.get("p99"),
+        "cpu_p50": cpu.get("p50"), "cpu_p95": cpu.get("p95"), "cpu_p99": cpu.get("p99"), "cpu_max": cpu.get("max"),
+        "memory_p50": memory.get("p50"), "memory_p95": memory.get("p95"), "memory_p99": memory.get("p99"),
+        "memory_max": memory.get("max"),
         "coverage": min([s["coverage"] for s in (cpu, memory) if s.get("coverage") is not None], default=None),
         "risks": item.risks or [], "state_note": item.state_note,
         "state_changed_at": _iso(item.state_changed_at), "created_at": _iso(item.created_at),
         "inputs_hash": item.inputs_hash, "engine_version": item.engine_version,
+        # Recurring-peak insight: saving conditional on capping/rescheduling the job.
+        "conditional_action_type": item.conditional_action_type,
+        "conditional_monthly_saving": item.conditional_monthly_saving,
+        "conditional_state": item.conditional_state, "conditional_state_note": item.conditional_state_note,
+        "conditional_to_config": conditional.get("to_config"),
+        "conditional_confidence": conditional.get("confidence"),
+        "recurring_peaks_label": detection.get("label") if detection.get("detected") else None,
     }
     if full:
         data.update({"rationale": item.rationale or [], "evidence": evidence})
@@ -172,7 +184,13 @@ async def summary(connection_id: int = Query(..., gt=0), user=Depends(get_curren
     actionable = [item for item in items if item.action_type == "RIGHTSIZE_DOWN"
                   and item.readiness_status == "READY_FOR_CAPACITY_ANALYSIS" and (item.monthly_saving or 0) > 0]
     pick = lambda states: round(sum(i.monthly_saving for i in actionable if i.state in states), 2)
-    projected = pick(("NEW", "ACCEPTED", "IMPLEMENTED"))
+    # Conditional savings (recurring peaks) are on top of the main
+    # recommendation and only count in the projection once accepted.
+    conditionals = [item for item in items if item.conditional_action_type
+                    and item.readiness_status == "READY_FOR_CAPACITY_ANALYSIS" and (item.conditional_monthly_saving or 0) > 0]
+    pick_conditional = lambda states: round(
+        sum(i.conditional_monthly_saving for i in conditionals if i.conditional_state in states), 2)
+    projected = round(pick(("NEW", "ACCEPTED", "IMPLEMENTED")) + pick_conditional(("ACCEPTED", "IMPLEMENTED")), 2)
     current_cost = sum(item.current_monthly_cost or 0 for item in items)
     return {
         "run": _run_dict(run),
@@ -186,6 +204,10 @@ async def summary(connection_id: int = Query(..., gt=0), user=Depends(get_curren
         "implemented_saving_monthly": pick(("IMPLEMENTED",)),
         "accepted_saving_monthly": pick(("ACCEPTED",)),
         "dismissed_saving_monthly": pick(("DISMISSED",)),
+        "conditional_opportunities": sum(1 for item in conditionals if item.conditional_state != "DISMISSED"),
+        "conditional_saving_monthly": pick_conditional(("NEW", "ACCEPTED", "IMPLEMENTED")),
+        "conditional_pending_saving_monthly": pick_conditional(("NEW",)),
+        "conditional_accepted_saving_monthly": pick_conditional(("ACCEPTED", "IMPLEMENTED")),
         "avg_saving_per_opportunity": round(projected / len(actionable), 2) if actionable else None,
         "analyzed_monthly_cost": round(current_cost, 2),
         "saving_ratio": round(projected / current_cost, 4) if current_cost else None,
@@ -210,6 +232,70 @@ async def list_opportunities(connection_id: int = Query(..., gt=0), run_id: int 
         .order_by(InfraOpportunity.monthly_saving.desc().nulls_last())
     )).scalars().all()
     return {"run_id": run_id, "items": [_opportunity_dict(item) for item in items]}
+
+
+# Runs freeze their window, so the hourly profiles of a run can be reused.
+_PROFILE_CACHE: dict[int, dict] = {}
+_PROFILE_CACHE_SIZE = 8
+
+
+def _hourly_profiles(run: InfraOpportunityRun, items: list[InfraOpportunity]) -> dict:
+    from datetime import timedelta
+
+    from app.services.infrastructure_metrics.opportunities import CPU_METRIC, MEMORY_METRIC
+    from app.services.infrastructure_metrics.opportunity_runner import read_hourly_profiles
+
+    profiles = read_hourly_profiles(
+        run.connection_id, sorted({item.resource_id for item in items}),
+        run.window_start_utc, run.window_end_utc, run.resolution_seconds,
+    )
+    hours, cursor = [], run.window_start_utc.replace(minute=0, second=0, microsecond=0)
+    while cursor < run.window_end_utc:
+        hours.append(cursor.strftime("%Y-%m-%dT%H"))
+        cursor += timedelta(hours=1)
+    rounded = lambda value: round(float(value), 2) if value is not None else None
+    result = []
+    for item in items:
+        by_metric = profiles.get(item.resource_id, {})
+        entry = {"opportunity_id": item.id, "resource_id": item.resource_id}
+        for metric, key in ((CPU_METRIC, "cpu"), (MEMORY_METRIC, "memory")):
+            series = by_metric.get(metric, {})
+            entry[f"{key}_p95"] = [rounded((series.get(hour) or {}).get("p95")) for hour in hours]
+            entry[f"{key}_peak"] = [rounded((series.get(hour) or {}).get("peak")) for hour in hours]
+            entry[f"{key}_hours"] = len(series)
+        result.append(entry)
+    return {
+        "run_id": run.id, "window_start_utc": _iso(run.window_start_utc), "window_end_utc": _iso(run.window_end_utc),
+        "resolution_seconds": run.resolution_seconds, "hours": hours, "items": result,
+    }
+
+
+@router.get("/perfis-horarios")
+async def hourly_profiles(connection_id: int = Query(..., gt=0), run_id: int | None = None,
+                          user=Depends(get_current_user), db: AsyncSession = Depends(get_db)):
+    """Hourly CPU/memory profile (P95 and peak per hour, UTC) of every resource of a run.
+
+    Feeds the mini charts of the "all resources" view with one aggregated
+    Trino query instead of each host's 5-minute buckets.
+    """
+    await _authorize(user, db, connection_id, "read")
+    run = (await db.get(InfraOpportunityRun, run_id)) if run_id is not None else await _latest_run(db, connection_id)
+    if run is None or run.connection_id != connection_id:
+        return {"run_id": None, "hours": [], "items": []}
+    if run.id in _PROFILE_CACHE:
+        return _PROFILE_CACHE[run.id]
+    items = (await db.execute(
+        select(InfraOpportunity).where(InfraOpportunity.run_id == run.id).order_by(InfraOpportunity.id)
+    )).scalars().all()
+    try:
+        data = await asyncio.to_thread(_hourly_profiles, run, list(items))
+    except Exception as exc:
+        raise HTTPException(503, f"Silver indisponível para consulta ({type(exc).__name__})") from exc
+    if run.status == "COMPLETED":
+        while len(_PROFILE_CACHE) >= _PROFILE_CACHE_SIZE:
+            _PROFILE_CACHE.pop(next(iter(_PROFILE_CACHE)))
+        _PROFILE_CACHE[run.id] = data
+    return data
 
 
 @router.get("/{opportunity_id}")
@@ -279,6 +365,24 @@ async def opportunity_series(
         return await asyncio.to_thread(_read_chart_series, item, run, resolution_seconds)
     except Exception as exc:
         raise HTTPException(503, f"Silver indisponível para consulta ({type(exc).__name__})") from exc
+
+
+@router.post("/{opportunity_id}/estado-condicional")
+async def set_conditional_state(opportunity_id: int, body: StateRequest, user=Depends(get_current_user),
+                                db: AsyncSession = Depends(get_db)):
+    """Decision on the recurring-peak conditional (cap or reschedule the job)."""
+    item = await db.get(InfraOpportunity, opportunity_id)
+    if not item:
+        raise HTTPException(404, "Oportunidade não encontrada")
+    if not item.conditional_action_type:
+        raise HTTPException(409, "Esta oportunidade não tem ajuste de job condicionado")
+    await _authorize(user, db, item.connection_id, "update")
+    item.conditional_state = body.state
+    item.conditional_state_note = body.note
+    item.conditional_state_changed_at = datetime.now(timezone.utc)
+    await db.commit()
+    await db.refresh(item)
+    return _opportunity_dict(item, full=True)
 
 
 @router.post("/{opportunity_id}/estado")

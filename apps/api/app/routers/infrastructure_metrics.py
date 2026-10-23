@@ -122,4 +122,7 @@ async def read_series(
 # Rightsizing opportunities share this prefix and the same RBAC module.
 from app.routers.infrastructure_opportunities import router as _opportunities_router  # noqa: E402
 
+from app.routers.infrastructure_rightsizing_policy import router as _policy_router  # noqa: E402
+
 router.include_router(_opportunities_router)
+router.include_router(_policy_router)

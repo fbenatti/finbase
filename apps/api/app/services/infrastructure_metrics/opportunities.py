@@ -50,7 +50,34 @@ DEFAULT_POLICY = {
     "high_confidence_coverage": 0.98,
     # Reductions smaller than this keep the current size (avoid churn by noise).
     "min_change_ratio": 0.15,
+    # Recurring peaks (see peak_patterns): a bucket peaks when its max reaches
+    # the threshold (lowered to multiplier × P90 of the maxima, never below the
+    # floor); an hour recurs when it peaks on min_day_ratio of the days (or of
+    # the same weekdays, min_weeks times at least) starting within jitter_minutes of the
+    # usual time; peaks above max_time_share of the time are continuous load.
+    "peak_pattern_threshold": 80.0,
+    "peak_pattern_floor": 40.0,
+    "peak_pattern_baseline_multiplier": 2.0,
+    "peak_pattern_min_day_ratio": 0.70,
+    "peak_pattern_min_weeks": 4,
+    "peak_pattern_jitter_minutes": 15,
+    # Chance, over all slots tested, of flagging peaks that have no schedule.
+    "peak_pattern_max_false_alarm": 0.001,
+    "peak_pattern_max_time_share": 0.10,
+    "peak_pattern_timezone": "America/Sao_Paulo",
 }
+
+
+PEAK_STAT = {99.0: "max_p99", 99.5: "max_p995", 99.9: "max_p999", 100.0: "max"}
+
+
+def cpu_peak(cpu: Mapping, policy: Mapping = DEFAULT_POLICY) -> float | None:
+    """Quantile of the per-bucket CPU peaks the policy sizes for (``cpu_peak_quantile``)."""
+    return cpu.get(PEAK_STAT.get(float(policy.get("cpu_peak_quantile", 99.5)), "max_p995"))
+
+
+def _pt(value: float) -> str:
+    return f"{value:g}".replace(".", ",")
 
 
 def canonical_json(value: Any) -> str:
@@ -101,6 +128,7 @@ def summarize_series(
         # Distribution of the per-bucket native maxima (provider ``max``).
         "max_p99": _linear_quantile(maxima, 99),
         "max_p995": _linear_quantile(maxima, 99.5),
+        "max_p999": _linear_quantile(maxima, 99.9),
         "daily": [
             {"day": day, "p95": _linear_quantile(day_values, 95), "max": max(day_values),
              "average": sum(day_values) / len(day_values)}
@@ -125,7 +153,7 @@ def required_capacity(current: CapacitySnapshot, cpu: Mapping, memory: Mapping |
         "p95": current.vcpus * cpu["p95"] / 100 / policy["cpu_target_p95"],
         "p99": current.vcpus * cpu["p99"] / 100 / policy["cpu_target_p99"],
     }
-    peak_cpu = cpu.get("max_p995")
+    peak_cpu = cpu_peak(cpu, policy)
     if peak_cpu is not None:
         candidates_cpu["peak"] = current.vcpus * peak_cpu / 100 / policy["cpu_peak_limit"]
     cpu_basis = max(candidates_cpu, key=candidates_cpu.get)
@@ -236,11 +264,13 @@ def analyze_resource(
         f"CPU P95 {cpu['p95']:.1f}% / P99 {cpu['p99']:.1f}% de {current.vcpus:g} vCPU; "
         f"alvo mantém P95 ≤ {policy['cpu_target_p95']:.0%} e P99 ≤ {policy['cpu_target_p99']:.0%}."
     )
-    if cpu.get("max_p995") is not None:
+    peak, quantile = cpu_peak(cpu, policy), float(policy.get("cpu_peak_quantile", 99.5))
+    tail = _pt(round(100 - quantile, 1))
+    if peak is not None:
         result["rationale"].append(
-            f"Picos de CPU: em 99,5% dos intervalos o pico ficou até {cpu['max_p995']:.1f}% "
-            f"({current.vcpus * cpu['max_p995'] / 100:.1f} vCPU); o novo tamanho precisa comportá-los "
-            f"(no máximo 0,5% do tempo com pico acima da capacidade)."
+            f"Picos de CPU: em {_pt(quantile)}% dos intervalos o pico ficou até {peak:.1f}% "
+            f"({current.vcpus * peak / 100:.1f} vCPU); o novo tamanho precisa comportá-los "
+            f"(no máximo {tail}% do tempo com pico acima de {policy['cpu_peak_limit']:.0%} da capacidade)."
         )
     result["rationale"].append(
         f"O tamanho de CPU foi definido {BASIS_LABEL.get(need['cpu_basis'], need['cpu_basis'])}"
@@ -263,7 +293,7 @@ def analyze_resource(
         "cpu_p95": cpu["p95"] * current.vcpus / target.vcpus,
         "cpu_p99": cpu["p99"] * current.vcpus / target.vcpus,
         "cpu_peak": (cpu["max"] or 0) * current.vcpus / target.vcpus,
-        "cpu_peak_p995": (cpu.get("max_p995") or 0) * current.vcpus / target.vcpus,
+        "cpu_peak_p995": (peak or 0) * current.vcpus / target.vcpus,
     }
     if memory_from_telemetry:
         projected["memory_p95"] = memory["p95"] * current.memory_gb / target.memory_gb
@@ -271,13 +301,13 @@ def analyze_resource(
     result["evidence"]["projected_utilization"] = projected
     if projected["cpu_peak_p995"] > 100 * policy["cpu_peak_limit"]:
         result["risks"].append(
-            f"Picos frequentes: o P99,5 dos picos ({cpu['max_p995']:.1f}%) equivaleria a {projected['cpu_peak_p995']:.0f}% "
-            "no novo tamanho; mais de 0,5% do tempo com fila de CPU."
+            f"Picos frequentes: o P{_pt(quantile)} dos picos ({peak:.1f}%) equivaleria a {projected['cpu_peak_p995']:.0f}% "
+            f"no novo tamanho; mais de {tail}% do tempo com fila de CPU."
         )
     elif projected["cpu_peak"] > 100:
         result["risks"].append(
             f"Pico isolado: o maior pico ({cpu['max']:.1f}%) equivaleria a {projected['cpu_peak']:.0f}% no novo tamanho, "
-            "dentro da tolerância de 0,5% do tempo."
+            f"dentro da tolerância de {tail}% do tempo."
         )
     current_hourly = price_book.hourly(current) if price_book else None
     target_hourly = price_book.hourly(target) if price_book else None
