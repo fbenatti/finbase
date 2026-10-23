@@ -1,4 +1,4 @@
-import { AddOutlined, ArrowBackOutlined, AutorenewOutlined, CableOutlined, CancelOutlined, CheckCircleOutlineOutlined, CheckOutlined, ChevronRightOutlined, CloseOutlined, ContentCopyOutlined, DeleteOutlineOutlined, EditOutlined, ExpandMoreOutlined, FileDownloadOutlined, FileUploadOutlined, FilterListOutlined, HistoryOutlined, MenuBookOutlined, MoreVertOutlined, OpenInFullOutlined, PlayArrowOutlined, RemoveOutlined, RestartAltOutlined, SaveOutlined, SearchOutlined, StopCircleOutlined, StorageOutlined, StorefrontOutlined, SwapHorizOutlined, TableChartOutlined, ThumbUpOutlined, UndoOutlined, VisibilityOutlined, AppsOutlined, CloudOutlined, BarChartOutlined, ShowChartOutlined, PieChartOutlineOutlined, NumbersOutlined, TuneOutlined } from "@mui/icons-material";
+import { AddOutlined, ArrowBackOutlined, AutorenewOutlined, CableOutlined, CancelOutlined, CheckCircleOutlineOutlined, CheckOutlined, ChevronRightOutlined, CloseOutlined, ContentCopyOutlined, DeleteOutlineOutlined, EditOutlined, ExpandMoreOutlined, FileDownloadOutlined, FileUploadOutlined, FilterListOutlined, HistoryOutlined, MenuBookOutlined, MoreVertOutlined, OpenInFullOutlined, PlayArrowOutlined, RemoveOutlined, RestartAltOutlined, SaveOutlined, SearchOutlined, StopCircleOutlined, StorageOutlined, StorefrontOutlined, SwapHorizOutlined, TableChartOutlined, ThumbUpOutlined, UndoOutlined, VisibilityOutlined, AppsOutlined, CloudOutlined, BarChartOutlined, ShowChartOutlined, PieChartOutlineOutlined, NumbersOutlined, TuneOutlined, DragIndicatorOutlined, DashboardOutlined } from "@mui/icons-material";
 
 export const Add = AddOutlined;
 export const Cloud = CloudOutlined;
@@ -47,3 +47,5 @@ export const ShowChart = ShowChartOutlined;
 export const PieChart = PieChartOutlineOutlined;
 export const Numbers = NumbersOutlined;
 export const Tune = TuneOutlined;
+export const DragHandle = DragIndicatorOutlined;
+export const DashboardIcon = DashboardOutlined;

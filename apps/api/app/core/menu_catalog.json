@@ -748,7 +748,7 @@
       "tab": "destino"
     },
     "permission_module": "analysis",
-    "position": 2,
+    "position": 4,
     "icon": "TableChartOutlined",
     "required": false,
     "development_only": false,
@@ -765,7 +765,7 @@
       "tab": "fontes"
     },
     "permission_module": "analysis",
-    "position": 3,
+    "position": 5,
     "icon": "CloudOutlined",
     "required": false,
     "development_only": false,
@@ -783,7 +783,7 @@
       "etapa": "origem"
     },
     "permission_module": "analysis",
-    "position": 4,
+    "position": 6,
     "icon": "StorageOutlined",
     "required": false,
     "development_only": false,
@@ -801,7 +801,7 @@
       "etapa": "preparacao"
     },
     "permission_module": "analysis",
-    "position": 5,
+    "position": 7,
     "icon": "DataObjectOutlined",
     "required": false,
     "development_only": false,
@@ -819,7 +819,7 @@
       "etapa": "consolidacao"
     },
     "permission_module": "analysis",
-    "position": 6,
+    "position": 8,
     "icon": "PaidOutlined",
     "required": false,
     "development_only": false,
@@ -836,7 +836,7 @@
       "tab": "temporarios"
     },
     "permission_module": "analysis",
-    "position": 7,
+    "position": 9,
     "icon": "DeleteSweepOutlined",
     "required": false,
     "development_only": false,
@@ -846,7 +846,7 @@
   {
     "code": "dados_explorador_tabelas_dinamicas",
     "parent_code": "section_consultas",
-    "label": "Pivot de custos",
+    "label": "Novo relatório",
     "path": "/dados/explorador/tabelas-dinamicas",
     "renderer": "Analysis",
     "view_params": {
@@ -861,6 +861,36 @@
     "api_prefixes": []
   },
   {
+    "code": "dados_explorador_relatorios",
+    "parent_code": "section_consultas",
+    "label": "Relatórios salvos",
+    "path": "/dados/explorador/relatorios",
+    "renderer": "Reports",
+    "view_params": {},
+    "permission_module": "analysis",
+    "position": 2,
+    "icon": "QueryStatsOutlined",
+    "required": false,
+    "development_only": false,
+    "legacy_path": null,
+    "api_prefixes": []
+  },
+  {
+    "code": "dados_explorador_paineis",
+    "parent_code": "section_consultas",
+    "label": "Painéis",
+    "path": "/dados/explorador/paineis",
+    "renderer": "Dashboards",
+    "view_params": {},
+    "permission_module": "analysis",
+    "position": 3,
+    "icon": "DashboardOutlined",
+    "required": false,
+    "development_only": false,
+    "legacy_path": null,
+    "api_prefixes": []
+  },
+  {
     "code": "dados_explorador_busca",
     "parent_code": "section_consultas",
     "label": "Busca na origem",
@@ -870,7 +900,7 @@
       "tab": "busca"
     },
     "permission_module": "analysis",
-    "position": 8,
+    "position": 10,
     "icon": "ScienceOutlined",
     "required": false,
     "development_only": false,

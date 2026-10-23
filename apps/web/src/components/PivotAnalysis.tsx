@@ -26,6 +26,8 @@ interface Props {
   initialFilters?: PivotFilter[];
   autoRun?: boolean;
   onOpenQuery?: (sql: string) => void;
+  /** Saved report to open on arrival (the Relatórios screen links here with ?relatorio=). */
+  initialViewId?: number;
 }
 
 const money = new Intl.NumberFormat("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
@@ -117,7 +119,7 @@ function downloadExcel(result: PivotResult) {
   XLSX.writeFile(workbook, `pivot_${new Date().toISOString().slice(0, 10)}.xlsx`);
 }
 
-export default function PivotAnalysis({ destinations, initialTableId, showSearch = false, initialMeasure, initialFilters = [], autoRun = false, onOpenQuery }: Props) {
+export default function PivotAnalysis({ destinations, initialTableId, showSearch = false, initialMeasure, initialFilters = [], autoRun = false, onOpenQuery, initialViewId }: Props) {
   const first = initialTableId || destinations.filter(d => d.id > 0)[0]?.id || destinations[0]?.id || 0;
   const [tableId, setTableId] = useState(first);
   const [sourceIds, setSourceIds] = useState<number[]>([first]);
@@ -152,6 +154,7 @@ export default function PivotAnalysis({ destinations, initialTableId, showSearch
   const [searchResult, setSearchResult] = useState<DataSearchResult | null>(null);
   const [searchLoading, setSearchLoading] = useState(false);
   const [mode, setModeState] = useState<PivotMode>(readMode);
+  const [pendingViewId, setPendingViewId] = useState(initialViewId);
   const [visualization, setVisualization] = useState<PivotVisualization>("bar");
   const runSeq = useRef(0);
   const setMode = (next: PivotMode) => {
@@ -301,8 +304,12 @@ export default function PivotAnalysis({ destinations, initialTableId, showSearch
 
   useEffect(() => {
     if (!tableId) return;
+    // A late answer for a previous table (or StrictMode's first run) must not
+    // reapply defaults over a report the user has already opened.
+    let cancelled = false;
     setMeta(null); setResult(null); setError("");
     getPivotMetadata(tableId).then(next => {
+      if (cancelled) return;
       setMeta(next);
       const dimensions = new Set(next.dimensions);
       const isForecastManual = tableId === FORECAST_MANUAL_PIVOT_ID;
@@ -331,10 +338,11 @@ export default function PivotAnalysis({ destinations, initialTableId, showSearch
       setFilters(current => current.filter(item => known.has(item.column)));
       const wanted = [initialMeasure, "realizado", next.default_measure].find(name => name && next.measures.includes(name));
       setMeasures(wanted ? [{ column: wanted, aggregation: "SUM" }] : []);
-    }).catch(e => setError(formatApiError(e, "Não foi possível carregar a estrutura da base consolidada")));
+    }).catch(e => { if (!cancelled) setError(formatApiError(e, "Não foi possível carregar a estrutura da base consolidada")); });
     // Views are global to the workspace. Filtering only by the current table
     // made a saved dashboard disappear when the user opened another table.
     getPivotViews().then(setViews).catch(() => setViews([]));
+    return () => { cancelled = true; };
   }, [tableId]);
 
   const execute = async () => {
@@ -415,6 +423,26 @@ export default function PivotAnalysis({ destinations, initialTableId, showSearch
     catch (e: unknown) { setError(e instanceof Error ? e.message : "Não foi possível gravar a visão"); }
   };
   const loadView = (view: PivotView) => { setTableId(view.destination_table_id); const config = view.config as PivotView["config"] & { source_ids?: number[]; sort_rows?: PivotSort[]; sort_columns?: PivotSort[] }; const sourceIds = config.source_ids?.filter(id => id !== 0) || []; setSourceIds(sourceIds.length ? sourceIds : [view.destination_table_id]); setRows(view.config.rows); setCols(view.config.columns); setMeasures(view.config.measures); setFilters(view.config.filters); setSortRows(config.sort_rows || []); setSortCols(config.sort_columns || []); setVisualization(reportVisualization(view)); };
+  // Opening a report from the URL: switch to its table first, then apply the
+  // config once that table's metadata (and its defaults) has loaded.
+  useEffect(() => {
+    if (!pendingViewId || !meta || !views.length) return;
+    const view = views.find(item => item.id === pendingViewId);
+    if (!view) { setPendingViewId(undefined); setError("O relatório pedido não foi encontrado."); return; }
+    if (meta.destination_table_id !== view.destination_table_id) { setTableId(view.destination_table_id); return; }
+    // Older reports saved FOCUS names in another case ("EffectiveCost"); use the
+    // table's spelling so the field pickers recognise them.
+    const known = new Map(meta.columns.map(column => [column.name.toLowerCase(), column.name]));
+    const name = (column: string) => known.get(column.toLowerCase()) || column;
+    loadView({ ...view, config: {
+      ...view.config,
+      rows: (view.config.rows || []).map(name), columns: (view.config.columns || []).map(name),
+      measures: (view.config.measures || []).map(measure => ({ ...measure, column: name(measure.column) })),
+      filters: (view.config.filters || []).map(filter => ({ ...filter, column: name(filter.column) })),
+    } });
+    setViewName(view.name);
+    setPendingViewId(undefined);
+  }, [pendingViewId, meta, views]);
   const deleteReport = (view: PivotView) => { void deletePivotView(view.id).then(() => getPivotViews().then(setViews)).catch(e => setError(formatApiError(e, "Não foi possível excluir o relatório"))); };
   const applyTemplate = (template: PivotTemplate) => {
     setVisualization(template.visualization);

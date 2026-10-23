@@ -1021,6 +1021,7 @@ export default function Analysis() {
               autoRun={searchParams.get("tab") === "pivot"}
               showSearch
               onOpenQuery={openQuery}
+              initialViewId={Number(searchParams.get("relatorio")) || undefined}
             />
           : <EmptyState message="Nenhuma base consolidada ativa disponível para tabela dinâmica." />
       )}

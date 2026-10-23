@@ -20,10 +20,12 @@ interface Props {
   destinations: DestinationAnalysis[];
   loading?: boolean;
   onOpen: (report: PivotView) => void;
-  onDelete: (report: PivotView) => void;
+  /** Omitted when the grid is only a picker (e.g. adding a dashboard widget). */
+  onDelete?: (report: PivotView) => void;
+  openLabel?: string;
 }
 
-export default function SavedReportsGrid({ reports, destinations, loading, onOpen, onDelete }: Props) {
+export default function SavedReportsGrid({ reports, destinations, loading, onOpen, onDelete, openLabel = "Abrir relatório" }: Props) {
   const columns = useMemo<GridColDef<PivotView>[]>(() => [
     { field: "name", headerName: "Relatório", flex: 1.4, minWidth: 200 },
     { field: "visualization", headerName: "Visualização", width: 130, valueGetter: (_, row) => VISUALIZATION_LABELS[reportVisualization(row)] },
@@ -34,11 +36,11 @@ export default function SavedReportsGrid({ reports, destinations, loading, onOpe
     {
       field: "actions", headerName: "Ações", width: 110, sortable: false, filterable: false, disableExport: true,
       renderCell: params => <Stack direction="row" spacing={0.5} alignItems="center" height="100%">
-        <RowAction kind="run" label={`Abrir relatório ${params.row.name}`} onClick={event => { event.stopPropagation(); onOpen(params.row); }} />
-        <RowAction kind="delete" label={`Excluir relatório ${params.row.name}`} onClick={event => { event.stopPropagation(); onDelete(params.row); }} />
+        <RowAction kind="run" label={`${openLabel} ${params.row.name}`} onClick={event => { event.stopPropagation(); onOpen(params.row); }} />
+        {onDelete && <RowAction kind="delete" label={`Excluir relatório ${params.row.name}`} onClick={event => { event.stopPropagation(); onDelete(params.row); }} />}
       </Stack>,
     },
-  ], [destinations, onOpen, onDelete]);
+  ], [destinations, onOpen, onDelete, openLabel]);
 
   return <DataGrid
     rows={reports}

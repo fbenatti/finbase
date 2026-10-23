@@ -428,7 +428,7 @@ class LakehouseSearchRequest(BaseModel):
     filters: list[PivotFilter] = []
 
 
-ChartType = Literal["kpi", "line", "area", "bar", "stacked_bar", "pie", "donut", "heatmap", "map"]
+ChartType = Literal["kpi", "line", "area", "bar", "stacked_bar", "pie", "donut", "heatmap", "map", "table"]
 
 
 class DashboardCreate(BaseModel):
