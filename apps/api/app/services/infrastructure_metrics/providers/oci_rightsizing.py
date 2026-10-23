@@ -64,10 +64,17 @@ def read_oci_capacity(
         client_factory = lambda values: oci.core.ComputeClient(
             values, retry_strategy=oci.retry.NoneRetryStrategy(), timeout=(5, 30),
         )
-    client = client_factory(oci_config)
     snapshots: dict[str, CapacitySnapshot | dict] = {}
+    # A discovering source already listed the instances, shape config included.
+    listed = {item["resource_id"]: item["instance"] for item in config.extractor.instances()} \
+        if getattr(getattr(config, "extractor", None), "discovers_compartment", False) else {}
+    client = None
     for resource_id in config.resource_ids:
         try:
+            if resource_id in listed:
+                snapshots[resource_id] = _snapshot(listed[resource_id])
+                continue
+            client = client or client_factory(oci_config)
             snapshots[resource_id] = _snapshot(client.get_instance(resource_id).data)
         except Exception as exc:  # noqa: BLE001 - recorded as missing capacity
             snapshots[resource_id] = {"resource_id": resource_id, "error": type(exc).__name__}

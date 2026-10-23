@@ -59,7 +59,7 @@ const emptyForm = {
   gcp_token: "", table_name: "",
   mongo_group_id: "", mongo_contract_type: "", marketplace: false,
   oci_fingerprint: "", oci_region: "sa-saopaulo-1", oci_private_key: "", oci_genai_compartments: "",
-  mon_credentials_code: "", mon_compartment: "", mon_resource_ids: "", mon_resolution: "5m", mon_history_days: "30",
+  mon_credentials_code: "", mon_compartment: "", mon_discovery: false, mon_resource_ids: "", mon_resolution: "5m", mon_history_days: "30",
   github_extraction_type: "token" as "billing" | "license" | "token",
   gemini_extraction_type: "token" as "license" | "token",
   admin_email: "",
@@ -362,6 +362,7 @@ export default function Connections() {
         oci_region: cfg.region || "sa-saopaulo-1",
         mon_credentials_code: cfg.credentials_connection_code || "",
         mon_compartment: cfg.compartment_id || "",
+        mon_discovery: cfg.discovery === "compartment",
         mon_resource_ids: (Array.isArray(cfg.resource_ids) ? cfg.resource_ids : []).join("\n"),
         mon_resolution: cfg.resolution || "5m",
         mon_history_days: String(cfg.history_days || 30),
@@ -561,6 +562,7 @@ export default function Connections() {
       configJson.credentials_connection_code = form.mon_credentials_code;
       configJson.region = form.oci_region;
       configJson.compartment_id = form.mon_compartment.trim();
+      configJson.discovery = form.mon_discovery ? "compartment" : "";
       configJson.resource_ids = form.mon_resource_ids.split("\n").map(id => id.trim()).filter(Boolean);
       configJson.namespace = "oci_computeagent";
       configJson.resolution = form.mon_resolution;
@@ -643,8 +645,8 @@ export default function Connections() {
     if (savingConnection) return;
     if (form.connector_type === "oci_monitoring") {
       const resourceIds = form.mon_resource_ids.split("\n").map(id => id.trim()).filter(Boolean);
-      if (!form.mon_credentials_code || !form.mon_compartment.trim() || resourceIds.length < 1) {
-        setError("Escolha a conexão OCI das credenciais e informe o compartimento e ao menos uma instância.");
+      if (!form.mon_credentials_code || !form.mon_compartment.trim() || (!form.mon_discovery && resourceIds.length < 1)) {
+        setError("Escolha a conexão OCI das credenciais, informe o compartimento e ative a descoberta ou liste ao menos uma instância.");
         return;
       }
     }
@@ -1087,9 +1089,12 @@ export default function Connections() {
                   onChange={(e) => setForm({ ...form, oci_region: e.target.value })} />
                 <TextField label="OCID do compartimento das métricas" value={form.mon_compartment}
                   onChange={(e) => setForm({ ...form, mon_compartment: e.target.value })} />
-                <TextField label="OCIDs das instâncias (uma por linha)" multiline minRows={2} value={form.mon_resource_ids}
+                <FormControlLabel sx={{ gridColumn: "1 / -1" }}
+                  control={<Checkbox checked={form.mon_discovery} onChange={(e) => setForm({ ...form, mon_discovery: e.target.checked })} />}
+                  label="Todas as instâncias do compartimento (descobertas a cada coleta)" />
+                {!form.mon_discovery && <TextField label="OCIDs das instâncias (uma por linha)" multiline minRows={2} value={form.mon_resource_ids}
                   onChange={(e) => setForm({ ...form, mon_resource_ids: e.target.value })}
-                  helperText="A coleta consulta somente estas instâncias; não há descoberta automática." sx={{ gridColumn: "1 / -1" }} />
+                  helperText="Sem a descoberta, a coleta consulta somente estas instâncias." sx={{ gridColumn: "1 / -1" }} />}
                 <FormControl>
                   <InputLabel>Resolução</InputLabel>
                   <Select label="Resolução" value={form.mon_resolution}
@@ -1110,7 +1115,7 @@ export default function Connections() {
                   <Box component="code" sx={{ display: "block", mt: 0.5, whiteSpace: "normal", overflowWrap: "anywhere" }}>
                     Allow group &lt;grupo&gt; to read instances in compartment &lt;compartimento&gt;
                   </Box>
-                  A primeira lê as métricas; a segunda lê o shape, OCPU e memória usados pelo motor de rightsizing. Nenhuma das duas permite alterar recursos.
+                  A primeira lê as métricas; a segunda lista as instâncias (descoberta) e lê shape, OCPU e memória usados pelo motor de rightsizing. Nenhuma das duas permite alterar recursos.
                 </Alert>
               </>
             )}

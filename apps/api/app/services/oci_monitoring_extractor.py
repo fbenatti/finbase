@@ -113,8 +113,30 @@ class OciMonitoringExtractor:
         return [str(item).strip() for item in values if str(item).strip()]
 
     @property
+    def discovers_compartment(self) -> bool:
+        """``discovery = "compartment"``: every instance of the compartment, no allowlist."""
+        return str(self.config.get("discovery") or "") == "compartment"
+
+    @property
     def resource_ids(self) -> list[str]:
+        if self.discovers_compartment:
+            return [instance["resource_id"] for instance in self.instances()]
         return self._list("resource_ids")
+
+    def instances(self) -> list[dict]:
+        """Non-terminated instances of the compartment (one paginated ListInstances)."""
+        if getattr(self, "_instances", None) is None:
+            import oci
+
+            compute = oci.core.ComputeClient(self.oci_config(), timeout=(5, 60))
+            found = oci.pagination.list_call_get_all_results(
+                compute.list_instances, self.config["compartment_id"],
+            ).data
+            self._instances = [
+                {"resource_id": item.id, "instance": item}
+                for item in found if item.lifecycle_state not in ("TERMINATED", "TERMINATING")
+            ]
+        return self._instances
 
     @property
     def history_days(self) -> int:
@@ -161,8 +183,8 @@ class OciMonitoringExtractor:
     def _validate(self) -> None:
         if not self.config.get("compartment_id"):
             raise ValueError("Informe o compartment_id da fonte OCI Monitoring")
-        if not self.resource_ids:
-            raise ValueError("Informe resource_ids (allowlist) da fonte OCI Monitoring")
+        if not self.discovers_compartment and not self.resource_ids:
+            raise ValueError("Informe resource_ids (allowlist) ou ative a descoberta do compartimento")
 
     # ---- units ---------------------------------------------------------
     def windows(self, now: datetime | None = None) -> list[tuple[datetime, datetime, datetime, datetime]]:
@@ -246,13 +268,17 @@ class OciMonitoringExtractor:
         region = self.oci_config().get("region")
         rows: list[dict[str, Any]] = []
         errors: list[str] = []
+        # Compartment discovery asks once per metric/statistic and receives one
+        # stream per instance; an allowlist asks per resource.
+        resource_filters = [None] if self.discovers_compartment else self.resource_ids
         for metric in self._list("metric_names", DEFAULT_METRICS):
-            for resource_id in self.resource_ids:
+            for resource_id in resource_filters:
                 for statistic in self._list("statistics", DEFAULT_STATISTICS):
                     if should_abort and should_abort():
                         raise RuntimeError("Coleta cancelada")
                     aggregation = AGGREGATIONS[statistic]
-                    query = f'{metric}[{resolution}]{{resourceId = "{resource_id}"}}.{aggregation}'
+                    selector = f'{{resourceId = "{resource_id}"}}' if resource_id else ""
+                    query = f'{metric}[{resolution}]{selector}.{aggregation}'
                     details = oci.monitoring.models.SummarizeMetricsDataDetails(
                         namespace=namespace, query=query, start_time=effective_start,
                         end_time=effective_end, resolution=resolution,
@@ -307,6 +333,7 @@ class MonitoringScope:
 def monitoring_scope(connection: SourceConnection) -> MonitoringScope:
     extractor = OciMonitoringExtractor(connection)
     return MonitoringScope(
-        enabled=bool(extractor.resource_ids), region=extractor.oci_config().get("region"),
+        enabled=extractor.discovers_compartment or bool(extractor.resource_ids),
+        region=extractor.oci_config().get("region"),
         resource_ids=tuple(extractor.resource_ids), resolution=extractor.resolution, extractor=extractor,
     )
