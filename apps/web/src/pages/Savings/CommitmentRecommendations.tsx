@@ -76,8 +76,10 @@ function NegotiatedOfferForm({ item, onSaved }: { item: CommitmentRecommendation
   const [term, setTerm] = useState(12);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
-  const value = Number(discount.replace(",", "."));
-  const valid = value > 0 && value < 100;
+  // Accept "15", "15%", "15,5" or "15.5 %".
+  const value = Number(discount.replace("%", "").replace(",", ".").trim());
+  const valid = discount.trim() !== "" && value > 0 && value < 100;
+  const invalid = discount.trim() !== "" && !valid;
 
   const save = async () => {
     setSaving(true);
@@ -95,7 +97,9 @@ function NegotiatedOfferForm({ item, onSaved }: { item: CommitmentRecommendation
   return (
     <Stack direction="row" gap={1} alignItems="center" flexWrap="wrap" useFlexGap sx={{ mt: 1.5 }}>
       <TextField size="small" label="Desconto negociado (%)" value={discount} sx={{ width: 190 }}
-                 onChange={(event) => setDiscount(event.target.value)} inputProps={{ inputMode: "decimal" }} />
+                 onChange={(event) => setDiscount(event.target.value)} inputProps={{ inputMode: "decimal" }}
+                 onKeyDown={(event) => { if (event.key === "Enter" && valid && !saving) void save(); }}
+                 error={invalid} helperText={invalid ? "Informe um percentual entre 0 e 100" : undefined} />
       <FormControl size="small" sx={{ width: 130 }}>
         <InputLabel>Prazo</InputLabel>
         <Select label="Prazo" value={term} onChange={(event) => setTerm(Number(event.target.value))}>
@@ -111,13 +115,37 @@ function NegotiatedOfferForm({ item, onSaved }: { item: CommitmentRecommendation
 }
 
 const SIMULATED_DISCOUNTS = [0.05, 0.10, 0.15, 0.20, 0.25];
-const BALANCED_SHARE = 0.9;
+// Share of the projected consumption each profile commits (same policy as the engine):
+// conservative survives a 20% drop, balanced keeps a 10% margin, aggressive commits it all.
+const PROFILE_SHARE: Record<CommitmentProfile, number> = { CONSERVATIVE: 0.8, BALANCED: 0.9, AGGRESSIVE: 1.0 };
+const USAGE_DROP = 0.2;
+
+// How a spend pool works, in the customer's words: it is a negotiation, not a purchase in the console.
+const SPEND_POOL_GUIDE: Record<string, { title: string; points: string[] }> = {
+  oci_universal_credits: {
+    title: "Como funciona o Universal Credits da OCI",
+    points: [
+      "Você se compromete com um valor anual de consumo na OCI (os créditos), num contrato de 1 a 3 anos fechado com a Oracle.",
+      "Em troca, a Oracle aplica um desconto sobre o preço dos serviços da OCI (compute, storage, rede, banco…), não só de compute. O percentual depende do valor comprometido e da negociação.",
+      "O consumo do ano abate os créditos já com o desconto. Crédito não usado até o fim do ano se perde; alguns contratos permitem levar o saldo na renovação.",
+      "O consumo acima do compromisso é cobrado como excedente (overage), em geral com o mesmo desconto. Confira as condições no seu contrato.",
+      "Não há compra pelo console: é uma negociação ou renovação comercial com a Oracle. O motor sugere quanto comprometer; o desconto vem do contrato ou da proposta recebida.",
+      "O consumo projetado é o da fatura inteira da tenancy, ao preço que você paga hoje. Se a fatura já tem desconto de contrato, informe o desconto adicional sobre o valor atual.",
+    ],
+  },
+};
 
 // Until the deal's discount is registered, show what the spend pool is worth per discount point.
-function SpendSimulation({ item, money, onSaved }: {
-  item: CommitmentRecommendation; money: (value: unknown) => string; onSaved: () => Promise<void>;
+function SpendSimulation({ item, money, profile, onSaved }: {
+  item: CommitmentRecommendation; money: (value: unknown) => string; profile: CommitmentProfile;
+  onSaved: () => Promise<void>;
 }) {
   const projected = Number(item.projected_annual_spend || 0);
+  const share = PROFILE_SHARE[profile];
+  const profileLabel = PROFILES.find((option) => option.value === profile)?.label.toLowerCase();
+  // Yearly saving of a commitment when the spend turns out to be ``spend``: the pool is paid even if unused.
+  const savingAt = (spend: number, discount: number) =>
+    spend - Math.max(projected * (1 - discount) * share, spend * (1 - discount));
   return (
     <Card sx={{ mb: 2, borderColor: "warning.light" }} variant="outlined"><CardContent>
       <Typography variant="overline" color="text.secondary">{item.instrument_label}</Typography>
@@ -131,26 +159,43 @@ function SpendSimulation({ item, money, onSaved }: {
           </Typography>
           <NegotiatedOfferForm item={item} onSaved={onSaved} />
         </Box>
+        {SPEND_POOL_GUIDE[item.instrument] && (
+          <Box sx={{ maxWidth: 720, p: 1.5, bgcolor: "action.hover", borderRadius: 1 }}>
+            <Typography variant="subtitle2" fontWeight={600} mb={0.5}>{SPEND_POOL_GUIDE[item.instrument].title}</Typography>
+            <Box component="ul" sx={{ m: 0, pl: 2.5 }}>
+              {SPEND_POOL_GUIDE[item.instrument].points.map((point) => (
+                <Typography key={point} component="li" variant="body2" sx={{ mb: 0.5 }}>{point}</Typography>
+              ))}
+            </Box>
+          </Box>
+        )}
         <Box sx={{ maxWidth: 720 }}>
-          <Typography variant="subtitle2" fontWeight={600} mb={0.5}>Simulação — perfil balanceado</Typography>
+          <Typography variant="subtitle2" fontWeight={600} mb={0.5}>Simulação — perfil {profileLabel}</Typography>
           <Box component="table" sx={{ width: "100%", borderCollapse: "collapse", "& td, & th": { py: 0.75, px: 1, borderBottom: "1px solid", borderColor: "divider", textAlign: "right" }, "& th:first-of-type, & td:first-of-type": { textAlign: "left" } }}>
             <thead><tr>
               <Typography component="th" variant="caption" color="text.secondary">Desconto</Typography>
-              <Typography component="th" variant="caption" color="text.secondary">Compromisso / ano</Typography>
-              <Typography component="th" variant="caption" color="text.secondary">Saving / mês</Typography>
+              <Typography component="th" variant="caption" color="text.secondary">Consumo com desconto / ano</Typography>
+              <Typography component="th" variant="caption" color="text.secondary">Compromisso / ano ({Math.round(share * 100)}% do consumo)</Typography>
               <Typography component="th" variant="caption" color="text.secondary">Saving / ano</Typography>
+              <Typography component="th" variant="caption" color="text.secondary">Se o uso cair 20%</Typography>
             </tr></thead>
             <tbody>{SIMULATED_DISCOUNTS.map((discount) => (
               <tr key={discount}>
                 <Typography component="td" variant="body2">{percent(discount)}</Typography>
-                <Typography component="td" variant="body2">{money(projected * (1 - discount) * BALANCED_SHARE)}</Typography>
-                <Typography component="td" variant="body2">{money(projected * discount / 12)}</Typography>
-                <Typography component="td" variant="body2" fontWeight={700} color="success.main">{money(projected * discount)}</Typography>
+                <Typography component="td" variant="body2">{money(projected * (1 - discount))}</Typography>
+                <Typography component="td" variant="body2" fontWeight={600}>{money(projected * (1 - discount) * share)}</Typography>
+                <Typography component="td" variant="body2" fontWeight={700} color="success.main">{money(savingAt(projected, discount))}</Typography>
+                <Typography component="td" variant="body2"
+                            color={savingAt(projected * (1 - USAGE_DROP), discount) < 0 ? "error.main" : undefined}>
+                  {money(savingAt(projected * (1 - USAGE_DROP), discount))}
+                </Typography>
               </tr>
             ))}</tbody>
           </Box>
           <Typography variant="caption" color="text.secondary">
-            Compromisso de {Math.round(BALANCED_SHARE * 100)}% do consumo projetado ao preço com desconto; o consumo acima dele mantém o desconto.
+            Consumo com desconto = {money(projected)} × (1 − desconto). O perfil {profileLabel} compromete {Math.round(share * 100)}% desse
+            valor e deixa o restante como excedente com o mesmo desconto. Com o uso previsto o saving é o mesmo
+            nos três perfis; o que muda é o risco: se o uso cair, a parte do compromisso não consumida é paga sem uso.
           </Typography>
         </Box>
       </Stack>
@@ -318,7 +363,7 @@ export default function CommitmentRecommendations() {
       {run?.status === "FAILED" && <Alert severity="warning" sx={{ mb: 2 }}>A última análise não terminou: {run.error_message}</Alert>}
 
       {connection && awaitingDiscount.map((item) => (
-        <SpendSimulation key={item.id} item={item} money={moneyIn(item.currency || currency)} onSaved={execute} />
+        <SpendSimulation key={item.id} item={item} money={moneyIn(item.currency || currency)} profile={profile} onSaved={execute} />
       ))}
 
       {connection && proposals.length > 0 && <>
