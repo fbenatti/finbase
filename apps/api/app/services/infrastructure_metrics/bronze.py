@@ -17,7 +17,7 @@ def persist_raw_query_results(
     from app.services import iceberg_service
 
     bronze_code = f"{connection_code}_infra_metrics"
-    rows_written = 0
+    rows_by_period: dict[str, list[dict]] = {}
     for result in results:
         plan = result.plan
         for raw in result.raw_payloads:
@@ -49,6 +49,8 @@ def persist_raw_query_results(
             }
             row = {
                 "collection_run_id": str(collection_run_id),
+                # Matches Silver `bronze_path`: exact payload of one statistic.
+                "payload_path": blob_path,
                 "request_id": raw.get("request_id") or plan.request_id,
                 "provider": "oci",
                 "connection_id": int(connection_id),
@@ -73,7 +75,12 @@ def persist_raw_query_results(
                 "_source_connection_id": int(connection_id),
             }
             period = plan.start_utc.astimezone(timezone.utc).strftime("%Y%m")
-            rows_written += iceberg_service.replace_bronze_slice(
-                bronze_code, pd.DataFrame([row]), period, blob_path,
-            )
-    return rows_written
+            rows_by_period.setdefault(period, []).append(row)
+    # One atomic replace per run and month: a commit per payload rescans every
+    # earlier file of the month partition and grows quadratically in a backfill.
+    return sum(
+        iceberg_service.replace_bronze_slice(
+            bronze_code, pd.DataFrame(rows), period, f"infrastructure_metrics/{collection_run_id}",
+        )
+        for period, rows in sorted(rows_by_period.items())
+    )
