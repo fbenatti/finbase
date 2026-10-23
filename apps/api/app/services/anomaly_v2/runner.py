@@ -25,7 +25,7 @@ from app.services.anomaly_v2.query_control import execute as trino_execute
 
 logger = logging.getLogger(__name__)
 
-MODEL_VERSION = "v2.4"
+MODEL_VERSION = "v2.5"
 
 
 class AnomalyV2RunError(RuntimeError):
