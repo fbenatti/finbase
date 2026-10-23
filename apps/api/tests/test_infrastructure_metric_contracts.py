@@ -7,6 +7,7 @@ from app.services.infrastructure_metrics.contracts import (
     MetricScope, QueryPlan,
 )
 from app.services.infrastructure_metrics.identity import dimensions_hash, series_id
+from app.services.silver_models import METRIC_SERIES
 
 
 def _series(**overrides):
@@ -64,3 +65,13 @@ def test_catalog_covers_the_eight_pilot_metrics_and_native_percentiles():
     }
     with pytest.raises(LookupError):
         get_metric("oci", "oci_computeagent", "UnknownMetric")
+
+
+def test_silver_metric_model_preserves_resolution_percentiles_and_lineage():
+    names = set(METRIC_SERIES.column_names())
+    assert {
+        "series_id", "dimensions_hash", "bucket_end_utc", "resolution_seconds",
+        "source_sample_period_seconds", "native_p90", "native_p95", "native_p99",
+        "statistic_lineage_json", "collection_run_id", "metric_day",
+    } <= names
+    assert METRIC_SERIES.field("sample_count").type == "double"
