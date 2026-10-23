@@ -54,67 +54,74 @@ function DesvioTable({
   );
 }
 
-function FragmentRow({ item, color, open, onToggle, subcats, subcatLoading, onAck, ack, onSubcatSeries, onDeactivateAck }: {
+function FragmentRow({ item, color, open, onToggle, subcats, subcatLoading, onAck, ack, onSubcatSeries, onDeactivateAck, maxVariance }: {
   item: ForecastDesvioItem; color: string; open: boolean; onToggle: () => void;
   subcats: ForecastDesvioSubcat[] | undefined; subcatLoading: boolean; onAck: () => void;
   ack: ForecastAck | undefined; onSubcatSeries: (sub: ForecastDesvioSubcat) => void;
-  onDeactivateAck: () => void;
+  onDeactivateAck: () => void; maxVariance: number;
 }) {
+  const stop = (event: React.MouseEvent) => event.stopPropagation();
+  const variance = Number(item.variance || 0);
+  const barWidth = Math.max(4, Math.min(100, Math.abs(variance) / maxVariance * 100));
+
   return (
-    <>
-      <TableRow hover onClick={onToggle} sx={{ cursor: "pointer", bgcolor: ack ? "#EFF6FF" : undefined }}>
-        <TableCell>
-          <Stack direction="row" alignItems="center" gap={0.5} sx={{ flexWrap: "wrap" }}>
-            <IconButton size="small" onClick={event => { event.stopPropagation(); onToggle(); }} aria-label={open ? "recolher" : "expandir"}>
-              {open ? <RemoveOutlined fontSize="small" /> : <AddOutlined fontSize="small" />}
-            </IconButton>
-            <Typography variant="body2" fontWeight={600}>{item.name}</Typography>
-            <Tooltip title={item.path.join(" > ")}>
-              <Chip size="small" variant="outlined" label={item.path.join(" > ")} sx={{ maxWidth: 260 }} />
-            </Tooltip>
-            {ack && <Chip size="small" color="info" label={`✓ Justificativa: ${ack.category}`} />}
-          </Stack>
-          {ack && (
-            <Typography variant="caption" color="text.secondary" sx={{ display: "block", pl: 4, maxWidth: 520 }}>
-              {ack.reason}
-            </Typography>
-          )}
-        </TableCell>
-        <TableCell align="right">{money.format(Number(item.forecast_value || 0))}</TableCell>
-        <TableCell align="right">{money.format(Number(item.actual_value || 0))}</TableCell>
-        <TableCell align="right" sx={{ color, fontWeight: 600 }}>{money.format(Number(item.variance || 0))}</TableCell>
-        <TableCell align="right">{pct(item.variance_pct)}</TableCell>
-        <TableCell align="right">{pct(item.accuracy)}</TableCell>
-        <TableCell align="center">
-          {ack ? (
-            <Stack direction="row" alignItems="center" justifyContent="center">
-              <Tooltip title="Alterar justificativa">
-                <IconButton size="small" aria-label={`Editar Justificativa de ${item.name}`} onClick={event => { event.stopPropagation(); onAck(); }}>
-                  <EditOutlined fontSize="small" />
-                </IconButton>
-              </Tooltip>
-              <Tooltip title="Desativar justificativa">
-                <IconButton size="small" color="error" aria-label={`Desativar Justificativa de ${item.name}`} onClick={event => { event.stopPropagation(); onDeactivateAck(); }}>
-                  <BlockOutlined fontSize="small" />
-                </IconButton>
-              </Tooltip>
+    <Box sx={{ borderBottom: "1px solid", borderColor: "divider", bgcolor: ack ? "#F5F9FF" : "background.paper", "&:last-of-type": { borderBottom: 0 } }}>
+      <Box
+        role="button"
+        tabIndex={0}
+        aria-expanded={open}
+        onClick={onToggle}
+        onKeyDown={event => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); onToggle(); } }}
+        sx={{ px: 2, py: 1.5, cursor: "pointer", display: "grid", alignItems: "center", gap: 1.5, gridTemplateColumns: { xs: "minmax(0, 1fr) auto", md: "minmax(145px, 1.5fr) repeat(2, minmax(82px, .8fr)) minmax(118px, 1fr) minmax(64px, .55fr) auto" }, "&:hover": { bgcolor: "action.hover" }, "&:focus-visible": { outline: "2px solid", outlineColor: "primary.main", outlineOffset: -2 } }}
+      >
+        <Box sx={{ minWidth: 0, gridColumn: { xs: "1 / -1", md: "auto" }, display: "flex", alignItems: "center", gap: 1 }}>
+          <IconButton size="small" aria-label={open ? "recolher" : "expandir"} tabIndex={-1}>
+            {open ? <RemoveOutlined fontSize="small" /> : <AddOutlined fontSize="small" />}
+          </IconButton>
+          <Box sx={{ minWidth: 0 }}>
+            <Stack direction="row" alignItems="center" gap={0.75} flexWrap="wrap">
+              <Typography variant="body2" fontWeight={700}>{item.name}</Typography>
+              {ack && <Chip size="small" color="info" label={ack.category} />}
             </Stack>
-          ) : (
-            <Button
-              size="small"
-              variant="contained"
-              color="primary"
-              onClick={event => { event.stopPropagation(); onAck(); }}
-            >
-              Ack
-            </Button>
-          )}
-        </TableCell>
-      </TableRow>
+            <Tooltip title={item.path.join(" > ")}>
+              <Typography variant="caption" color="text.secondary" noWrap sx={{ display: "block", maxWidth: { xs: "70vw", md: 260 } }}>{item.path.join(" › ")}</Typography>
+            </Tooltip>
+          </Box>
+        </Box>
+        {[
+          { label: "Previsto", value: money.format(Number(item.forecast_value || 0)) },
+          { label: "Efetivado", value: money.format(Number(item.actual_value || 0)) },
+        ].map(metric => (
+          <Box key={metric.label} sx={{ pl: { xs: 5, md: 0 }, minWidth: 0 }}>
+            <Typography variant="caption" color="text.secondary">{metric.label}</Typography>
+            <Typography variant="body2" fontWeight={600} noWrap>{metric.value}</Typography>
+          </Box>
+        ))}
+        <Box sx={{ pl: { xs: 5, md: 0 }, minWidth: 0 }}>
+          <Typography variant="caption" color="text.secondary">Variação</Typography>
+          <Typography variant="body2" fontWeight={750} sx={{ color }}>{variance > 0 ? "+" : ""}{money.format(variance)} <Box component="span" sx={{ fontSize: "0.75rem", fontWeight: 500 }}>({pct(item.variance_pct)})</Box></Typography>
+          <Box sx={{ mt: 0.5, width: "100%", height: 4, borderRadius: 4, bgcolor: "action.hover", overflow: "hidden" }}>
+            <Box sx={{ width: `${barWidth}%`, height: "100%", bgcolor: color }} />
+          </Box>
+        </Box>
+        <Box sx={{ pl: { xs: 5, md: 0 }, minWidth: 0 }}>
+          <Typography variant="caption" color="text.secondary">Precisão</Typography>
+          <Typography variant="body2" fontWeight={700}>{pct(item.accuracy)}</Typography>
+        </Box>
+        <Box onClick={stop} sx={{ gridColumn: { xs: "2", md: "auto" }, gridRow: { xs: "1", md: "auto" }, justifySelf: "end" }}>
+          {ack ? (
+            <Stack direction="row" alignItems="center">
+              <Tooltip title="Alterar justificativa"><IconButton size="small" aria-label={`Editar justificativa de ${item.name}`} onClick={onAck}><EditOutlined fontSize="small" /></IconButton></Tooltip>
+              <Tooltip title="Desativar justificativa"><IconButton size="small" color="error" aria-label={`Desativar justificativa de ${item.name}`} onClick={onDeactivateAck}><BlockOutlined fontSize="small" /></IconButton></Tooltip>
+            </Stack>
+          ) : <Button size="small" variant="outlined" onClick={onAck}>Justificar</Button>}
+        </Box>
+      </Box>
+      {ack && <Typography variant="caption" color="text.secondary" sx={{ display: "block", px: 2, pb: 1.25, pl: { xs: 7, md: 6 } }}>{ack.reason}</Typography>}
       {open && (
-        <TableRow>
-          <TableCell colSpan={7} sx={{ bgcolor: "#FAFBFD" }}>
-            {subcatLoading ? <LinearProgress sx={{ m: 1 }} /> : subcats && subcats.length > 0 ? (
+        <Box sx={{ bgcolor: "#F7F9FC", px: { xs: 1, md: 2 }, py: 1.5, borderTop: "1px solid", borderColor: "divider" }}>
+          {subcatLoading ? <LinearProgress sx={{ m: 1 }} /> : subcats && subcats.length > 0 ? (
+            <TableContainer>
               <Table size="small">
                 <TableHead>
                   <TableRow>
@@ -138,21 +145,17 @@ function FragmentRow({ item, color, open, onToggle, subcats, subcatLoading, onAc
                       </TableCell>
                       <TableCell align="right">{money.format(Number(sub.forecast_value || 0))}</TableCell>
                       <TableCell align="right">{money.format(Number(sub.actual_value || 0))}</TableCell>
-                      <TableCell align="right" sx={{ color: Number(sub.variance || 0) >= 0 ? "#DC2626" : "#16A34A" }}>
-                        {money.format(Number(sub.variance || 0))}
-                      </TableCell>
+                      <TableCell align="right" sx={{ color: Number(sub.variance || 0) >= 0 ? "#DC2626" : "#16A34A" }}>{money.format(Number(sub.variance || 0))}</TableCell>
                       <TableCell align="right">{pct(sub.accuracy)}</TableCell>
                     </TableRow>
                   ))}
                 </TableBody>
               </Table>
-            ) : (
-              <Typography variant="body2" color="text.secondary">Nenhuma subcategoria neste nível.</Typography>
-            )}
-          </TableCell>
-        </TableRow>
+            </TableContainer>
+          ) : <Typography variant="body2" color="text.secondary">Nenhuma subcategoria neste nível.</Typography>}
+        </Box>
       )}
-    </>
+    </Box>
   );
 }
 
