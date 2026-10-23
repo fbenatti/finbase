@@ -176,3 +176,23 @@ def test_vocabulario_de_qualidade_declarado():
         "CALENDAR_SHIFT_EVIDENCE", "FEW_MONTHLY_EVENTS",
     ):
         assert code in QUALITY_REASON_CODES
+
+
+def test_observado_diario_poda_particoes_por_periodo_de_faturamento():
+    """Sem este predicado o Trino lia a Silver inteira e filtrava por dia depois."""
+    from datetime import date
+
+    from app.services.anomaly_observed import billing_periods_between, observed_daily_sql
+
+    assert billing_periods_between(date(2026, 9, 1), date(2026, 10, 21)) == ["202608", "202609", "202610"]
+    sql = observed_daily_sql(
+        source_namespace="silver", table="dest_billing_cloud", date_column="chargeperiodstart",
+        period_column="_billing_period", type_column="tipo", measure_column="realizado_cloud",
+        dimensions=["cloud_origem"], start=date(2026, 9, 1), end=date(2026, 10, 21),
+    )
+    assert "CAST(\"_billing_period\" AS VARCHAR) IN ('202608', '202609', '202610')" in sql
+    sem_periodo = observed_daily_sql(
+        source_namespace="silver", table="t", date_column="d", period_column=None, type_column=None,
+        measure_column="v", dimensions=["a"], start=date(2026, 9, 1), end=date(2026, 9, 2),
+    )
+    assert " IN ('2026" not in sem_periodo
