@@ -111,8 +111,10 @@ USAGE_API_ACCOUNT_GROUP_BY = ["subscriptionId", "tenantName"]
 # granularidade horária aceita janelas curtas. O serviço é filtrado depois
 # (sem diferenciar maiúsculas) para não depender da grafia exata na API.
 USAGE_API_HOURLY_GROUP_BY = ["resourceId", "service", "skuPartNumber", "region"]
-# Só os dias recentes viram série horária: o motor analisa até 90 dias.
-USAGE_API_HOURLY_LOOKBACK_DAYS = 100
+# A Usage API só responde HOURLY dos últimos 31 dias ("Hourly query only
+# available for last 31 days"). Séries mais longas se acumulam ingestão a
+# ingestão: cada busca substitui só as horas que trouxe.
+USAGE_API_HOURLY_LOOKBACK_DAYS = 30
 
 
 def _availability_zone(ad: str | None) -> str | None:
@@ -376,7 +378,9 @@ class OciExtractor:
         return self.config_json.get("extraction_mode") == USAGE_API_MODE
 
     def _usage_client(self) -> "oci.usage_api.UsageapiClient":
-        return oci.usage_api.UsageapiClient(self._get_oci_config())
+        # The Usage API throttles per user (429): months run in parallel and the
+        # hourly compute query adds one call per day, so back off and retry.
+        return oci.usage_api.UsageapiClient(self._get_oci_config(), retry_strategy=oci.retry.DEFAULT_RETRY_STRATEGY)
 
     def _test_usage_api(self) -> dict:
         try:
@@ -485,11 +489,14 @@ class OciExtractor:
         frame = frame[(pd.to_numeric(frame["cost/myCost"]) != 0) | (pd.to_numeric(frame["usage/billedQuantity"]) != 0)]
         return _sanitize_df(frame.reset_index(drop=True))
 
-    def fetch_compute_hourly_month(self, billing_period: str, connection_id: int) -> pd.DataFrame | None:
+    def fetch_compute_hourly_month(
+        self, billing_period: str, connection_id: int,
+    ) -> tuple[pd.DataFrame, str, str] | None:
         """Compute por hora, recurso e SKU no mês ``YYYYMM`` (só os dias recentes).
 
-        Mesmas colunas que ``compute_hourly_rows`` gera a partir dos relatórios CSV.
-        ``None`` quando o mês todo está fora da janela: a série já gravada é mantida.
+        Devolve as linhas (mesmas colunas que ``compute_hourly_rows`` gera a partir
+        dos relatórios CSV) e as horas buscadas ``[primeira, fim)``, para que só
+        elas sejam substituídas. ``None`` quando o mês todo está fora da janela.
         """
         start = datetime(int(billing_period[:4]), int(billing_period[4:6]), 1, tzinfo=timezone.utc)
         end = datetime(start.year + (start.month == 12), start.month % 12 + 1, 1, tzinfo=timezone.utc)
@@ -514,14 +521,15 @@ class OciExtractor:
                     "billed_cost": cost, "billed_quantity": quantity,
                 })
             day += timedelta(days=1)
+        hours = (start.strftime("%Y-%m-%dT%H"), end.strftime("%Y-%m-%dT%H"))
         if not rows:
-            return pd.DataFrame()
+            return pd.DataFrame(), *hours
         frame = pd.DataFrame(rows)
         keys = ["usage_hour", "resource_id", "region", "sku", "sku_description", "currency"]
         frame = frame.groupby(keys, as_index=False, dropna=False)[["billed_cost", "billed_quantity"]].sum()
         frame["source_connection_id"] = int(connection_id)
         frame["_billing_period"] = str(billing_period)
-        return frame
+        return frame, *hours
 
     def _summarized_usages(self, start: datetime, end: datetime, granularity: str, group_by: list[str]) -> list:
         """Todas as páginas de uma consulta de custo da Usage API."""

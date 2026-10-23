@@ -1161,18 +1161,24 @@ def _process_databricks_month_sync_worker(
 
 def _fetch_oci_usage_api_hourly(
     task_id, extractor: OciExtractor, connection_id: int, billing_period: str,
-) -> list[pd.DataFrame] | None:
-    """Hourly compute from the Usage API; None keeps the stored series (failure or month out of range)."""
+) -> tuple[list[pd.DataFrame], tuple[str, str]] | None:
+    """Hourly compute from the Usage API and the hours it covers; None keeps the stored series."""
     try:
         _persist_download_progress(task_id, phase=f"Usage API OCI ({billing_period}): compute por hora")
-        frame = extractor.fetch_compute_hourly_month(billing_period, connection_id)
+        fetched = extractor.fetch_compute_hourly_month(billing_period, connection_id)
     except Exception as exc:
         logger.error("Hourly OCI Usage API fetch failed (%s/%s): %s", connection_id, billing_period, exc)
         return None
-    return None if frame is None else [frame]
+    if fetched is None:
+        return None
+    frame, first_hour, end_hour = fetched
+    return [frame], (first_hour, end_hour)
 
 
-def _write_oci_compute_hourly(task_id, connection_id: int, billing_period: str, parts: list[pd.DataFrame]) -> None:
+def _write_oci_compute_hourly(
+    task_id, connection_id: int, billing_period: str, parts: list[pd.DataFrame],
+    hour_range: tuple[str, str] | None = None,
+) -> None:
     """Hourly compute Silver for the commitment engine; a failure never fails the cost load."""
     frames = [part for part in parts if part is not None and not part.empty]
     hourly = pd.concat(frames, ignore_index=True) if frames else pd.DataFrame()
@@ -1181,7 +1187,8 @@ def _write_oci_compute_hourly(task_id, connection_id: int, billing_period: str, 
         hourly = hourly.groupby(keys, as_index=False, dropna=False)[["billed_cost", "billed_quantity"]].sum()
     try:
         _persist_download_progress(task_id, phase=f"Silver: compute horário OCI ({billing_period}, {len(hourly)} linhas)")
-        iceberg.replace_oci_compute_hourly(hourly, connection_id=connection_id, billing_period=billing_period)
+        iceberg.replace_oci_compute_hourly(hourly, connection_id=connection_id, billing_period=billing_period,
+                                           hour_range=hour_range)
     except Exception as exc:
         logger.error("Hourly OCI compute write failed (%s/%s): %s", connection_id, billing_period, exc)
 
@@ -1220,7 +1227,8 @@ def _process_oci_blob_sync(
             if full_df.empty:
                 logger.warning("Nenhum dado na Usage API para o período OCI %s", billing_period)
                 return 0, 0, 0, [f"Nenhum registro para {billing_period}"]
-            hourly_parts = _fetch_oci_usage_api_hourly(task_id, extractor, conn.id, billing_period)
+            hourly = _fetch_oci_usage_api_hourly(task_id, extractor, conn.id, billing_period)
+            hourly_parts, hourly_range = hourly if hourly is not None else (None, None)
             full_df = OciExtractor.aggregate_df_daily(full_df)
             raw_df_bronze = full_df.copy()
         else:
@@ -1248,7 +1256,9 @@ def _process_oci_blob_sync(
             _persist_download_blob(task_id, blob_path, "DOWNLOADING", 0, total_bytes_expected)
 
             dfs: list[pd.DataFrame] = []
+            # The cost reports bring the whole month: its slice is replaced whole.
             hourly_parts: list[pd.DataFrame] = []
+            hourly_range = None
             cumulative_bytes = 0
 
             for idx, obj in enumerate(objects_in_period, 1):
@@ -1338,7 +1348,7 @@ def _process_oci_blob_sync(
             return len(full_df), 0, 0, [f"Bronze write failed: {exc}"]
 
     if hourly_parts is not None:
-        _write_oci_compute_hourly(task_id, conn.id, billing_period, hourly_parts)
+        _write_oci_compute_hourly(task_id, conn.id, billing_period, hourly_parts, hourly_range)
 
     _persist_download_progress(task_id, phase=f"Carga Bronze OCI ({billing_period}) concluída com {len(full_df)} linhas")
     _persist_download_blob(task_id, blob_path, "BRONZE_IMPORTED", cumulative_bytes, cumulative_bytes)

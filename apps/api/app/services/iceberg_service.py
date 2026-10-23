@@ -2762,9 +2762,15 @@ def _append_or_create_table(namespace: str, table_name: str, df: pd.DataFrame, p
     return len(frame)
 
 
-def replace_oci_compute_hourly(df: pd.DataFrame, *, connection_id: int, billing_period: str) -> int:
-    """Replace one connection+month of the hourly OCI compute Silver in one transaction."""
-    from pyiceberg.expressions import And, EqualTo
+def replace_oci_compute_hourly(
+    df: pd.DataFrame, *, connection_id: int, billing_period: str, hour_range: tuple[str, str] | None = None,
+) -> int:
+    """Replace one connection+month of the hourly OCI compute Silver in one transaction.
+
+    ``hour_range`` (``[first, end)`` as ``YYYY-MM-DDTHH``) limits the replacement
+    to the hours that were fetched, so a partial fetch keeps the older hours.
+    """
+    from pyiceberg.expressions import And, EqualTo, GreaterThanOrEqual, LessThan
 
     namespace = layers.detail_layer()
     column_types = {"billed_cost": "DOUBLE", "billed_quantity": "DOUBLE", "source_connection_id": "BIGINT"}
@@ -2782,7 +2788,11 @@ def replace_oci_compute_hourly(df: pd.DataFrame, *, connection_id: int, billing_
 
     with exclusive_write_lock():
         tx = tbl.transaction()
-        tx.delete(And(EqualTo("source_connection_id", int(connection_id)), EqualTo("_billing_period", str(billing_period))))
+        slice_filter = And(EqualTo("source_connection_id", int(connection_id)), EqualTo("_billing_period", str(billing_period)))
+        if hour_range:
+            slice_filter = And(slice_filter, GreaterThanOrEqual("usage_hour", hour_range[0]),
+                               LessThan("usage_hour", hour_range[1]))
+        tx.delete(slice_filter)
         if not frame.empty:
             tx.append(_df_to_arrow(frame, column_types=column_types, target_schema=tbl.schema()))
         tx.commit_transaction()
