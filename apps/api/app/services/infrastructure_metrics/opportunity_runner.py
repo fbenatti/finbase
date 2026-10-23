@@ -1,103 +1,91 @@
-"""Run the rightsizing engine over Silver telemetry and persist its results."""
+"""Run the generic rightsizing engine over the shared Silver and persist results.
+
+Nothing here is cloud specific. The series come from
+``compute_usage_metrics`` (cloud-neutral columns filled by catalog mappings),
+and the source's provider registration supplies the scope, capacity, sizing
+catalog and price books.
+"""
 from __future__ import annotations
 
 from datetime import datetime, timezone
+import re
 from typing import Any
 
 from sqlalchemy import select
 
-from .config import config_from_connection
 from .opportunities import (
-    DEFAULT_POLICY, ENGINE_VERSION, READY, RIGHTSIZE_DOWN, analyze_resource,
-    effective_unit_prices, summarize_series, window_bounds,
+    CPU_METRIC, DEFAULT_POLICY, ENGINE_VERSION, MEMORY_METRIC, READY, RIGHTSIZE_DOWN,
+    analyze_resource, summarize_series, window_bounds,
 )
+from .registry import provider_for_connection, rightsizing_for
+from .sizing import CapacitySnapshot
 
-ANALYZED_METRICS = ("CpuUtilization", "MemoryUtilization")
-SERIES_FIELDS = ("resource_id", "source_metric_name", "bucket_start_utc", "value_average", "value_maximum", "origin_kind")
-# Native buckets come first: at 5m/15m OCI computes max over the raw samples.
-# Local rollups of 1m buckets (which keep the 1m maximum) fill only the
-# windows that were collected at 1m.
-ORIGINS_BY_RESOLUTION = {60: ("NATIVE",), 300: ("NATIVE", "DERIVED_ROLLUP"), 900: ("NATIVE", "DERIVED_ROLLUP")}
+ANALYZED_METRICS = (CPU_METRIC, MEMORY_METRIC)
+SILVER_TABLE = "compute_usage_metrics"
+# Statistic names of the Silver → fields the engine summarizes.
+STATISTIC_FIELDS = {"mean": "value_average", "max": "value_maximum", "p95": "native_p95", "p99": "native_p99"}
+_SAFE = re.compile(r"^[A-Za-z0-9._:\-]+$")
 
 
-def read_native_series(
+def _literal(value: str) -> str:
+    if not _SAFE.match(value):
+        raise ValueError(f"valor inválido para filtro da Silver: {value!r}")
+    return f"'{value}'"
+
+
+def read_series(
     connection_id: int, resource_id: str, metric: str, start: datetime, end: datetime,
-    resolution_seconds: int = 60,
+    resolution_seconds: int = 300,
 ) -> list[dict]:
-    """Buckets of one series from the Silver, via an allowlisted scan."""
-    from pyiceberg.expressions import And, EqualTo, GreaterThanOrEqual, LessThan
-
-    from app.services import iceberg_service
-
-    if not iceberg_service.table_exists("resource_metric_series", namespace="silver"):
-        return []
-    table = iceberg_service.get_catalog().load_table(("silver", "resource_metric_series"))
-    by_bucket: dict[str, dict] = {}
-    for origin in ORIGINS_BY_RESOLUTION[resolution_seconds]:
-        expression = And(
-            EqualTo("_source_connection_id", connection_id),
-            EqualTo("resource_id", resource_id),
-            EqualTo("source_metric_name", metric),
-            EqualTo("origin_kind", origin),
-            EqualTo("resolution_seconds", resolution_seconds),
-            GreaterThanOrEqual("bucket_start_utc", start.replace(tzinfo=None)),
-            LessThan("bucket_start_utc", end.replace(tzinfo=None)),
-        )
-        for row in table.scan(row_filter=expression, selected_fields=SERIES_FIELDS).to_arrow().to_pylist():
-            if isinstance(row["bucket_start_utc"], datetime):
-                row["bucket_start_utc"] = row["bucket_start_utc"].isoformat()
-            by_bucket.setdefault(row["bucket_start_utc"], row)
-    return [by_bucket[key] for key in sorted(by_bucket)]
-
-
-def read_billing_prices(resource_ids: tuple[str, ...]) -> dict[str, dict]:
-    """Effective unit prices of the resources' own compute meters."""
+    """Buckets of one canonical series, one dict per bucket with its statistics."""
     from app.services import lakehouse_layers as layers
     from app.services.trino_service import execute_sync
 
-    if not resource_ids:
-        return {}
-    in_list = ", ".join("'" + rid.replace("'", "''") + "'" for rid in resource_ids)
     rows = execute_sync(
-        f"SELECT resourceid AS resource_id, _billing_period AS billing_period, skumeter, "
-        f"consumedunit AS unit, billingcurrency AS currency, "
-        f"SUM(consumedquantity) AS quantity, SUM(effectivecost) AS cost "
-        f"FROM {layers.detail_layer()}.dest_billing_cloud "
-        f"WHERE resourceid IN ({in_list}) "
-        f"GROUP BY 1, 2, 3, 4, 5",
+        f"SELECT CAST(bucket_start_utc AS VARCHAR) AS bucket, statistic, CAST(value AS DOUBLE) AS value "
+        f"FROM {layers.detail_layer()}.{SILVER_TABLE} "
+        f"WHERE source_connection_id = {int(connection_id)} AND resource_id = {_literal(resource_id)} "
+        f"AND metric = {_literal(metric)} AND CAST(resolution_seconds AS INTEGER) = {int(resolution_seconds)} "
+        f"AND bucket_start_utc >= TIMESTAMP '{start:%Y-%m-%d %H:%M:%S} UTC' "
+        f"AND bucket_start_utc < TIMESTAMP '{end:%Y-%m-%d %H:%M:%S} UTC'",
         timeout_s=180,
     )
-    return effective_unit_prices(rows)
+    by_bucket: dict[str, dict] = {}
+    for row in rows:
+        field = STATISTIC_FIELDS.get(str(row["statistic"]))
+        if field is None or row["value"] is None:
+            continue
+        bucket = str(row["bucket"])[:19].replace(" ", "T")
+        by_bucket.setdefault(bucket, {"bucket_start_utc": bucket, "origin_kind": "NATIVE"})[field] = float(row["value"])
+    return [by_bucket[key] for key in sorted(by_bucket)]
 
 
 def run_opportunity_engine(
     session: Any, connection: Any, *, days: int = 7, resolution_seconds: int = 300,
-    user_id: int | None = None,
-    as_of: datetime | None = None, capacity_reader=None, series_reader=read_native_series,
-    price_reader=read_billing_prices,
+    user_id: int | None = None, as_of: datetime | None = None, rightsizing=None,
+    series_reader=read_series,
 ):
-    """Analyze every allowlisted instance and persist one run with its results."""
+    """Analyze every allowlisted resource and persist one run with its results."""
     from app.models.infrastructure_opportunity import InfraOpportunity, InfraOpportunityRun
 
-    if resolution_seconds not in ORIGINS_BY_RESOLUTION:
+    if resolution_seconds not in (60, 300, 900):
         raise ValueError("resolution_seconds must be 60, 300 or 900")
-    config = config_from_connection(connection)
+    registration = provider_for_connection(connection)
+    config = registration.config_parser(connection)
     if not config.enabled:
         raise PermissionError("infrastructure metric collection is disabled")
+    rightsizing = rightsizing or rightsizing_for(registration.provider)
     start, end = window_bounds(as_of or datetime.now(timezone.utc), days)
     run = InfraOpportunityRun(
         connection_id=int(connection.id), status="RUNNING", engine_version=ENGINE_VERSION,
         policy_version=DEFAULT_POLICY["version"], window_start_utc=start, window_end_utc=end,
-        resolution_seconds=resolution_seconds,
-        created_by=user_id, readiness_counts={},
+        resolution_seconds=resolution_seconds, created_by=user_id, readiness_counts={},
     )
     session.add(run)
     session.commit()
     try:
-        if capacity_reader is None:
-            from .capacity import read_oci_capacity as capacity_reader
-        capacity = capacity_reader(connection, config)
-        prices = price_reader(config.resource_ids)
+        capacity = rightsizing.read_capacity(connection, config)
+        price_books = rightsizing.price_books(tuple(config.resource_ids))
         previous = {
             (item.resource_id, item.action_type, str(item.to_config)): item
             for item in session.execute(
@@ -114,15 +102,17 @@ def run_opportunity_engine(
                 )
                 for metric in ANALYZED_METRICS
             }
-            cpu = stats["CpuUtilization"] if stats["CpuUtilization"]["samples"] else None
-            memory = stats["MemoryUtilization"] if stats["MemoryUtilization"]["samples"] else None
+            snapshot = capacity.get(resource_id)
             result = analyze_resource(
-                resource_id=resource_id, capacity=capacity.get(resource_id), cpu=cpu,
-                memory=memory, prices=prices.get(resource_id),
+                resource_id=resource_id,
+                capacity=snapshot if isinstance(snapshot, CapacitySnapshot) else None,
+                cpu=stats[CPU_METRIC] if stats[CPU_METRIC]["samples"] else None,
+                memory=stats[MEMORY_METRIC] if stats[MEMORY_METRIC]["samples"] else None,
+                catalog=rightsizing.sizing_catalog, price_book=price_books.get(resource_id),
             )
             prior = previous.get((resource_id, result["action_type"], str(result["to_config"])))
-            opportunity = InfraOpportunity(
-                run_id=run.id, connection_id=int(connection.id), provider="oci",
+            session.add(InfraOpportunity(
+                run_id=run.id, connection_id=int(connection.id), provider=registration.provider,
                 resource_id=resource_id, resource_name=result["resource_name"],
                 action_type=result["action_type"], readiness_status=result["readiness_status"],
                 state=prior.state if prior else "NEW", state_note=prior.state_note if prior else None,
@@ -132,8 +122,7 @@ def run_opportunity_engine(
                 currency=result["currency"], rationale=result["rationale"], risks=result["risks"],
                 evidence=result["evidence"], inputs_hash=result["inputs_hash"],
                 engine_version=result["engine_version"],
-            )
-            session.add(opportunity)
+            ))
             results.append(result)
         savings = [
             item["monthly_saving"] for item in results

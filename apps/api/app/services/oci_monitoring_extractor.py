@@ -13,6 +13,7 @@ in the catalog mappings, when the Silver is reprocessed.
 from __future__ import annotations
 
 import calendar
+from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 import json
 import logging
@@ -287,3 +288,24 @@ class OciMonitoringExtractor:
             return {"status": "OK", "message": "OCI Monitoring acessível com as credenciais da conexão de referência"}
         except Exception as exc:  # noqa: BLE001
             return {"status": "FAILED", "message": str(exc)[:500]}
+
+
+@dataclass(frozen=True)
+class MonitoringScope:
+    """Allowlisted scope of a monitoring source, as the engine and readers see it."""
+    enabled: bool
+    region: str | None
+    resource_ids: tuple[str, ...]
+    resolution: str
+    extractor: "OciMonitoringExtractor"
+
+    def oci_config(self) -> dict:
+        return self.extractor.oci_config()
+
+
+def monitoring_scope(connection: SourceConnection) -> MonitoringScope:
+    extractor = OciMonitoringExtractor(connection)
+    return MonitoringScope(
+        enabled=bool(extractor.resource_ids), region=extractor.oci_config().get("region"),
+        resource_ids=tuple(extractor.resource_ids), resolution=extractor.resolution, extractor=extractor,
+    )

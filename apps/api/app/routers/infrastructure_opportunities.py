@@ -107,8 +107,14 @@ def _execute(connection_id: int, days: int, resolution_seconds: int, user_id: in
 @router.post("/executar")
 async def run_engine(body: RunRequest, user=Depends(get_current_user), db: AsyncSession = Depends(get_db)):
     connection = await db.get(SourceConnection, body.connection_id)
-    if not connection or connection.connector_type != "oci":
-        raise HTTPException(404, "Conexão OCI não encontrada")
+    if not connection:
+        raise HTTPException(404, "Fonte de métricas não encontrada")
+    try:
+        from app.services.infrastructure_metrics.registry import provider_for_connection, rightsizing_for
+
+        rightsizing_for(provider_for_connection(connection).provider)
+    except LookupError as exc:
+        raise HTTPException(422, f"Fonte sem rightsizing configurado: {exc}") from exc
     await _authorize(user, db, connection.id, "create")
     running = (await db.execute(select(InfraOpportunityRun.id).where(
         InfraOpportunityRun.connection_id == connection.id, InfraOpportunityRun.status == "RUNNING",
@@ -209,12 +215,13 @@ async def get_opportunity(opportunity_id: int, user=Depends(get_current_user), d
 
 
 def _read_chart_series(item: InfraOpportunity, run: InfraOpportunityRun, resolution_seconds: int) -> dict:
-    from app.services.infrastructure_metrics.opportunity_runner import ANALYZED_METRICS, read_native_series
+    from app.services.infrastructure_metrics.opportunities import CPU_METRIC
+    from app.services.infrastructure_metrics.opportunity_runner import ANALYZED_METRICS, read_series
 
     points: dict[str, dict] = {}
     for metric in ANALYZED_METRICS:
-        key = "cpu" if metric == "CpuUtilization" else "memory"
-        for row in read_native_series(
+        key = "cpu" if metric == CPU_METRIC else "memory"
+        for row in read_series(
             item.connection_id, item.resource_id, metric, run.window_start_utc, run.window_end_utc, resolution_seconds,
         ):
             point = points.setdefault(row["bucket_start_utc"], {"t": row["bucket_start_utc"]})
