@@ -61,7 +61,7 @@ export default function ReprocessForecastTab() {
       {error && <Alert severity="error" onClose={() => setError("")}>{dataDisplayText(error)}</Alert>}
 
       {configs.length === 0 ? (
-        <Typography color="text.secondary">Nenhuma configuração de Forecast. Crie em Perfis de Forecast.</Typography>
+        <Typography color="text.secondary">O perfil único de Forecast ainda não foi configurado. Acesse Perfil de Forecast para revisar a configuração.</Typography>
       ) : (
         <Stack spacing={1}>
           {configs.map(config => (

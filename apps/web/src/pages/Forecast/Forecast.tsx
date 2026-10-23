@@ -191,7 +191,7 @@ export default function Forecast() {
       {/* Faixa de contexto branca */}
       <Box sx={{ mb: 3 }}>
         <Box sx={{ mb: 2 }}>
-          <Typography variant="h4" component="h1">{tab === "rules" ? "Regras de negócio do Forecast" : tab === "history" ? "Histórico do Forecast" : tab === "accuracy" ? "Precisão do Forecast" : "Perfis de Forecast"}</Typography>
+          <Typography variant="h4" component="h1">{tab === "rules" ? "Regras de negócio do Forecast" : tab === "history" ? "Histórico do Forecast" : tab === "accuracy" ? "Precisão do Forecast" : "Perfil de Forecast"}</Typography>
           <Typography color="text.secondary" sx={{ mt: 0.5 }}>
             Forecast de custos sobre as bases consolidadas, com regras de negócio e alocação por intervalo.
           </Typography>

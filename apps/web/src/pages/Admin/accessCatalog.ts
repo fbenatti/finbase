@@ -42,7 +42,7 @@ export const ACCESS_AREAS: AccessArea[] = [
     area: "Regras de negócio",
     screens: [
       { route: "/alertas/configuracao", label: "Parâmetros de detecção", module: "anomalies" },
-      { route: "/projecoes/configuracao", label: "Perfis de Forecast", module: "forecast" },
+      { route: "/projecoes/configuracao", label: "Perfil de Forecast", module: "forecast" },
       { route: "/projecoes/regras", label: "Regras de negócio do Forecast", module: "forecast" },
       { route: "/projecoes/precisao/desvios", label: "Variações do Forecast", module: "forecast" },
       { route: "/projecoes/precisao/justificativas", label: "Justificativas de variação", module: "forecast" },

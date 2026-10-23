@@ -391,7 +391,7 @@
   {
     "code": "projecoes_configuracao",
     "parent_code": "section_regras_negocio",
-    "label": "Perfis de Forecast",
+    "label": "Perfil de Forecast",
     "path": "/projecoes/configuracao",
     "renderer": "Forecast",
     "view_params": {
