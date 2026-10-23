@@ -307,7 +307,6 @@ async def generate_metric_profile(
             "billing_period": None,
             "requested_days": max(1, int((end - start).total_seconds() // 86400)),
             "observed_days": len({item["bucket_start_utc"].strftime("%Y%m%d") for item in normalized}),
-            "p50": None,
             "threshold_durations_json": None,
             "profile_hash_inputs": profile["profile_hash"],
             "confidence": "PARTIAL" if profile["coverage"] < 1 else "OBSERVED",
