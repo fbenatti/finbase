@@ -88,7 +88,7 @@ def query_results_to_silver_rows(
                     "source_descriptor_hash": descriptor_hash,
                     "dimensions_json": labels_json,
                     "dimensions_hash": labels_digest,
-                    "dimension_schema_version": 2,
+                    "dimension_schema_version": 1,
                     "bucket_start_utc": timestamp.replace(tzinfo=None),
                     "bucket_end_utc": timestamp.replace(tzinfo=None) + timedelta(seconds=interval),
                     "aggregation_interval_seconds": interval,
