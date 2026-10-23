@@ -254,13 +254,24 @@ async def generate_metric_profile(
     if not connection or connection.connector_type != "oci":
         raise HTTPException(404, "Conexão OCI não encontrada")
     await _authorize_connection(user, db, connection.id, "read")
+    try:
+        config = config_from_connection(connection)
+        if not config.enabled:
+            raise ValueError("coleta de métricas está desabilitada nesta conexão")
+        if body.resource_id not in config.resource_ids:
+            raise ValueError("recurso fora da allowlist desta conexão")
+        descriptor = get_metric("oci", "oci_computeagent", body.metric)
+        if descriptor.name not in config.metric_names:
+            raise ValueError("métrica fora da allowlist desta conexão")
+    except (ValueError, LookupError) as exc:
+        raise HTTPException(422, str(exc)) from exc
 
     filters = {
         "_source_connection_id": int(connection.id),
         "resource_id": body.resource_id,
         "source_metric_name": body.metric,
         "resolution_seconds": body.resolution_seconds,
-        "origin_kind": "PROVIDER_NATIVE",
+        "origin_kind": "NATIVE",
         "bucket_start_utc__gte": start.replace(tzinfo=None),
         "bucket_start_utc__lt": end.replace(tzinfo=None),
     }
