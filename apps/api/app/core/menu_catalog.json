@@ -450,6 +450,21 @@
     "api_prefixes": []
   },
   {
+    "code": "otimizacao_rightsizing_infra",
+    "parent_code": "section_otimizacao",
+    "label": "Rightsizing de infraestrutura",
+    "path": "/otimizacao/rightsizing-infra",
+    "renderer": "InfrastructureOpportunities",
+    "view_params": {},
+    "permission_module": "infrastructure_metrics",
+    "position": 3,
+    "icon": "SavingsOutlined",
+    "required": false,
+    "development_only": false,
+    "legacy_path": null,
+    "api_prefixes": []
+  },
+  {
     "code": "otimizacao_compromissos_e_compras",
     "parent_code": "section_otimizacao",
     "label": "Compras e compromissos",
