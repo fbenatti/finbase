@@ -749,7 +749,7 @@ export default function GoldDashboard() {
       {tab === "visao-executiva" && (
         <CostSummary
           table={table}
-          director={globalDirector || "Consumo de nuvem"}
+          director={globalDirector || ""}
           departmentId={filters.deptId ?? undefined}
           path={filters.path}
           includeSharedCost={includeSharedCost}
