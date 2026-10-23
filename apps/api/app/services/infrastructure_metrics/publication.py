@@ -107,8 +107,10 @@ def ensure_metric_series_table(*, namespace: str = "silver") -> bool:
     queries on the first persisted collection, so an empty/unsupported metric
     response still leaves the agreed schema visible in the catalog.
     """
-    import pyarrow as pa
-    from pyiceberg.io.pyarrow import pyarrow_to_schema
+    from pyiceberg.schema import Schema
+    from pyiceberg.types import (
+        BooleanType, DoubleType, LongType, NestedField, StringType, TimestampType,
+    )
 
     from app.services import iceberg_service
     from app.services.destination_slice import (
@@ -117,15 +119,17 @@ def ensure_metric_series_table(*, namespace: str = "silver") -> bool:
     )
     from app.services.silver_models import METRIC_SERIES
 
-    arrow_types = {
-        "varchar": pa.string(), "decimal": pa.float64(), "double": pa.float64(),
-        "bigint": pa.int64(), "boolean": pa.bool_(), "timestamp": pa.timestamp("us"),
+    iceberg_types = {
+        "varchar": StringType(), "decimal": DoubleType(), "double": DoubleType(),
+        "bigint": LongType(), "boolean": BooleanType(), "timestamp": TimestampType(),
     }
-    arrow_schema = pa.schema([
-        pa.field(field.name, arrow_types[field.type], nullable=not field.required)
-        for field in METRIC_SERIES.fields
+    target_schema = Schema(*[
+        NestedField(
+            field_id=index, name=field.name, field_type=iceberg_types[field.type],
+            required=field.required,
+        )
+        for index, field in enumerate(METRIC_SERIES.fields, start=1)
     ])
-    target_schema = pyarrow_to_schema(arrow_schema)
     table_name = METRIC_SERIES.table
     if iceberg_service.table_exists(table_name, namespace=namespace):
         table = iceberg_service.get_catalog().load_table((namespace, table_name))
