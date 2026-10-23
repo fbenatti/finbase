@@ -1,7 +1,7 @@
 """Deterministic P90/P95/P99 profiles over one explicitly selected bucket series."""
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 import hashlib
 import math
 from typing import Iterable, Mapping
@@ -76,8 +76,14 @@ def build_window_profiles(
     for key, buckets in groups.items():
         values = list(buckets.values())
         ordered_times = sorted(buckets)
-        gaps = [int((right - left).total_seconds())
-                for left, right in zip(ordered_times, ordered_times[1:])]
+        # Count only missing buckets, including missing buckets at both window
+        # edges; regular cadence is not itself a gap.
+        gap_buckets = [max(0, int((ordered_times[0] - start).total_seconds() // resolution_seconds))]
+        gap_buckets.extend(
+            max(0, int((right - left).total_seconds() // resolution_seconds) - 1)
+            for left, right in zip(ordered_times, ordered_times[1:])
+        )
+        gap_buckets.append(max(0, int((end - ordered_times[-1]).total_seconds() // resolution_seconds) - 1))
         coverage = min(1.0, len(values) / expected)
         row = metadata[key]
         identity_payload = {
@@ -109,11 +115,13 @@ def build_window_profiles(
             "policy_version": policy_version,
             "window_start_utc": start,
             "window_end_utc": end,
+            "window_from_day": start.strftime("%Y%m%d"),
+            "window_to_day": (end - timedelta(microseconds=1)).strftime("%Y%m%d"),
             "samples": len(values),
             "expected_buckets": expected,
             "observed_duration_seconds": min((end - start).total_seconds(), len(values) * resolution_seconds),
             "coverage": coverage,
-            "largest_gap_seconds": max(gaps, default=0),
+            "largest_gap_seconds": max(gap_buckets, default=0) * resolution_seconds,
             "value_min": min(values),
             "p90": _linear_quantile(values, 90),
             "p95": _linear_quantile(values, 95),
@@ -122,6 +130,6 @@ def build_window_profiles(
             "value_avg": sum(values) / len(values),
             "capacity_snapshot_id": row.get("capacity_snapshot_id"),
             "profile_hash": profile_hash,
-            "profile_built_at": datetime.now(timezone.utc),
+            "profile_built_at": datetime.now(timezone.utc).isoformat(),
         })
     return profiles
