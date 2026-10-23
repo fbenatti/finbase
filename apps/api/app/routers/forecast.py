@@ -1564,6 +1564,13 @@ _DESVIOS_GRAIN_TTL = 600.0
 _SKU_DIMENSION_CANDIDATES = ("skumeter", "skuid", "resource_sku", "sku_name", "sku")
 
 
+def _sku_value_filter(column: str, value: str, null_label: str) -> str:
+    expression = _qi(column)
+    if value == null_label:
+        return f" AND ({expression} IS NULL OR TRIM(CAST({expression} AS VARCHAR)) = '')"
+    return f" AND TRIM(CAST({expression} AS VARCHAR)) = {_ql(value)}"
+
+
 async def _forecast_sku_column(
     snapshot: dict[str, Any],
     forecast_schema: dict[str, str],
@@ -2095,8 +2102,9 @@ async def create_ack(body: AckIn, db: AsyncSession = Depends(get_db)):
                 if period_col else f"date_format({date_expr}, '%Y%m') = {_ql(target)}"
             )
             scope_filter = _department_scope_filter(" > ".join(sku_scope))
-            sku_filter_forecast = f" AND TRIM(CAST({_qi(forecast_sku)} AS VARCHAR)) = {_ql(sku_value)}"
-            sku_filter_actual = f" AND TRIM(CAST({_qi(actual_sku)} AS VARCHAR)) = {_ql(sku_value)}"
+            null_label = str(snapshot.get("null_dimension_label") or "Não classificado")
+            sku_filter_forecast = _sku_value_filter(forecast_sku, sku_value, null_label)
+            sku_filter_actual = _sku_value_filter(actual_sku, sku_value, null_label)
             totals = await trino_execute(
                 f"SELECT 'forecast' AS source, SUM(TRY_CAST(\"forecast_value\" AS DOUBLE)) AS value "
                 f"FROM iceberg.forecast.{run.result_table} WHERE \"forecast_month\" = {_ql(target)} "
