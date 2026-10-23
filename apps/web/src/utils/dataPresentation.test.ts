@@ -27,4 +27,12 @@ describe("data presentation boundaries", () => {
     expect(dataDisplayText("Origem: iceberg.silver")).toBe("Origem: Base preparada");
     expect(dataDisplayText("Falha no Treno")).toBe("Falha no serviço de consultas");
   });
+
+  it("hides customer and infrastructure clues in user-facing messages", () => {
+    const message = dataDisplayText("Falha no Iceberg para 4P (ibm-ti / dimon): Vivo TLF Telefónica; PostgreSQL e Trino indisponíveis.");
+    expect(message).not.toMatch(/iceberg|4p|ibm-ti|dimon|vivo|tlf|telef[oó]nica|postgres|trino/i);
+    expect(message).toContain("ambiente configurado");
+    expect(message).toContain("serviço de consultas");
+    expect(message).toContain("banco de dados");
+  });
 });
