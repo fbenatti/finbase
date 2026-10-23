@@ -55,7 +55,10 @@ async def materialize_dollar_evolution_cube(session: Any, *, run_id: int) -> int
     provider = schema.get("serviceprovidername")
     exchange_rate = schema.get("source_exchange_rate")
     if not exchange_rate:
-        raise RuntimeError("Silver FOCUS precisa expor source_exchange_rate para o cubo de câmbio")
+        # Fontes sem conversão cambial (como uma base apenas OCI em BRL) não
+        # precisam do cubo auxiliar de câmbio para publicar a visão de custos.
+        logger.info("Cubo de câmbio ignorado: Silver FOCUS sem source_exchange_rate")
+        return 0
     period_text = f"CAST({_quote_ident(period)} AS VARCHAR)"
     month_expr = (
         f"CASE WHEN regexp_like({period_text}, '^[0-9]{{6}}') "
