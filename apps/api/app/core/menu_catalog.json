@@ -166,23 +166,6 @@
     "api_prefixes": []
   },
   {
-    "code": "alertas_configuracao",
-    "parent_code": "section_regras_negocio",
-    "label": "Parâmetros de detecção",
-    "path": "/alertas/configuracao",
-    "renderer": "Anomalies",
-    "view_params": {
-      "tab": "7"
-    },
-    "permission_module": "anomalies",
-    "position": 1,
-    "icon": "SettingsOutlined",
-    "required": false,
-    "development_only": true,
-    "legacy_path": "/alertas",
-    "api_prefixes": []
-  },
-  {
     "code": "section_planejamento",
     "parent_code": null,
     "label": "Orçamento e Forecast",
@@ -210,6 +193,23 @@
     "required": false,
     "development_only": false,
     "legacy_path": null,
+    "api_prefixes": []
+  },
+  {
+    "code": "alertas_configuracao",
+    "parent_code": "section_regras_negocio",
+    "label": "Parâmetros de detecção",
+    "path": "/alertas/configuracao",
+    "renderer": "Anomalies",
+    "view_params": {
+      "tab": "7"
+    },
+    "permission_module": "anomalies",
+    "position": 1,
+    "icon": "SettingsOutlined",
+    "required": false,
+    "development_only": true,
+    "legacy_path": "/alertas",
     "api_prefixes": []
   },
   {
