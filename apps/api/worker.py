@@ -1665,6 +1665,7 @@ def consumer_main(worker_id: int):
                             collection_run_id=str(task_id),
                             persist=payload.get("persist") is True,
                             should_abort=lambda: _is_etl_task_cancelled(task_id),
+                            config_snapshot=payload.get("config_snapshot"),
                         )
                         task_row = metrics_session.get(_EtlTask, task_id)
                         if task_row and task_row.status != "CANCELLED":
