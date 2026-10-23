@@ -173,26 +173,13 @@ export default function Forecast() {
     }
   };
 
-  const removeConfig = async () => {
-    if (!deleteConfigPending) return;
-    try {
-      await deleteForecastConfig(deleteConfigPending.id);
-      setDeleteConfigPending(null);
-      setMessage("Perfil excluído");
-      await load();
-      void loadConfigsGrid(configsQueryRef.current);
-    } catch (e) {
-      setError(String(e));
-    }
-  };
-
   const removeRule = async () => {
-    if (!rulesConfigId || !rulePendingDeletion) return;
+    if (!profile || !rulePendingDeletion) return;
     try {
       await deleteForecastBusinessRule(rulePendingDeletion.id);
       setRulePendingDeletion(null);
       setMessage("Regra removida");
-      void loadRulesGrid(rulesConfigId, rulesQueryRef.current);
+      await loadRules(profile);
     } catch (e) {
       setError(String(e));
     }
