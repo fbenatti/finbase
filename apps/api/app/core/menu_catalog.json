@@ -928,7 +928,7 @@
   },
   {
     "code": "governanca_regras_de_ajuste",
-    "parent_code": "section_regras_negocio",
+    "parent_code": "section_governanca",
     "label": "Regras financeiras",
     "path": "/governanca/regras-de-ajuste",
     "renderer": "Governance",
