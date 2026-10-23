@@ -9,7 +9,6 @@ A busca do menu encontra qualquer tela pelo próprio nome, em qualquer nível, s
 - **Resumo de custos**: `/custos/resumo`
 - **Orçamento**: `/planejamento/historico-do-orcamento`
 - **Compromissos**: `/planejamento/consumo-de-compromissos`
-- **Histórico de contratos**: `/planejamento/historia-dos-contratos`
 - **Câmbio do dólar**: `/planejamento/evolucao-do-dolar`
 - **Visão de alertas**: `/alertas/painel` (antiga `/alertas/visao-geral`, redirecionada) _(em desenvolvimento)_
 - **Painel de desligamento**: `/otimizacao/desligamento/painel`

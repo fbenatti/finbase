@@ -35,7 +35,7 @@ Resumo do que foi reescrito em cada módulo do frontend, com o estado de cada um
 | Acurácia da previsão (ForecastAccuracy, Desvios, Acks) | Aderência, desvios, justificativas | Feito; categorias gravadas mantidas |
 | Visão esperada e dashboards (ExpectedView, ExpectedViewV2, Acks/BudgetAccuracy widgets) | Títulos, legendas, filtros | Feito |
 | Dashboard de custos (GoldDashboard e variantes, CostSummary, VisaoContabil, DesligueProgramado, Hierarchical) | Cabeçalhos, filtros, widgets | Feito; alguns valores de dado mantidos |
-| Planejamento (BudgetAccuracy, BudgetDefensePanel, ContractStoryDashboard, FinancialPlanning, DollarEvolution) | Textos de defesa, história do contrato, câmbio | Feito |
+| Planejamento (BudgetAccuracy, BudgetDefensePanel, FinancialPlanning, DollarEvolution) | Textos de defesa, câmbio | Feito |
 | Planejamento (Planning.tsx, MonthlyValuesDialog) | Não mexido: outra thread é dona | Pendente |
 | Fontes de dados (Connections, AzureSourcesPanel, ConnectionsDataGrid, IntegrationsPanel, ManualCsvUploadDialog) | Nomes de fonte, testes, formulários | Feito |
 | Serviços de apoio (IntegrationsPanel) | Serviços, tipos, mensagens | Feito |

@@ -27,7 +27,7 @@ Tamanhos explícitos de componentes especializados continuam permitidos quando n
   filtros, busca, ações de importação/exportação/publicação, grade com rolagem,
   paginação e virtualização, legenda única e histórico de versões.
 - A estrutura de Planejamento não repete os cabeçalhos dos componentes filhos.
-  Aderência ao orçamento, Histórico do orçamento e História dos contratos usam
+  Aderência ao orçamento e Histórico do orçamento usam
   o espaçamento do contêiner principal.
 - Configuração, regras, histórico e precisão de projeções usam o mesmo tema e
   títulos correspondentes às suas rotas.

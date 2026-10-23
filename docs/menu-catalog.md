@@ -42,9 +42,9 @@ retiradas anteriormente da navegação, sem recolocá-las nos menus.
 
 `view_params` são detalhes internos para selecionar a implementação legada. O hook
 `useMenuSearchParams` combina esses valores fixos com os filtros dos widgets. Os
-seletores de página recebidos pela URL são ignorados, portanto acrescentar
-`?executive=historia-contrato` a outra página não troca sua identidade nem suas permissões.
-Favoritos antigos são redirecionados à rota registrada, preservando filtros como mês.
+seletores de página recebidos pela URL são ignorados, portanto parâmetros antigos
+não trocam a identidade nem as permissões de outra página. Favoritos antigos são
+redirecionados à rota registrada, preservando filtros como mês.
 
 ## Disponibilidade e permissões
 
@@ -55,8 +55,8 @@ administrativa `modules` para ler ou alterar configurações.
 
 A interface valida o acesso no backend antes de montar a página e informa sua identidade
 nas chamadas de API. O middleware verifica essa identidade contra a sessão. Recursos
-exclusivos declarados no catálogo, como `/planning/contract-story`, são verificados
-independentemente do cabeçalho, impedindo contorno por omissão ou troca do código.
+exclusivos declarados no catálogo são verificados independentemente do cabeçalho,
+impedindo contorno por omissão ou troca do código.
 O RBAC existente continua protegendo os endpoints compartilhados. Este controle organiza
 a disponibilidade das funcionalidades; não introduz separação dos dados financeiros
 armazenados por cliente.
@@ -67,18 +67,18 @@ armazenados por cliente.
 - Frontend: em `apps/web`, `npx vitest run src/navigation/routes.test.ts` e `npm run build`.
 
 Os testes usam banco isolado e cobrem clientes diferentes, restrições de administração,
-desativação de grupos, escopos de leitura, acesso direto ao recurso de contratos e
-migração dos links. A validação do catálogo confere rotas únicas e renderers registrados.
+desativação de grupos, escopos de leitura e migração dos links. A validação do catálogo
+confere rotas únicas e renderers registrados.
 
 
 ## Revisão de agrupamento (Panorama e busca)
 
-- Painéis de leitura foram para **Panorama**: Resumo de custos, Orçamento, Compromissos, Histórico de contratos, Câmbio do dólar, Visão de alertas e Painel de desligamento. Continuam com a mesma rota, o mesmo `view_params` e o mesmo `permission_module`.
+- Painéis de leitura foram para **Panorama**: Resumo de custos, Orçamento, Compromissos, Câmbio do dólar, Visão de alertas e Painel de desligamento. Continuam com a mesma rota, o mesmo `view_params` e o mesmo `permission_module`.
 - Os grupos Planejamento, Alertas, Otimização, Dados e operação, Governança e Administração foram reordenados por função. O `position` é reiniciado em cada grupo.
 - Rótulos passaram a seguir o glossário em [finbase-data-language.md](finbase-data-language.md). Códigos, caminhos e permissões não mudaram.
 - As cinco telas fora do menu (Reservas Azure, Tags Automatizadas, Carta de crédito, Defesa orçamentária e Pedidos SAP) mantêm o grupo de origem.
 - A busca do menu (`apps/web/src/navigation/menuSearchIndex.ts`) compara só o rótulo de cada tela, em qualquer nível. A permissão ainda exige que o grupo ancestral esteja liberado.
-- O teste `test_group_disables_children_and_required_admin_cannot_be_disabled` agora desativa `section_planejamento` e confirma que a história dos contratos continua acessível pelo Panorama.
+- O teste `test_group_disables_children_and_required_admin_cannot_be_disabled` desativa `section_planejamento` e confirma que os itens do grupo seguem a disponibilidade configurada.
 - A árvore completa está em [finbase-navigation-inventory.md](finbase-navigation-inventory.md).
 
 ## Ajustes de menu (feedback de Fernando)
