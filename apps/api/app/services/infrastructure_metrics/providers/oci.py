@@ -87,6 +87,7 @@ class OciMetricsAdapter:
                     }
                     raw_payloads.append({
                         "resource_id": resource_id,
+                        "compartment_id": self._compartment_id,
                         "statistic": statistic,
                         "status_code": int(getattr(response, "status", 200) or 200),
                         "request_id": safe_headers.get("opc-request-id"),
@@ -112,6 +113,7 @@ class OciMetricsAdapter:
                     errors.append((status, code))
                     raw_payloads.append({
                         "resource_id": resource_id,
+                        "compartment_id": self._compartment_id,
                         "statistic": statistic,
                         "status_code": status or 502,
                         "error_code": code,
