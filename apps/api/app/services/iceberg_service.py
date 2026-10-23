@@ -1815,6 +1815,7 @@ def publish_staged_partition(
     *,
     billing_period: str | None = None,
     snapshot_date: str | None = None,
+    metric_day: str | None = None,
     connection_id: int,
     namespace: str = "silver",
     partition_spec_json: dict | None = None,
@@ -1849,6 +1850,7 @@ def publish_staged_partition(
         connection_id=connection_id,
         billing_period=billing_period,
         snapshot_date=snapshot_date,
+        metric_day=metric_day,
         expected_row_count=expected_row_count if expected_row_count is not None else row_count,
     )
 
@@ -1905,6 +1907,7 @@ def publish_staged_partition(
         connection_id=connection_id,
         billing_period=billing_period,
         snapshot_date=snapshot_date,
+        metric_day=metric_day,
     )
     batches = [batch for batch in staged.scan().to_arrow_batch_reader() if batch.num_rows]
     last_exc: Exception | None = None
@@ -1933,7 +1936,11 @@ def publish_staged_partition(
     # The native write above created new target files, so staging can be safely
     # removed with all of its now-unreferenced files.
     _force_delete_table(staging_id, temp_safe_name)
-    slice_label = snapshot_date if slice_config.grain == "snapshot_date" else billing_period
+    slice_label = (
+        billing_period if slice_config.grain == "billing_period"
+        else snapshot_date if slice_config.grain == "snapshot_date"
+        else metric_day
+    )
     logger.info(
         "Published %d rows for %s/%s into %s.%s",
         row_count,
@@ -1952,6 +1959,7 @@ def publish_silver_dataframe_slice(
     connection_id: int,
     billing_period: str | None = None,
     snapshot_date: str | None = None,
+    metric_day: str | None = None,
     column_types: Optional[dict[str, str]] = None,
     partition_spec_json: dict | None = None,
     namespace: str = "silver",
@@ -1976,6 +1984,7 @@ def publish_silver_dataframe_slice(
         connection_id=connection_id,
         billing_period=billing_period,
         snapshot_date=snapshot_date,
+        metric_day=metric_day,
     )
     temp_name = write_destination_staged(
         physical_name,
@@ -1990,6 +1999,7 @@ def publish_silver_dataframe_slice(
         temp_name,
         billing_period=billing_period,
         snapshot_date=snapshot_date,
+        metric_day=metric_day,
         connection_id=connection_id,
         namespace=namespace,
         partition_spec_json=partition_spec_json,
