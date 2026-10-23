@@ -4,7 +4,7 @@ import { dataDisplayText } from "../../utils/dataPresentation";
 import { useEffect, useId, useMemo, useState } from "react";
 import { Alert, Box, Button, Chip, CircularProgress, Stack, Typography } from "@mui/material";
 import {
-  GoldQueryFilter, GoldQueryResult, formatApiError, queryDimonTable,
+  GoldQueryFilter, GoldQueryResult, formatApiError, getGoldSchema, queryDimonTable,
 } from "../../services/api";
 import { ORG } from "../../constants/orgLabels";
 
@@ -188,7 +188,7 @@ export default function HierarchicalDecompTree({
   table,
   baseFilters,
   filterGroups = [],
-  chain,
+  chain: requestedChain,
   queryKey,
   onApplyContext,
   shareCaption = "participação no contexto vigente",
@@ -223,6 +223,19 @@ export default function HierarchicalDecompTree({
   const [showOtherChildren, setShowOtherChildren] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
+  const [availableFields, setAvailableFields] = useState<Set<string> | null>(null);
+
+  useEffect(() => {
+    let alive = true;
+    setAvailableFields(null);
+    setLoading(true);
+    getGoldSchema(table)
+      .then(columns => { if (alive) setAvailableFields(new Set(columns.map(column => column.name.toLowerCase()))); })
+      .catch(reason => { if (alive) { setError(formatApiError(reason, "Não foi possível consultar as colunas da base")); setLoading(false); } });
+    return () => { alive = false; };
+  }, [table]);
+
+  const chain = useMemo(() => requestedChain.filter(item => availableFields?.has(item.field.toLowerCase())), [requestedChain, availableFields]);
 
   useEffect(() => {
     setTreePath([]);
@@ -247,6 +260,7 @@ export default function HierarchicalDecompTree({
     setShowOtherChildren(false);
   }, [treePathKey, chainKey]);
   useEffect(() => {
+    if (!availableFields) return;
     let alive = true;
     setLoading(true);
     setError("");
@@ -314,7 +328,7 @@ export default function HierarchicalDecompTree({
     });
     return () => { alive = false; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [table, queryKey, treePathKey, chainKey, measureColumn, showOtherChildren, labelManualForecast]);
+  }, [table, queryKey, treePathKey, chainKey, measureColumn, showOtherChildren, labelManualForecast, availableFields]);
 
   const spineCosts = useMemo(() => {
     const arr: number[] = [];
