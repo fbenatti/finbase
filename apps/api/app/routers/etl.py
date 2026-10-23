@@ -188,6 +188,9 @@ async def scan_blobs(connection_id: int, db: AsyncSession = Depends(get_db)):
         from app.services.oci_extractor import OciExtractor
         extractor = OciExtractor(conn)
         return await extractor.scan(db)
+    if conn.connector_type == "oci_monitoring":
+        from app.services.oci_monitoring_extractor import OciMonitoringExtractor
+        return await OciMonitoringExtractor(conn).scan(db)
     if conn.connector_type == "mongodb_atlas":
         from app.services.mongodb_extractor import MongoAtlasExtractor
         extractor = MongoAtlasExtractor(conn)
@@ -553,7 +556,7 @@ async def run_etl(request: EtlRunRequest, db: AsyncSession = Depends(get_db)):
         # PTU is an operational source, not an Azure Blob export.  It is
         # executed by the worker through the PTU collector below.
         pass
-    elif conn.connector_type not in ("azure_blob", "gcp_bigquery", "oci", "mongodb_atlas", "github_billing", "github_license", "github_token", "notebooklm_license", "notebooklm_token", "claude_license", "claude_token", "gemini_license", "gemini_token", "gemini_notebooklm", "databricks", "azure_resource_graph"):
+    elif conn.connector_type not in ("azure_blob", "gcp_bigquery", "oci", "oci_monitoring", "mongodb_atlas", "github_billing", "github_license", "github_token", "notebooklm_license", "notebooklm_token", "claude_license", "claude_token", "gemini_license", "gemini_token", "gemini_notebooklm", "databricks", "azure_resource_graph"):
         return {
             "task_id": 0,
             "status": "NOT_IMPLEMENTED",
@@ -797,6 +800,10 @@ async def _execute_connection_test(conn: SourceConnection) -> dict[str, str]:
         finally:
             if service is not None:
                 service.close()
+
+    if conn.connector_type == "oci_monitoring":
+        from app.services.oci_monitoring_extractor import OciMonitoringExtractor
+        return OciMonitoringExtractor(conn).test_connection()
 
     if conn.connector_type == "gcp_bigquery":
         try:

@@ -35,7 +35,10 @@ export const SOURCE_PROVIDERS: SourceProvider[] = [
   },
   {
     key: "oci", label: "Oracle Cloud", description: "Custos da OCI", icon: <Cloud />,
-    kinds: [{ connectorType: "oci", label: "Custos e faturas", description: "Relatórios de custo da Oracle Cloud" }],
+    kinds: [
+      { connectorType: "oci", label: "Custos e faturas", description: "Relatórios de custo da Oracle Cloud" },
+      { connectorType: "oci_monitoring", label: "Métricas de uso", description: "CPU, memória, disco e rede pelo OCI Monitoring" },
+    ],
   },
   {
     key: "atlas", label: "MongoDB Atlas", description: "Oferta no marketplace", icon: <Dataset />,

@@ -104,6 +104,8 @@ function getConnectionSummary(connection: SourceConnection): string {
     }
     case "oci":
       return [config.region, config.tenancy_ocid || config.tenancy].filter(Boolean).join(" · ") || "Região não definida";
+    case "oci_monitoring":
+      return [config.region, config.resolution, `${(config.resource_ids as unknown as string[] | undefined)?.length ?? 0} recurso(s)`].filter(Boolean).join(" · ");
     case "mongodb_atlas":
       return [config.group_id, config.contract_type].filter(Boolean).join(" · ") || "Grupo e contrato não definidos";
     case "manual_csv":

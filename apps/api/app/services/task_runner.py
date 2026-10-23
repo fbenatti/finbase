@@ -30,6 +30,7 @@ from app.services.azure_extractor import AzureExtractor, derive_billing_period
 from app.services.gcp_bigquery_extractor import GcpBigQueryExtractor
 from app.services.oci_extractor import OciExtractor, derive_billing_period_oci
 from app.services.mongodb_extractor import MongoAtlasExtractor
+from app.services.oci_monitoring_extractor import OciMonitoringExtractor
 from app.services.github_extractor import GithubBillingExtractor
 from app.services.github_license_extractor import GithubLicenseExtractor
 from app.services.github_token_extractor import GithubTokenExtractor
@@ -2603,6 +2604,77 @@ def _process_mongodb_invoice_sync_worker(
             pass
 
 
+def _process_oci_monitoring_sync(
+    session: Session,
+    extractor: OciMonitoringExtractor,
+    blob_path: str,
+    blob_prefix: str,
+    task_id: int | None = None,
+) -> tuple[int, int, int, list[str]]:
+    """Grava em Bronze os pontos crus de uma janela OCI Monitoring.
+
+    A Silver não é escrita aqui: ela nasce do reprocessamento, aplicando os
+    mapeamentos do catálogo sobre a Bronze, como nas demais fontes.
+    """
+    conn = extractor.connection
+    _persist_download_progress(task_id, current_blob=blob_path, phase=f"OCI Monitoring: coletando {blob_path}")
+    _persist_download_blob(task_id, blob_path, "DOWNLOADING", 0, 0)
+    try:
+        df, effective_end, call_errors = extractor.fetch_window(
+            blob_path, should_abort=(lambda: _check_cancelled(task_id)) if task_id else None,
+        )
+    except Exception as exc:
+        logger.error("Falha ao coletar OCI Monitoring %s: %s", blob_path, exc)
+        return 0, 0, 0, [f"OCI Monitoring {blob_path}: {exc}"]
+    billing_period = blob_path.split("/")[-1][:7].replace("-", "")
+    if call_errors and df.empty:
+        return 0, 0, 0, [f"{blob_path}: " + "; ".join(call_errors[:5])]
+
+    existing = session.execute(
+        select(IngestedBlob).where(IngestedBlob.connection_id == conn.id, IngestedBlob.blob_path == blob_path)
+    ).scalar_one_or_none()
+    if existing:
+        session.delete(existing)
+        session.flush()
+    ingested = IngestedBlob(
+        connection_id=conn.id, blob_path=blob_path, blob_prefix=blob_prefix,
+        billing_period=billing_period, last_modified=effective_end, etag="",
+        content_length=len(df), row_count=len(df), status="INGESTED",
+    )
+    session.add(ingested)
+    session.flush()
+    if not df.empty:
+        _persist_download_blob(task_id, blob_path, "BRONZE", len(df), len(df))
+        try:
+            iceberg.replace_bronze_slice(conn.code, df, billing_period, blob_path)
+        except Exception as exc:
+            logger.error("Bronze write failed for OCI Monitoring (%s): %s", blob_path, exc)
+            session.delete(ingested)
+            session.flush()
+            return len(df), 0, 0, [f"Bronze write failed: {exc}"]
+    _persist_download_progress(task_id, phase=f"Bronze OCI Monitoring {blob_path}: {len(df)} pontos")
+    _persist_download_blob(task_id, blob_path, "BRONZE_IMPORTED", len(df), len(df))
+    return len(df), 0, 0, [f"{blob_path}: " + error for error in call_errors[:20]]
+
+
+def _process_oci_monitoring_sync_worker(
+    task_id: int,
+    item,
+    extractor: OciMonitoringExtractor,
+) -> tuple[int, int, int, list[str]]:
+    from app.database import SyncSession as WorkerSync
+
+    if _check_cancelled(task_id):
+        return 0, 0, 0, ["Cancelled"]
+    session = WorkerSync()
+    try:
+        result = _process_oci_monitoring_sync(session, extractor, item.blob_path, item.blob_prefix, task_id)
+        session.commit()
+        return result
+    finally:
+        session.close()
+
+
 def _process_github_report_sync_worker(
     task_id: int,
     item,
@@ -2874,6 +2946,10 @@ def _run_etl_sync(
             extractor = MongoAtlasExtractor(conn)
             scan_items = extractor._scan_sync(session)
             worker_fn = _process_mongodb_invoice_sync_worker
+        elif conn.connector_type == "oci_monitoring":
+            extractor = OciMonitoringExtractor(conn)
+            scan_items = extractor._scan_sync(session)
+            worker_fn = _process_oci_monitoring_sync_worker
         elif conn.connector_type == "github_license":
             extractor = GithubLicenseExtractor(conn)
             scan_items = extractor._scan_sync(session)
@@ -3028,7 +3104,7 @@ def _run_etl_sync(
             # two Pandas parsers at once kills the worker before it can commit
             # a single Bronze checkpoint; make concurrency an explicit opt-in.
             max_workers = max(1, int(os.getenv("AZURE_EXTRACTION_WORKERS", "1")))
-        elif conn.connector_type in ("gcp_bigquery", "mongodb_atlas", "github_billing", "github_license", "github_token", "notebooklm_license", "notebooklm_token", "claude_license", "claude_token", "gemini_license", "gemini_token", "gemini_notebooklm", "databricks"):
+        elif conn.connector_type in ("gcp_bigquery", "mongodb_atlas", "oci_monitoring", "github_billing", "github_license", "github_token", "notebooklm_license", "notebooklm_token", "claude_license", "claude_token", "gemini_license", "gemini_token", "gemini_notebooklm", "databricks"):
             max_workers = 1
         else:
             max_workers = 2

@@ -394,6 +394,7 @@ export const SCANNABLE_CONNECTOR_TYPES = new Set([
   "azure_openai_ptu",
   "gcp_bigquery",
   "oci",
+  "oci_monitoring",
   "mongodb_atlas",
   "github_license",
   "github_token",
