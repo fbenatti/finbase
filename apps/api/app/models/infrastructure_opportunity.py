@@ -13,6 +13,8 @@ class InfraOpportunityRun(Base):
     policy_version = Column(String(60), nullable=False)
     window_start_utc = Column(DateTime(timezone=True), nullable=False)
     window_end_utc = Column(DateTime(timezone=True), nullable=False)
+    # 60 = NATIVE 1m buckets; 300 = 5m rollups derived from 1m (max preserved).
+    resolution_seconds = Column(Integer, nullable=False, default=60, server_default="60")
     resources_analyzed = Column(Integer, nullable=False, default=0)
     opportunities_count = Column(Integer, nullable=False, default=0)
     total_monthly_saving = Column(Float)

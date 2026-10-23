@@ -83,7 +83,8 @@ def summarize_series(
             for day, day_values in sorted(daily.items())
         ],
         "quantile_method": "linear",
-        "percentile_basis": "WINDOW_OF_1M_BUCKET_AVERAGES",
+        "resolution_seconds": resolution_seconds,
+        "percentile_basis": f"WINDOW_OF_{resolution_seconds // 60}M_BUCKET_AVERAGES",
     }
 
 

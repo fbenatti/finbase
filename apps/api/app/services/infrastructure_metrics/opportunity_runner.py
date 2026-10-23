@@ -14,10 +14,16 @@ from .opportunities import (
 
 ANALYZED_METRICS = ("CpuUtilization", "MemoryUtilization")
 SERIES_FIELDS = ("resource_id", "source_metric_name", "bucket_start_utc", "value_average", "value_maximum")
+# 1m comes straight from the provider; 5m/15m are local rollups of the 1m
+# buckets that keep the 1m maximum (see plan section 3.3).
+ORIGIN_BY_RESOLUTION = {60: "NATIVE", 300: "DERIVED_ROLLUP", 900: "DERIVED_ROLLUP"}
 
 
-def read_native_series(connection_id: int, resource_id: str, metric: str, start: datetime, end: datetime) -> list[dict]:
-    """1m NATIVE buckets of one series from the Silver, via an allowlisted scan."""
+def read_native_series(
+    connection_id: int, resource_id: str, metric: str, start: datetime, end: datetime,
+    resolution_seconds: int = 60,
+) -> list[dict]:
+    """Buckets of one series from the Silver, via an allowlisted scan."""
     from pyiceberg.expressions import And, EqualTo, GreaterThanOrEqual, LessThan
 
     from app.services import iceberg_service
@@ -29,8 +35,8 @@ def read_native_series(connection_id: int, resource_id: str, metric: str, start:
         EqualTo("_source_connection_id", connection_id),
         EqualTo("resource_id", resource_id),
         EqualTo("source_metric_name", metric),
-        EqualTo("origin_kind", "NATIVE"),
-        EqualTo("resolution_seconds", 60),
+        EqualTo("origin_kind", ORIGIN_BY_RESOLUTION[resolution_seconds]),
+        EqualTo("resolution_seconds", resolution_seconds),
         GreaterThanOrEqual("bucket_start_utc", start.replace(tzinfo=None)),
         LessThan("bucket_start_utc", end.replace(tzinfo=None)),
     )
@@ -62,13 +68,16 @@ def read_billing_prices(resource_ids: tuple[str, ...]) -> dict[str, dict]:
 
 
 def run_opportunity_engine(
-    session: Any, connection: Any, *, days: int = 7, user_id: int | None = None,
+    session: Any, connection: Any, *, days: int = 7, resolution_seconds: int = 300,
+    user_id: int | None = None,
     as_of: datetime | None = None, capacity_reader=None, series_reader=read_native_series,
     price_reader=read_billing_prices,
 ):
     """Analyze every allowlisted instance and persist one run with its results."""
     from app.models.infrastructure_opportunity import InfraOpportunity, InfraOpportunityRun
 
+    if resolution_seconds not in ORIGIN_BY_RESOLUTION:
+        raise ValueError("resolution_seconds must be 60, 300 or 900")
     config = config_from_connection(connection)
     if not config.enabled:
         raise PermissionError("infrastructure metric collection is disabled")
@@ -76,6 +85,7 @@ def run_opportunity_engine(
     run = InfraOpportunityRun(
         connection_id=int(connection.id), status="RUNNING", engine_version=ENGINE_VERSION,
         policy_version=DEFAULT_POLICY["version"], window_start_utc=start, window_end_utc=end,
+        resolution_seconds=resolution_seconds,
         created_by=user_id, readiness_counts={},
     )
     session.add(run)
@@ -96,8 +106,8 @@ def run_opportunity_engine(
         for resource_id in config.resource_ids:
             stats = {
                 metric: summarize_series(
-                    series_reader(int(connection.id), resource_id, metric, start, end),
-                    window_start=start, window_end=end,
+                    series_reader(int(connection.id), resource_id, metric, start, end, resolution_seconds),
+                    window_start=start, window_end=end, resolution_seconds=resolution_seconds,
                 )
                 for metric in ANALYZED_METRICS
             }

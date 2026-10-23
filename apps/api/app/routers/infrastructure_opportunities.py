@@ -25,6 +25,7 @@ class RunRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
     connection_id: int
     days: int = Field(7, ge=1, le=60)
+    resolution_seconds: Literal[60, 300] = 300
 
 
 class StateRequest(BaseModel):
@@ -48,6 +49,7 @@ def _run_dict(run: InfraOpportunityRun) -> dict:
         "id": run.id, "connection_id": run.connection_id, "status": run.status,
         "engine_version": run.engine_version, "policy_version": run.policy_version,
         "window_start_utc": _iso(run.window_start_utc), "window_end_utc": _iso(run.window_end_utc),
+        "resolution_seconds": run.resolution_seconds,
         "resources_analyzed": run.resources_analyzed, "opportunities_count": run.opportunities_count,
         "total_monthly_saving": run.total_monthly_saving, "avg_monthly_saving": run.avg_monthly_saving,
         "currency": run.currency, "readiness_counts": run.readiness_counts or {},
@@ -88,14 +90,16 @@ async def _latest_run(db: AsyncSession, connection_id: int) -> InfraOpportunityR
     )).scalar_one_or_none()
 
 
-def _execute(connection_id: int, days: int, user_id: int):
+def _execute(connection_id: int, days: int, resolution_seconds: int, user_id: int):
     from app.database import SyncSession
     from app.services.infrastructure_metrics.opportunity_runner import run_opportunity_engine
 
     session = SyncSession()
     try:
         connection = session.get(SourceConnection, connection_id)
-        return _run_dict(run_opportunity_engine(session, connection, days=days, user_id=user_id))
+        return _run_dict(run_opportunity_engine(
+            session, connection, days=days, resolution_seconds=resolution_seconds, user_id=user_id,
+        ))
     finally:
         session.close()
 
@@ -112,7 +116,7 @@ async def run_engine(body: RunRequest, user=Depends(get_current_user), db: Async
     if running:
         raise HTTPException(409, f"A análise {running[0]} ainda está em execução")
     try:
-        return await asyncio.to_thread(_execute, int(connection.id), body.days, int(user.id))
+        return await asyncio.to_thread(_execute, int(connection.id), body.days, body.resolution_seconds, int(user.id))
     except (ValueError, PermissionError) as exc:
         raise HTTPException(422, str(exc)) from exc
 
@@ -202,6 +206,47 @@ async def get_opportunity(opportunity_id: int, user=Depends(get_current_user), d
         "window_start_utc": _iso(run.window_start_utc), "window_end_utc": _iso(run.window_end_utc),
     } for opp, run in history]
     return data
+
+
+def _read_chart_series(item: InfraOpportunity, run: InfraOpportunityRun, resolution_seconds: int) -> dict:
+    from app.services.infrastructure_metrics.opportunity_runner import ANALYZED_METRICS, read_native_series
+
+    points: dict[str, dict] = {}
+    for metric in ANALYZED_METRICS:
+        key = "cpu" if metric == "CpuUtilization" else "memory"
+        for row in read_native_series(
+            item.connection_id, item.resource_id, metric, run.window_start_utc, run.window_end_utc, resolution_seconds,
+        ):
+            point = points.setdefault(row["bucket_start_utc"], {"t": row["bucket_start_utc"]})
+            point[f"{key}_avg"] = row.get("value_average")
+            point[f"{key}_max"] = row.get("value_maximum")
+    return {
+        "resolution_seconds": resolution_seconds,
+        "window_start_utc": _iso(run.window_start_utc),
+        "window_end_utc": _iso(run.window_end_utc),
+        "from_config": item.from_config,
+        "to_config": item.to_config,
+        "points": [points[key] for key in sorted(points)],
+    }
+
+
+@router.get("/{opportunity_id}/serie")
+async def opportunity_series(
+    opportunity_id: int, resolution_seconds: int = Query(300),
+    user=Depends(get_current_user), db: AsyncSession = Depends(get_db),
+):
+    """Observed CPU/memory series of the run window; the UI projects it onto the target size."""
+    if resolution_seconds not in (60, 300, 900):
+        raise HTTPException(422, "resolution_seconds deve ser 60, 300 ou 900")
+    item = await db.get(InfraOpportunity, opportunity_id)
+    if not item:
+        raise HTTPException(404, "Oportunidade não encontrada")
+    await _authorize(user, db, item.connection_id, "read")
+    run = await db.get(InfraOpportunityRun, item.run_id)
+    try:
+        return await asyncio.to_thread(_read_chart_series, item, run, resolution_seconds)
+    except Exception as exc:
+        raise HTTPException(503, f"Silver indisponível para consulta ({type(exc).__name__})") from exc
 
 
 @router.post("/{opportunity_id}/estado")
