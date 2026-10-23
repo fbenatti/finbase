@@ -3,7 +3,7 @@ import { dataDisplayText } from "../../utils/dataPresentation";
 import { useState, useEffect, useRef } from "react";
 import { useMenuSearchParams as useSearchParams } from "../../navigation/useMenuSearchParams";
 import { Box, Typography, Button, TextField, Divider, Select, MenuItem, FormControl, InputLabel, Alert, CircularProgress, FormControlLabel, Checkbox, Paper, InputAdornment, Stack, Snackbar, Chip } from "@mui/material";
-import { Add, AutoAwesome, Cloud, Dataset, Download, MenuBook, Psychology, Search, SmartToy, Storage, Storefront, Refresh, Validate, Save } from "./ConnectionIcons";
+import { Add, AutoAwesome, Cloud, Dataset, MenuBook, Psychology, Search, SmartToy, Storage, Storefront, Validate, Save } from "./ConnectionIcons";
 import {
   getConnections, createConnection, updateConnection,
   deleteConnection, getConnectionsGrid, testConnection, testConnectionConfig, SourceConnection,
@@ -16,7 +16,7 @@ import SourceSetupWizard from "./SourceSetupWizard";
 import { CONNECTOR_TYPES, SOURCE_PROVIDERS, SourceProvider, kindOf, providerOf, visibleKinds } from "./sourceCatalog";
 
 export { CONNECTOR_TYPES };
-import ConnectionsDataGrid, { ConnectionTestMessage, getProviderLabel, getConnectorLabel } from "./ConnectionsDataGrid";
+import ConnectionsDataGrid, { ConnectionTestMessage } from "./ConnectionsDataGrid";
 import RecordHistory from "../../components/RecordHistory";
 import AzureSourcesPanel from "./AzureSourcesPanel";
 import IntegrationsPanel from "./IntegrationsPanel";
@@ -784,27 +784,6 @@ export default function Connections() {
     }
   };
 
-  const exportConnections = () => {
-    const escape = (value: unknown) => `"${String(value ?? "").replace(/"/g, '""')}"`;
-    const csv = [
-      ["Nome", "Identificador", "Provedor", "Tipo", "Última atualização", "Resultado do último teste"],
-      ...connections.map((connection) => [
-        connection.name,
-        connection.code,
-        getProviderLabel(connection.cloud_scope),
-        getConnectorLabel(connection.connector_type),
-        connection.updated_at,
-        connection.last_test_status || "",
-      ]),
-    ].map((row) => row.map(escape).join(",")).join("\n");
-    const url = URL.createObjectURL(new Blob([csv], { type: "text/csv;charset=utf-8" }));
-    const link = document.createElement("a");
-    link.href = url;
-    link.download = "conexoes.csv";
-    link.click();
-    URL.revokeObjectURL(url);
-  };
-
   if (loading || !tabsReady) return <Stack direction="row" gap={1} alignItems="center" sx={{ p: 3 }}><CircularProgress size={20} /><Typography variant="body2">Carregando origens de dados…</Typography></Stack>;
 
   return (
@@ -825,10 +804,6 @@ export default function Connections() {
           </Stack>
           <Stack direction={{ xs: "column", lg: "row" }} justifyContent="space-between" gap={2} sx={{ p: 2, bgcolor: "background.default", borderTop: 1, borderBottom: 1, borderColor: "divider" }}>
             <TextField label="Localizar conexão" placeholder="Nome, identificador ou origem" value={search} onChange={event => setSearch(event.target.value)} slotProps={{ input: { startAdornment: <InputAdornment position="start"><Search fontSize="small" /></InputAdornment> } }} sx={{ width: { xs: "100%", lg: 340 }, bgcolor: "background.paper" }} />
-            <Stack direction="row" gap={1} flexWrap="wrap">
-              <Button variant="outlined" startIcon={<Refresh />} disabled={gridLoading} onClick={() => { void load(); void loadGrid(); }}>Recarregar lista</Button>
-              <Button variant="outlined" startIcon={<Download />} onClick={exportConnections} disabled={gridLoading || connections.length === 0}>Baixar esta página</Button>
-            </Stack>
           </Stack>
           <ConnectionsDataGrid
             key={search}
