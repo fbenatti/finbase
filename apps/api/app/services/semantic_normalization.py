@@ -159,7 +159,7 @@ def is_valid_resource_id(value: Any) -> bool:
     """``True`` quando o valor é um ID de recurso de nuvem utilizável.
 
     Existe porque **presença não é validade**. Medido em 23/09/2026: as 5.294.906
-    linhas de ajuste do `azure-4p` (202504/202505) têm `resource_id` **preenchido**
+    linhas de ajuste de uma conexão Azure (202504/202505) têm `resource_id` **preenchido**
     com valores como ``'320core'``, ``'100core'`` e ``'96core'``. Um teste de
     "`resource_id` é nulo?" devolve zero linhas problemáticas e o dado sujo passa
     silenciosamente — foi exatamente o que aconteceu na primeira versão da
@@ -304,8 +304,8 @@ def service_display_name(values: Iterable[Any]) -> str:
 def connection_key(code: Any, name: Any = None) -> str:
     """Identidade estável da conexão.
 
-    O `code` é a chave durável (`azure-4p`); o `name` na Silver atual é o nome da
-    **tabela Bronze** (`raw_azure_4p`), não o nome de negócio. Preferir o código
+    O `code` é a chave durável (`azure-producao`); o `name` na Silver atual é o nome da
+    **tabela Bronze** (`raw_azure_producao`), não o nome de negócio. Preferir o código
     evita que o rótulo mude quando a origem for renomeada.
     """
     return _text(code) or _text(name) or UNKNOWN

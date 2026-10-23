@@ -148,8 +148,8 @@ case "$target" in
     ;;
 esac
 
-if [[ ! -f "$ROOT_DIR/.env" || ! -f "$ROOT_DIR/.env-databriks" ]]; then
-  echo "ERRO: faltam .env e/ou .env-databriks na raiz (copie da pasta OpenFinops)." >&2
+if [[ ! -f "$ROOT_DIR/.env" ]]; then
+  echo "ERRO: falta o .env na raiz (copie da pasta OpenFinops)." >&2
   exit 1
 fi
 

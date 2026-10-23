@@ -26,7 +26,7 @@ def test_resource_graph_collection_discovers_subscriptions_before_inventory(monk
 
     class FakeSession:
         def get(self, *_args):
-            return SimpleNamespace(code="azure-ti", config_json={})
+            return SimpleNamespace(code="azure-dev", config_json={})
 
         def commit(self):
             pass

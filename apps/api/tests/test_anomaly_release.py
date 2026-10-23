@@ -177,8 +177,8 @@ def test_leitura_observada_exige_dimensoes():
 def detection(**overrides):
     base = dict(
         series_id="s1",
-        series_dimensions={"cloud_origem": "gcp-4p", "servicename": "Compute"},
-        event_family="cloud_origem=gcp-4p",
+        series_dimensions={"cloud_origem": "gcp-producao", "servicename": "Compute"},
+        event_family="cloud_origem=gcp-producao",
         event_type="DAILY_CONSUMPTION",
         event_date="2026-10-13",
         period="202610",
@@ -226,7 +226,7 @@ def test_linha_de_avaliacao_segue_o_contrato_do_plano():
     assert row["period"] == "202610"
     assert row["source_billing_period"] == "202610"
     assert row["forecast_run_id"] == 399
-    assert row["cloud_origem"] == "gcp-4p"
+    assert row["cloud_origem"] == "gcp-producao"
     for name, _ in assessment_columns():
         assert name in row
     validate_assessments(rows)
@@ -370,14 +370,14 @@ async def test_build_outcome_avalia_series_e_reconcilia():
 
     dimensions = ["cloud_origem", "servicename"]
     expectation = [
-        {"cloud_origem": "gcp-4p", "servicename": "Compute", "forecast_month": "202610",
+        {"cloud_origem": "gcp-producao", "servicename": "Compute", "forecast_month": "202610",
          "expected_cloud": 3_100.0},
-        {"cloud_origem": "gcp-4p", "servicename": "Compute", "forecast_month": "202611",
+        {"cloud_origem": "gcp-producao", "servicename": "Compute", "forecast_month": "202611",
          "expected_cloud": 6_000.0},
     ]
     # Série observada: outubro muito acima do esperado, novembro não observado.
     observed = [
-        {"cloud_origem": "gcp-4p", "servicename": "Compute",
+        {"cloud_origem": "gcp-producao", "servicename": "Compute",
          "event_date": date(2026, 10, day), "observed_cloud": 4_000.0,
          "source_billing_period": "202610"}
         for day in range(13, 32)
@@ -420,8 +420,8 @@ def test_roteamento_com_regra_especifica_atribui():
     from app.services.anomaly_workflow import resolve_routing
 
     match = resolve_routing(
-        [{"id": "r1", "when": {"cloud_origem": "azure-ti"}, "assignee_user_id": 6}],
-        {"cloud_origem": "azure-ti", "servicename": "X"},
+        [{"id": "r1", "when": {"cloud_origem": "azure-dev"}, "assignee_user_id": 6}],
+        {"cloud_origem": "azure-dev", "servicename": "X"},
     )
     route, assignee, notes = routing_decision(match)
     assert route == ROUTE_ASSIGNED

@@ -25,7 +25,7 @@ def test_conditional_not_empty_applies_then_expression():
 
 def test_build_scope_mask_filters_rows():
     df = pd.DataFrame({
-        "cloud_origem": ["azure-ti", "gcp-4p", "azure-ti"],
+        "cloud_origem": ["azure-dev", "gcp-producao", "azure-dev"],
         "BilledCost": [10.0, 20.0, 30.0],
     })
     mask = build_scope_mask(df, {"field": "cloud_origem", "op": "contains", "value": "azure"})
@@ -34,7 +34,7 @@ def test_build_scope_mask_filters_rows():
 
 def test_evaluate_expression_respects_scope_mask():
     df = pd.DataFrame({
-        "cloud_origem": ["azure-ti", "gcp-4p"],
+        "cloud_origem": ["azure-dev", "gcp-producao"],
         "BilledCost": [100.0, 200.0],
         "realizado": [None, None],
     })

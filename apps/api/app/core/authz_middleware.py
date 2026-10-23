@@ -113,6 +113,11 @@ def _module_for(path: str) -> str | None:
     return None
 
 
+# Consultas de tarefas que o painel de avisos faz. Pertencem ao módulo etl, mas
+# também valem para quem só tem leitura dos avisos do sistema.
+NOTIFICATION_READ_PREFIXES = ("/operacoes/execucoes/tarefas", "/operacoes/execucoes/situacao")
+
+
 # Routers que a autorização precisa cobrir, mas que a auditoria ainda nomeia pelo
 # primeiro segmento (ver audit_module_for). Por isso ficam fora do PATH_MODULE.
 AUTHZ_EXTRA_MODULES: list[tuple[str, str]] = [
@@ -254,6 +259,8 @@ class RBACMiddleware:
             allowed = not unmapped and has_permission(perms, module, action, rbac_scope)
             if not unmapped:
                 allowed = await resolve_screen_access(db, user.id, module, action, rbac_scope, legacy_allowed=allowed)
+            if not allowed and action == "read" and path.startswith(NOTIFICATION_READ_PREFIXES):
+                allowed = has_permission(perms, "notifications", "read")
             if not allowed:
                 await _audit_denied(scope, 403, user)
                 await _respond(send, 403, "Sem permissão para esta ação.")

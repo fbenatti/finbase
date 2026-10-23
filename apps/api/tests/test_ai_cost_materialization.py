@@ -78,7 +78,7 @@ async def test_materialization_isolates_invalid_rules(monkeypatch):
                         active=True,
                         valid_from=None,
                         valid_until=None,
-                        name="Azure 4P — OpenAI PTU",
+                        name="Azure Producao — OpenAI PTU",
                         sources=[
                             SimpleNamespace(
                                 id=50,

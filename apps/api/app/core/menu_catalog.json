@@ -988,7 +988,7 @@
   {
     "code": "governanca_regras_de_ajuste",
     "parent_code": "section_governanca",
-    "label": "Regras de ajuste de custo",
+    "label": "Regras financeiras",
     "path": "/governanca/regras-de-ajuste",
     "renderer": "Governance",
     "view_params": {

@@ -33,35 +33,16 @@ def test_pricesheet_client_uses_its_independent_connection_credentials(monkeypat
     }
 
 
-def test_pricesheet_client_keeps_legacy_settings_fallback(monkeypatch):
-    captured = {}
-
-    class FakeBlobServiceClient:
-        def __init__(self, **kwargs):
-            captured.update(kwargs)
-
-    monkeypatch.setattr(azure_pricesheet, "ClientSecretCredential", lambda **kwargs: kwargs)
-    monkeypatch.setattr(azure_pricesheet, "BlobServiceClient", FakeBlobServiceClient)
-    monkeypatch.setattr(azure_pricesheet.settings, "azure_4p_tenant_id", "legacy-tenant")
-    monkeypatch.setattr(azure_pricesheet.settings, "azure_4p_client_id", "legacy-client")
-    monkeypatch.setattr(azure_pricesheet.settings, "azure_4p_client_secret", "legacy-secret")
-    monkeypatch.setattr(azure_pricesheet.settings, "azure_4p_storage_account", "legacy-storage")
-    monkeypatch.setattr(azure_pricesheet.settings, "azure_4p_container", "legacy-container")
-
-    service, container = azure_pricesheet._azure_client({})
-
-    assert isinstance(service, FakeBlobServiceClient)
-    assert container == "legacy-container"
-    assert captured["account_url"] == "https://legacy-storage.blob.core.windows.net"
+def test_pricesheet_client_requires_connection_credentials():
+    try:
+        azure_pricesheet._azure_client({})
+    except RuntimeError as exc:
+        assert "tenant_id" in str(exc)
+    else:
+        raise AssertionError("sem configuração da conexão não há credencial de fallback")
 
 
-def test_pricesheet_refuses_partial_independent_credentials_instead_of_mixing(monkeypatch):
-    monkeypatch.setattr(azure_pricesheet.settings, "azure_4p_tenant_id", "legacy-tenant")
-    monkeypatch.setattr(azure_pricesheet.settings, "azure_4p_client_id", "legacy-client")
-    monkeypatch.setattr(azure_pricesheet.settings, "azure_4p_client_secret", "legacy-secret")
-    monkeypatch.setattr(azure_pricesheet.settings, "azure_4p_storage_account", "legacy-storage")
-    monkeypatch.setattr(azure_pricesheet.settings, "azure_4p_container", "legacy-container")
-
+def test_pricesheet_refuses_partial_connection_credentials():
     try:
         azure_pricesheet._azure_client({
             "tenant_id": "pricesheet-tenant",
@@ -72,4 +53,4 @@ def test_pricesheet_refuses_partial_independent_credentials_instead_of_mixing(mo
     except RuntimeError as exc:
         assert "client_secret" in str(exc)
     else:
-        raise AssertionError("configuração incompleta não deve misturar credenciais legadas")
+        raise AssertionError("configuração incompleta da conexão deve ser recusada")

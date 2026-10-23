@@ -100,7 +100,7 @@ export default function OrphanedResources() {
       setSummary(data);
       // Sem filtro manual, a API mostra o snapshot mais recente de cada origem.
       // Selecionar o período/snapshot global mais recente esconderia origens
-      // cuja última coleta ocorreu antes (ex.: Azure-4P em setembro, TI em outubro).
+      // cuja última coleta ocorreu antes (ex.: uma conexão em setembro, outra em outubro).
       if (data.error) setError(data.error);
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : "Não foi possível carregar o resumo");

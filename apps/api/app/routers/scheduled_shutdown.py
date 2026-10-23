@@ -112,6 +112,29 @@ DEFAULT_MAPPINGS: list[dict[str, Any]] = [
 ]
 
 
+def _automation_tables() -> list[str]:
+    """Tabelas Bronze de inventário de automação de todas as conexões cadastradas."""
+    from app.services.iceberg_service import get_catalog
+
+    try:
+        tables = get_catalog().list_tables("bronze")
+    except Exception:
+        logger.warning("Não foi possível listar as tabelas Bronze de automação", exc_info=True)
+        return []
+    return sorted(name for _, name in tables if name.startswith("raw_azure_automation"))
+
+
+def _automation_union(columns: str, where: str = "") -> str | None:
+    """UNION ALL das tabelas de automação com as colunas pedidas (None se não houver)."""
+    tables = _automation_tables()
+    if not tables:
+        return None
+    clause = f" WHERE {where}" if where else ""
+    return "\n    UNION ALL\n    ".join(
+        f"SELECT {columns} FROM iceberg.bronze.{table}{clause}" for table in tables
+    )
+
+
 def _hours_in_month(yyyy_mm: str) -> int:
     y = int(yyyy_mm[:4])
     m = int(yyyy_mm[4:])
@@ -422,38 +445,30 @@ async def calculate_savings(body: SavingsFilter, db: AsyncSession = Depends(get_
     totals_rows = await execute(totals_sql, timeout_s=120)
     totals = (totals_rows[0] or {}) if totals_rows else {}
 
-    # Automação: usa o INVENTÁRIO Bronze (4P + TI) — cada recurso com schedule
-    # Start/Stop ativo no snapshot mais recente está "na automação". A Gold de
-    # jobs antiga não preenche ResourceId, então não é usada aqui.
-    inv_sql = """
-    SELECT
-        inferred_resource_name AS resource_name,
-        tenant AS connection_code,
-        MAX(CASE WHEN LOWER(inferred_action) = 'stop' AND LOWER(COALESCE(schedule_enabled, 'false')) = 'true' THEN 1 ELSE 0 END) AS has_stop,
-        MAX(CASE WHEN LOWER(inferred_action) = 'start' AND LOWER(COALESCE(schedule_enabled, 'false')) = 'true' THEN 1 ELSE 0 END) AS has_start
-    FROM (
-        SELECT inferred_resource_name, tenant, inferred_action, schedule_enabled, _snapshot_date
-        FROM iceberg.bronze.raw_azure_automation_4p
-        WHERE _blob_path LIKE '%inventory%'
-        UNION ALL
-        SELECT inferred_resource_name, tenant, inferred_action, schedule_enabled, _snapshot_date
-        FROM iceberg.bronze.raw_azure_automation_ti
-        WHERE _blob_path LIKE '%inventory%'
-    ) t
-    WHERE inferred_resource_name IS NOT NULL
-      AND _snapshot_date = (
-          SELECT MAX(_snapshot_date) FROM (
-              SELECT _snapshot_date FROM iceberg.bronze.raw_azure_automation_4p WHERE _blob_path LIKE '%inventory%'
-              UNION ALL
-              SELECT _snapshot_date FROM iceberg.bronze.raw_azure_automation_ti WHERE _blob_path LIKE '%inventory%'
-          ) s
-      )
-    GROUP BY inferred_resource_name, tenant
-    """
-    try:
-        inv_rows = await execute(inv_sql, timeout_s=60)
-    except Exception:
-        inv_rows = []
+    # Automação: usa o INVENTÁRIO Bronze de todas as conexões de automação —
+    # cada recurso com schedule Start/Stop ativo no snapshot mais recente está
+    # "na automação". A Gold de jobs antiga não preenche ResourceId.
+    inventory = _automation_union(
+        "inferred_resource_name, tenant, inferred_action, schedule_enabled, _snapshot_date",
+        "_blob_path LIKE '%inventory%'",
+    )
+    inv_rows = []
+    if inventory:
+        inv_sql = f"""
+        SELECT
+            inferred_resource_name AS resource_name,
+            tenant AS connection_code,
+            MAX(CASE WHEN LOWER(inferred_action) = 'stop' AND LOWER(COALESCE(schedule_enabled, 'false')) = 'true' THEN 1 ELSE 0 END) AS has_stop,
+            MAX(CASE WHEN LOWER(inferred_action) = 'start' AND LOWER(COALESCE(schedule_enabled, 'false')) = 'true' THEN 1 ELSE 0 END) AS has_start
+        FROM ({inventory}) t
+        WHERE inferred_resource_name IS NOT NULL
+          AND _snapshot_date = (SELECT MAX(_snapshot_date) FROM ({inventory}) s)
+        GROUP BY inferred_resource_name, tenant
+        """
+        try:
+            inv_rows = await execute(inv_sql, timeout_s=60)
+        except Exception:
+            inv_rows = []
     automation_keys: dict[tuple[str, str], dict] = {}
     for j in inv_rows:
         name = str(j.get("resource_name") or "").strip().lower()
@@ -467,7 +482,7 @@ async def calculate_savings(body: SavingsFilter, db: AsyncSession = Depends(get_
     out: list[VmMonthSaving] = []
     exception_rules = (await db.execute(select(ShutdownExceptionRule).where(ShutdownExceptionRule.is_active == True))).scalars().all()
 
-    # Lookup connection code por id (as conexões são multi-tenant: 4P, TI...).
+    # Lookup connection code por id (uma conexão por tenant Azure).
     conn_rows = (await db.execute(select(SourceConnection.id, SourceConnection.code))).all()
     conn_code_by_id = {r[0]: r[1] for r in conn_rows}
 
@@ -716,19 +731,18 @@ class ScheduleDeltaResponse(BaseModel):
 async def schedule_delta(db: AsyncSession = Depends(get_db)):
     """Compara o snapshot mais recente do inventário de schedules com o anterior (D vs D-1).
 
-    O inventário vem da Bronze (raw_azure_automation_4p/ti, blob inventory),
-    unificado 4P + TI. Identifica recursos que ENTRARAM ou SAÍRAM do desligue
+    O inventário vem da Bronze (raw_azure_automation_*, blob inventory), unindo
+    todas as conexões de automação. Identifica recursos que ENTRARAM ou SAÍRAM do desligue
     programado (REMOVIDO / DESABILITADO / ADICIONADO / REABILITADO) e estima o
     custo desde a saída usando o preço on-demand do billing.
     """
-    # Data de snapshot mais recente no inventário (Bronze 4P + TI).
-    dates_sql = """
+    # Data de snapshot mais recente no inventário de todas as conexões.
+    snapshots = _automation_union("_snapshot_date")
+    if not snapshots:
+        return ScheduleDeltaResponse(latest_snapshot=None, previous_snapshot=None, rows=[], total_removed=0, total_disabled=0, total_added=0, total_cost_since_removal=0.0)
+    dates_sql = f"""
     SELECT DISTINCT _snapshot_date AS snapshot_date
-    FROM (
-        SELECT _snapshot_date FROM iceberg.bronze.raw_azure_automation_4p
-        UNION ALL
-        SELECT _snapshot_date FROM iceberg.bronze.raw_azure_automation_ti
-    )
+    FROM ({snapshots})
     WHERE _snapshot_date IS NOT NULL
     ORDER BY 1 DESC
     """
@@ -752,18 +766,11 @@ async def schedule_delta(db: AsyncSession = Depends(get_db)):
     exc_by_rid = {str(e.scope_value).strip().lower(): e.id for e in exc_rows if e.scope_type == "resource" and e.scope_value}
 
     # Resumo por recurso no snapshot D: tem Stop ativo? tem Start ativo?
-    # Unifica 4P + TI na mesma consulta.
-    inventory_union = f"""
-    SELECT _snapshot_date, tenant, automation_account,
-           inferred_resource_name, inferred_action, schedule_enabled
-    FROM iceberg.bronze.raw_azure_automation_4p
-    WHERE _blob_path LIKE '%inventory%'
-    UNION ALL
-    SELECT _snapshot_date, tenant, automation_account,
-           inferred_resource_name, inferred_action, schedule_enabled
-    FROM iceberg.bronze.raw_azure_automation_ti
-    WHERE _blob_path LIKE '%inventory%'
-    """
+    # Une todas as conexões de automação na mesma consulta.
+    inventory_union = _automation_union(
+        "_snapshot_date, tenant, automation_account, inferred_resource_name, inferred_action, schedule_enabled",
+        "_blob_path LIKE '%inventory%'",
+    )
 
     if previous is None:
         # Apenas um snapshot: mostra o inventário ATUAL (recursos com schedule).

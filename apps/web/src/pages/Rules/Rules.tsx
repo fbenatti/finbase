@@ -5,7 +5,7 @@ import { Box, Typography, Button, IconButton, Chip, TextField, Select, MenuItem,
 import { AddOutlined, EditOutlined, DeleteOutlined } from "@mui/icons-material";
 import {
   getBusinessRules, createBusinessRule, updateBusinessRule, deleteBusinessRule, BusinessRule,
-  getDestinationTables, getDestinationSchema, DestinationTable, getFinancialContracts, FinancialContract,
+  getDestinationSchema, getFinancialContracts, FinancialContract,
   getConnections,
 } from "../../services/api";
 import EmptyState from "../../components/EmptyState";
@@ -187,10 +187,12 @@ const formatOperationSummary = (r: BusinessRule): string => {
   return r.rule_type;
 };
 
+// As regras financeiras valem sempre para o BILLING_CLOUD (FOCUS_DESTINATION_ID na API).
+const BILLING_CLOUD_DESTINATION_ID = 1;
+
 export default function Rules({ embedded = false }: { embedded?: boolean } = {}) {
   const [rules, setRules] = useState<BusinessRule[]>([]);
-  const [destTables, setDestTables] = useState<DestinationTable[]>([]);
-  const [selectedDestId, setSelectedDestId] = useState<number | "">("");
+  const selectedDestId = BILLING_CLOUD_DESTINATION_ID;
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [dialogOpen, setDialogOpen] = useState(false);
@@ -205,7 +207,6 @@ export default function Rules({ embedded = false }: { embedded?: boolean } = {})
   const [cloudScopes, setCloudScopes] = useState<string[]>([]);
 
   useEffect(() => {
-    getDestinationTables(true).then(setDestTables).catch(() => {});
     getFinancialContracts().then(setContracts).catch(() => {});
     getConnections()
       .then((connections) => setCloudScopes([...new Set(connections.map((c) => c.cloud_scope).filter((v): v is string => !!v))]))
@@ -214,10 +215,9 @@ export default function Rules({ embedded = false }: { embedded?: boolean } = {})
 
   const load = async () => {
     try {
-      const destId = selectedDestId === "" ? undefined : selectedDestId as number;
-      setRules(await getBusinessRules(undefined, destId));
+      setRules(await getBusinessRules(undefined, selectedDestId));
     } catch (e: unknown) {
-      setError(e instanceof Error ? e.message : "Não foi possível carregar os ajustes");
+      setError(e instanceof Error ? e.message : "Não foi possível carregar as regras financeiras");
     } finally { setLoading(false); }
   };
 
@@ -226,7 +226,7 @@ export default function Rules({ embedded = false }: { embedded?: boolean } = {})
   // Load columns from destination table — only numeric ones for math operations
   useEffect(() => {
     if (selectedDestId) {
-      getDestinationSchema(selectedDestId as number)
+      getDestinationSchema(selectedDestId)
         .then(schema => {
           setSourceColumns(schema.columns.map(c => c.name));
           const numericTypes = new Set(["NUMERIC", "INTEGER", "DECIMAL", "FLOAT", "REAL", "DOUBLE", "BIGINT", "SMALLINT", "MONEY"]);
@@ -309,7 +309,6 @@ export default function Rules({ embedded = false }: { embedded?: boolean } = {})
   };
 
   const save = async () => {
-    const destId = selectedDestId === "" ? null : selectedDestId as number;
     const expression = buildExpressionFromForm(form);
 
     const hasConditions = form.conditions.some(isValidCondition);
@@ -344,7 +343,7 @@ export default function Rules({ embedded = false }: { embedded?: boolean } = {})
     }
 
     const body: Record<string, unknown> = {
-      destination_table_id: destId,
+      destination_table_id: selectedDestId,
       name: form.name, description: form.description || null,
       target_column: form.target_column, rule_type: ruleType,
       cloud_scope: form.cloud_scope === "global" ? null : form.cloud_scope,
@@ -382,14 +381,14 @@ export default function Rules({ embedded = false }: { embedded?: boolean } = {})
       setDialogOpen(false);
       load();
     } catch (e: unknown) {
-      setError(e instanceof Error ? e.message : "Não foi possível salvar o ajuste");
+      setError(e instanceof Error ? e.message : "Não foi possível salvar a regra financeira");
     }
   };
 
   const remove = async (id: number) => {
     if (!confirm("Remover?")) return;
     try { await deleteBusinessRule(id); load(); } catch (e: unknown) {
-      setError(e instanceof Error ? e.message : "Não foi possível excluir o ajuste");
+      setError(e instanceof Error ? e.message : "Não foi possível excluir a regra financeira");
     }
   };
 
@@ -428,57 +427,24 @@ export default function Rules({ embedded = false }: { embedded?: boolean } = {})
     return `${r.rule_type}: ${r.target_column}`;
   };
 
-  const selectedDestName = selectedDestId ? destTables.find(t => t.id === selectedDestId)?.name : null;
-
   return (
     <Box>
       <Box sx={{ display: "flex", justifyContent: "space-between", alignItems: "center", mb: 2, gap: 2, flexWrap: "wrap" }}>
-        {!embedded && <Typography variant="h4">Ajustes de custo</Typography>}
+        {!embedded && <Typography variant="h4">Regras financeiras</Typography>}
         <Button
           variant="contained" startIcon={<AddOutlined />}
           onClick={openNew}
-          disabled={!selectedDestId}
         >
-          Novo ajuste
+          Nova regra
         </Button>
-      </Box>
-
-      {/* ── Primary: Tabela Destino (mandatory) ── */}
-      <Box sx={{ display: "flex", gap: 2, mb: 2, flexWrap: "wrap", alignItems: "center" }}>
-        <FormControl sx={{ minWidth: 260 }} size="small">
-          <InputLabel>Tabela de destino *</InputLabel>
-          <Select
-            value={selectedDestId}
-            label="Tabela de destino *"
-            onChange={(e) => {
-              setSelectedDestId(e.target.value as number | "");
-              setLoading(true);
-            }}
-          >
-            {destTables.map((t) => (
-              <MenuItem key={t.id} value={t.id}>{t.name}</MenuItem>
-            ))}
-          </Select>
-        </FormControl>
-
-        {selectedDestName && (
-          <Chip
-            label={`${rules.length} ajustes em ${selectedDestName}`}
-            color="primary" size="small"
-          />
-        )}
       </Box>
 
       {error && <Alert severity="error" sx={{ mb: 2 }} onClose={() => setError("")}>{dataDisplayText(error)}</Alert>}
 
-      {!selectedDestId ? (
-        <Alert severity="info" sx={{ mb: 2 }}>
-          Selecione uma Tabela Destino acima para visualizar os ajustes de custo.
-        </Alert>
-      ) : loading ? (
+      {loading ? (
         <CircularProgress sx={{ display: "block", mx: "auto", mt: 5 }} />
       ) : rules.length === 0 ? (
-        <EmptyState message="Nenhum ajuste de custo para esta tabela de destino. Clique em 'Novo ajuste' para começar." />
+        <EmptyState message="Nenhuma regra financeira cadastrada. Clique em 'Nova regra' para começar." />
       ) : (
         <SortableTable
           data={rules}
@@ -496,7 +462,7 @@ export default function Rules({ embedded = false }: { embedded?: boolean } = {})
               ),
             },
             {
-              key: "_summary", label: "Ajuste", width: 350,
+              key: "_summary", label: "Regra", width: 350,
               render: (r: BusinessRule) => (
                 <Typography variant="body2" sx={{ fontFamily: "monospace", fontSize: "0.75rem" }}>
                   {formatRuleSummary(r)}
@@ -537,17 +503,11 @@ export default function Rules({ embedded = false }: { embedded?: boolean } = {})
       )}
 
       <Dialog open={dialogOpen} onClose={() => setDialogOpen(false)} maxWidth="md" fullWidth>
-        <DialogTitle>{editing ? "Editar" : "Novo"} ajuste de custo</DialogTitle>
+        <DialogTitle>{editing ? "Editar" : "Nova"} regra financeira</DialogTitle>
         <DialogContent>
           <Box sx={{ display: "flex", flexDirection: "column", gap: 2.5, mt: 1 }}>
-            {/* Context banner */}
-            {selectedDestName && (
-              <Alert severity="info" icon={false} sx={{ py: 0 }}>
-                Tabela Destino: <strong>{selectedDestName}</strong>
-              </Alert>
-            )}
 
-            <TextField label="Nome do ajuste" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} />
+            <TextField label="Nome da regra" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} />
             <TextField label="Finalidade (opcional)" value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} />
 
             <FormControl fullWidth>
@@ -573,10 +533,10 @@ export default function Rules({ embedded = false }: { embedded?: boolean } = {})
             )}
 
             <FormControl fullWidth>
-              <InputLabel>Nuvem (abrangência do ajuste)</InputLabel>
+              <InputLabel>Nuvem (abrangência da regra)</InputLabel>
               <Select
                 value={form.cloud_scope}
-                label="Nuvem (abrangência do ajuste)"
+                label="Nuvem (abrangência da regra)"
                 onChange={(e) => setForm({ ...form, cloud_scope: e.target.value })}
               >
                 {CLOUD_SCOPE_FORM_OPTIONS
@@ -587,14 +547,14 @@ export default function Rules({ embedded = false }: { embedded?: boolean } = {})
               </Select>
             </FormControl>
             <Typography variant="caption" color="text.secondary" sx={{ mt: -1 }}>
-              Ajustes com abrangência Azure/GCP/etc. só rodam no reprocessamento da nuvem correspondente.
+              Regras com abrangência Azure/GCP/etc. só rodam no reprocessamento da nuvem correspondente.
               Use &quot;Qualquer nuvem&quot; para o fallback final (<code>efetivado = BilledCost</code>).
             </Typography>
 
             <Divider />
             <Typography variant="subtitle2">Rateio Marketplace → nuvem</Typography>
             <Typography variant="caption" color="text.secondary">
-              Preencha estes campos para criar um ajuste de teste que distribui o efetivado de nuvem em BRL pela participação USD do Marketplace.
+              Preencha estes campos para criar uma regra de teste que distribui o efetivado de nuvem em BRL pela participação USD do Marketplace.
             </Typography>
             {form.financial_effect === "MARKETPLACE_ALLOCATION" && <>
               <TextField label="Conexão de marketplace" value={form.marketplace_connection_code} onChange={(e) => setForm({ ...form, marketplace_connection_code: e.target.value })} placeholder="código da conexão" />
@@ -674,7 +634,7 @@ export default function Rules({ embedded = false }: { embedded?: boolean } = {})
               {form.conditions.length === 0 && (
                 <Box sx={{ textAlign: "center", py: 1.5, color: "text.secondary", bgcolor: "#fafafa", borderRadius: 1, border: "1px dashed #ddd" }}>
                   <Typography variant="body2" sx={{ fontStyle: "italic" }}>
-                    (sem condições — ajuste aplicado em todas as linhas)
+                    (sem condições — regra aplicada em todas as linhas)
                   </Typography>
                 </Box>
               )}
@@ -821,7 +781,7 @@ export default function Rules({ embedded = false }: { embedded?: boolean } = {})
               && form.target_column && (
               <Paper variant="outlined" sx={{ p: 1.5, bgcolor: "#fafafa", borderLeft: "4px solid #0EA5C6" }}>
                 <Typography variant="caption" color="text.secondary" sx={{ display: "block", mb: 0.3 }}>
-                  Prévia do ajuste
+                  Prévia da regra
                 </Typography>
                 <Typography variant="body2" sx={{ fontFamily: "monospace", fontSize: "0.82rem" }}>
                   {form.conditions.some(isValidCondition) ? (
@@ -866,7 +826,7 @@ export default function Rules({ embedded = false }: { embedded?: boolean } = {})
               <TextField label="Prioridade" type="number" value={form.priority}
                 onChange={(e) => setForm({ ...form, priority: Number(e.target.value) })}
                 size="small" sx={{ width: 110 }}
-                helperText="Ordem em que o ajuste é aplicado" />
+                helperText="Ordem em que a regra é aplicada" />
               <TextField label="Vigência inicial (AAAAMM)" value={form.valid_from}
                 onChange={(e) => setForm({ ...form, valid_from: e.target.value })} size="small" sx={{ width: 150 }} />
               <TextField label="Vigência final (AAAAMM)" value={form.valid_until}
@@ -879,9 +839,9 @@ export default function Rules({ embedded = false }: { embedded?: boolean } = {})
 
             {/* Cardinality hint for multi-rule strategy */}
             <Alert severity="info" sx={{ fontSize: "0.8rem" }}>
-              <strong>Ordem de aplicação:</strong> números menores rodam primeiro. Ajustes específicos por nuvem
+              <strong>Ordem de aplicação:</strong> números menores rodam primeiro. Regras específicas por nuvem
               (ex.: Azure 20, 25) devem vir <strong>antes</strong> do fallback global (ex.: prioridade 100).
-              Cada ajuste só preenche linhas ainda em branco — por isso o fallback precisa ser o último.
+              Cada regra só preenche linhas ainda em branco — por isso o fallback precisa ser o último.
             </Alert>
           </Box>
         </DialogContent>

@@ -44,7 +44,7 @@ def _reservation_row():
         "source_exchange_rate": 1.0,
         "BilledCost": 0.0,
         "EffectiveCost": 0.0,
-        "cloud_origem": "azure-ti",
+        "cloud_origem": "azure-dev",
         "source_record_id": "record-1",
     }
 
@@ -53,7 +53,7 @@ def test_zero_fx_uses_observed_rate_from_same_month_account_and_currencies():
     row = _reservation_row() | {"source_exchange_rate": 0, "source_billing_account_id": "account",
                                "source_pricing_currency": "USD", "BillingCurrency": "BRL"}
     engine = CloneEngine([_rule()], 1, reference_prices={("azure", "meter-1"): 10.0},
-                         period_exchange_rates={"202608": {("azure-ti", "account", "usd", "brl"): 5.17}})
+                         period_exchange_rates={"202608": {("azure-dev", "account", "usd", "brl"): 5.17}})
     output, count = engine.apply(pd.DataFrame([row]), "202608")
     assert count == 1
     assert output.BilledCost.tolist() == [103.4, -103.4]
@@ -64,8 +64,8 @@ def test_invalid_fx_does_not_use_other_account_or_future_month_or_silently_disca
     row = _reservation_row() | {"source_exchange_rate": 0, "source_billing_account_id": "account",
                                "source_pricing_currency": "USD", "BillingCurrency": "BRL"}
     engine = CloneEngine([_rule()], 1, reference_prices={("azure", "meter-1"): 10.0},
-                         period_exchange_rates={"202609": {("azure-ti", "account", "usd", "brl"): 5},
-                                                "202608": {("azure-ti", "other", "usd", "brl"): 5}})
+                         period_exchange_rates={"202609": {("azure-dev", "account", "usd", "brl"): 5},
+                                                "202608": {("azure-dev", "other", "usd", "brl"): 5}})
     _, count = engine.apply(pd.DataFrame([row]), "202608")
     assert count == 0
     assert len(engine.pendencies) == 1
@@ -106,7 +106,7 @@ def test_future_month_reference_does_not_value_earlier_usage():
     assert len(engine.pendencies) == 1
 
 
-def test_azure_ti_uses_shared_azure_reference_when_month_has_no_ondemand_row():
+def test_azure_dev_uses_shared_azure_reference_when_month_has_no_ondemand_row():
     engine = CloneEngine([_rule()], 1, reference_prices={("azure", "meter-1"): 10.0})
 
     result, count = engine.apply(pd.DataFrame([_reservation_row()]), "202609")
@@ -188,7 +188,7 @@ def test_contract_price_fallback_requires_shared_account_and_matching_unit_dimen
         "source_product_id": "product-1",
         "source_region": "region-1",
     }
-    key = ("azure-ti", "meter-1", "account-1", "usd", "10k", "product-1", "region-1")
+    key = ("azure-dev", "meter-1", "account-1", "usd", "10k", "product-1", "region-1")
     engine = CloneEngine([_rule()], 1, reference_prices={key: 3.25})
 
     result, count = engine.apply(pd.DataFrame([row]), "202609")
@@ -205,7 +205,7 @@ def test_contract_price_fallback_does_not_match_different_account_or_unit():
         "source_product_id": "product-1",
         "source_region": "region-1",
     }
-    key = ("azure-ti", "meter-1", "account-1", "usd", "10k", "product-1", "region-1")
+    key = ("azure-dev", "meter-1", "account-1", "usd", "10k", "product-1", "region-1")
     engine = CloneEngine([_rule()], 1, reference_prices={key: 3.25})
 
     result, count = engine.apply(pd.DataFrame([row]), "202609")
@@ -222,7 +222,7 @@ def test_bronze_price_sheet_candidate_must_have_equivalent_uom():
         "source_product_id": "product-1",
         "source_region": "region-1",
     }
-    key = ("azure-ti", "meter-1", "account-1", "usd", "10k", "product-1", "region-1")
+    key = ("azure-dev", "meter-1", "account-1", "usd", "10k", "product-1", "region-1")
 
     exact = CloneEngine([_rule()], 1, reference_prices={
         key: {"unit_price": 3.25, "unit_of_measure": "10K"},
@@ -246,7 +246,7 @@ def test_curated_reference_list_precedes_price_sheet_fallback():
         "source_product_id": "product-1",
         "source_region": "region-1",
     }
-    key = ("azure-ti", "meter-1", "account-1", "usd", "10k", "product-1", "region-1")
+    key = ("azure-dev", "meter-1", "account-1", "usd", "10k", "product-1", "region-1")
     engine = CloneEngine(
         [_rule()], 1,
         reference_prices={("azure", "meter-1"): {

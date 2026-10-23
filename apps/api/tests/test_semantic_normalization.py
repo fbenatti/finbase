@@ -277,9 +277,9 @@ def test_missing_currency_is_not_assumed():
 
 
 def test_connection_key_prefers_stable_code():
-    """O `name` na Silver é a tabela Bronze (`raw_azure_4p`), não nome de negócio."""
-    assert connection_key("azure-4p", "raw_azure_4p") == "azure-4p"
-    assert connection_key(None, "raw_azure_4p") == "raw_azure_4p"
+    """O `name` na Silver é a tabela Bronze (`raw_azure_producao`), não nome de negócio."""
+    assert connection_key("azure-producao", "raw_azure_producao") == "azure-producao"
+    assert connection_key(None, "raw_azure_producao") == "raw_azure_producao"
     assert connection_key(None, None) == UNKNOWN
 
 

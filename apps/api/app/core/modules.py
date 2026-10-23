@@ -11,6 +11,8 @@ ALL_MODULES = [
     # qualidade. Módulo próprio porque a permissão de leitura de custo agregado não
     # é a mesma de administrar a governança Gold.
     "finops",
+    # Avisos do sistema: sino, painel e alertas de tarefas em andamento.
+    "notifications",
     # módulos de administração
     "auth", "users", "groups", "roles", "audit", "ideas", "modules",
 ]

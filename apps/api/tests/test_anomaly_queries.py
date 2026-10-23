@@ -33,7 +33,7 @@ def row(**overrides):
         "reference_kind": "PROSPECTIVE",
         "reference_id": "ref-1",
         "forecast_run_id": 399,
-        "cloud_origem": "azure-ti",
+        "cloud_origem": "azure-dev",
         "servicename": "Microsoft.Capacity",
         "chargecategory": "Purchase",
     }
@@ -99,7 +99,7 @@ def test_agrupa_recorrencias_por_familia():
     ]
     items = group_expected_events(rows)
     by_family = {item["family"]: item for item in items}
-    virtual = by_family["azure-ti|Microsoft.Capacity|Purchase"]
+    virtual = by_family["azure-dev|Microsoft.Capacity|Purchase"]
     assert virtual["occurrences"] == 2
     assert virtual["series_count"] == 1
     assert virtual["expected_cloud"] == pytest.approx(60_000.0)
@@ -108,7 +108,7 @@ def test_agrupa_recorrencias_por_familia():
     assert virtual["months"] == ["202608", "202609"]
     assert virtual["last_event_date"] == "2026-09-05"
     assert virtual["reason_codes"] == ["EXPECTED_MONTHLY_EVENT", "EXPLICIT_TOLERANCE"]
-    assert by_family["azure-ti|Microsoft.Storage|Purchase"]["occurrences"] == 1
+    assert by_family["azure-dev|Microsoft.Storage|Purchase"]["occurrences"] == 1
 
 
 def test_ordenacao_por_numero_de_ocorrencias():

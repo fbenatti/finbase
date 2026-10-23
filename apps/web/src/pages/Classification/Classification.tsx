@@ -8,9 +8,7 @@ import {
   getClassifications, createClassification, updateClassification,
   deleteClassification, ClassificationRule, getClassificationsGrid,
   getClassificationFieldValues, refreshClassificationFieldValues, ClassificationFieldValue,
-  getDepartments, Department, getConnections,
-  getDestinationTables, getDestinationSchema,
-  DestinationTable,
+  getDepartments, Department, getDestinationSchema,
   getAzureTenants, getAzurePolicySubscriptions, exportAzureTagPolicy, downloadText, getAzureTagMappings, createAzureTagMapping, updateAzureTagMapping,
   AzureTenant, AzurePolicySubscription, AzureTenantPolicy, AzureTagMapping,
 } from "../../services/api";
@@ -23,33 +21,6 @@ import { ORG } from "../../constants/orgLabels";
 import { colors } from "../../theme/tokens";
 
 interface CondEntry { field: string; operator: string; values: string; logic: string }
-
-const CLOUD_FILTER_OPTIONS = [
-  { value: "every", label: "Todos os critérios" },
-  { value: "global", label: "Global (cross-cloud, sem escopo)" },
-  { value: "azure", label: "Azure" },
-  { value: "gcp", label: "GCP" },
-  { value: "atlas", label: "MongoDB Atlas" },
-  { value: "aws", label: "AWS" },
-  { value: "oci", label: "Oracle (OCI)" },
-  { value: "ibm", label: "IBM Cloud" },
-] as const;
-
-const CLOUD_SCOPE_FORM_OPTIONS = [
-  { value: "global", label: "Global (cross-cloud — todas as clouds)" },
-  { value: "azure", label: "Azure" },
-  { value: "gcp", label: "GCP" },
-  { value: "atlas", label: "MongoDB Atlas" },
-  { value: "aws", label: "AWS" },
-  { value: "oci", label: "Oracle (OCI)" },
-  { value: "ibm", label: "IBM Cloud" },
-] as const;
-
-const cloudScopeLabel = (scope: string | null | undefined) => {
-  if (!scope) return "Global (todas as nuvens)";
-  return CLOUD_SCOPE_FORM_OPTIONS.find((o) => o.value === scope)?.label ?? scope.toUpperCase();
-};
-
 
 const emptyForm = {
   name: "", target_field: "hierarquia",
@@ -120,9 +91,7 @@ const ClassificationRuleDialog = memo(function ClassificationRuleDialog({
   open,
   editing,
   cloning,
-  selectedDestName,
   destColumns,
-  cloudScopes,
   departments,
   destinationTableId,
   onClose,
@@ -132,9 +101,7 @@ const ClassificationRuleDialog = memo(function ClassificationRuleDialog({
   open: boolean;
   editing: ClassificationRule | null;
   cloning: ClassificationRule | null;
-  selectedDestName: string | null;
   destColumns: string[];
-  cloudScopes: string[];
   departments: Department[];
   destinationTableId: number | null;
   onClose: () => void;
@@ -270,12 +237,6 @@ const ClassificationRuleDialog = memo(function ClassificationRuleDialog({
       <DialogTitle>{editing ? "Editar" : "Nova"} Classificação</DialogTitle>
       <DialogContent>
         <Box sx={{ display: "flex", flexDirection: "column", gap: 2, mt: 1 }}>
-          {selectedDestName && (
-            <Alert severity="info" icon={false} sx={{ py: 0 }}>
-              Tabela Destino: <strong>{selectedDestName}</strong>
-            </Alert>
-          )}
-
           <TextField
             label="Nome da regra"
             value={form.name}
@@ -289,24 +250,6 @@ const ClassificationRuleDialog = memo(function ClassificationRuleDialog({
             label="Estrutura organizacional"
             helperText="Escolha a unidade na estrutura organizacional, como em Estrutura > Editar unidade."
           />
-
-          <FormControl fullWidth>
-            <InputLabel>Nuvem (abrangência do ajuste)</InputLabel>
-            <Select
-              value={form.cloud_scope}
-              label="Nuvem (abrangência do ajuste)"
-              onChange={(e) => setForm((prev) => ({ ...prev, cloud_scope: e.target.value }))}
-            >
-              {CLOUD_SCOPE_FORM_OPTIONS
-                .filter((s) => s.value === "global" || s.value === form.cloud_scope || cloudScopes.includes(s.value))
-                .map((s) => (
-                  <MenuItem key={s.value} value={s.value}>{s.label}</MenuItem>
-                ))}
-            </Select>
-          </FormControl>
-          <Typography variant="caption" color="text.secondary" sx={{ mt: -1 }}>
-            Define em quais provedores esta regra é aplicada no reprocessamento (ex.: GCP não usa regras Azure).
-          </Typography>
 
           <Divider />
           <Box sx={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
@@ -429,6 +372,8 @@ const ClassificationRuleDialog = memo(function ClassificationRuleDialog({
   );
 });
 
+const BILLING_CLOUD_DESTINATION_ID = 1;
+
 export function ClassificationRulesTab() {
   const [rules, setRules] = useState<ClassificationRule[]>([]);
   const [total, setTotal] = useState(0);
@@ -436,9 +381,8 @@ export function ClassificationRulesTab() {
   const [search, setSearch] = useState("");
   const queryRef = useRef<{ offset: number; limit: number; sort?: { field: string; direction: "asc" | "desc" }; filters: ClassificationGridFilter[] }>({ offset: 0, limit: 25, filters: [] });
   const [departments, setDepartments] = useState<Department[]>([]);
-  const [destTables, setDestTables] = useState<DestinationTable[]>([]);
-  const [selectedDestId, setSelectedDestId] = useState<number | "">("");
-  const [cloudFilter, setCloudFilter] = useState<string>("every");
+  // As classificações valem para o BILLING_CLOUD, que reúne todas as nuvens.
+  const selectedDestId = BILLING_CLOUD_DESTINATION_ID;
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
   const abortRef = useRef<AbortController | null>(null);
@@ -449,52 +393,32 @@ export function ClassificationRulesTab() {
   const [selectedRuleIds, setSelectedRuleIds] = useState<number[]>([]);
   const [bulkDeleteOpen, setBulkDeleteOpen] = useState(false);
   const [destColumns, setDestColumns] = useState<string[]>([]);
-  // Nuvens com conexão cadastrada: só elas aparecem na abrangência da regra.
-  const [cloudScopes, setCloudScopes] = useState<string[]>([]);
 
   useEffect(() => {
     getDepartments(false).then(setDepartments).catch(() => {});
-    getDestinationTables(true).then(setDestTables).catch(() => {});
-    getConnections()
-      .then((connections) => setCloudScopes([...new Set(connections.map((c) => c.cloud_scope).filter((v): v is string => !!v))]))
-      .catch(() => setCloudScopes([]));
   }, []);
 
   useEffect(() => {
-    const schemaTableId = selectedDestId
-      || editing?.destination_table_id
-      || cloning?.destination_table_id
-      || (destTables.length === 1 ? destTables[0].id : null);
-    if (schemaTableId) {
-      getDestinationSchema(schemaTableId as number)
-        .then(schema => setDestColumns(schema.columns.map(c => c.name)))
-        .catch(() => setDestColumns([]));
-    } else {
-      setDestColumns([]);
-    }
-  }, [selectedDestId, destTables, editing, cloning]);
+    getDestinationSchema(selectedDestId)
+      .then(schema => setDestColumns(schema.columns.map(c => c.name)))
+      .catch(() => setDestColumns([]));
+  }, [selectedDestId]);
 
-  // cloud/dest sao passados explicitamente: setState e assincrono, entao ler do
-  // estado em load usaria valores antigos no mesmo tick (stale closure).
   const load = async (
     query: { offset: number; limit: number; sort?: { field: string; direction: "asc" | "desc" }; filters: ClassificationGridFilter[] },
-    cloudOverride?: string,
-    destOverride?: number | "",
   ) => {
     abortRef.current?.abort();
     abortRef.current = new AbortController();
     setLoading(true);
     try {
-      const cloud = cloudOverride ?? cloudFilter;
-      const destId = destOverride === undefined ? (selectedDestId === "" ? undefined : (selectedDestId as number)) : (destOverride === "" ? undefined : (destOverride as number));
       const { sort, ...paginationAndFilters } = query;
       const data = await getClassificationsGrid({
         ...paginationAndFilters,
         sort_field: sort?.field,
         sort_direction: sort?.direction,
         search: search.trim() || undefined,
-        destination_table_id: destId,
-        cloud,
+        destination_table_id: selectedDestId,
+        cloud: "every",
       }, abortRef.current.signal);
       setRules(data.items);
       setTotal(data.total);
@@ -515,13 +439,6 @@ export function ClassificationRulesTab() {
     void load(query);
   };
 
-  const changeFilters = (nextCloud: string, nextDest: number | "") => {
-    // Primary filters changed — reset column filters/search so they don't apply to the new scope.
-    queryRef.current = { offset: 0, limit: queryRef.current.limit, filters: [] };
-    setSearch("");
-    void load(queryRef.current, nextCloud, nextDest);
-  };
-
   const openNew = () => {
     setEditing(null);
     setCloning(null);
@@ -537,7 +454,6 @@ export function ClassificationRulesTab() {
   const openClone = (rule: ClassificationRule) => {
     setEditing(null);
     setCloning(rule);
-    setSelectedDestId(rule.destination_table_id ?? "");
     setDialogOpen(true);
   };
 
@@ -568,16 +484,15 @@ export function ClassificationRulesTab() {
     [flatDepartments],
   );
 
-  const selectedDestName = selectedDestId ? destTables.find(t => t.id === selectedDestId)?.name : null;
   const filtersReady = true;
 
   return (
     <Box>
       <Stack direction="row" justifyContent="space-between" alignItems="center" sx={{ mb: 2, minHeight: 52, gap: 2, flexWrap: "wrap" }}>
         <Box>
-          <Typography variant="h6">Aplicar classificação</Typography>
+          <Typography variant="h6">Regras de classificação</Typography>
           <Typography variant="body2" color="text.secondary">
-            Regras que classificam linhas de custo em unidades da estrutura organizacional.
+            Quando uma linha de custo atende aos critérios da regra, ela é atribuída à unidade escolhida.
           </Typography>
         </Box>
         <Stack direction="row" gap={1}>
@@ -586,7 +501,7 @@ export function ClassificationRulesTab() {
             startIcon={<RefreshOutlined />}
             onClick={() => {
               setSuccess("");
-              refreshClassificationFieldValues(selectedDestId === "" ? undefined : (selectedDestId as number))
+              refreshClassificationFieldValues(selectedDestId)
                 .then(() => setSuccess("Recarga de valores iniciada em segundo plano."))
                 .catch((e: unknown) => setError(e instanceof Error ? e.message : "Não foi possível iniciar a recarga de valores"));
             }}
@@ -597,43 +512,6 @@ export function ClassificationRulesTab() {
             Nova
           </Button>
         </Stack>
-      </Stack>
-
-      {/* Filtros: Cloud primeiro, depois Tabela Destino */}
-      <Stack direction="row" spacing={1.5} sx={{ mb: 2, flexWrap: "wrap" }} alignItems="center">
-        <FormControl sx={{ minWidth: 220 }} size="small">
-          <InputLabel>Nuvem</InputLabel>
-          <Select
-            value={cloudFilter}
-            label="Nuvem"
-            onChange={(e) => { const value = e.target.value; setCloudFilter(value); changeFilters(value, selectedDestId); }}
-          >
-            {CLOUD_FILTER_OPTIONS.map((s) => (
-              <MenuItem key={s.value} value={s.value}>{s.label}</MenuItem>
-            ))}
-          </Select>
-        </FormControl>
-
-        <FormControl sx={{ minWidth: 260 }} size="small">
-          <InputLabel>Tabela de destino</InputLabel>
-          <Select
-            value={selectedDestId}
-            label="Tabela de destino"
-            onChange={(e) => { const value = e.target.value as number | ""; setSelectedDestId(value); changeFilters(cloudFilter, value); }}
-          >
-            <MenuItem value="">Todas as tabelas de destino</MenuItem>
-            {destTables.map((t) => (
-              <MenuItem key={t.id} value={t.id}>{t.name}</MenuItem>
-            ))}
-          </Select>
-        </FormControl>
-
-        {selectedDestName && (
-          <Chip
-            label={total + " regras em " + selectedDestName}
-            color="primary" size="small"
-          />
-        )}
       </Stack>
 
       {error && <Alert severity="error" sx={{ mb: 2 }} onClose={() => setError("")}>{dataDisplayText(error)}</Alert>}
@@ -681,7 +559,6 @@ export function ClassificationRulesTab() {
             </Stack>
           )}
           <ClassificationDataGrid
-            key={cloudFilter + "|" + selectedDestId}
             rows={rules}
             total={total}
             loading={loading}
@@ -701,11 +578,9 @@ export function ClassificationRulesTab() {
         open={dialogOpen}
         editing={editing}
         cloning={cloning}
-        selectedDestName={selectedDestName ?? null}
         destColumns={destColumns}
-        cloudScopes={cloudScopes}
         departments={departments}
-        destinationTableId={selectedDestId === "" ? null : (selectedDestId as number)}
+        destinationTableId={selectedDestId}
         onClose={() => setDialogOpen(false)}
         onSaved={() => void load(queryRef.current)}
         onError={setError}

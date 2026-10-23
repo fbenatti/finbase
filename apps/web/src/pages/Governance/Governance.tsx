@@ -13,7 +13,7 @@ import Reservations from "../Reservations/Reservations";
 const TABS = [
   { id: "organization", label: "Estrutura organizacional", perms: [{ module: "planning", scope: null }] },
   { id: "classification", label: "Classificação por projeto", perms: [{ module: "rules", scope: null }] },
-  { id: "rules", label: "Ajustes de custo", perms: [{ module: "rules", scope: null }, { module: "reservations", scope: null }] },
+  { id: "rules", label: "Regras financeiras", perms: [{ module: "rules", scope: null }, { module: "reservations", scope: null }] },
   { id: "financial-contracts", label: "Contratos financeiros", perms: [{ module: "rules", scope: null }] },
   { id: "cost-relationship", label: "Modelos analíticos", perms: [{ module: "gold", scope: null }] },
   { id: "reservas", label: "Reservas de capacidade Azure", perms: [{ module: "reservations", scope: null }] },
@@ -43,11 +43,18 @@ export default function Governance() {
       ? (requested as TabId)
       : fallback;
   const allowedRulesTabs = [
-    ...(hasPerm("rules", "read") ? [{ id: "adjustments" as const, label: "Regras de alocação" }] : []),
+    ...(hasPerm("rules", "read") ? [{ id: "adjustments" as const, label: "Regras financeiras" }] : []),
     ...(hasPerm("reservations", "read") ? [{ id: "clone-rules" as const, label: "Compromissos de tarifa" }] : []),
   ];
   const requestedRulesTab = searchParams.get("subtab");
   const rulesTab: RulesTabId | undefined = allowedRulesTabs.find((item) => item.id === requestedRulesTab)?.id ?? allowedRulesTabs[0]?.id;
+  const description = tab === "rules" && rulesTab === "adjustments"
+    ? "Regras financeiras para aplicação de impostos ou custo de suporte de cloud."
+    : tab === "rules" && rulesTab === "clone-rules"
+      ? "Recompõe o preço sob demanda do consumo coberto por instâncias reservadas e Savings Plans, para mostrar o uso real."
+      : tab === "classification"
+        ? "Regras que associam cada linha de custo a uma unidade da estrutura organizacional, para o showback por projeto."
+        : "Regras de alocação de custo, compromissos de tarifa (RIs e Savings Plans), estrutura organizacional e políticas de tags.";
 
   return (
     <Box sx={{ mx: -3, mt: -3, pb: 3, minHeight: "calc(100vh - 64px)", bgcolor: "#FAFBFD" }}>
@@ -55,9 +62,7 @@ export default function Governance() {
       <Box sx={{ px: 3, pt: 3, bgcolor: "background.paper", borderBottom: "1px solid", borderColor: "divider" }}>
         <Box sx={{ mb: 2 }}>
           <Typography variant="h4">Políticas e governança</Typography>
-          <Typography color="text.secondary" sx={{ mt: 0.5 }}>
-            Regras de alocação de custo, compromissos de tarifa (RIs e Savings Plans), estrutura organizacional e políticas de tags.
-          </Typography>
+          <Typography color="text.secondary" sx={{ mt: 0.5 }}>{description}</Typography>
         </Box>
       </Box>
 

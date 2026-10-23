@@ -45,7 +45,7 @@ def custom_metric_namespaces(connection: SourceConnection) -> dict[str, list[str
         }
 
     Metrics are queried for GPU compute instances only (shapes containing ".GPU"),
-    the same hosts where the agent (scripts/oci-gpu-agent) publishes them.
+    the hosts where a custom-metrics agent publishes them.
     """
     raw = (connection.config_json or {}).get("custom_metric_namespaces") or {}
     if isinstance(raw, str):

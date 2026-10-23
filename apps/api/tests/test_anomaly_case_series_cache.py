@@ -21,7 +21,7 @@ def clean_cache():
 def inputs():
     return (
         SimpleNamespace(series_id="scope", event_date="2026-10-09", case_version=1,
-                        series_dimensions={"cloud_origem": "azure-ti"}),
+                        series_dimensions={"cloud_origem": "azure-dev"}),
         SimpleNamespace(id=1, version=1, destination_physical_name="focus"),
     )
 

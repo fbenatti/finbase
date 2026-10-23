@@ -52,7 +52,7 @@ async def materialize_dollar_evolution_cube(session: Any, *, run_id: int) -> int
     period = schema.get("_billing_period") or schema.get("billingperiodstart")
     if not period:
         raise RuntimeError("Silver FOCUS sem período de faturamento para o cubo de câmbio")
-    cloud = schema.get("cloud_origem")
+    provider = schema.get("serviceprovidername")
     exchange_rate = schema.get("source_exchange_rate")
     if not exchange_rate:
         raise RuntimeError("Silver FOCUS precisa expor source_exchange_rate para o cubo de câmbio")
@@ -62,7 +62,10 @@ async def materialize_dollar_evolution_cube(session: Any, *, run_id: int) -> int
         f"THEN substr({period_text}, 1, 6) "
         f"ELSE date_format(try_cast({period_text} AS TIMESTAMP), '%Y%m') END"
     )
-    azure_filter = f" AND lower(CAST({_quote_ident(cloud)} AS VARCHAR)) IN ('azure-ti', 'azure-4p', 'azure', 'azure-marketplace')" if cloud else ""
+    # Linhas Azure pelo provedor FOCUS, não pelo código das conexões.
+    azure_filter = (
+        f" AND lower(CAST({_quote_ident(provider)} AS VARCHAR)) LIKE 'microsoft%'" if provider else ""
+    )
     sql = f"""
       SELECT {month_expr} AS billing_month,
              AVG(DISTINCT TRY_CAST({_quote_ident(exchange_rate)} AS DOUBLE)) AS taxa_brl_usd
@@ -1027,7 +1030,6 @@ async def prepare_vm_monthly(
             SUM(COALESCE(TRY_CAST(b."BilledCost" AS DOUBLE), 0)) AS total_cost
         FROM iceberg.silver.dest_billing_cloud b
         WHERE b._billing_period = '{period}'
-          AND b.cloud_origem IN ('azure-ti', 'azure-4p')
           AND LOWER(CAST(b."ServiceSubcategory" AS VARCHAR)) LIKE '%virtual machines%'
           AND POSITION('virtualMachines' IN CAST(b."ResourceId" AS VARCHAR)) > 0
           AND NOT regexp_like(element_at(split(CAST(b."ResourceId" AS VARCHAR), '/'), -1), '^[0-9a-f]{{32}}$')

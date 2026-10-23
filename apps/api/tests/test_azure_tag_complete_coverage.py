@@ -14,7 +14,7 @@ SUB = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa'
 
 
 def configured_service(monkeypatch, count=48):
-    connection = SimpleNamespace(id=2, code='azure-ti', name='TI', cloud_scope='azure',
+    connection = SimpleNamespace(id=2, code='azure-dev', name='TI', cloud_scope='azure',
                                  cloud_name='Azure', config_json={'tenant_id': 'tenant'})
 
     class DB:

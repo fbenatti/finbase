@@ -5,7 +5,7 @@ Examples:
   python scripts/blob_backup.py upload backups/scheduled/openfinops-full-20260914T212639Z.tar.gz
   python scripts/blob_backup.py download openfinops-full-20260914T212639Z.tar.gz /tmp/openfinops-backup.tar.gz
 
-The default settings are read from ``.env-4p``.  The value of
+The settings are read from the env file given by --env-file (default ``.env``).  The value of
 DEFAULT_UPLOAD_CONTAINER is treated as a blob prefix (Azure container names
 cannot contain ``/``); DEFAULT_CONTAINER_NAME is the actual container.
 """
@@ -95,7 +95,7 @@ def _progress(label: str):
     return report
 
 
-def upload(local_file, env_file=".env-4p", blob_name=None, storage_ip=None):
+def upload(local_file, env_file=".env", blob_name=None, storage_ip=None):
     """Upload *local_file* and return its full blob path."""
     source = Path(local_file).expanduser().resolve()
     if not source.is_file():
@@ -114,7 +114,7 @@ def upload(local_file, env_file=".env-4p", blob_name=None, storage_ip=None):
     return target
 
 
-def download(blob_name, local_file, env_file=".env-4p", storage_ip=None):
+def download(blob_name, local_file, env_file=".env", storage_ip=None):
     """Download *blob_name* (relative to DEFAULT_UPLOAD_CONTAINER) locally."""
     service, container, prefix = _blob_client(env_file, storage_ip)
     target = blob_name.strip("/")
@@ -137,7 +137,7 @@ def download(blob_name, local_file, env_file=".env-4p", storage_ip=None):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--env-file", default=".env-4p", help="arquivo de configuração Azure")
+    parser.add_argument("--env-file", default=".env", help="arquivo com as credenciais Azure do backup")
     parser.add_argument("--storage-ip", help="IP temporário do Blob quando a VM não resolve DNS")
     # ``required`` was added to argparse subparsers after Python 3.6.
     sub = parser.add_subparsers(dest="command")

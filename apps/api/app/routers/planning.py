@@ -719,7 +719,7 @@ async def download_simulated_budget(
 
     The consolidated file is import-ready.  The detailed file is an optional
     budget-defense view split by FOCUS ServiceName when that field exists.
-    Use cloud=gcp to generate only GCP project rows (gcp-4p / gcp-ti).
+    Use cloud=gcp to generate only GCP project rows (todas as conexões GCP).
     """
     if year <= 0 or not re.fullmatch(r"\d{6}", base_period):
         raise HTTPException(422, "Ano ou período-base inválido")

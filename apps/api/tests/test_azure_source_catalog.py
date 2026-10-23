@@ -37,16 +37,16 @@ def conn(**kwargs):
 # --- agrupamento por ambiente ---------------------------------------------
 
 def test_cloud_name_groups_sources_of_the_same_tenant():
-    """`Azure-4P` reúne todas as fontes 4P no mesmo grupo."""
-    assert environment_slug(conn(code="azure-4p", cloud_name="Azure-4P")) == "4p"
-    assert environment_slug(conn(code="azure-4p-ptu", cloud_name="Azure-4P")) == "4p"
-    assert environment_slug(conn(code="azure-automation-4p", cloud_name="Azure-4P")) == "4p"
-    assert environment_slug(conn(code="azure-resource-graph-4p", cloud_name="Azure-4P")) == "4p"
+    """`Azure-Producao` reúne todas as fontes de produção no mesmo grupo."""
+    assert environment_slug(conn(code="azure-producao", cloud_name="Azure-Producao")) == "producao"
+    assert environment_slug(conn(code="azure-producao-ptu", cloud_name="Azure-Producao")) == "producao"
+    assert environment_slug(conn(code="azure-automation-producao", cloud_name="Azure-Producao")) == "producao"
+    assert environment_slug(conn(code="azure-resource-graph-producao", cloud_name="Azure-Producao")) == "producao"
 
 
-def test_ti_is_a_different_environment_from_4p():
-    assert environment_slug(conn(code="azure-ti", cloud_name="Azure-TI")) == "ti"
-    assert environment_slug(conn(code="azure-automation-ti", cloud_name="Azure-TI")) == "ti"
+def test_dev_is_a_different_environment_from_producao():
+    assert environment_slug(conn(code="azure-dev", cloud_name="Azure-Dev")) == "dev"
+    assert environment_slug(conn(code="azure-automation-dev", cloud_name="Azure-Dev")) == "dev"
 
 
 def test_marketplace_uses_its_own_label():
@@ -55,21 +55,21 @@ def test_marketplace_uses_its_own_label():
 
 def test_explicit_environment_slug_wins_over_label():
     """Metadata manda: se o operador fixou o slug, é ele que vale."""
-    explicit = conn(code="azure-qualquer", cloud_name="Azure-4P",
+    explicit = conn(code="azure-qualquer", cloud_name="Azure-Producao",
                     config_json={"environment_slug": "producao"})
     assert environment_slug(explicit) == "producao"
 
 
 def test_grouping_never_renames_the_code():
     """`code` é identidade do pipeline e não muda com o agrupamento."""
-    c = conn(code="azure-resource-graph-4p", cloud_name="Azure-4P")
-    assert environment_slug(c) == "4p"
-    assert c.code == "azure-resource-graph-4p"
+    c = conn(code="azure-resource-graph-producao", cloud_name="Azure-Producao")
+    assert environment_slug(c) == "producao"
+    assert c.code == "azure-resource-graph-producao"
 
 
 def test_falls_back_to_code_when_no_label():
-    assert environment_slug(conn(code="azure-automation-4p")) == "4p"
-    assert environment_slug(conn(code="azure-resource-graph-ti")) == "ti"
+    assert environment_slug(conn(code="azure-automation-producao")) == "producao"
+    assert environment_slug(conn(code="azure-resource-graph-dev")) == "dev"
 
 
 def test_shared_credential_key_groups_by_tenant_and_client():
@@ -144,10 +144,10 @@ def test_catalog_has_official_sources_and_mca_commitment():
 def test_price_sheet_has_its_own_connection_and_environment_identity():
     from app.services.azure_source_registry import source_code, bronze_table_for
 
-    c = conn(code="azure-pricesheet", connector_type="azure_pricesheet", cloud_name="Azure-4P")
+    c = conn(code="azure-pricesheet", connector_type="azure_pricesheet", cloud_name="Azure-Producao")
     assert source_key_for(c) == "price_sheet"
     assert environment_slug(c) == "azure-pricesheet"
-    assert environment_slug(conn(code="azure-4p", connector_type="azure_blob", cloud_name="Azure-4P")) == "4p"
+    assert environment_slug(conn(code="azure-producao", connector_type="azure_blob", cloud_name="Azure-Producao")) == "producao"
     assert source_code(c.code, "price_sheet") == "azure-pricesheet"
     assert bronze_table_for(c.code, "price_sheet") == "raw_azure_pricesheet"
 
@@ -162,16 +162,16 @@ def test_catalog_entry_returns_none_for_unknown():
 
 def test_sanitized_bronze_matches_the_pipeline_convention():
     """`_bronze_table_id` troca hífen e ponto por underscore."""
-    assert sanitized_bronze(conn(code="azure-4p-resource-graph")) == "raw_azure_4p_resource_graph"
+    assert sanitized_bronze(conn(code="azure-producao-resource-graph")) == "raw_azure_producao_resource_graph"
     assert sanitized_bronze(conn(code="azure.resource.graph")) == "raw_azure_resource_graph"
 
 
 def test_resource_graph_reprocess_reads_the_selected_source_bronze():
     from app.routers.etl import _source_bronze_code
 
-    assert _source_bronze_code("azure-4p", "resource_graph") == "azure-4p-resource-graph"
-    assert _source_bronze_code("azure-ti", "resource_graph") == "azure-ti-resource-graph"
-    assert _source_bronze_code("azure-4p") == "azure-4p"
+    assert _source_bronze_code("azure-producao", "resource_graph") == "azure-producao-resource-graph"
+    assert _source_bronze_code("azure-dev", "resource_graph") == "azure-dev-resource-graph"
+    assert _source_bronze_code("azure-producao") == "azure-producao"
 
 
 # --- estado da fonte na API ------------------------------------------------

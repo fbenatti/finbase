@@ -7,27 +7,28 @@ import logging
 from datetime import datetime, timezone
 from typing import Any
 
-from azure.identity import ClientSecretCredential
 from azure.storage.blob import BlobServiceClient
-
-from app.config import settings
 
 logger = logging.getLogger(__name__)
 PRICE_SHEET_PREFIX = "reports/report_-pricesheet/"
 
 
-def _credentials() -> tuple[ClientSecretCredential, str, str]:
-    tenant = settings.azure_4p_tenant_id or settings.azure_ti_tenant_id
-    client = settings.azure_4p_client_id or settings.azure_ti_client_id
-    secret = settings.azure_4p_client_secret or settings.azure_ti_client_secret
-    account = settings.azure_4p_storage_account or settings.azure_ti_storage_account
-    container = settings.azure_4p_container if settings.azure_4p_storage_account else settings.azure_ti_container
-    if not all((tenant, client, secret, account, container)):
-        raise RuntimeError("Credenciais Azure para Price Sheet não configuradas")
-    from app.core.network_override import register_storage_ip
-    register_storage_ip(account)
-    credential = ClientSecretCredential(tenant_id=tenant, client_id=client, client_secret=secret)
-    return credential, account, container
+def _price_sheet_client() -> tuple[BlobServiceClient, str]:
+    """Cliente do Price Sheet com as credenciais da conexão ``azure-pricesheet``."""
+    from sqlalchemy import select
+
+    from app.database import SyncSession
+    from app.models.source_connection import SourceConnection
+    from app.services.azure_pricesheet import _azure_client
+
+    with SyncSession() as session:
+        connection = session.execute(
+            select(SourceConnection).where(SourceConnection.connector_type == "azure_pricesheet")
+        ).scalars().first()
+        config = dict(connection.config_json or {}) if connection else {}
+    if not config:
+        raise RuntimeError("Cadastre a conexão Azure Price Sheet para buscar preços de referência")
+    return _azure_client(config)
 
 
 def _latest_month(client: Any, container_name: str) -> str:
@@ -63,11 +64,7 @@ def _find_meter_rows(container: Any, month: str, meter_id: str) -> list[dict[str
 
 def collect_meter_price(meter_id: str) -> dict[str, Any]:
     """Fetch only matching Price Sheet rows via server-side Query Acceleration."""
-    credential, account, container_name = _credentials()
-    service = BlobServiceClient(
-        account_url=f"https://{account}.blob.core.windows.net", credential=credential,
-        connection_timeout=60, read_timeout=300,
-    )
+    service, container_name = _price_sheet_client()
     try:
         container = service.get_container_client(container_name)
         month = _latest_month(service, container_name)

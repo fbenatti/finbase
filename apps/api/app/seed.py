@@ -8,13 +8,6 @@ async def seed(db: AsyncSession):
     """Configuração genérica de cada startup; conexões e regras vêm do cadastro."""
     if settings.skip_seed:
         return
-
-    # Seeded rules are reconciled on every startup. These last-priority rules
-    # assign only rows left without an organizational classification.
-    from app.services.classification_fallbacks import ensure_cloud_classification_fallbacks
-    await ensure_cloud_classification_fallbacks(db)
-
-    await db.commit()
     await _seed_pivot_views(db)
 
 

@@ -99,7 +99,7 @@ def test_executive_summary_reads_snapshot_and_does_not_call_resource_graph(monke
     from datetime import datetime, timezone
     from types import SimpleNamespace
 
-    connection = SimpleNamespace(id=2, name="Azure TI", code="azure-ti")
+    connection = SimpleNamespace(id=2, name="Azure Dev", code="azure-dev")
     service = AzureTagDashboardService(db=object())
     async def get_connection(_connection_id): return connection
     async def tag_keys(): return ["projeto", "diretoria"]
@@ -138,7 +138,7 @@ def test_subscription_resources_filters_in_bronze_and_uses_snapshot_name():
     subscription_id = "a1dc3bc4-8d61-4b04-9090-65e60012b96f"
     service = AzureTagDashboardService(db=object())
     async def get_connection(_connection_id):
-        return SimpleNamespace(id=2, name="Azure TI", code="azure-ti")
+        return SimpleNamespace(id=2, name="Azure Dev", code="azure-dev")
     async def tag_keys():
         return ["projeto", "diretoria", "centro-de-custos"]
     async def inventory(_connection, subscription_id=None):
@@ -190,7 +190,7 @@ def test_resource_details_mark_alias_keys_as_managed_when_silver_expectation_is_
     service = AzureTagDashboardService(db=object())
 
     async def get_connection(_connection_id):
-        return SimpleNamespace(id=2, name="Azure TI", code="azure-ti")
+        return SimpleNamespace(id=2, name="Azure Dev", code="azure-dev")
 
     async def tag_keys():
         return ["projeto", "diretoria", "centro-de-custos"]
@@ -240,7 +240,7 @@ def test_silver_expectations_prefer_resource_evidence_and_use_unique_group_fallb
     import asyncio
     from types import SimpleNamespace
 
-    connection = SimpleNamespace(id=2, code="azure-ti")
+    connection = SimpleNamespace(id=2, code="azure-dev")
     resource_id = "/subscriptions/sub-a/resourcegroups/rg-a/providers/microsoft.compute/virtualmachines/vm-a"
     inventory = [
         {"resource_id": resource_id, "resource_name": "vm-a", "resource_group": "rg-a",

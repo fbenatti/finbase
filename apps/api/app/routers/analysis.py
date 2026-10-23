@@ -881,7 +881,7 @@ async def _inject_latest_period_filter(
 ) -> tuple[list[PivotFilter], str | None]:
     """Restrict unbounded pivots to the latest billing partition.
 
-    The Gold FOCUS table holds ~25M rows (mostly Azure-TI). Pivot/search
+    The Gold FOCUS table can hold tens of millions of rows. Pivot/search
     without a period filter forces Trino to scan every partition and often
     OOMs the 2 GB coordinator heap.
 
@@ -2774,7 +2774,7 @@ async def run_query(req: QueryRequest, request: Request, db: AsyncSession = Depe
     Execute a SQL query against Trino + Iceberg.
 
     Examples:
-      SELECT * FROM iceberg.bronze.raw_azure_4p WHERE _billing_period = '202504' LIMIT 10
+      SELECT * FROM iceberg.bronze.raw_oci WHERE _billing_period = '202504' LIMIT 10
       SELECT SUM("BilledCost") AS total_billed FROM iceberg.silver.dest_billing_cloud WHERE "_billing_period" = '202504'
     """
     allowed = set((await db.execute(select(DestinationTable.physical_name).where(DestinationTable.active.is_(True)))).scalars().all())

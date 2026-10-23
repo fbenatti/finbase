@@ -1,5 +1,6 @@
 import logging
 import io
+import json
 import re
 import configparser
 import os
@@ -96,11 +97,33 @@ USAGE_API_MODE = "usage_api"
 USAGE_API_PREFIX = "usage-api"
 USAGE_API_HISTORY_MONTHS = 12
 # A Usage API aceita no máximo 4 chaves de agrupamento: a consulta diária usa
-# as que definem a linha de custo; serviço/descrição/unidade (por SKU) e o nome
-# do compartimento vêm de consultas mensais e são juntados depois.
+# as que definem a linha de custo; serviço/descrição/unidade (por SKU), o nome
+# do compartimento, a zona e as tags (por recurso) e a assinatura vêm de
+# consultas mensais e são juntados depois. A API não agrupa por nome de recurso
+# nem devolve preço de lista ou unitário.
 USAGE_API_DAILY_GROUP_BY = ["resourceId", "skuPartNumber", "compartmentId", "region"]
 USAGE_API_SKU_GROUP_BY = ["skuPartNumber", "skuName", "service", "unit"]
 USAGE_API_COMPARTMENT_GROUP_BY = ["compartmentId", "compartmentName"]
+USAGE_API_ZONE_GROUP_BY = ["resourceId", "logicalAd"]
+USAGE_API_TAG_GROUP_BY = ["resourceId", "tagNamespace", "tagKey", "tagValue"]
+USAGE_API_ACCOUNT_GROUP_BY = ["subscriptionId", "tenantName"]
+
+
+def _availability_zone(ad: str | None) -> str | None:
+    """``Tota:SA-SAOPAULO-1-AD-1`` → ``SA-SAOPAULO-1-AD-1``; ``NA`` é recurso regional."""
+    if not ad or ad == "NA":
+        return None
+    return ad.split(":", 1)[-1]
+
+
+def _resource_type(resource_id: str | None) -> str | None:
+    """Tipo do recurso pelo OCID (``ocid1.instance.oc1...`` → ``instance``)."""
+    parts = (resource_id or "").split(".")
+    return parts[1] if len(parts) > 2 and parts[0].startswith("ocid") else None
+
+
+def _unit_price(cost: float, quantity: float) -> float | None:
+    return round(cost / quantity, 10) if quantity else None
 
 
 class OciExtractor:
@@ -406,25 +429,50 @@ class OciExtractor:
             item.compartment_id: item.compartment_name
             for item in self._summarized_usages(start, end, "MONTHLY", USAGE_API_COMPARTMENT_GROUP_BY)
         }
+        zones: dict[str, str] = {}
+        for item in self._summarized_usages(start, end, "MONTHLY", USAGE_API_ZONE_GROUP_BY):
+            zone = _availability_zone(item.ad)
+            if zone and item.resource_id:
+                zones[item.resource_id] = zone
+        tags: dict[str, dict[str, str]] = defaultdict(dict)
+        for item in self._summarized_usages(start, end, "MONTHLY", USAGE_API_TAG_GROUP_BY):
+            for tag in item.tags or []:
+                if item.resource_id and tag.key:
+                    key = f"{tag.namespace}.{tag.key}" if tag.namespace else tag.key
+                    tags[item.resource_id][key] = tag.value
+        accounts = self._summarized_usages(start, end, "MONTHLY", USAGE_API_ACCOUNT_GROUP_BY)
+        # Sem a assinatura no agrupamento diário, ela só é atribuída quando é única.
+        subscription = accounts[0].subscription_id if len({a.subscription_id for a in accounts}) == 1 else None
+        tenant_name = next((a.tenant_name for a in accounts if a.tenant_name), None)
         tenancy = self._tenancy_ocid()
         rows: list[dict] = []
         for item in daily:
             sku = skus.get(item.sku_part_number)
+            cost = item.computed_amount or 0.0
+            quantity = item.computed_quantity or 0.0
+            resource_tags = tags.get(item.resource_id)
             rows.append({
                 "lineItem/intervalUsageStart": item.time_usage_started.strftime("%Y-%m-%d") if item.time_usage_started else None,
                 "lineItem/intervalUsageEnd": item.time_usage_ended.strftime("%Y-%m-%d") if item.time_usage_ended else None,
                 "lineItem/tenantId": tenancy,
+                "lineItem/tenantName": tenant_name,
                 "product/service": sku.service if sku else None,
                 "product/resourceId": item.resource_id,
+                "product/resourceType": _resource_type(item.resource_id),
                 "product/compartmentId": item.compartment_id,
                 "product/compartmentName": compartments.get(item.compartment_id),
                 "product/region": item.region,
+                "product/availabilityDomain": zones.get(item.resource_id),
                 "product/description": sku.sku_name if sku else None,
+                "cost/subscriptionId": subscription,
                 "cost/productSku": item.sku_part_number,
                 "cost/skuUnitDescription": sku.unit if sku else None,
                 "cost/currencyCode": item.currency,
-                "cost/myCost": item.computed_amount or 0.0,
-                "usage/billedQuantity": item.computed_quantity or 0.0,
+                # Preço efetivo (custo ÷ quantidade): a API não traz o de tabela.
+                "cost/unitPrice": _unit_price(cost, quantity),
+                "cost/myCost": cost,
+                "usage/billedQuantity": quantity,
+                "tags": json.dumps(resource_tags, ensure_ascii=False, sort_keys=True) if resource_tags else None,
             })
         frame = pd.DataFrame(rows)
         # Linhas sem custo nem quantidade não acrescentam nada ao bronze.
@@ -504,8 +552,10 @@ class OciExtractor:
             "intervalStart",
             "intervalEnd",
             "lineItem/tenantId",
+            "lineItem/tenantName",
             "product/service",
             "product/resource",
+            "product/resourceType",
             "product/compartmentId",
             "product/compartmentName",
             "product/region",
@@ -520,6 +570,7 @@ class OciExtractor:
             "cost/skuUnitDescription",
             "cost/overageFlag",
             "lineItem/isCorrection",
+            "tags",
         ]
         # Adicionar todas as colunas de tags presentes no DataFrame
         tag_cols = [c for c in df.columns if c.startswith("tags/")]

@@ -925,17 +925,13 @@ async def lifespan(app: FastAPI):
         await db.commit()
         # Reconcile ARG destinations for connections created before the
         # automatic setup hook existed. The setup is idempotent and also
-        # repairs missing mappings for existing Azure TI/4P connections,
+        # repairs missing mappings for existing Azure cost connections,
         # including deployments that keep cost ingestion as azure_blob.
         from app.models.source_connection import SourceConnection
         from app.routers.azure_resource_graph import _setup_for_connection as setup_arg_connection
         arg_connections = (await db.execute(
           select(SourceConnection).where(
-            (SourceConnection.connector_type == "azure_resource_graph")
-            | (
-              (SourceConnection.connector_type == "azure_blob")
-              & SourceConnection.code.in_(("azure-4p", "azure-ti"))
-            )
+            SourceConnection.connector_type.in_(("azure_resource_graph", "azure_blob"))
           )
         )).scalars().all()
         for arg_connection in arg_connections:

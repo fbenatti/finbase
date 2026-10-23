@@ -102,7 +102,7 @@ def band(offset=200.0, expected=1000.0, quantile=0.975):
 def point(day, *, observed=1500.0, expected=1000.0, upper=1200.0, partial=False, billing=None):
     return SeriesPoint(
         series_id="s1",
-        dimensions={"cloud_origem": "gcp-4p", "servicename": "Compute"},
+        dimensions={"cloud_origem": "gcp-producao", "servicename": "Compute"},
         event_date=day,
         observed_cloud=observed,
         expected_cloud=expected,
@@ -117,8 +117,8 @@ def point(day, *, observed=1500.0, expected=1000.0, upper=1200.0, partial=False,
 def detection(**overrides):
     base = dict(
         series_id="s1",
-        series_dimensions={"cloud_origem": "gcp-4p", "servicename": "Compute"},
-        event_family="cloud_origem=gcp-4p",
+        series_dimensions={"cloud_origem": "gcp-producao", "servicename": "Compute"},
+        event_family="cloud_origem=gcp-producao",
         event_type=EVENT_DAILY,
         event_date="2026-10-13",
         period="202610",
@@ -196,7 +196,7 @@ def test_02_realizado_muda_e_realizado_cloud_nao_muda_anomalia_identica():
 def test_03_reserva_mensal_esperada_nao_abre_caso():
     event = MonthlyEvent(
         series_id="s1",
-        dimensions={"cloud_origem": "azure-ti", "servicename": "SavingsPlan"},
+        dimensions={"cloud_origem": "azure-dev", "servicename": "SavingsPlan"},
         event_date=date(2026, 10, 5),
         observed_cloud=30_000.0,
         expected_cloud=30_000.0,
@@ -229,17 +229,17 @@ def test_03_reserva_mensal_esperada_nao_abre_caso():
 # ---------------------------------------------------------------------------
 def test_04_compra_adicional_consolida_excesso_mensal():
     primeira = MonthlyEvent(
-        series_id="s1", dimensions={"cloud_origem": "azure-ti", "servicename": "SavingsPlan"},
+        series_id="s1", dimensions={"cloud_origem": "azure-dev", "servicename": "SavingsPlan"},
         event_date=date(2026, 10, 5), observed_cloud=30_000.0, expected_cloud=30_000.0,
         upper_cloud=34_500.0, lower_cloud=25_500.0,
     )
     segunda = MonthlyEvent(
-        series_id="s1", dimensions={"cloud_origem": "azure-ti", "servicename": "SavingsPlan"},
+        series_id="s1", dimensions={"cloud_origem": "azure-dev", "servicename": "SavingsPlan"},
         event_date=date(2026, 10, 20), observed_cloud=40_000.0, expected_cloud=30_000.0,
         upper_cloud=34_500.0, lower_cloud=25_500.0,
     )
     result = detect_monthly_accumulated(
-        series_id="s1", dimensions={"cloud_origem": "azure-ti", "servicename": "SavingsPlan"},
+        series_id="s1", dimensions={"cloud_origem": "azure-dev", "servicename": "SavingsPlan"},
         event_family="fam", period="202610", events=[primeira, segunda],
         profile=PROFILE, materiality=MATERIALITY, band=None,
     )
@@ -262,7 +262,7 @@ def test_05_restante_zero_preserva_a_referencia_anterior():
     assert selection.contract.run_id == 394  # o snapshot anterior à compra
     rows = build_reference_rows(
         selection.contract,
-        [{"cloud_origem": "azure-ti", "servicename": "SavingsPlan", "forecast_month": "202610", "expected_cloud": 30_000.0}],
+        [{"cloud_origem": "azure-dev", "servicename": "SavingsPlan", "forecast_month": "202610", "expected_cloud": 30_000.0}],
         dimensions=DIMS, reference_kind=selection.reference_kind,
         target_start="2026-10-03", target_end="2026-10-31",
     )
@@ -434,11 +434,11 @@ def test_14_novo_forecast_nao_apaga_caso_ativo():
     novo = contract(run_id=399, cutoff="2026-10-12")
     # A referência do caso é a anterior; a nova produz outro reference_id.
     rows_antigo = build_reference_rows(
-        antigo, [{"cloud_origem": "gcp-4p", "servicename": "Compute", "forecast_month": "202610", "expected_cloud": 1000.0}],
+        antigo, [{"cloud_origem": "gcp-producao", "servicename": "Compute", "forecast_month": "202610", "expected_cloud": 1000.0}],
         dimensions=DIMS, reference_kind="PROSPECTIVE", target_start="2026-10-03", target_end="2026-10-31",
     )
     rows_novo = build_reference_rows(
-        novo, [{"cloud_origem": "gcp-4p", "servicename": "Compute", "forecast_month": "202610", "expected_cloud": 5000.0}],
+        novo, [{"cloud_origem": "gcp-producao", "servicename": "Compute", "forecast_month": "202610", "expected_cloud": 5000.0}],
         dimensions=DIMS, reference_kind="PROSPECTIVE", target_start="2026-10-13", target_end="2026-10-31",
     )
     assert rows_antigo[0].reference_id != rows_novo[0].reference_id

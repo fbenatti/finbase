@@ -138,12 +138,9 @@ WITH latest_orphan_period AS (
     FROM {_orphan_table()}
     GROUP BY cloud_origem
 ), orphan_ids AS (
-    SELECT DISTINCT lower(o.resource_id) AS rid, o."_billing_period",
-                     CASE o.cloud_origem
-                         WHEN 'azure-resource-graph-4p' THEN 'azure-4p'
-                         WHEN 'azure-resource-graph-ti' THEN 'azure-ti'
-                         ELSE o.cloud_origem
-                     END AS focus_cloud_origem
+    -- O ResourceId da Azure é único entre tenants: o cruzamento com o custo é
+    -- por recurso e mês, independente do código das conexões.
+    SELECT DISTINCT lower(o.resource_id) AS rid, o."_billing_period"
     FROM {_orphan_table('o')}
     JOIN latest_orphan_period p
       ON p.cloud_origem = o.cloud_origem
@@ -158,7 +155,6 @@ WITH latest_orphan_period AS (
         JOIN orphan_ids o
           ON lower(f.resourceid) = o.rid
          AND f."_billing_period" = o."_billing_period"
-         AND lower(f.cloud_origem) = lower(o.focus_cloud_origem)
     ) WHERE resourceid = canonical
 )
 SELECT
@@ -186,11 +182,6 @@ LEFT JOIN focus_dedup f
   -- enquanto o export de custo FOCUS normaliza para UPPER/lower.
   ON LOWER(f.resourceid) = LOWER(o.resource_id)
  AND f."_billing_period" = o."_billing_period"
- AND lower(f.cloud_origem) = lower(CASE o.cloud_origem
-     WHEN 'azure-resource-graph-4p' THEN 'azure-4p'
-     WHEN 'azure-resource-graph-ti' THEN 'azure-ti'
-     ELSE o.cloud_origem
- END)
 -- Restringe ao período mais recente de cada origem (poda de partição no FOCUS).
 WHERE EXISTS (
     SELECT 1 FROM latest_orphan_period p

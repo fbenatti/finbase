@@ -50,7 +50,7 @@ export default function CloneRules({ embedded }: { embedded?: boolean } = {}) {
   const [deletePending, setDeletePending] = useState<CloneRule | null>(null);
 
   const [editingId, setEditingId] = useState<number | null>(null);
-  const [name, setName] = useState("Nova regra de clonagem");
+  const [name, setName] = useState("Nova regra de compromisso");
   const [description, setDescription] = useState("");
   const [connectionId, setConnectionId] = useState<number | "">("");
   const [provider, setProvider] = useState("");
@@ -98,7 +98,7 @@ export default function CloneRules({ embedded }: { embedded?: boolean } = {}) {
 
   const reset = () => {
     setEditingId(null);
-    setName("Nova regra de clonagem");
+    setName("Nova regra de compromisso");
     setDescription("");
     setConnectionId("");
     setProvider("");
@@ -290,20 +290,20 @@ export default function CloneRules({ embedded }: { embedded?: boolean } = {}) {
       <Alert severity="info" sx={{ mb: 2 }}>
         <Typography variant="subtitle2" fontWeight={700} gutterBottom>Para que servem estas regras?</Typography>
         <Typography variant="body2" component="div">
-          Na fatura Azure, linhas de <strong>uso (Usage)</strong> cobertas por <strong>Reserva</strong> ou <strong>Savings Plan</strong> frequentemente chegam com custo zerado — o compromisso já foi pago em outro lançamento. Sem esse tratamento, dashboards e pivots subestimam o consumo real da cloud.
+          Quando um consumo é coberto por um <strong>compromisso de tarifa</strong> (instância reservada ou Savings Plan), o provedor costuma faturar a linha de uso com custo zero, porque o compromisso já foi cobrado em outro lançamento. Sem tratamento, os painéis mostram um consumo menor que o real.
           <br /><br />
-          No reprocessamento da base consolidada, cada regra elegível reconstrói o <strong>preço sob demanda (OnDemand) de referência</strong> na linha original e cria uma linha sintética de <strong>estorno (Return)</strong> com valor negativo. O total financeiro se mantém; o que muda é a visibilidade do uso real para análise FinOps.
+          No reprocessamento da base consolidada, cada regra recompõe na linha de uso o <strong>preço sob demanda de referência</strong> e cria uma <strong>linha de estorno</strong> com o mesmo valor, negativo. O total financeiro não muda; o que passa a aparecer é o consumo real de cada recurso.
           <br /><br />
-          Templates editáveis para tabelas de destino são instalados automaticamente (ex.: <em>Uso de reserva Azure → devolução</em>). Se não houver preço On-Demand histórico para o medidor, a linha vai para <strong>pendências</strong> — nada é alterado em silêncio.
+          Quando não há preço sob demanda histórico para o item, a linha vai para <strong>pendências</strong> e nada é alterado.
         </Typography>
       </Alert>
 
       <Paper variant="outlined" sx={{ p: { xs: 1.5, md: 2.5 }, bgcolor: "background.paper" }}>
         <Stack direction="row" justifyContent="space-between" alignItems="center" flexWrap="wrap" gap={1.5} sx={{ mb: 2 }}>
           <Box>
-            <Typography variant="h6">Compromissos de tarifa (RI e Savings Plan)</Typography>
+            <Typography variant="h6">Regras de compromisso de tarifa</Typography>
             <Typography variant="body2" color="text.secondary">
-              Ajustes de estorno sob demanda (OnDemand) para uso coberto por compromisso — por tabela de destino.
+              Cada regra define que consumo coberto por compromisso recebe o preço sob demanda e a linha de estorno.
             </Typography>
           </Box>
           <Stack direction="row" gap={1} flexWrap="wrap" alignItems="center">
@@ -321,7 +321,7 @@ export default function CloneRules({ embedded }: { embedded?: boolean } = {}) {
               InputProps={{ startAdornment: <InputAdornment position="start"><Search fontSize="small" /></InputAdornment> }}
               sx={{ minWidth: 240 }}
             />
-            <Button variant="contained" startIcon={<Add />} onClick={openNew}>Nova regra de clonagem</Button>
+            <Button variant="contained" startIcon={<Add />} onClick={openNew}>Nova regra</Button>
             <Button variant="text" startIcon={<Refresh />} onClick={() => void load()}>Recarregar dados</Button>
           </Stack>
         </Stack>
@@ -332,8 +332,8 @@ export default function CloneRules({ embedded }: { embedded?: boolean } = {}) {
           <Box sx={{ py: 7 }}>
             <EmptyState
               message={search
-                ? "Nenhuma regra de clonagem encontrada para a busca."
-                : "Nenhuma regra cadastrada para esta tabela. Clique em 'Nova regra de clonagem' para começar."}
+                ? "Nenhuma regra encontrada para a busca."
+                : "Nenhuma regra de compromisso cadastrada. Clique em 'Nova regra' para começar."}
             />
           </Box>
         ) : (
@@ -353,12 +353,12 @@ export default function CloneRules({ embedded }: { embedded?: boolean } = {}) {
           <Chip label={pending.length + " pendências"} size="small" color={pending.length ? "warning" : "default"} />
         </Stack>
         <Typography variant="caption" color="text.secondary" sx={{ display: "block", mt: 0.5 }}>
-          Uma linha sem preço histórico compatível não é alterada nem gera clone.
+          Linhas sem preço sob demanda histórico compatível ficam aqui, sem alteração e sem linha de estorno.
         </Typography>
       </Paper>
 
       <Dialog open={dialogOpen} onClose={() => setDialogOpen(false)} maxWidth="md" fullWidth>
-        <DialogTitle>{editingId ? "Editar regra de clonagem" : "Nova regra de clonagem"}</DialogTitle>
+        <DialogTitle>{editingId ? "Editar regra de compromisso" : "Nova regra de compromisso"}</DialogTitle>
         <DialogContent dividers>
           <Stack gap={2} sx={{ mt: 1 }}>
             <Stack direction="row" gap={2} flexWrap="wrap">
@@ -377,7 +377,7 @@ export default function CloneRules({ embedded }: { embedded?: boolean } = {}) {
                   {connections.map((c) => <MenuItem key={c.id} value={c.id}>{c.name}</MenuItem>)}
                 </Select>
               </FormControl>
-              <TextField label="Provedor (abrangência)" value={provider} onChange={(e) => setProvider(e.target.value)} placeholder="azure" />
+              <TextField label="Provedor (abrangência)" value={provider} onChange={(e) => setProvider(e.target.value)} placeholder="ex.: nome do provedor" />
               <TextField type="number" label="Prioridade" value={priority} onChange={(e) => setPriority(Number(e.target.value))} sx={{ width: 120 }} />
               <TextField label="Início da vigência" value={validFrom} onChange={(e) => setValidFrom(e.target.value)} placeholder="AAAAMM" sx={{ width: 140 }} />
               <TextField label="Fim da vigência" value={validUntil} onChange={(e) => setValidUntil(e.target.value)} placeholder="AAAAMM" sx={{ width: 140 }} />
@@ -429,13 +429,13 @@ export default function CloneRules({ embedded }: { embedded?: boolean } = {}) {
         <DialogActions sx={{ px: 3, pb: 2 }}>
           <Button onClick={() => setDialogOpen(false)}>Cancelar</Button>
           <Button variant="contained" startIcon={editingId ? <Edit /> : <Add />} onClick={() => void save()}>
-            {editingId ? "Salvar nova versão" : "Criar regra de clonagem"}
+            {editingId ? "Salvar nova versão" : "Criar regra"}
           </Button>
         </DialogActions>
       </Dialog>
 
       <Dialog open={Boolean(deletePending)} onClose={() => setDeletePending(null)} maxWidth="xs" fullWidth>
-        <DialogTitle>Excluir esta regra de clonagem?</DialogTitle>
+        <DialogTitle>Excluir esta regra de compromisso?</DialogTitle>
         <DialogContent>
           <Typography>
             Você está prestes a excluir <strong>{deletePending?.name}</strong>. Esta ação não pode ser desfeita.
@@ -443,7 +443,7 @@ export default function CloneRules({ embedded }: { embedded?: boolean } = {}) {
         </DialogContent>
         <DialogActions sx={{ px: 3, pb: 2 }}>
           <Button onClick={() => setDeletePending(null)}>Cancelar</Button>
-          <Button variant="contained" color="error" onClick={() => void remove()}>Remover regra de clonagem</Button>
+          <Button variant="contained" color="error" onClick={() => void remove()}>Remover regra</Button>
         </DialogActions>
       </Dialog>
     </Box>

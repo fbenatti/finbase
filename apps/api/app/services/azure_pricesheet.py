@@ -14,7 +14,6 @@ import pandas as pd
 from azure.identity import ClientSecretCredential
 from azure.storage.blob import BlobServiceClient
 
-from app.config import settings
 from app.core.network_override import register_storage_ip
 
 logger = logging.getLogger(__name__)
@@ -23,45 +22,16 @@ BATCH_ROWS = 100_000
 
 
 def _azure_client(config: dict[str, Any] | None = None) -> tuple[BlobServiceClient, str]:
-    """Build the Price Sheet client from its own connection configuration.
-
-    The legacy settings fallback keeps existing deployments operational while
-    the independent `azure-pricesheet` connection is configured.
-    """
+    """Build the Price Sheet client from its own connection configuration."""
     config = config or {}
     keys = ("tenant_id", "client_id", "client_secret", "storage_account", "container_name")
     configured = [config.get(key) for key in keys]
-    if any(configured):
-        if not all(configured):
-            missing = [key for key, value in zip(keys, configured) if not value]
-            raise RuntimeError(
-                "Configuração independente do Azure Price Sheet incompleta; faltam: "
-                + ", ".join(missing)
-            )
-        tenant, client_id, secret, account, container = configured
-    else:
-        # Legacy fallback is selected as a complete credential/storage profile;
-        # never mix tenant/client/secret/account across independent profiles.
-        profiles = (
-            (
-                settings.azure_4p_tenant_id,
-                settings.azure_4p_client_id,
-                settings.azure_4p_client_secret,
-                settings.azure_4p_storage_account,
-                settings.azure_4p_container,
-            ),
-            (
-                settings.azure_ti_tenant_id,
-                settings.azure_ti_client_id,
-                settings.azure_ti_client_secret,
-                settings.azure_ti_storage_account,
-                settings.azure_ti_container,
-            ),
+    if not all(configured):
+        missing = [key for key, value in zip(keys, configured) if not value]
+        raise RuntimeError(
+            "Configuração da conexão Azure Price Sheet incompleta; faltam: " + ", ".join(missing)
         )
-        legacy = next((profile for profile in profiles if all(profile)), None)
-        if legacy is None:
-            raise RuntimeError("Credenciais Azure para azure-pricesheet não estão configuradas")
-        tenant, client_id, secret, account, container = legacy
+    tenant, client_id, secret, account, container = configured
     if not all((tenant, client_id, secret, account, container)):
         raise RuntimeError("Credenciais Azure para azure-pricesheet não estão configuradas")
     # Match the Azure Blob extractor's private-endpoint DNS handling. Keep the

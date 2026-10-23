@@ -67,7 +67,7 @@ def test_should_skip_gold_from_metadata(monkeypatch):
 
 def test_provider_month_to_date_snapshot_is_not_skipped_without_manual_csv_metadata(monkeypatch):
     monkeypatch.setattr(csv_upload_service, "is_current_billing_period", lambda period: period == "202610")
-    # This is the shape of the Azure TI October extract: a single Date of
+    # This is the shape of the Azure Dev October extract: a single Date of
     # month-start triggers the generic monthly-grain heuristic, despite being
     # a current-period cost snapshot that must feed realized and forecast.
     df = pd.DataFrame({"Date": ["2026-10-01"], "BilledCost": [125.0]})

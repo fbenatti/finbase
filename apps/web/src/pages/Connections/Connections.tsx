@@ -1067,8 +1067,8 @@ export default function Connections() {
                     onChange={(e) => setForm({ ...form, blob_prefixes: e.target.value })}
                     helperText={
                       "O tipo define qual coletor usa o caminho; nada fica fixo no código.\n"
-                      + "Ex.:\nactual_cost: reports/Report4P-actual-cost/\n"
-                      + "amortized_cost: reports/Report4P-amortized-cost/"
+                      + "Ex.:\nactual_cost: reports/actual-cost/\n"
+                      + "amortized_cost: reports/amortized-cost/"
                     } />
                 ) : (
                   <TextField label="Pasta dos preços contratados" value="reports/report_-pricesheet/" disabled />

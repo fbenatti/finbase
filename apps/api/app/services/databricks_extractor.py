@@ -10,10 +10,8 @@ default ``SELECT * FROM system.billing.usage`` and ``config_json.month_column``
 (default ``usage_date``) tells the extractor which column carries the usage
 date used to derive billing months.
 
-The access token is resolved in this order:
-1. ``config_json.token`` / ``config_json.access_token`` (write-only, never
-   returned by the API);
-2. ``DATABRICKS_TOKEN`` loaded from the project's ``.env-databriks`` file.
+The access token comes from the connection: ``config_json.token`` /
+``config_json.access_token`` (write-only, never returned by the API).
 """
 
 from __future__ import annotations
@@ -61,18 +59,9 @@ def _row_to_dict(row: Any, columns: list[str]) -> dict[str, Any]:
 
 
 def _resolve_access_token(config: dict) -> str:
-    from app.config import settings
-
-    token = (
-        config.get("token")
-        or config.get("access_token")
-        or getattr(settings, "databricks_token", "")
-    )
+    token = config.get("token") or config.get("access_token")
     if not token:
-        raise ValueError(
-            "Token Databricks nao configurado. Adicione o token em .env-databriks "
-            "(chave DATABRICKS_TOKEN) ou informe config_json.token na conexao."
-        )
+        raise ValueError("Token Databricks nao configurado. Informe o Access Token na conexao.")
     return str(token).strip()
 
 
@@ -101,7 +90,7 @@ class DatabricksExtractor:
             raise ValueError(
                 "Parece que o token foi preenchido no campo Server Hostname. "
                 "Server Hostname e o endereco do workspace (ex: adb-7405612109211710.10.azuredatabricks.net). "
-                "O token vai em .env-databriks (DATABRICKS_TOKEN) ou no campo Access Token da conexao."
+                "O token vai no campo Access Token da conexao."
             )
         return value
 

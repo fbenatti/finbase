@@ -3,6 +3,7 @@ import { dataDisplayText } from "../utils/dataPresentation";
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
 import { AlertColor, Badge, IconButton, Tooltip } from "@mui/material";
 import { NotificationsOutlined } from "@mui/icons-material";
+import { useAuth } from "../auth/AuthContext";
 import {
   cancelEtl,
   cancelForecastRun,
@@ -216,6 +217,8 @@ function sortNotifications(items: NotificationItem[]): NotificationItem[] {
 }
 
 interface NotificationContextValue {
+  /** Permissão de leitura do módulo "notifications" (avisos do sistema). */
+  canView: boolean;
   items: NotificationItem[];
   unreadCount: number;
   dialogOpen: boolean;
@@ -241,10 +244,13 @@ export function NotificationProvider({ children }: { children: React.ReactNode }
   });
   const [connections, setConnections] = useState<SourceConnection[]>([]);
   const itemsRef = useRef<NotificationItem[]>([]);
+  const { hasPerm } = useAuth();
+  const canView = hasPerm("notifications", "read");
+  const canCancel = hasPerm("etl", "create");
 
   useEffect(() => {
-    getConnections().then(setConnections).catch(() => {});
-  }, []);
+    if (canView) getConnections().then(setConnections).catch(() => {});
+  }, [canView]);
 
   useEffect(() => {
     itemsRef.current = items;
@@ -423,13 +429,19 @@ export function NotificationProvider({ children }: { children: React.ReactNode }
   }, [connections, makeItem, enqueueSnackbar]);
 
   useEffect(() => {
+    if (!canView) {
+      setItems([]);
+      setDialogOpen(false);
+      return;
+    }
     poll();
     const timer = setInterval(poll, 3000);
     return () => clearInterval(timer);
-  }, [poll]);
+  }, [poll, canView]);
 
   const addTaskById = useCallback(
     async (taskId: number, opts?: { kind?: NotificationKind; title?: string }) => {
+      if (!canView) return;
       try {
         const task = await getTaskStatus(taskId);
         if (opts?.kind) {
@@ -438,7 +450,7 @@ export function NotificationProvider({ children }: { children: React.ReactNode }
         upsertTask(task, true);
       } catch { /* ignore */ }
     },
-    [upsertTask]
+    [upsertTask, canView]
   );
 
   const openDialog = useCallback(() => {
@@ -506,6 +518,7 @@ export function NotificationProvider({ children }: { children: React.ReactNode }
 
   const value = useMemo(
     () => ({
+      canView,
       items,
       unreadCount,
       dialogOpen,
@@ -518,29 +531,31 @@ export function NotificationProvider({ children }: { children: React.ReactNode }
       closeSnackbar,
       enqueueSnackbar,
     }),
-    [items, unreadCount, dialogOpen, openDialog, closeDialog, addTaskById, remove, clearAll, snackbar, closeSnackbar, enqueueSnackbar]
+    [canView, items, unreadCount, dialogOpen, openDialog, closeDialog, addTaskById, remove, clearAll, snackbar, closeSnackbar, enqueueSnackbar]
   );
 
   return (
     <NotificationContext.Provider value={value}>
       {children}
-      <NotificationPanel
-        open={dialogOpen}
-        items={views}
-        onClose={closeDialog}
-        onCancel={(id) => {
-          const item = items.find((candidate) => candidate.id === id);
-          return item ? doCancel(item) : undefined;
-        }}
-        onRemove={remove}
-        onClearAll={clearAll}
-      />
+      {canView && (
+        <NotificationPanel
+          open={dialogOpen}
+          items={views}
+          onClose={closeDialog}
+          onCancel={canCancel ? (id) => {
+            const item = items.find((candidate) => candidate.id === id);
+            return item ? doCancel(item) : undefined;
+          } : undefined}
+          onRemove={remove}
+          onClearAll={clearAll}
+        />
+      )}
       <NotificationToast
         open={snackbar.open}
         message={dataDisplayText(snackbar.message)}
         severity={snackbar.severity}
         onClose={closeSnackbar}
-        onOpenPanel={openDialog}
+        onOpenPanel={canView ? openDialog : undefined}
       />
     </NotificationContext.Provider>
   );
@@ -552,8 +567,9 @@ export function useNotifications(): NotificationContextValue {
   return ctx;
 }
 
-export function NotificationBell(): React.JSX.Element {
-  const { unreadCount, openDialog } = useNotifications();
+export function NotificationBell(): React.JSX.Element | null {
+  const { canView, unreadCount, openDialog } = useNotifications();
+  if (!canView) return null;
   return (
     <Tooltip title="Avisos">
       <IconButton color="inherit" onClick={openDialog} aria-label={unreadCount ? `Avisos (${unreadCount} novos)` : "Avisos"}>

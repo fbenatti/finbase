@@ -46,7 +46,7 @@ from app.services.anomaly_detector import (
     resolve_episode,
 )
 
-DIMS = {"cloud_origem": "azure-ti", "servicename": "Virtual Machines"}
+DIMS = {"cloud_origem": "azure-dev", "servicename": "Virtual Machines"}
 PROFILE = profile_for("BALANCED")
 MATERIALITY = 100.0
 
@@ -117,7 +117,7 @@ def test_tres_dias_anomalos_consecutivos_sao_um_unico_episodio():
     points = [point(start + timedelta(days=i)) for i in range(3)]
     detection = detect_daily_consumption(
         points, profile=PROFILE, materiality=MATERIALITY, band=band_offset(),
-        event_family="azure-ti|Virtual Machines",
+        event_family="azure-dev|Virtual Machines",
     )
     assert detection is not None
     assert detection.event_type == EVENT_DAILY
@@ -206,7 +206,7 @@ def test_compra_esperada_nao_abre_caso():
     event = monthly_event(date(2026, 10, 5), observed=30_000.0, expected=30_000.0, upper=34_500.0)
     detection = detect_monthly_event(
         event, profile=PROFILE, materiality=MATERIALITY, band=None,
-        event_family="azure-ti|SavingsPlan",
+        event_family="azure-dev|SavingsPlan",
     )
     assert detection.assessment_status == ASSESSMENT_EXPECTED
     assert detection.expected_only is True
@@ -222,7 +222,7 @@ def test_compra_adicional_gera_caso_com_excesso():
     event = monthly_event(date(2026, 10, 5), observed=40_000.0, expected=30_000.0, upper=34_500.0)
     detection = detect_monthly_event(
         event, profile=PROFILE, materiality=MATERIALITY, band=None,
-        event_family="azure-ti|SavingsPlan",
+        event_family="azure-dev|SavingsPlan",
     )
     assert detection.assessment_status == ASSESSMENT_OPEN
     assert detection.anomalous_cost_cloud == pytest.approx(5_500.0)
@@ -308,7 +308,7 @@ def test_duas_compras_no_mes_consolidam_o_excesso_sem_somar_duas_vezes():
     first = monthly_event(date(2026, 10, 5), observed=30_000.0, expected=30_000.0, upper=34_500.0)
     second = monthly_event(date(2026, 10, 20), observed=40_000.0, expected=30_000.0, upper=34_500.0)
     detection = detect_monthly_accumulated(
-        series_id="s1", dimensions=DIMS, event_family="azure-ti|SavingsPlan", period="202610",
+        series_id="s1", dimensions=DIMS, event_family="azure-dev|SavingsPlan", period="202610",
         events=[first, second], profile=PROFILE, materiality=MATERIALITY, band=None,
     )
     assert detection.event_type == EVENT_MONTHLY_ACCUMULATED

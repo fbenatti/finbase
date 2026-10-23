@@ -1,17 +1,17 @@
 """Tipos de relatório do Blob de export e o seu de-para para o catálogo.
 
 O caminho de cada relatório é **configuração da conexão**, não código: o mesmo
-export muda de nome entre ambientes (`Report4P-actual-cost`,
-`ReportTI-actual-cost`) e o cliente pode publicar outros tipos (`amortized`,
+export muda de nome entre ambientes (`ReportProd-actual-cost`,
+`ReportDev-actual-cost`) e o cliente pode publicar outros tipos (`amortized`,
 `focus`, `pricelist`). Chumbar qualquer um deles obrigaria a mexer no código para
 cada ambiente novo.
 
 Formato em `SourceConnection.blob_prefixes` (JSON), tipo → caminho::
 
     {
-      "actual_cost":   "reports/Report4P-actual-cost/",
-      "amortized_cost": "reports/Report4P-amortized-cost/",
-      "focus":         "reports/Report4P-focus/",
+      "actual_cost":   "reports/actual-cost/",
+      "amortized_cost": "reports/amortized-cost/",
+      "focus":         "reports/focus/",
     }
 
 A forma antiga (lista de strings) continua aceita e é lida como `actual_cost`,
@@ -36,7 +36,7 @@ REPORT_TYPES: dict[str, dict[str, Any]] = {
     REPORT_TYPE_ACTUAL: {
         "display_name": "Custo realizado (actual cost)",
         "description": "Export de custo do período — a base do FOCUS.",
-        "default_path": "reports/Report4P-actual-cost/",
+        "default_path": "reports/actual-cost/",
         # Fonte do catálogo que este relatório alimenta.
         "source_key": "cost_exports",
         "is_focus_base": True,
@@ -44,7 +44,7 @@ REPORT_TYPES: dict[str, dict[str, Any]] = {
     REPORT_TYPE_AMORTIZED: {
         "display_name": "Custo amortizado",
         "description": "Export amortizado: reservas distribuídas no período de uso.",
-        "default_path": "reports/Report4P-amortized-cost/",
+        "default_path": "reports/amortized-cost/",
         "source_key": None,
         "is_focus_base": False,
     },
@@ -98,7 +98,7 @@ def focus_download_prefixes(blob_prefixes: Any) -> list[str]:
 
     Amortizado e qualquer outro tipo ficam fora: cada um tem a
     própria tabela. Baixá-los aqui gravava o arquivo na Bronze de custo
-    (`raw_azure_4p` / `raw_azure_ti`) e o manifesto da conexão de custo.
+    (`raw_<código da conexão>`) e o manifesto da conexão de custo.
     """
     configured = normalize_prefixes(blob_prefixes)
     return [

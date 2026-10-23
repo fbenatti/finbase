@@ -125,7 +125,7 @@ def test_recurring_forecast_loads_the_entire_previous_month_anchor():
 def test_cloud_effective_cutoff_uses_per_origin_anchor():
     cloud_cutoffs = {
         "azure-marketplace": date(2026, 7, 10),
-        "gcp-ti": date(2026, 8, 16),
+        "gcp-dev": date(2026, 8, 16),
     }
     assert _cloud_effective_cutoff(
         cloud_cutoffs,
@@ -136,7 +136,7 @@ def test_cloud_effective_cutoff_uses_per_origin_anchor():
     assert _cloud_effective_cutoff(
         cloud_cutoffs,
         "cloud_origem",
-        {"cloud_origem": "gcp-ti"},
+        {"cloud_origem": "gcp-dev"},
         date(2026, 8, 16),
     ) == date(2026, 8, 16)
 
@@ -366,7 +366,7 @@ def test_rule_without_identification_or_scope_is_not_applied_globally():
     output = pd.DataFrame(
         [
             {"cloud_origem": "oci-prod", "servicename": "COMPUTE", "forecast_month": "202608", "tipo": "forecast", "forecast_value": 100.0},
-            {"cloud_origem": "gcp-ttech", "servicename": "COMPUTE", "forecast_month": "202608", "tipo": "forecast", "forecast_value": 200.0},
+            {"cloud_origem": "gcp-terceiros", "servicename": "COMPUTE", "forecast_month": "202608", "tipo": "forecast", "forecast_value": 200.0},
         ]
     )
     rule = _rule(name="Refund global", behavior="CANCEL_ON_REFUND", cancel_on_refund=True)
@@ -441,7 +441,7 @@ def test_source_mean_30d_rule_builds_a_source_filter_without_dimension():
 
 def test_source_mean_30d_rule_is_not_reapplied_after_aggregation():
     output = pd.DataFrame([{
-        "cloud_origem": "azure-ti", "forecast_month": "202609",
+        "cloud_origem": "azure-dev", "forecast_month": "202609",
         "tipo": "forecast", "forecast_value": 123.0,
     }])
     rule = _rule(

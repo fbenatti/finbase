@@ -5,8 +5,6 @@ services:
     build:
       context: .
       dockerfile: apps/api/Dockerfile
-    env_file:
-      - .env-databriks
     environment: &finbase-app-environment
       ENV: development
       AUTH_ENABLED: "false"
@@ -41,8 +39,6 @@ services:
     build:
       context: .
       dockerfile: apps/api/Dockerfile
-    env_file:
-      - .env-databriks
     environment:
       <<: *finbase-app-environment
       BOOTSTRAP_ENABLED: "true"
@@ -66,8 +62,6 @@ services:
       context: .
       dockerfile: apps/api/Dockerfile
     command: ["python", "-u", "worker.py"]
-    env_file:
-      - .env-databriks
     environment:
       <<: *finbase-app-environment
       OPENFINOPS_WORKER_CONCURRENCY: ${OPENFINOPS_WORKER_CONCURRENCY:-2}

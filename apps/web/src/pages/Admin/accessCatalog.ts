@@ -61,6 +61,7 @@ export const ACCESS_AREAS: AccessArea[] = [
     screens: [
       { route: "/iniciativas", label: "Iniciativas", module: "ideas" },
       { route: "/alertas", label: "Alertas", module: "anomalies" },
+      { route: "/avisos", label: "Avisos do sistema (sino e alertas de tarefas)", module: "notifications" },
     ],
   },
   {

@@ -154,10 +154,10 @@ class AzureTagPolicyService:
     async def _subscription_home_tenants(self, billing_conn: SourceConnection) -> dict[str, str]:
         """Map subscription GUID → ARM home tenant (never assume the billing collector).
 
-        Billing TI can list cost for subscriptions that live in Azure-4P (…8fd7).
+        A billing connection can list cost for subscriptions that live in another tenant.
         Policy must be applied in the tenant that owns the subscription. GUIDs
         come from each connection's ``subscription_ids`` and from Resource Graph
-        reachable with that connection's credentials. When TI and 4P both mention
+        reachable with that connection's credentials. When two connections mention
         the same GUID, the non-billing tenant wins.
         """
         billing_tenant = str((billing_conn.config_json or {}).get("tenant_id") or "").strip().casefold()
@@ -978,7 +978,7 @@ class AzureTagPolicyService:
         """Resource groups do not nest; an RG assignment never evaluates another RG.
 
         Prisma ``contains PCCAGENTLESSSCANRESOURCEGROUP`` belongs on the
-        subscription-scoped policy, not inside ``azure-ti-test-fundacao-...``.
+        subscription-scoped policy, not inside a test resource group.
         """
         if item.get("assignment_scope_kind") != "resource_group":
             return False

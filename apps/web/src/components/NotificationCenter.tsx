@@ -129,7 +129,8 @@ function StatusPill({ item }: { item: NotificationView }) {
 function NotificationCard({ item, now, onCancel, onRemove, cancelling }: {
   item: NotificationView;
   now: number;
-  onCancel: (id: number) => void;
+  /** Ausente quando o usuário não pode interromper tarefas. */
+  onCancel?: (id: number) => void;
   onRemove: (id: number) => void;
   cancelling: boolean;
 }) {
@@ -138,7 +139,9 @@ function NotificationCard({ item, now, onCancel, onRemove, cancelling }: {
   const isActive = tone === "running" || tone === "queued";
   const { Icon, label } = KIND[item.kind];
   const entries = item.scope ? scopeEntries(item.scope) : [];
-  const time = isActive ? `${elapsed(item.startedAt, now)} decorridos` : relativeTime(item.timestamp, now);
+  // Espaço reservado à direita para os botões de ação, que ficam sobrepostos ao topo do card.
+  const actionsGutter = isActive ? 8.5 : 4.5;
+  const time = isActive ? elapsed(item.startedAt, now) : relativeTime(item.timestamp, now);
 
   return (
     <Box sx={{
@@ -156,18 +159,18 @@ function NotificationCard({ item, now, onCancel, onRemove, cancelling }: {
       </Box>
 
       <Box sx={{ flex: 1, minWidth: 0 }}>
-        <Box sx={{ display: "flex", alignItems: "center", gap: 1, mb: 0.25 }}>
-          <Typography sx={{ fontSize: "0.6875rem", fontWeight: 600, letterSpacing: "0.04em", textTransform: "uppercase", color: "text.secondary" }}>
+        <Box sx={{ display: "flex", alignItems: "center", gap: 1, mb: 0.25, pr: actionsGutter }}>
+          <Typography noWrap sx={{ minWidth: 0, fontSize: "0.6875rem", fontWeight: 600, letterSpacing: "0.04em", textTransform: "uppercase", color: "text.secondary" }}>
             {label}
           </Typography>
           <Typography sx={{ fontSize: "0.6875rem", color: colors.textMuted }}>·</Typography>
-          <Typography sx={{ fontSize: "0.6875rem", color: colors.textMuted, fontVariantNumeric: "tabular-nums" }}>
+          <Typography sx={{ flexShrink: 0, whiteSpace: "nowrap", fontSize: "0.6875rem", color: colors.textMuted, fontVariantNumeric: "tabular-nums" }}>
             {time}
           </Typography>
         </Box>
 
         <Typography sx={{
-          fontSize: "0.875rem", fontWeight: 600, color: "text.primary", lineHeight: 1.4, pr: 7,
+          fontSize: "0.875rem", fontWeight: 600, color: "text.primary", lineHeight: 1.4, pr: actionsGutter,
           display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical", overflow: "hidden", wordBreak: "break-word",
         }}>
           {item.title}
@@ -189,7 +192,7 @@ function NotificationCard({ item, now, onCancel, onRemove, cancelling }: {
           </Box>
         )}
 
-        {isActive && (
+        {tone === "running" && (
           <Box sx={{ mt: 1.5 }}>
             <LinearProgress
               variant={item.indeterminate ? "indeterminate" : "determinate"}
@@ -204,13 +207,21 @@ function NotificationCard({ item, now, onCancel, onRemove, cancelling }: {
 
         <Box sx={{ mt: 1.25, display: "flex", alignItems: "center", gap: 1, flexWrap: "wrap" }}>
           <StatusPill item={item} />
-          {item.stage && item.stage !== item.status && (
+          {item.stage && item.stage !== item.status && tone !== "error" && (
             <Typography sx={{ fontSize: "0.75rem", color: "text.secondary", minWidth: 0, flex: 1 }} noWrap title={item.stage}>
               {item.stage}
             </Typography>
           )}
         </Box>
-        {item.caption && (
+        {item.stage && tone === "error" && (
+          <Typography sx={{
+            mt: 1, px: 1.25, py: 0.75, borderRadius: `${radius.control}px`, bgcolor: alpha(colors.error, 0.06),
+            fontSize: "0.75rem", lineHeight: 1.5, color: colors.error, wordBreak: "break-word",
+          }}>
+            {item.stage}
+          </Typography>
+        )}
+        {item.caption && tone !== "queued" && (
           <Typography sx={{ mt: 0.5, fontSize: "0.75rem", color: colors.textMuted, fontVariantNumeric: "tabular-nums" }}>
             {item.caption}
           </Typography>
@@ -221,7 +232,7 @@ function NotificationCard({ item, now, onCancel, onRemove, cancelling }: {
         position: "absolute", top: 10, right: 10, display: "flex", gap: 0.25,
         opacity: { xs: 1, md: isActive ? 1 : 0 }, transition: "opacity 120ms",
       }}>
-        {isActive && (
+        {isActive && onCancel && (
           <Tooltip title="Interromper tarefa">
             <span>
               <IconButton aria-label="Interromper tarefa" size="small" disabled={cancelling} onClick={() => onCancel(item.id)}
@@ -279,7 +290,7 @@ export function NotificationPanel({ open, items, onClose, onCancel, onRemove, on
   open: boolean;
   items: NotificationView[];
   onClose: () => void;
-  onCancel: (id: number) => Promise<void> | void;
+  onCancel?: (id: number) => Promise<void> | void;
   onRemove: (id: number) => void;
   onClearAll: () => void;
 }) {
@@ -287,19 +298,23 @@ export function NotificationPanel({ open, items, onClose, onCancel, onRemove, on
   const [cancelling, setCancelling] = useState<Set<number>>(new Set());
   const active = items.filter((item) => item.status === "RUNNING" || item.status === "QUEUED");
   const finished = items.filter((item) => item.status !== "RUNNING" && item.status !== "QUEUED");
-  const failures = finished.filter((item) => item.status === "FAILED").length;
+  const countOf = (status: string) => finished.filter((item) => item.status === status).length;
+  const completed = countOf("COMPLETED");
+  const failures = countOf("FAILED");
+  const cancelled = countOf("CANCELLED");
 
   const cancel = async (id: number) => {
     setCancelling((prev) => new Set(prev).add(id));
-    try { await onCancel(id); } finally {
+    try { await onCancel?.(id); } finally {
       setCancelling((prev) => { const next = new Set(prev); next.delete(id); return next; });
     }
   };
 
   const summary = [
     active.length ? `${active.length} em andamento` : "",
-    finished.length ? `${finished.length} ${finished.length === 1 ? "concluído" : "concluídos"}` : "",
+    completed ? `${completed} ${completed === 1 ? "concluído" : "concluídos"}` : "",
     failures ? `${failures} com falha` : "",
+    cancelled ? `${cancelled} ${cancelled === 1 ? "cancelado" : "cancelados"}` : "",
   ].filter(Boolean).join(" · ") || "Nenhuma tarefa recente";
 
   return (
@@ -334,7 +349,7 @@ export function NotificationPanel({ open, items, onClose, onCancel, onRemove, on
             <SectionHeader title="Em andamento" count={active.length} />
             <Stack spacing={1}>
               {active.map((item) => (
-                <NotificationCard key={item.id} item={item} now={now} onCancel={(id) => void cancel(id)} onRemove={onRemove} cancelling={cancelling.has(item.id)} />
+                <NotificationCard key={item.id} item={item} now={now} onCancel={onCancel ? (id) => void cancel(id) : undefined} onRemove={onRemove} cancelling={cancelling.has(item.id)} />
               ))}
             </Stack>
           </Box>
@@ -344,7 +359,7 @@ export function NotificationPanel({ open, items, onClose, onCancel, onRemove, on
             <SectionHeader title="Recentes" count={finished.length} />
             <Stack spacing={1}>
               {finished.map((item) => (
-                <NotificationCard key={item.id} item={item} now={now} onCancel={(id) => void cancel(id)} onRemove={onRemove} cancelling={false} />
+                <NotificationCard key={item.id} item={item} now={now} onCancel={onCancel ? (id) => void cancel(id) : undefined} onRemove={onRemove} cancelling={false} />
               ))}
             </Stack>
           </Box>
@@ -381,7 +396,8 @@ export function NotificationToast({ open, message, severity, onClose, onOpenPane
   message: string;
   severity: AlertColor;
   onClose: () => void;
-  onOpenPanel: () => void;
+  /** Ausente para quem não pode ver os avisos: o toast fica sem o atalho. */
+  onOpenPanel?: () => void;
 }) {
   const theme = useTheme();
   const { color, title, Icon } = TOAST[severity];
@@ -401,12 +417,14 @@ export function NotificationToast({ open, message, severity, onClose, onOpenPane
         <Box sx={{ flex: 1, minWidth: 0, pt: 0.25 }}>
           <Typography sx={{ fontSize: "0.8125rem", fontWeight: 700, color: "text.primary", lineHeight: 1.4 }}>{title}</Typography>
           <Typography sx={{ fontSize: "0.8125rem", color: "text.secondary", lineHeight: 1.45, wordBreak: "break-word" }}>{message}</Typography>
-          <ButtonBase onClick={() => { onClose(); onOpenPanel(); }} sx={{
-            mt: 0.75, fontSize: "0.75rem", fontWeight: 600, color: colors.brand, borderRadius: 0.5,
-            "&:hover": { textDecoration: "underline" }, "&:focus-visible": { outline: `2px solid ${colors.brandLight}`, outlineOffset: 2 },
-          }}>
-            Ver avisos
-          </ButtonBase>
+          {onOpenPanel && (
+            <ButtonBase onClick={() => { onClose(); onOpenPanel(); }} sx={{
+              mt: 0.75, fontSize: "0.75rem", fontWeight: 600, color: colors.brand, borderRadius: 0.5,
+              "&:hover": { textDecoration: "underline" }, "&:focus-visible": { outline: `2px solid ${colors.brandLight}`, outlineOffset: 2 },
+            }}>
+              Ver avisos
+            </ButtonBase>
+          )}
         </Box>
         <IconButton aria-label="Fechar alerta" size="small" onClick={onClose} sx={{ width: 28, height: 28, mt: -0.25, mr: -0.5, color: colors.textMuted }}>
           <CloseOutlined sx={{ fontSize: "16px !important" }} />

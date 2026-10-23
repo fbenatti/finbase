@@ -18,7 +18,6 @@ PLATFORM_COLUMNS = [
     ("source_connection_id", "INTEGER"),
     ("_billing_period", "TEXT"),
     ("tipo", "TEXT"),
-    ("organograma", "TEXT"),
     ("centro_custo", "TEXT"),
     ("hierarquia_1", "TEXT"),
     ("hierarquia_2", "TEXT"),

@@ -6,16 +6,15 @@ import App from "./App";
 import { ConfirmationProvider } from "./context/ConfirmationContext";
 import theme from "./theme/theme";
 import "./index.css";
-import { NotificationProvider } from "./context/NotificationContext";
 
 ReactDOM.createRoot(document.getElementById("root")!).render(
   <React.StrictMode>
     <BrowserRouter>
       <ThemeProvider theme={theme}>
         <CssBaseline />
-        <ConfirmationProvider><NotificationProvider>
+        <ConfirmationProvider>
           <App />
-        </NotificationProvider></ConfirmationProvider>
+        </ConfirmationProvider>
       </ThemeProvider>
     </BrowserRouter>
   </React.StrictMode>

@@ -98,7 +98,7 @@ def _gcp_aggregated_select_sql(
         if "subscription" in fields
         else "CAST(NULL AS STRUCT<instance_id STRING>) AS subscription"
     )
-    # Some billing exports (older TI tables, partial schemas) omit the
+    # Some billing exports (older tables, partial schemas) omit the
     # cost_at_* pricing columns. Reference them only when present so the
     # aggregation query never fails with "not found inside src".
     cost_at_list_expr = (

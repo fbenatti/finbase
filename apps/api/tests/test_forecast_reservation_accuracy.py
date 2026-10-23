@@ -62,7 +62,7 @@ async def simulate(monkeypatch, records, *, rules=(), as_of=date(2026, 9, 2), cl
     return published["frame"]
 
 
-def record(day, category, value, *, cloud="azure-ti"):
+def record(day, category, value, *, cloud="azure-dev"):
     return dict(forecast_day=pd.Timestamp(day), value=value, cloud_origem=cloud,
                 project="FABRIC", chargecategory=category, commitmentdiscounttype="Reservation")
 

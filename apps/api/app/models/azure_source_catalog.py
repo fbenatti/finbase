@@ -8,7 +8,7 @@ as fontes que quer coletar, sem configurar dezenas de cards nem repetir segredo.
 O catálogo é declarativo e fica no PostgreSQL (metadata, não dado volumoso):
 
 - `source_key` identifica a semântica da fonte (`resource_graph`, `monitor_vm_metrics`, …);
-- `environment_slug` identifica o ambiente/tenant (`4p`, `ti`, …);
+- `environment_slug` identifica o ambiente/tenant (`producao`, `dev`, …);
 - a linha do catálogo descreve a fonte **possível** (o que ela coleta, qual API,
   qual permissão, qual Bronze); a conexão descreve a fonte **configurada** para
   um ambiente.

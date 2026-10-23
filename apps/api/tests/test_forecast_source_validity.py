@@ -9,7 +9,7 @@ from app.services.forecast_service import _apply_source_validity_rules, _series_
 def _rule(active=True):
     return SimpleNamespace(
         id=1,
-        name="Fonte Azure-4P vencida",
+        name="Fonte Azure-Producao vencida",
         priority=1,
         active=active,
         behavior="SOURCE_VALIDITY",
@@ -17,7 +17,7 @@ def _rule(active=True):
         identification_column="",
         identification_values=[],
         identification_clauses=[],
-        scope={"cloud_origem": "azure-4p"},
+        scope={"cloud_origem": "azure-producao"},
         start_period="202001",
         end_period=None,
     )
@@ -25,7 +25,7 @@ def _rule(active=True):
 
 def _case(last_seen: date, *, evaluated_at: date = date(2026, 10, 2), active=True):
     key_cols = ["cloud_origem", "servicename"]
-    keys = {"cloud_origem": "azure-4p", "servicename": "PTU"}
+    keys = {"cloud_origem": "azure-producao", "servicename": "PTU"}
     output = pd.DataFrame([
         {**keys, "forecast_month": "202610", "tipo": "forecast", "forecast_value": 120.0, "realizado": 120.0, "realizado_cloud": 120.0},
         {**keys, "forecast_month": "202611", "tipo": "forecast", "forecast_value": 120.0, "realizado": 120.0, "realizado_cloud": 120.0},

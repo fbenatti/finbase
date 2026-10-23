@@ -8,6 +8,7 @@ import { lazy, Suspense } from "react";
 import type { ReactElement } from "react";
 import Layout from "./layout/Layout";
 import { AuthProvider, useAuth } from "./auth/AuthContext";
+import { NotificationProvider } from "./context/NotificationContext";
 import ChangePassword from "./auth/ChangePassword";
 const Modules = lazy(() => import("./pages/Admin/Modules"));
 const Login = lazy(() => import("./pages/Login/Login"));
@@ -186,7 +187,7 @@ function ApplicationRoutes() {
 }
 
 function App() {
-  return <AuthProvider><NavigationProvider><ApplicationRoutes /></NavigationProvider></AuthProvider>;
+  return <AuthProvider><NotificationProvider><NavigationProvider><ApplicationRoutes /></NavigationProvider></NotificationProvider></AuthProvider>;
 }
 
 export default App;

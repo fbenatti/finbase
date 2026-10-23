@@ -10,7 +10,7 @@ from app.services.anomaly_v2.scope import scope_id_for
 
 
 def test_scope_id_stable():
-    values = {"cloud_origem": "azure-ti", "subaccountname": "Production", "servicename": "Microsoft.Capacity"}
+    values = {"cloud_origem": "azure-dev", "subaccountname": "Production", "servicename": "Microsoft.Capacity"}
     assert scope_id_for(values) == scope_id_for(values)
 
 
@@ -41,7 +41,7 @@ def test_commitment_on_calendar():
                 "day": "2026-09-10",
                 "resource_id": "/providers/Microsoft.Capacity/reservationOrders/x",
                 "cost_cloud": 29594.0,
-                "cloud_origem": "azure-ti",
+                "cloud_origem": "azure-dev",
                 "subaccountname": "Production",
                 "servicename": "Microsoft.Capacity",
             },
@@ -49,7 +49,7 @@ def test_commitment_on_calendar():
                 "day": "2026-10-10",
                 "resource_id": "/providers/Microsoft.Capacity/reservationOrders/x",
                 "cost_cloud": 29594.0,
-                "cloud_origem": "azure-ti",
+                "cloud_origem": "azure-dev",
                 "subaccountname": "Production",
                 "servicename": "Microsoft.Capacity",
             },

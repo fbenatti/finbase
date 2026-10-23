@@ -22,21 +22,21 @@ from app.services.anomaly_workflow import (
 # Roteamento (plano §3.3)
 # ---------------------------------------------------------------------------
 RULES = [
-    {"id": "generico", "when": {"cloud_origem": "azure-ti"}, "assignee_user_id": 10},
-    {"id": "especifico", "when": {"cloud_origem": "azure-ti", "servicename": "Virtual Machines"}, "assignee_user_id": 20},
-    {"id": "outro", "when": {"cloud_origem": "gcp-4p"}, "assignee_user_id": 30},
+    {"id": "generico", "when": {"cloud_origem": "azure-dev"}, "assignee_user_id": 10},
+    {"id": "especifico", "when": {"cloud_origem": "azure-dev", "servicename": "Virtual Machines"}, "assignee_user_id": 20},
+    {"id": "outro", "when": {"cloud_origem": "gcp-producao"}, "assignee_user_id": 30},
 ]
 
 
 def test_maior_especificidade_prevalece():
-    match = resolve_routing(RULES, {"cloud_origem": "azure-ti", "servicename": "Virtual Machines"})
+    match = resolve_routing(RULES, {"cloud_origem": "azure-dev", "servicename": "Virtual Machines"})
     assert match.rule_id == "especifico"
     assert match.assignee_user_id == 20
     assert match.specificity == 2
 
 
 def test_regra_menos_especifica_quando_nao_ha_match_mais_fino():
-    match = resolve_routing(RULES, {"cloud_origem": "azure-ti", "servicename": "Storage"})
+    match = resolve_routing(RULES, {"cloud_origem": "azure-dev", "servicename": "Storage"})
     assert match.rule_id == "generico"
     assert match.assignee_user_id == 10
     assert match.specificity == 1
@@ -69,8 +69,8 @@ def test_sem_regras_configuradas():
 
 def test_roteamento_compara_sem_case_e_espaco():
     match = resolve_routing(
-        [{"id": "r", "when": {"cloud_origem": "Azure-TI"}, "assignee_user_id": 5}],
-        {"cloud_origem": " azure-ti "},
+        [{"id": "r", "when": {"cloud_origem": "Azure-Dev"}, "assignee_user_id": 5}],
+        {"cloud_origem": " azure-dev "},
     )
     assert match.assignee_user_id == 5
 

@@ -52,7 +52,7 @@ def test_subscription_discovery_uses_lightweight_arm_list(monkeypatch):
 
 def test_tag_policy_subscription_selector_reads_tenant_subscriptions_from_arm(monkeypatch):
     connection = SimpleNamespace(
-        id=2, code="azure-ti", connector_type="azure_blob",
+        id=2, code="azure-dev", connector_type="azure_blob",
         config_json={"tenant_id": "tenant"},
     )
 
@@ -84,7 +84,7 @@ def test_tag_policy_subscription_selector_reads_tenant_subscriptions_from_arm(mo
 def test_dashboard_refresh_queues_resource_graph_collection_for_selected_connection(monkeypatch):
     import app.services.worker_runtime as worker_runtime
     import app.services.task_runner as task_runner
-    connection = SimpleNamespace(id=2, connector_type="azure_blob", cloud_scope="azure", code="azure-ti")
+    connection = SimpleNamespace(id=2, connector_type="azure_blob", cloud_scope="azure", code="azure-dev")
     selection = SimpleNamespace(subscription_ids="63dbc6fc-93d8-4ac1-9745-253f6b502240")
 
     class FakeResult:
@@ -119,11 +119,11 @@ def test_export_returns_explanation_instead_of_400_when_subscription_has_no_poli
             pass
 
         async def list_azure_tenants(self):
-            return [{"connection_id": 2, "name": "Azure TI", "code": "azure-ti"}]
+            return [{"connection_id": 2, "name": "Azure Dev", "code": "azure-dev"}]
 
         async def generate_tenant_policy(self, *_args):
             return {
-                "connection_id": 2, "connection_code": "azure-ti", "connection_name": "Azure TI",
+                "connection_id": 2, "connection_code": "azure-dev", "connection_name": "Azure Dev",
                 "selected_subscription_id": subscription, "deployment_subscriptions": [],
                 "layers": {"resource_groups": [], "resources": []},
                 "coverage": {"diagnostics": [{"status": "warning", "reason": "Sem alvos ARM atuais"}]},
@@ -146,7 +146,7 @@ def test_explicit_subscription_expands_historical_silver_rg_to_rg_scoped_policy(
     selected = "63dbc6fc-93d8-4ac1-9745-253f6b502240"
     other = "71cc41f4-8e37-4c60-abbb-b9003b91c554"
     connection = SimpleNamespace(
-        id=2, code="azure-ti", name="Azure TI", cloud_scope="azure", cloud_name="Azure TI",
+        id=2, code="azure-dev", name="Azure Dev", cloud_scope="azure", cloud_name="Azure Dev",
         config_json={"tenant_id": "78879b00-f0e9-486c-836f-56f314e47e7f"},
     )
 
@@ -224,7 +224,7 @@ def test_explicit_subscription_expands_historical_silver_rg_to_rg_scoped_policy(
 def test_selected_subscription_preserves_contains_exact_and_subscription_predicates(monkeypatch):
     selected = "63dbc6fc-93d8-4ac1-9745-253f6b502240"
     connection = SimpleNamespace(
-        id=2, code="azure-ti", name="Azure TI", cloud_scope="azure", cloud_name="Azure TI",
+        id=2, code="azure-dev", name="Azure Dev", cloud_scope="azure", cloud_name="Azure Dev",
         config_json={"tenant_id": "tenant"},
     )
 
@@ -663,7 +663,7 @@ def test_tag_mapping_uses_global_key_and_focus_field_value():
 
 def test_deployment_script_uses_identity_rbac_and_stable_names():
     script = build_script([{
-        "tenant_id": "11111111-1111-1111-1111-111111111111", "connection_code": "azure-ti", "connection_name": "Azure TI", "department_name": "Terra Brasil",
+        "tenant_id": "11111111-1111-1111-1111-111111111111", "connection_code": "azure-dev", "connection_name": "Azure Dev", "department_name": "Terra Brasil",
         "subscription_name_by_id": {"aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa": "Terra-Mexico-Test"},
         "deployment_subscriptions": ["aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"],
         "layers": {"resource_groups": [{"rule_id": 1, "rule_name": "Terra Brasil", "tags": {"centro_custo": "CC"},
@@ -690,7 +690,7 @@ def test_deployment_script_uses_resource_home_tenant_not_billing_tenant():
     home = "0fce1554-ffcc-4e69-aa8d-9334eb2d8fd7"
     finops = "354cc2f6-cbad-45aa-adea-045fb4602f79"
     script = build_script([{
-        "tenant_id": billing, "connection_code": "azure-ti", "connection_name": "Azure TI",
+        "tenant_id": billing, "connection_code": "azure-dev", "connection_name": "Azure Dev",
         "layers": {"resource_groups": [{"rule_id": 3028, "rule_name": "FinOps", "tags": {"projeto": "FinOps"},
                                              "condition": {"field": "name", "equals": "rg"},
                                              "scope_subscriptions": [finops],
@@ -707,7 +707,7 @@ def test_deployment_script_groups_4p_and_ti_tenant_blocks():
     finops = "354cc2f6-cbad-45aa-adea-045fb4602f79"
     terra = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
     script = build_script([{
-        "tenant_id": billing, "connection_code": "azure-ti", "connection_name": "Azure TI",
+        "tenant_id": billing, "connection_code": "azure-dev", "connection_name": "Azure Dev",
         "subscription_tenants": {finops: four_p, terra: billing},
         "layers": {"resource_groups": [
             {"rule_id": 3028, "rule_name": "FinOps", "tags": {"projeto": "FinOps"},
@@ -840,12 +840,12 @@ def test_rg_assignment_does_not_embed_other_rg_exclusions():
     service = AzureTagPolicyService(db=None)
     assigned = {
         "assignment_scope_kind": "resource_group",
-        "assignment_resource_group": "azure-ti-test-fundacao-exemplo-1",
+        "assignment_resource_group": "azure-dev-test-fundacao-exemplo-1",
         "tags": {"projeto": "fundacao exemplo"},
-        "observed": {"resource_group_name": "azure-ti-test-fundacao-exemplo-1"},
+        "observed": {"resource_group_name": "azure-dev-test-fundacao-exemplo-1"},
         "terms": [
             {"scope": SCOPE_SUBSCRIPTION, "field": "subscriptionId", "operator": "=", "values": ["aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"]},
-            {"scope": SCOPE_RG, "field": "name", "operator": "=", "values": ["azure-ti-test-fundacao-exemplo-1"]},
+            {"scope": SCOPE_RG, "field": "name", "operator": "=", "values": ["azure-dev-test-fundacao-exemplo-1"]},
         ],
     }
     prisma = {
@@ -972,7 +972,7 @@ def test_current_arg_matches_resource_name_separately_from_resource_group_name()
 def test_plan_only_shell_calls_no_azure_mutations(tmp_path):
     subscription = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
     script = build_script([{
-        "connection_id": 2, "connection_code": "azure-ti", "connection_name": "Azure TI",
+        "connection_id": 2, "connection_code": "azure-dev", "connection_name": "Azure Dev",
         "layers": {"resource_groups": [{
             "rule_id": 52, "rule_name": "Fundacao", "tags": {"projeto": "Fundacao"},
             "condition": {"field": "name", "equals": "rg-fundacao"},
@@ -1027,7 +1027,7 @@ def test_rg_assignment_scope_omits_rg_name_from_selector():
 def test_deployment_script_uses_resource_group_assignment_scope():
     subscription = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
     script = build_script([{
-        "connection_code": "azure-ti", "connection_name": "Azure TI",
+        "connection_code": "azure-dev", "connection_name": "Azure Dev",
         "layers": {"resource_groups": [{
             "rule_id": 21, "rule_name": "Terra Brasil", "tags": {"projeto": "Terra"},
             "condition": {"field": "type", "equals": "Microsoft.Resources/subscriptions/resourceGroups"},
@@ -1047,7 +1047,7 @@ def test_deployment_identity_is_stable_across_item_order_and_short_enough():
     items = [{"rule_id": 52, "rule_name": "Fundacao", "tags": {"projeto": "Fundacao"},
               "condition": {"field": "name", "contains": "fundacao"}, "base_selector": {"field": "name", "contains": "fundacao"},
               "scope_subscriptions": [subscription]}]
-    tenant = {"connection_id": 2, "connection_code": "azure-ti", "connection_name": "Azure TI",
+    tenant = {"connection_id": 2, "connection_code": "azure-dev", "connection_name": "Azure Dev",
               "layers": {"resource_groups": items, "resources": []}}
     build_script([tenant])
     second = build_script([{**tenant, "layers": {"resource_groups": [{"rule_id": 999, "rule_name": "Other",
@@ -1155,7 +1155,7 @@ def test_billing_observations_do_not_prune_overlapping_rg_patterns():
 
 def test_subscription_pattern_excludes_higher_priority_rg_with_its_full_selector(monkeypatch):
     subscription = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa'
-    connection = SimpleNamespace(id=2, code='azure-ti', name='TI', cloud_scope='azure', cloud_name='Azure', config_json={})
+    connection = SimpleNamespace(id=2, code='azure-dev', name='TI', cloud_scope='azure', cloud_name='Azure', config_json={})
     class DB:
         async def get(self, *_): return connection
     service = AzureTagPolicyService(DB())

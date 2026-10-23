@@ -25,12 +25,12 @@ def test_allocation_uses_source_cloud_even_when_organogram_filter_is_stale():
     assert resolved[0].cloud_prefix == "gcp"
     actual = [
         {"period": "202609", "path": resolved[0].donor_path,
-         "cloud": "gcp-ttech", "value": 100.0, "cloud_value": 20.0},
+         "cloud": "gcp-terceiros", "value": 100.0, "cloud_value": 20.0},
         {"period": "202609", "path": resolved[0].donor_path,
-         "cloud": "gcp-ti", "value": 30.0, "cloud_value": 6.0},
+         "cloud": "gcp-dev", "value": 30.0, "cloud_value": 6.0},
     ]
     rows = build_allocation_rows(resolved, actual, [])
-    for cloud, billed, consumption in [("gcp-ttech", 100.0, 20.0), ("gcp-ti", 30.0, 6.0)]:
+    for cloud, billed, consumption in [("gcp-terceiros", 100.0, 20.0), ("gcp-dev", 30.0, 6.0)]:
         source_rows = [row for row in rows if row["cloud_origem"] == cloud]
         assert len(source_rows) == 2
         receiver = next(row for row in source_rows if row["hierarquia_5"] == "Projeto")
@@ -48,7 +48,7 @@ def test_expected_view_uses_provider_scope_when_organogram_filter_is_stale():
     scope = ["Consumo Cloud", "Showback", "GCP", "DIR INFRA", "Networking"]
     clause = _expected_view_cloud_filter(scope, selected, {"cloud_origem": "cloud_origem"})
     assert "gcp%" in clause
-    assert "gcp-ti%" not in clause
+    assert "gcp-dev%" not in clause
 
 
 def test_normal_allocation_conserves_billed_and_cloud_measures_independently():

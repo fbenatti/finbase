@@ -151,7 +151,7 @@ function buildMappingPayload(sourceColumn: string, destColumn: string): Partial<
 
 function nestedPathLabel(fullName: string, parent: string): string {
   if (fullName === parent) return parent;
-  if (fullName.startsWith(`${parent}.`)) return fullName.slice(parent.length + 1);
+  if (fullName.startsWith(`${parent}.`) || fullName.startsWith(`${parent}/`)) return fullName.slice(parent.length + 1);
   if (fullName.startsWith(`${parent}[`)) return fullName.slice(parent.length);
   return fullName;
 }
@@ -188,9 +188,23 @@ function groupSourceColumns(cols: ColumnInfo[]) {
     }
   }
 
-  flatCols.sort((a, b) => a.name.localeCompare(b.name));
+  // Colunas planas com namespace no nome (OCI: lineItem/…, product/…, cost/…)
+  // viram grupos pelo prefixo, como os objetos JSON.
+  const byPrefix = new Map<string, ColumnInfo[]>();
+  for (const col of flatCols) {
+    const slash = col.name.indexOf("/");
+    if (slash <= 0) continue;
+    const prefix = col.name.slice(0, slash);
+    byPrefix.set(prefix, [...(byPrefix.get(prefix) || []), col]);
+  }
+  const prefixGroups = [...byPrefix.entries()]
+    .map(([prefix, children]) => ({ prefix, children: children.sort((a, b) => a.name.localeCompare(b.name)) }))
+    .sort((a, b) => a.prefix.localeCompare(b.prefix));
+  const grouped = new Set(prefixGroups.flatMap((group) => group.children.map((c) => c.name)));
+
+  const ungrouped = flatCols.filter((c) => !grouped.has(c.name)).sort((a, b) => a.name.localeCompare(b.name));
   jsonGroups.sort((a, b) => a.parent.name.localeCompare(b.parent.name));
-  return { flatCols, jsonGroups };
+  return { flatCols: ungrouped, prefixGroups, jsonGroups };
 }
 
 export default function Relationship({ embedded }: { embedded?: boolean } = {}) {
@@ -255,10 +269,14 @@ export default function Relationship({ embedded }: { embedded?: boolean } = {}) 
       setSourceCols(srcCols);
       setDestCols(destSchema.columns);
 
+      // O ETL casa a coluna de origem sem diferenciar maiúsculas; a tela usa o
+      // nome do esquema para marcar o campo como mapeado.
+      const schemaNames = new Map(srcCols.map((c: ColumnInfo) => [c.name.toLowerCase(), c.name]));
+      const schemaName = (name: string) => schemaNames.get(name.toLowerCase()) ?? name;
       const restoredMappings = saved.map((m: SourceDestinationMapping) => ({
         savedId: m.id,
-        sourceColumn: displaySourceColumn(m),
-        rawSourceColumn: m.source_column,
+        sourceColumn: schemaName(displaySourceColumn(m)),
+        rawSourceColumn: schemaName(m.source_column),
         destColumn: m.destination_column,
         transformType: m.transform_type,
         transformConfig: m.transform_config,
@@ -771,7 +789,7 @@ export default function Relationship({ embedded }: { embedded?: boolean } = {}) 
     if (!!a.nested !== !!b.nested) return a.nested ? 1 : -1;
     return a.name.localeCompare(b.name);
   });
-  const { flatCols, jsonGroups } = groupSourceColumns(sourceCols);
+  const { flatCols, prefixGroups, jsonGroups } = groupSourceColumns(sourceCols);
 
   const toggleJsonGroup = (parentName: string) => {
     setCollapsedJsonGroups((prev) => {
@@ -784,11 +802,12 @@ export default function Relationship({ embedded }: { embedded?: boolean } = {}) 
 
   const renderSourceColumn = (
     col: ColumnInfo,
-    opts?: { nested?: boolean; parent?: string; subtitle?: string },
+    opts?: { nested?: boolean; parent?: string; subtitle?: string; separator?: string },
   ) => {
     const isMapped = mappedSources.has(col.name);
     const nested = opts?.nested ?? false;
     const parent = opts?.parent;
+    const separator = opts?.separator ?? ".";
     const pathLabel = parent ? nestedPathLabel(col.name, parent) : col.name;
 
     return (
@@ -827,7 +846,7 @@ export default function Relationship({ embedded }: { embedded?: boolean } = {}) 
           >
             {nested && parent ? (
               <>
-                <Box component="span" sx={{ color: "text.secondary" }}>{parent}.</Box>
+                <Box component="span" sx={{ color: "text.secondary" }}>{parent}{separator}</Box>
                 <Box component="span" sx={{ color: "text.primary", fontWeight: 500 }}>{pathLabel}</Box>
               </>
             ) : col.name}
@@ -838,7 +857,7 @@ export default function Relationship({ embedded }: { embedded?: boolean } = {}) 
             </Typography>
           )}
         </Box>
-        {nested && (
+        {nested && separator === "." && (
           <Chip label="path" size="small" variant="outlined" sx={{ height: 18, fontSize: "0.58rem" }} />
         )}
         {isMapped && (
@@ -986,6 +1005,44 @@ export default function Relationship({ embedded }: { embedded?: boolean } = {}) 
 
             {flatCols.map((col) => renderSourceColumn(col))}
 
+            {prefixGroups.map(({ prefix, children }) => {
+              const key = `${prefix}/`;
+              const collapsed = collapsedJsonGroups.has(key);
+              const mappedCount = children.filter((c) => mappedSources.has(c.name)).length;
+              return (
+                <Box key={key} sx={{ mb: 0.6 }}>
+                  <Box
+                    onClick={() => toggleJsonGroup(key)}
+                    sx={{
+                      display: "flex", alignItems: "center", gap: 0.5,
+                      px: 1, py: 0.5, borderRadius: 1,
+                      cursor: "pointer", bgcolor: "#eef2f7", border: "1px solid #cfd8dc",
+                      "&:hover": { bgcolor: "#e3eaf2" },
+                    }}
+                  >
+                    <IconButton size="small" sx={{ p: 0.25 }} aria-label={collapsed ? "Expandir" : "Recolher"}>
+                      {collapsed ? <ChevronRightOutlined sx={{ fontSize: 18 }} /> : <ExpandMoreOutlined sx={{ fontSize: 18 }} />}
+                    </IconButton>
+                    <Typography variant="body2" sx={{ fontFamily: "monospace", fontSize: "0.8rem", fontWeight: 600, flexGrow: 1 }}>
+                      {key}
+                    </Typography>
+                    <Chip
+                      label={`${mappedCount}/${children.length} mapeados`}
+                      size="small"
+                      color={mappedCount === children.length ? "success" : "default"}
+                      variant={mappedCount === children.length ? "filled" : "outlined"}
+                      sx={{ height: 20, fontSize: "0.62rem" }}
+                    />
+                  </Box>
+                  <Collapse in={!collapsed}>
+                    <Box sx={{ mt: 0.4, pl: 0.5, borderLeft: "2px solid #cfd8dc", ml: 1.2 }}>
+                      {children.map((col) => renderSourceColumn(col, { nested: true, parent: prefix, separator: "/" }))}
+                    </Box>
+                  </Collapse>
+                </Box>
+              );
+            })}
+
             {jsonGroups.map(({ parent, children }) => {
               const collapsed = collapsedJsonGroups.has(parent.name);
               const mappedCount = [
@@ -1038,7 +1095,7 @@ export default function Relationship({ embedded }: { embedded?: boolean } = {}) 
               );
             })}
 
-            {flatCols.length === 0 && jsonGroups.length === 0 && sortedSourceCols.map((col) => renderSourceColumn(col))}
+            {flatCols.length === 0 && prefixGroups.length === 0 && jsonGroups.length === 0 && sortedSourceCols.map((col) => renderSourceColumn(col))}
           </Paper>
 
           {/* Divider arrow */}

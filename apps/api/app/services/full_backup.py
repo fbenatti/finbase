@@ -241,7 +241,7 @@ def _load_dotenv_if_needed() -> dict[str, str]:
     try:
         from dotenv import dotenv_values
         root = _project_root().resolve()
-        for env_name in (".env-4p", ".env-databriks", ".env.production", ".env"):
+        for env_name in (".env.production", ".env"):
             p = root / env_name
             if p.is_file():
                 for k, v in dotenv_values(p).items():

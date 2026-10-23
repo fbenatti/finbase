@@ -17,7 +17,7 @@ Os dados são gravados no Bronze (tabelas dedicadas, SEM normalização FOCUS po
   - bronze.azure_benefit_utilization   (reservada p/ benefitUtilizationSummaries futuro)
 
 Segue o padrão do azure_ptu_service (ClientSecretCredential + httpx + ARM),
-com suporte a credential_profile (azure-4p / azure-ti) ou config direta.
+com suporte a credential_profile (código de outra conexão Azure) ou config direta.
 """
 
 from __future__ import annotations

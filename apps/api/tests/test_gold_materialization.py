@@ -18,7 +18,7 @@ from app.services.gold_materialization import (
 def test_gold_table_name_sanitizes_hyphens():
     # Original code is preserved; the physical table swaps hyphens for underscores.
     assert rule_target_table("copilot-custo") == "dest_dm_cost_copilot_custo"
-    assert rule_target_table("PTU 4P") == "dest_dm_cost_ptu_4p"
+    assert rule_target_table("PTU Producao") == "dest_dm_cost_ptu_producao"
     assert normalize_code("Visão Completa!") == "vis_o_completa"
 
 

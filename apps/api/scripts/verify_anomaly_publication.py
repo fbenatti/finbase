@@ -50,8 +50,8 @@ def detection(*, case_key: str, anomalous: float, status: str = "OPEN", severity
     return SimpleNamespace(
         case_key=case_key,
         series_id="serie-verificacao",
-        series_dimensions={"cloud_origem": "gcp-4p", "servicename": "Compute"},
-        event_family="cloud_origem=gcp-4p",
+        series_dimensions={"cloud_origem": "gcp-producao", "servicename": "Compute"},
+        event_family="cloud_origem=gcp-producao",
         event_type="DAILY_CONSUMPTION",
         event_date="2026-10-13",
         period="202610",

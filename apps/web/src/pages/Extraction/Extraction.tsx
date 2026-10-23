@@ -802,7 +802,7 @@ export default function Extraction({ embedded = false }: { embedded?: boolean })
             data={filteredScanItems}
             searchValue={blobFilter}
             onSearchChange={setBlobFilter}
-            placeholder="Buscar arquivos: 4p, 202505, part_1..."
+            placeholder="Buscar arquivos: 202505, part_1..."
             getRowKey={(item) => item.blob_path}
             defaultSortKey="billing_period"
             defaultSortDir="desc"

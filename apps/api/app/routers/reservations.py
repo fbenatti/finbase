@@ -63,7 +63,7 @@ async def _tabelas_da_base(base: str) -> list[str]:
     """Tabelas Bronze das conexões para uma base de nome.
 
     Cada conexão tem a sua (`raw_azure_4p_advisor_recommendations`,
-    `raw_azure_ti_advisor_recommendations`). A leitura une todas — quem consome
+    `raw_<código>_advisor_recommendations`). A leitura une todas — quem consome
     não precisa saber em quantas conexões o dado está.
     """
     try:

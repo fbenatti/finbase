@@ -51,7 +51,7 @@ def test_connection_rule_filter_matches_cloud_origem():
 def test_series_matches_charge_interval_by_cloud_origem():
     rules = [{"connection_code": "ibm-ti", "period_allocation": "charge_interval"}]
     assert _series_matches_charge_interval({"cloud_origem": "ibm-ti"}, rules, "cloud_origem", "source_connection_id")
-    assert not _series_matches_charge_interval({"cloud_origem": "gcp-ttech"}, rules, "cloud_origem", "source_connection_id")
+    assert not _series_matches_charge_interval({"cloud_origem": "gcp-terceiros"}, rules, "cloud_origem", "source_connection_id")
 
 
 def test_validate_connection_allocation_rules_requires_identifier():
@@ -91,7 +91,7 @@ def test_billing_period_values_include_closed_invoice_months():
 def test_charge_interval_rules_include_connection_allocation_config():
     rules = _charge_interval_rules([
         {"connection_code": "ibm-ti", "connection_id": 3, "period_allocation": "charge_interval", "charge_end_column": "ChargePeriodEnd"},
-        {"connection_code": "gcp-ti", "period_allocation": "none"},
+        {"connection_code": "gcp-dev", "period_allocation": "none"},
     ])
     assert len(rules) == 1
     assert rules[0]["connection_id"] == 3
@@ -140,7 +140,7 @@ async def test_cloud_fetch_batches_shards_without_removing_dimensions(monkeypatc
         connection_filter=None,
         exclusion_filter=None,
         cloud_col="cloud_origem",
-        clouds={"azure-ti": date(2026, 9, 7)},
+        clouds={"azure-dev": date(2026, 9, 7)},
         shard_col="subaccountname",
         minimum_monthly_points=1,
     )
@@ -187,7 +187,7 @@ async def test_cloud_fetch_anchors_history_on_each_cloud_cutoff(monkeypatch):
     )
 
     # The 35-day lookback is preserved, but follows Marketplace's July cutoff
-    # rather than Azure TI's newer August cutoff.
+    # rather than Azure Dev's newer August cutoff.
     cloud_call = calls[0]
     assert cloud_call["history_start"] == date(2026, 6, 25)
     assert cloud_call["effective_cutoff"] == date(2026, 7, 30)

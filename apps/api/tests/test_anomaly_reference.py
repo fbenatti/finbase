@@ -148,7 +148,7 @@ def test_rastro_textual_vira_referencia_estruturada():
             "Return simulado",
             "Marketplace ONESHOT zera forecast (sem séries correspondentes)",
             "Projeto Beta - PTU Azure OpenAI mensal (não aplicada: campo fora das dimensões)",
-            "Azure-4P - suspender após 30 dias sem dados (suspensas 26 linhas; validade 30 dias)",
+            "Azure-Producao - suspender após 30 dias sem dados (suspensas 26 linhas; validade 30 dias)",
         ]
     }
     refs, source, declares_current = parse_applied_rule_refs(metrics)
@@ -156,7 +156,7 @@ def test_rastro_textual_vira_referencia_estruturada():
     assert by_name["Return simulado"].status == APPLIED
     assert by_name["Marketplace ONESHOT zera forecast"].status == SERIES_NOT_FOUND
     assert by_name["Projeto Beta - PTU Azure OpenAI mensal"].status == OUT_OF_DIMENSIONS
-    assert by_name["Azure-4P - suspender após 30 dias sem dados"].status == APPLIED
+    assert by_name["Azure-Producao - suspender após 30 dias sem dados"].status == APPLIED
     assert source == "RUN_METRICS"
     assert declares_current is False
 
@@ -230,11 +230,11 @@ def test_horizonte_no_inicio_do_mes():
 # ---------------------------------------------------------------------------
 def expectation_rows():
     return [
-        {"cloud_origem": "gcp-4p", "servicename": "Compute", "forecast_month": "202610", "expected_cloud": 1000.0},
-        {"cloud_origem": "gcp-4p", "servicename": "Storage", "forecast_month": "202610", "expected_cloud": 250.0},
-        {"cloud_origem": "gcp-4p", "servicename": "Compute", "forecast_month": "202611", "expected_cloud": 3000.0},
+        {"cloud_origem": "gcp-producao", "servicename": "Compute", "forecast_month": "202610", "expected_cloud": 1000.0},
+        {"cloud_origem": "gcp-producao", "servicename": "Storage", "forecast_month": "202610", "expected_cloud": 250.0},
+        {"cloud_origem": "gcp-producao", "servicename": "Compute", "forecast_month": "202611", "expected_cloud": 3000.0},
         # mês já transcorrido no corte: fora do horizonte
-        {"cloud_origem": "gcp-4p", "servicename": "Compute", "forecast_month": "202609", "expected_cloud": 999.0},
+        {"cloud_origem": "gcp-producao", "servicename": "Compute", "forecast_month": "202609", "expected_cloud": 999.0},
     ]
 
 
@@ -312,9 +312,9 @@ def test_referencia_recusa_kind_unavailable():
 
 
 def test_ids_sao_deterministicos():
-    a = series_id_for(DIMS, {"cloud_origem": "gcp-4p", "servicename": "Compute"})
-    b = series_id_for(DIMS, {"cloud_origem": "gcp-4p", "servicename": "Compute"})
-    c = series_id_for(DIMS, {"cloud_origem": "gcp-4p", "servicename": "Storage"})
+    a = series_id_for(DIMS, {"cloud_origem": "gcp-producao", "servicename": "Compute"})
+    b = series_id_for(DIMS, {"cloud_origem": "gcp-producao", "servicename": "Compute"})
+    c = series_id_for(DIMS, {"cloud_origem": "gcp-producao", "servicename": "Storage"})
     assert a == b != c
     # None e string vazia colapsam para o mesmo id (não duplicar caso).
     assert series_id_for(DIMS, {"cloud_origem": None, "servicename": ""}) == series_id_for(
@@ -377,7 +377,7 @@ def test_compra_mensal_esperada_nao_vira_anomalia_com_restante_zero():
 
     rows = build_reference_rows(
         selection.contract,
-        [{"cloud_origem": "azure-ti", "servicename": "SavingsPlan", "forecast_month": "202610", "expected_cloud": 30000.0}],
+        [{"cloud_origem": "azure-dev", "servicename": "SavingsPlan", "forecast_month": "202610", "expected_cloud": 30000.0}],
         dimensions=DIMS,
         reference_kind=selection.reference_kind,
         target_start="2026-10-03", target_end="2026-10-31",

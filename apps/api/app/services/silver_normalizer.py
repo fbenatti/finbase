@@ -554,7 +554,7 @@ def mapping_rows(mapping: SourceMapping, silver_model: SilverModel) -> list[dict
 def _resolver_conexao(session, tabela_bronze: str):
     """Conexão que originou a Bronze.
 
-    O nome da tabela carrega o código da conexão (`raw_azure_4p`), então a
+    O nome da tabela carrega o código da conexão (`raw_azure_producao`), então a
     origem é resolvida a partir dele — sem parâmetro novo em cada chamada.
     """
     from sqlalchemy import select
@@ -568,7 +568,7 @@ def _resolver_conexao(session, tabela_bronze: str):
         conexoes = session.execute(select(SourceConnection)).scalars().all()
     except Exception:  # noqa: BLE001
         return None
-    # O código mais longo que casa vence: `azure-4p` antes de `azure`.
+    # O código mais longo que casa vence: `azure-producao` antes de `azure`.
     candidatas = [
         c for c in conexoes
         if corpo == c.code.replace("-", "_") or corpo.startswith(c.code.replace("-", "_") + "_")

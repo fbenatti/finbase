@@ -59,7 +59,7 @@ interface DataTableGroup {
 
 function groupDataTables(names: string[]): DataTableGroup[] {
   const groups = new Map<string, DataTableGroup>();
-  const costSlice = /^(finops_cost_driver_slice_azure_4p)_(\d{6})_(service|sub_account|region|organization)_(\d+)$/;
+  const costSlice = /^(finops_cost_driver_slice_[a-z0-9_]+?)_(\d{6})_(service|sub_account|region|organization)_(\d+)$/;
   for (const tableName of names) {
     const match = tableName.match(costSlice);
     const groupName = match?.[1] || tableName;

@@ -22,7 +22,7 @@ def test_build_chunk_payload_includes_rules_and_provenance():
     payload = build_chunk_payload(
         records=records,
         connection_id=7,
-        connection_code="azure-ti",
+        connection_code="azure-dev",
         billing_period="202501",
         brules=[],
         crules=[],
@@ -31,7 +31,7 @@ def test_build_chunk_payload_includes_rules_and_provenance():
         hierarchy_cache={},
         dest_col_names={"ServiceName", "BilledCost"},
     )
-    assert payload["connection_code"] == "azure-ti"
+    assert payload["connection_code"] == "azure-dev"
     assert payload["connection_id"] == 7
     assert payload["billing_period"] == "202501"
     assert payload["records"][0]["ServiceName"] == "Compute"

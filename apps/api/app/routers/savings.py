@@ -22,8 +22,9 @@ def _period(value: str, field: str) -> str:
 
 
 def _commitment_source_filter(source: str) -> str:
- if source not in {"all", "azure-ti", "azure-4p"}:
-  raise HTTPException(422, "source deve ser all, azure-ti ou azure-4p")
+ # "all" ou o código de uma conexão (ex.: azure-producao).
+ if source != "all" and not re.fullmatch(r"[a-z0-9][a-z0-9_-]{0,99}", source or ""):
+  raise HTTPException(422, "source deve ser all ou o código de uma conexão")
  return "" if source == "all" else f"AND source = '{source}'"
 
 

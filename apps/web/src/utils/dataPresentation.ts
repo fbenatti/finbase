@@ -23,7 +23,7 @@ const MODULE_LABELS: Record<string, string> = {
   azure_tag_policy: "Políticas de classificação", oci_operational: "Operação de recursos",
   scheduled_shutdown: "Desligamento programado", ideas: "Iniciativas", auth: "Login corporativo",
   users: "Pessoas e acessos", groups: "Grupos", roles: "Funções e permissões", audit: "Trilha de auditoria",
-  anomalies: "Alertas",
+  anomalies: "Alertas", notifications: "Avisos do sistema",
 };
 
 export function moduleDisplayName(module: string): string {

@@ -18,14 +18,9 @@ export default defineConfig({
     },
   },
   server: {
-    // Nginx terminates TLS and forwards the private VM hostnames to the Vite
-    // development server.  Vite 6 rejects unknown Host headers by default.
-    allowedHosts: [
-      "finopsintelligence.telefonicati.onmicrosoft.com",
-      "api.finopsintelligence.telefonicati.onmicrosoft.com",
-      "finopsintelligence.telefonicabigdata.com",
-      "api.finopsintelligence.telefonicabigdata.com",
-    ],
+    // Atrás de um proxy com outro nome de host, informe-o em VITE_ALLOWED_HOSTS
+    // (separados por vírgula); o Vite 6 recusa hosts desconhecidos.
+    allowedHosts: (process.env.VITE_ALLOWED_HOSTS || "").split(",").map((host) => host.trim()).filter(Boolean),
     proxy: {
       "/api": {
         target: process.env.VITE_API_PROXY_TARGET || "http://localhost:8001",

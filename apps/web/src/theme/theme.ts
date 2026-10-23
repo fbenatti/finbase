@@ -68,9 +68,10 @@ export function createAppTheme() {
         defaultProps: { rowHeight: 48, columnHeaderHeight: 48, disableRowSelectionOnClick: true, pageSizeOptions: [50, 100, 500, 1000], initialState: { pagination: { paginationModel: { page: 0, pageSize: 50 } } }, slots: dataGridIcons, localeText: ptBR.components.MuiDataGrid.defaultProps.localeText },
         styleOverrides: {
           root: { borderColor: border, backgroundColor: colors.paper, borderRadius: radius.surface, fontSize: "0.875rem", "& .MuiDataGrid-cell:focus, & .MuiDataGrid-columnHeader:focus, & .MuiDataGrid-cell:focus-within, & .MuiDataGrid-columnHeader:focus-within": { outline: "2px solid", outlineColor: "primary.main", outlineOffset: -2 } },
-          columnHeader: { backgroundColor: colors.tableHead, padding: "0 16px", "&:focus-within": { outlineOffset: -2 } },
+          // A coluna de seleção tem 50px: sem zerar o espaçamento, a caixa fica cortada.
+          columnHeader: { backgroundColor: colors.tableHead, padding: "0 16px", "&:focus-within": { outlineOffset: -2 }, "&.MuiDataGrid-columnHeaderCheckbox": { padding: 0 } },
           columnHeaderTitle: { fontWeight: 700 },
-          cell: { borderColor: border, padding: "0 16px", fontVariantNumeric: "tabular-nums", display: "flex", alignItems: "center", "&.MuiDataGrid-cell--textRight": { justifyContent: "flex-end" }, "&:focus-within": { outlineOffset: -2 } },
+          cell: { borderColor: border, padding: "0 16px", "&.MuiDataGrid-cellCheckbox": { padding: 0, justifyContent: "center" }, fontVariantNumeric: "tabular-nums", display: "flex", alignItems: "center", "&.MuiDataGrid-cell--textRight": { justifyContent: "flex-end" }, "&:focus-within": { outlineOffset: -2 } },
           row: { "&:hover": { backgroundColor: colors.rowHover } },
           footerContainer: { minHeight: 48, borderColor: border, backgroundColor: colors.raised },
           toolbarContainer: { padding: 16, gap: 8, borderBottom: `1px solid ${border}` },

@@ -240,7 +240,7 @@ async def get_catalog():
 
 @router.get("/")
 async def list_azure_sources(
-    environment: str | None = Query(None, description="Filtra por slug de ambiente (ex.: 4p)"),
+    environment: str | None = Query(None, description="Filtra por slug de ambiente (ex.: producao)"),
     connection_id: int | None = Query(
         None,
         description="Filtra por conexão: cada conexão tem as suas próprias fontes",
@@ -250,7 +250,7 @@ async def list_azure_sources(
     """Fontes Azure por ambiente de coleta ou conexão independente."""
     connection_query = select(SourceConnection).where(SourceConnection.cloud_scope == "azure")
     if connection_id is not None:
-        # Isola a conexão: editar a 4P não pode mostrar fontes da TI nem do
+        # Isola a conexão: editar uma conexão não pode mostrar fontes de outra nem do
         # Marketplace, mesmo que compartilhem o mesmo ambiente.
         connection_query = connection_query.where(SourceConnection.id == connection_id)
     connections = (await db.execute(
@@ -520,7 +520,7 @@ async def update_source_selection(
     await db.commit()
     await db.refresh(selection)
     # O inventário unificado precisa de destination/mappings ligados à
-    # conexão do ambiente (azure-4p/azure-ti), não de uma conexão ARG
+    # conexão do ambiente (custo Azure do tenant), não de uma conexão ARG
     # standalone. Prepare-os ao habilitar a fonte no catálogo novo.
     if source_key == "resource_graph" and selection.enabled and connection.connector_type == "azure_blob":
         from app.routers.azure_resource_graph import _setup_for_connection

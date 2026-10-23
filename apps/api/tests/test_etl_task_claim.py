@@ -23,7 +23,7 @@ from app.models.destination import DestinationTable  # noqa: F401
 
 
 def test_allowed_rule_cloud_scopes_for_azure():
-    scopes = allowed_rule_cloud_scopes("azure", "Azure-TI")
+    scopes = allowed_rule_cloud_scopes("azure", "Azure-Dev")
     assert None in scopes
     assert "azure" in scopes
 

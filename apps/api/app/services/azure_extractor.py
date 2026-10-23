@@ -244,7 +244,7 @@ class AzureExtractor:
 
         # A raw Azure cost export must not already contain application-level
         # enrichments. This signature identifies the legacy derived report
-        # that previously polluted the TI source schema.
+        # that previously polluted the source schema.
         derived_markers = {"BusinessRule", "Projetos", "Diretoria"}
         if derived_markers.issubset(set(str(col).lstrip("\ufeff") for col in df.columns)):
             raise ValueError(
@@ -437,7 +437,7 @@ class AzureExtractor:
         # Mapping, normalização, regras e classificações são executados
         # exclusivamente no reprocessamento de uma tabela de destino. A
         # extração não pode mais criar Silver por conexão (ex.:
-        # silver.normalized_azure_ti).
+        # silver.normalized_<código>).
         return raw_count, 0, errors
 
     async def run_full_pipeline(

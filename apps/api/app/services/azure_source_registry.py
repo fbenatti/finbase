@@ -122,14 +122,14 @@ def environment_slug(connection: Any) -> str:
 
     O ambiente é a **credencial compartilhada**: conexões com o mesmo
     `tenant_id`/`client_id` pertencem ao mesmo grupo, porque é isso que evita
-    repetir segredo. Assim `azure-4p`, `azure-4p-ptu`, `azure-automation-4p` e
-    `azure-4p-resource-graph` caem no mesmo grupo `4p`, e o operador configura
+    repetir segredo. Assim `azure-producao`, `azure-producao-ptu`, `azure-automation-producao` e
+    `azure-producao-resource-graph` caem no mesmo grupo `producao`, e o operador configura
     uma vez só.
 
     Ordem de resolução:
 
     1. `config_json.environment_slug` explícito (metadata manda);
-    2. `cloud_name` normalizado (`Azure-4P` → `4p`) — rótulo de tenant já
+    2. `cloud_name` normalizado (`Azure-Producao` → `producao`) — rótulo de tenant já
        preenchido nas conexões existentes;
     3. `code` sem o prefixo `azure-` e sem o sufixo de fonte.
 
@@ -143,7 +143,7 @@ def environment_slug(connection: Any) -> str:
 
     cloud_name = str(getattr(connection, "cloud_name", "") or "").strip()
     if cloud_name:
-        # `Azure-4P` → `4p`; `Azure Marketplace` → `marketplace`.
+        # `Azure-Producao` → `producao`; `Azure Marketplace` → `marketplace`.
         cleaned = re.sub(r"(?i)^azure[\s\-_]*", "", cloud_name).strip()
         cleaned = re.sub(r"[\s_]+", "-", cleaned).lower()
         if cleaned:
@@ -164,7 +164,7 @@ def environment_slug(connection: Any) -> str:
         if len(cleaned_tokens) >= len(parts) and cleaned_tokens[-len(parts):] == parts:
             cleaned_tokens = cleaned_tokens[: -len(parts)]
             break
-    # `automation-4p` / `resource-graph-ti`: o ambiente é o último token.
+    # `automation-producao` / `resource-graph-dev`: o ambiente é o último token.
     if cleaned_tokens and cleaned_tokens[0] in {"automation", "resource", "monitor", "aks", "compute"}:
         return cleaned_tokens[-1]
     return "-".join(cleaned_tokens) if cleaned_tokens else "default"
@@ -219,7 +219,7 @@ def sanitized_bronze(connection: Any) -> str:
 
 # Sufixo do `code` por fonte. O nome físico da Bronze é `raw_{code}`, então o
 # sufixo define a tabela: manter o histórico exige preservar os nomes já em uso
-# (raw_azure_4p, raw_azure_4p_monitor_vm, ...). Uma conexão só passa a escrever
+# (raw_azure_producao, raw_azure_producao_monitor_vm, ...). Uma conexão só passa a escrever
 # várias tabelas por causa deste mapa — antes cada fonte era um `code` próprio.
 SOURCE_CODE_SUFFIX: dict[str, str] = {
     "cost_exports": "",

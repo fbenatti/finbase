@@ -1221,15 +1221,6 @@ def _parse_classification_conditions(condicoes_str: str) -> list[dict]:
     return conditions
 
 
-CLOUD_TO_CONNECTION: dict[str, int] = {
-    "Azure-TI": 2,
-    "Azure-4P": 1,
-    "GCP-TI": 4,
-    "GCP-4P": 3,
-    "Atlas-MongoDB": 5,
-}
-
-
 def _adapt_conditions_to_destination(
     conditions: list[dict],
     relationship_map: dict[str, str],
@@ -1300,6 +1291,15 @@ async def import_csv_data(data: CsvImportRequest, db: AsyncSession = Depends(get
         # Keep the first mapping for an ambiguous source field. Explicit
         # technical overrides above handle the fields that must be preserved.
         bucket.setdefault(str(mapping.source_column).lower(), mapping.destination_column)
+
+    # A coluna "Cloud" do CSV é o nome da nuvem de uma conexão cadastrada
+    # (cloud_name) ou o código dela.
+    from app.models.source_connection import SourceConnection
+    connection_by_cloud: dict[str, int] = {}
+    for connection in (await db.execute(select(SourceConnection))).scalars().all():
+        for key in (connection.cloud_name, connection.code):
+            if key:
+                connection_by_cloud.setdefault(str(key).strip().lower(), connection.id)
 
     # --- Helper: find a single department by name + parent ---
     async def _find_dept(name: str, parent_id: int | None = None) -> Department | None:
@@ -1468,7 +1468,7 @@ async def import_csv_data(data: CsvImportRequest, db: AsyncSession = Depends(get
             if not parsed_conditions:
                 continue
 
-            connection_id = CLOUD_TO_CONNECTION.get(cloud)
+            connection_id = connection_by_cloud.get(cloud.lower())
             cloud_scope = connection_cloud_scope(cloud) if cloud else None
             parsed_conditions = _adapt_conditions_to_destination(
                 parsed_conditions,
@@ -1640,22 +1640,3 @@ async def import_csv_data(data: CsvImportRequest, db: AsyncSession = Depends(get
         await db.commit()
 
     return result
-
-
-@router.post("/governanca/hierarquia/sincronizar-classificacoes-azure")
-async def sync_azure_active_classifications(
-    apply: bool = Query(False, description="When true, persist departments and classification rules"),
-    db: AsyncSession = Depends(get_db),
-):
-    """Preview or apply Azure classification metadata for RGs with recent consumption.
-
-    Gold is never reprocessed here.  Callers must review the returned audit and
-    start a reprocess explicitly after the metadata has been approved.
-    """
-    from app.services.azure_active_classification_sync import sync_active_azure_classifications
-
-    try:
-        report = await sync_active_azure_classifications(db, apply=apply)
-    except ValueError as exc:
-        raise HTTPException(status_code=422, detail=str(exc)) from exc
-    return {"mode": "apply" if apply else "preview", **report.as_dict()}

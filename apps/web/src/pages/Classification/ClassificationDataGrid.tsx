@@ -183,15 +183,6 @@ export default function ClassificationDataGrid({
       ),
     },
     {
-      field: "updated_at",
-      headerName: "Última atualização",
-      renderHeader: () => filteredHeader("Última atualização", "updated_at"),
-      minWidth: 165,
-      type: "dateTime",
-      valueGetter: (_, row: ClassificationRule) => (row.updated_at ? new Date(row.updated_at) : null),
-      valueFormatter: (value) => formatDateTime(value),
-    },
-    {
       field: "actions",
       headerName: "Opções",
       width: 132,
@@ -297,14 +288,13 @@ export default function ClassificationDataGrid({
     const field = cell?.getAttribute("data-field") || "";
     const rowId = cell?.parentElement?.getAttribute("data-id");
     const row = rows.find((item) => String(item.id) === rowId);
-    const allowedFields = new Set(["name", "department_name", "cloud_scope", "priority", "active", "updated_at"]);
+    const allowedFields = new Set(["name", "department_name", "cloud_scope", "priority", "active"]);
     let value = "";
     if (field === "name") value = row?.name || "";
     else if (field === "department_name") value = row?.department_id ? departmentPathById.get(row.department_id) || row.department_name || "" : row?.department_name || "";
     else if (field === "cloud_scope") value = row?.cloud_scope || "";
     else if (field === "priority") value = String(row?.priority ?? "");
     else if (field === "active") value = String(row?.active ?? "");
-    else if (field === "updated_at") value = row?.updated_at || "";
     else value = cell?.textContent?.trim() || "";
 
     if (allowedFields.has(field) && value) {
@@ -348,7 +338,7 @@ export default function ClassificationDataGrid({
 
   const exportDisplayed = () => {
     const escape = (value: unknown) => '"' + String(value ?? "").replace(/"/g, '""') + '"';
-    const header = ["Nome", "Critérios", "Hierarquia", "Cloud", "Prioridade", "Ativa", "Última atualização"];
+    const header = ["Nome", "Critérios", "Hierarquia", "Cloud", "Prioridade", "Ativa"];
     const lines = [
       header.join(";"),
       ...rows.map((row) => [
@@ -358,7 +348,6 @@ export default function ClassificationDataGrid({
         cloudLabel(row.cloud_scope),
         row.priority,
         row.active ? "Sim" : "Não",
-        row.updated_at ? formatDateTime(row.updated_at) : "",
       ].map(escape).join(";")),
     ];
     const blob = new Blob(["\uFEFF" + lines.join("\r\n")], { type: "text/csv;charset=utf-8;" });

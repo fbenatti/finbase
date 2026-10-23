@@ -1,7 +1,0 @@
-SHA256 principal: 6d2cb7441cc59d545cf77f12db13934625169bd3b650fafeff3d72b5cf014a80
-
-ABRIR_FINOPS.html: 6d2cb7441cc59d545cf77f12db13934625169bd3b650fafeff3d72b5cf014a80 | idêntico ao principal = True
-start.html: 6d2cb7441cc59d545cf77f12db13934625169bd3b650fafeff3d72b5cf014a80 | idêntico ao principal = True
-start_v2.5.3.html: 6d2cb7441cc59d545cf77f12db13934625169bd3b650fafeff3d72b5cf014a80 | idêntico ao principal = True
-
-Todos os entrypoints são standalone e byte-idênticos ao HTML congelado.

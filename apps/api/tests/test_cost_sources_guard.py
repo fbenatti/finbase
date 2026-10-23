@@ -27,7 +27,7 @@ def conn(code: str, **config):
 
 def azure_conn(**blob_prefixes):
     return SimpleNamespace(
-        code="azure-4p",
+        code="azure-producao",
         connector_type="azure_blob",
         blob_prefixes=blob_prefixes,
         config_json={},
@@ -37,18 +37,18 @@ def azure_conn(**blob_prefixes):
 # --- classificação ---------------------------------------------------------
 
 def test_source_key_marks_cost_source():
-    assert is_cost_source(conn("azure-ti", source_key="cost_exports")) is True
+    assert is_cost_source(conn("azure-dev", source_key="cost_exports")) is True
 
 
 def test_explicit_true_marks_cost_source():
-    assert is_cost_source(conn("gcp-4p", cost_source=True)) is True
-    assert is_cost_source(conn("gcp-4p", cost_source="true")) is True
-    assert is_cost_source(conn("gcp-4p", cost_source="True")) is True
+    assert is_cost_source(conn("gcp-producao", cost_source=True)) is True
+    assert is_cost_source(conn("gcp-producao", cost_source="true")) is True
+    assert is_cost_source(conn("gcp-producao", cost_source="True")) is True
 
 
 def test_explicit_false_is_non_cost():
-    assert is_cost_source(conn("azure-automation-4p", cost_source=False)) is False
-    assert is_explicitly_non_cost(conn("azure-automation-4p", cost_source=False)) is True
+    assert is_cost_source(conn("azure-automation-producao", cost_source=False)) is False
+    assert is_explicitly_non_cost(conn("azure-automation-producao", cost_source=False)) is True
 
 
 def test_unmarked_connection_is_not_a_cost_source_by_default():
@@ -61,52 +61,52 @@ def test_unmarked_connection_is_not_a_cost_source_by_default():
 def test_azure_prefix_alone_does_not_make_it_cost():
     """O bug original: `azure-automation-*` casa com o prefixo e não é custo."""
     assert is_cost_source(conn("azure-automation-ti")) is False
-    assert is_cost_source(conn("azure-resource-graph-4p")) is False
+    assert is_cost_source(conn("azure-resource-graph-producao")) is False
 
 
 # --- bloqueio de mapping ---------------------------------------------------
 
 def test_operational_source_cannot_map_to_focus():
-    reason = mapping_rejection_reason(conn("azure-automation-4p", cost_source=False), FOCUS_DESTINATION_ID)
+    reason = mapping_rejection_reason(conn("azure-automation-producao", cost_source=False), FOCUS_DESTINATION_ID)
     assert reason is not None
     assert "operacional" in reason
-    assert "azure-automation-4p" in reason
+    assert "azure-automation-producao" in reason
 
 
 @pytest.mark.parametrize("code,config", [
-    ("azure-automation-4p", {"cost_source": False}),
+    ("azure-automation-producao", {"cost_source": False}),
     ("azure-automation-ti", {"cost_source": False}),
-    ("azure-resource-graph-4p", {"cost_source": False}),
-    ("azure-resource-graph-ti", {"cost_source": False}),
-    ("azure-4p-ptu", {"cost_source": False}),
+    ("azure-resource-graph-producao", {"cost_source": False}),
+    ("azure-resource-graph-dev", {"cost_source": False}),
+    ("azure-producao-ptu", {"cost_source": False}),
 ])
 def test_every_operational_source_is_blocked_for_focus(code, config):
     assert mapping_rejection_reason(conn(code, **config), FOCUS_DESTINATION_ID) is not None
 
 
 def test_cost_source_is_allowed_for_focus():
-    assert mapping_rejection_reason(conn("azure-ti", source_key="cost_exports"), FOCUS_DESTINATION_ID) is None
+    assert mapping_rejection_reason(conn("azure-dev", source_key="cost_exports"), FOCUS_DESTINATION_ID) is None
 
 
 def test_cost_extractor_ignores_non_focus_prefixes():
     from app.services.azure_report_types import focus_download_prefixes
 
     prefixes = focus_download_prefixes({
-        "actual_cost": "reports/Report4P-actual-cost/",
+        "actual_cost": "reports/ReportProd-actual-cost/",
         "price_sheet": "reports/report_-pricesheet/",
-        "amortized_cost": "reports/Report4P-amortized-cost/",
+        "amortized_cost": "reports/ReportProd-amortized-cost/",
     })
-    assert prefixes == ["reports/Report4P-actual-cost/"]
+    assert prefixes == ["reports/ReportProd-actual-cost/"]
 
 
 def test_price_sheet_blob_is_not_focus_eligible():
     c = azure_conn(
-        actual_cost="reports/Report4P-actual-cost/",
+        actual_cost="reports/ReportProd-actual-cost/",
         price_sheet="reports/report_-pricesheet/",
     )
     assert bronze_blob_eligible_for_focus(
         c,
-        "reports/Report4P-actual-cost/20260901-20260930/run/part_0.csv",
+        "reports/ReportProd-actual-cost/20260901-20260930/run/part_0.csv",
     )
     assert not bronze_blob_eligible_for_focus(
         c,
@@ -122,8 +122,8 @@ def test_unmarked_legacy_connection_is_not_blocked():
 @pytest.mark.parametrize("destination_id", [36, 38, 40, 41])
 def test_operational_source_is_allowed_for_its_own_destination(destination_id):
     """O bloqueio vale para o FOCUS; inventário/órfãos/automação continuam válidos."""
-    assert mapping_rejection_reason(conn("azure-automation-4p", cost_source=False), destination_id) is None
-    assert mapping_rejection_reason(conn("azure-resource-graph-4p", cost_source=False), destination_id) is None
+    assert mapping_rejection_reason(conn("azure-automation-producao", cost_source=False), destination_id) is None
+    assert mapping_rejection_reason(conn("azure-resource-graph-producao", cost_source=False), destination_id) is None
 
 
 def test_missing_connection_does_not_block_unrelated_destination():
