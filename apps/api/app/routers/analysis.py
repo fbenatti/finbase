@@ -2791,8 +2791,8 @@ async def run_query(req: QueryRequest, request: Request, db: AsyncSession = Depe
     Execute a read-only query against the data catalog.
 
     Examples:
-      SELECT * FROM iceberg.bronze.raw_oci WHERE _billing_period = '202504' LIMIT 10
-      SELECT SUM("BilledCost") AS total_billed FROM iceberg.silver.dest_billing_cloud WHERE "_billing_period" = '202504'
+      SELECT * FROM dados.origem.nome_da_tabela WHERE _billing_period = '202504' LIMIT 10
+      SELECT SUM("BilledCost") AS total_billed FROM dados.preparacao.nome_da_tabela WHERE "_billing_period" = '202504'
     """
     allowed = set((await db.execute(select(DestinationTable.physical_name).where(DestinationTable.active.is_(True)))).scalars().all())
     # Bases de origem (bronze) das fontes cadastradas: bronze.raw_<identificador>.
