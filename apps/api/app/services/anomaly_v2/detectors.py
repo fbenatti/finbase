@@ -220,11 +220,15 @@ def continuous_episode(
 
     cursor = window_start
     while cursor <= as_of:
-        if cursor.isoformat() not in by_day or (valid_days is not None and cursor.isoformat() not in valid_days):
+        if valid_days is not None and cursor.isoformat() not in valid_days:
             quiet = 0
             cursor += timedelta(days=1)
             continue
-        obs = by_day[cursor.isoformat()]
+        if cursor.isoformat() not in by_day and (active is None or valid_days is None):
+            cursor += timedelta(days=1)
+            continue
+        # Em um dia coletado da nuvem, ausência do escopo significa custo zero.
+        obs = by_day.get(cursor.isoformat(), 0.0)
         if active is None and sum(day < cursor.isoformat() for day in by_day) < int(config["new_spend_min_history_days"]):
             # A first observation has no baseline; it is not a historical spike.
             cursor += timedelta(days=1)
