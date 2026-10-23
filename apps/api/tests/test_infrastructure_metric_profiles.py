@@ -26,6 +26,7 @@ def test_profiles_compute_linear_p90_p95_p99_and_record_basis():
         resolution_seconds=60,
     )
     assert profile["p90"] == pytest.approx(81)
+    assert profile["p50"] == pytest.approx(45)
     assert profile["p95"] == pytest.approx(85.5)
     assert profile["p99"] == pytest.approx(89.1)
     assert profile["percentile_basis"] == "WINDOW_OF_BUCKET_VALUES"
