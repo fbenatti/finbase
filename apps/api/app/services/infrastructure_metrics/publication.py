@@ -117,7 +117,7 @@ def _column_types() -> dict[str, str]:
             if field.type in mapping}
 
 
-def ensure_metric_series_table(*, namespace: str = "silver") -> bool:
+def _ensure_metric_series_table_locked(*, namespace: str = "silver") -> bool:
     """Create the empty shared Silver table, or evolve it to the declared model.
 
     Returns True when a new table was registered. This runs before provider
@@ -181,6 +181,14 @@ def ensure_metric_series_table(*, namespace: str = "silver") -> bool:
             with table.update_schema() as update:
                 update.union_by_name(target_schema)
         return False
+
+
+def ensure_metric_series_table(*, namespace: str = "silver") -> bool:
+    """Initialize/evolve the shared schema under the warehouse write lock."""
+    from app.services.write_lock import exclusive_write_lock
+
+    with exclusive_write_lock():
+        return _ensure_metric_series_table_locked(namespace=namespace)
 
 
 def publish_metric_rows(
