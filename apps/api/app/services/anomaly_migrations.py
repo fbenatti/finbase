@@ -177,7 +177,6 @@ ANOMALY_MIGRATION_STATEMENTS: tuple[str, ...] = (
     """,
     # Correção de dados estreita: materialidade vazia passa a ter o default de
     # 100 na moeda declarada pela configuração. Idempotente.
-    "UPDATE scheduled_task SET active = false WHERE schedule_type = 'anomaly_detection'",
     """UPDATE scheduled_task
           SET config_json = (
                 COALESCE(config_json::jsonb, '{}'::jsonb) || '{"anomaly_after_pipeline": true}'::jsonb
