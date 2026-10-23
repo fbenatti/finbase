@@ -10,6 +10,7 @@ from .catalog import get_metric
 from .collector import collect, estimated_api_calls, plan_queries
 from .config import InfrastructureMetricsConfig, config_from_connection
 from .contracts import CollectionCancelled, QueryResult
+from .coverage import build_coverage_rows
 from .credentials import build_oci_adapter
 from .normalization import query_results_to_silver_rows
 
@@ -60,9 +61,10 @@ def collect_oci_metrics(
     )
     estimated_calls = estimated_api_calls(plans)
     if persist:
-        from .publication import ensure_metric_series_table
+        from .publication import ensure_metric_coverage_table, ensure_metric_series_table
 
         ensure_metric_series_table()
+        ensure_metric_coverage_table()
     adapter = build_oci_adapter(connection, config)
     if should_abort:
         adapter._should_abort = should_abort
@@ -93,9 +95,13 @@ def collect_oci_metrics(
     from .counters import derive_counter_rates
 
     rows.extend(derive_counter_rates(rows))
+    coverage_rows = build_coverage_rows(
+        results, source_owner="oci_infrastructure_metrics", collection_run_id=run_id,
+    )
     persisted_by_day: dict[str, int] = {}
+    coverage_persisted_by_day: dict[str, int] = {}
     if persist:
-        from .publication import publish_metric_rows
+        from .publication import publish_metric_coverage_rows, publish_metric_rows
         rows_by_day: dict[str, list[dict]] = defaultdict(list)
         for row in rows:
             row["_billing_period"] = row["metric_day"]
@@ -104,6 +110,15 @@ def collect_oci_metrics(
             if should_abort and should_abort():
                 raise CollectionCancelled("infrastructure metric collection cancelled")
             persisted_by_day[metric_day] = publish_metric_rows(
+                day_rows, connection_id=int(connection.id), metric_day=metric_day,
+            )
+        coverage_by_day: dict[str, list[dict]] = defaultdict(list)
+        for row in coverage_rows:
+            coverage_by_day[str(row["metric_day"])].append(row)
+        for metric_day, day_rows in sorted(coverage_by_day.items()):
+            if should_abort and should_abort():
+                raise CollectionCancelled("infrastructure metric collection cancelled")
+            coverage_persisted_by_day[metric_day] = publish_metric_coverage_rows(
                 day_rows, connection_id=int(connection.id), metric_day=metric_day,
             )
     call_statuses = [
@@ -127,7 +142,9 @@ def collect_oci_metrics(
         "completed_query_count": sum(status < 400 for status in call_statuses),
         "failed_query_count": sum(status >= 400 for status in call_statuses),
         "rows_prepared": rows,
+        "coverage_rows_prepared": coverage_rows,
         "persistence_enabled": persist,
         "raw_rows_persisted": raw_persisted_count,
         "persisted_by_day": persisted_by_day,
+        "coverage_persisted_by_day": coverage_persisted_by_day,
     }
