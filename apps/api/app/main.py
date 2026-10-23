@@ -968,6 +968,11 @@ from app.core.security_headers_middleware import SecurityHeadersMiddleware
 from app.core.audit_middleware import AuditCaptureMiddleware
 from app.core.authz_middleware import RBACMiddleware
 
+from app.core.latency_middleware import LatencyMetricsMiddleware
+
+# O mais interno de propósito: mede só o tratamento da rota, sem autorização e
+# auditoria, que é onde o Trino entra.
+app.add_middleware(LatencyMetricsMiddleware)
 app.add_middleware(SecurityHeadersMiddleware)
 app.add_middleware(AuditCaptureMiddleware)
 app.add_middleware(RBACMiddleware)

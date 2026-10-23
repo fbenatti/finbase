@@ -3010,6 +3010,18 @@ async def get_summary(
         raise HTTPException(status_code=502, detail=str(e))
 
 
+@router.get("/metricas-latencia")
+async def latency_metrics():
+    """p50/p95 medidos por rota e por tipo de query Trino desde o início do processo.
+
+    Amostras em memória, janela curta (ver ``finops_cache``): servem para o aceite
+    de performance no ambiente de referência, não para observabilidade histórica.
+    """
+    from app.services.finops_cache import metrics_report
+
+    return metrics_report()
+
+
 @router.get("/saude")
 async def health_check():
     """Check if Trino and the PostgreSQL-backed Iceberg catalog are reachable."""
