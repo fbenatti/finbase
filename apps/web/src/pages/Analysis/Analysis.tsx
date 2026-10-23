@@ -100,7 +100,7 @@ export default function Analysis() {
   const publicTab = searchParams.get("tab");
   const requestedTab = (publicTab === "acervo" ? "iceberg" : publicTab === "temporarios" ? "staging" : publicTab) as AnalysisTab | null;
   const tab: AnalysisTab = requestedTab && ["destino", "fontes", "iceberg", "staging", "pivot", "busca"].includes(requestedTab) ? requestedTab : "fontes";
-  const [health, setHealth] = useState<AnalysisHealth>({ trino: "?", nessie: "?", minio: "?" });
+  const [health, setHealth] = useState<AnalysisHealth>({ trino: "?", iceberg_catalog: "?" });
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
 

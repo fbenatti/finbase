@@ -3633,8 +3633,7 @@ export interface AnalysisSummaryRow {
 
 export interface AnalysisHealth {
   trino: string;
-  nessie: string;
-  minio: string;
+  iceberg_catalog: string;
 }
 
 export interface AnalysisStagingTable {
