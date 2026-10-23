@@ -1561,6 +1561,30 @@ async def accuracy_delta(
 
 _desvios_grain_cache: dict[tuple[Any, ...], tuple[float, dict[tuple[Any, ...], float]]] = {}
 _DESVIOS_GRAIN_TTL = 600.0
+_SKU_DIMENSION_CANDIDATES = ("skumeter", "skuid", "resource_sku", "sku_name", "sku")
+
+
+async def _forecast_sku_column(
+    snapshot: dict[str, Any],
+    forecast_schema: dict[str, str],
+    actual_source: str,
+) -> tuple[str, str]:
+    """Resolve the SKU field present in both the immutable forecast and actual source."""
+    forecast_names = {str(name).lower(): str(name) for name in forecast_schema}
+    configured = {str(name).lower() for name in snapshot.get("dimensions", [])}
+    actual_rows = await trino_execute(f"DESCRIBE {actual_source}", timeout_s=30)
+    actual_names = {
+        str(row.get("Column") or row.get("column_name") or "").lower():
+        str(row.get("Column") or row.get("column_name") or "")
+        for row in actual_rows
+    }
+    for candidate in _SKU_DIMENSION_CANDIDATES:
+        if candidate in configured and candidate in forecast_names and candidate in actual_names:
+            return forecast_names[candidate], actual_names[candidate]
+    raise HTTPException(
+        409,
+        "Este snapshot não contém previsão por SKU. Inclua skumeter nas dimensões do perfil e reprocese o mês para comparar por SKU.",
+    )
 
 
 def _leaf_paths(departments: list[Department], scope_path: list[str]) -> list[list[str]]:
@@ -1786,29 +1810,54 @@ async def accuracy_desvios(
     limit: int = Query(5, ge=0, le=10000),
     db: AsyncSession = Depends(get_db),
 ):
-    """Desvios no último nível de cada departamento (folhas) dentro do escopo:
-    top 10 positivos (realizado acima do projetado) e top 10 negativos."""
+    """Maiores desvios por SKU dentro do escopo organizacional selecionado."""
     run = await _resolve_accuracy_run(db, run_id)
     snapshot = dict(run.config_snapshot or {})
     if not snapshot.get("simulated_as_of"):
         raise HTTPException(422, "Esta execução não é um simulado de precisão")
     target = target_month or _month_after(date.fromisoformat(str(snapshot["simulated_as_of"])))
     scope_path = [part.strip() for part in (department or "").split(">") if part.strip()]
-    departments = (await db.execute(select(Department).where(Department.active == True))).scalars().all()
-    leaves = _leaf_paths(departments, scope_path)
-    forecast_grain, actual_grain = await _desvios_grain(run, snapshot, target, scope_path)
-    leaves = _desvio_cost_paths(leaves, forecast_grain, actual_grain, scope_path)
-    parents = {tuple(path[:depth]) for path in leaves for depth in range(1, len(path))}
+    run, snapshot, forecast_schema = await _history_context(run.id, db)
+    actual_source, date_expr, measure, type_col, type_filter = _accuracy_actual_context(snapshot)
+    forecast_sku, actual_sku = await _forecast_sku_column(snapshot, forecast_schema, actual_source)
+    period_col = snapshot.get("period_column")
+    actual_month = (
+        f"CAST({_qi(period_col)} AS VARCHAR) = {_ql(target)}"
+        if period_col else f"date_format({date_expr}, '%Y%m') = {_ql(target)}"
+    )
+    scope_filter = _department_scope_filter(department)
+    null_label = str(snapshot.get("null_dimension_label") or "Não classificado")
+    forecast_sku_expr = f"COALESCE(NULLIF(TRIM(CAST({_qi(forecast_sku)} AS VARCHAR)), ''), {_ql(null_label)})"
+    actual_sku_expr = f"COALESCE(NULLIF(TRIM(CAST({_qi(actual_sku)} AS VARCHAR)), ''), {_ql(null_label)})"
+    try:
+        records = await trino_execute(
+            f"WITH f AS ("
+            f"SELECT {forecast_sku_expr} AS sku, SUM(TRY_CAST(\"forecast_value\" AS DOUBLE)) AS forecast_value "
+            f"FROM iceberg.forecast.{run.result_table} "
+            f"WHERE \"forecast_month\" = {_ql(target)} AND \"tipo\" = 'forecast'{scope_filter} GROUP BY {forecast_sku_expr}"
+            f"), a AS ("
+            f"SELECT {actual_sku_expr} AS sku, SUM(COALESCE(TRY_CAST({_qi(measure)} AS DOUBLE), 0)) AS actual_value "
+            f"FROM {actual_source} WHERE {actual_month}{type_filter}{scope_filter} GROUP BY {actual_sku_expr}"
+            f") SELECT COALESCE(f.sku, a.sku) AS sku, COALESCE(f.forecast_value, 0) AS forecast_value, "
+            f"COALESCE(a.actual_value, 0) AS actual_value FROM f FULL OUTER JOIN a ON f.sku = a.sku",
+            timeout_s=180,
+        )
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(503, f"Falha ao agregar desvios por SKU: {exc}")
+
     items = []
-    for leaf in leaves:
-        forecast, actual = _leaf_totals(leaf, forecast_grain, actual_grain)
+    for record in records:
+        sku = str(record.get("sku") or null_label)
+        forecast = float(record.get("forecast_value") or 0)
+        actual = float(record.get("actual_value") or 0)
         if forecast == 0 and actual == 0:
             continue
         metrics = _desvio_metrics(forecast, actual)
-        name = leaf[-1] if leaf else ""
-        if tuple(leaf) in parents:
-            name += " (lançamentos diretos)"
-        items.append({"path": leaf, "name": name, "forecast_value": forecast, "actual_value": actual, **{k: metrics[k] for k in ("variance", "variance_pct", "accuracy", "wape", "bias")}})
+        items.append({"path": [*scope_path, "SKU", sku], "name": sku, "sku": sku,
+                      "forecast_value": forecast, "actual_value": actual,
+                      **{k: metrics[k] for k in ("variance", "variance_pct", "accuracy", "wape", "bias")}})
     positive = sorted((i for i in items if i["variance"] > 0), key=lambda i: -i["variance"])
     negative = sorted((i for i in items if i["variance"] < 0), key=lambda i: i["variance"])
     if limit:
