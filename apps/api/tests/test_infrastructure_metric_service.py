@@ -72,6 +72,25 @@ def test_service_rejects_unconfigured_resolution(monkeypatch):
         )
 
 
+def test_service_rejects_windows_larger_than_the_pilot_budget():
+    connection = SimpleNamespace(
+        id=4, connector_type="oci", config_json={
+            "tenancy": "tenancy-a", "region": "sa-saopaulo-1",
+            "infrastructure_metrics": {
+                "enabled": True, "compartment_id": "compartment-a",
+                "resource_ids": ["vm-a"], "metric_names": ["CpuUtilization"],
+                "resolutions_seconds": [60],
+            },
+        },
+    )
+    start = datetime(2026, 1, 1, tzinfo=timezone.utc)
+    with pytest.raises(ValueError, match="at most 24 hours"):
+        service.collect_oci_metrics(
+            connection, start_utc=start, end_utc=start + timedelta(hours=25),
+            resolution_seconds=60, statistics=("mean",),
+        )
+
+
 def test_service_can_opt_in_to_day_slice_publication(monkeypatch):
     connection = SimpleNamespace(
         id=4, connector_type="oci", config_json={
