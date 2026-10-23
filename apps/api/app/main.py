@@ -1022,3 +1022,8 @@ app.include_router(access_router.router)
 @app.get("/saude")
 async def health():
     return {"status": "ok"}
+        # The anomaly migration runs before the forecast bootstrap. Reconcile
+        # the default anomaly profile again after a forecast becomes available.
+        from app.services.anomaly_migrations import ensure_default_anomaly_config
+        async with engine.begin() as conn:
+            await ensure_default_anomaly_config(conn)
