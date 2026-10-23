@@ -1,7 +1,8 @@
 """Run the commitment engine for one billing connection and persist the results.
 
-Each cloud registers a ``CommitmentProvider``: how to read its hourly eligible
-usage (on-demand equivalent, covered or not) and its active commitments. The
+Each cloud registers a ``CommitmentProvider``: how to read its eligible usage
+(on-demand equivalent per hour, covered or not, per hour or per day) and its
+active commitments. The
 offers come from the ``commitment_offer`` catalog (market + negotiated). The
 engine only recommends; nothing here buys.
 """
@@ -15,8 +16,8 @@ from sqlalchemy import select
 
 from .contracts import INSTRUMENTS, Adjustment, ExistingCommitment, OfferRecord, UsageLine, instruments_for
 from .engine import (
-    BALANCED, COMMIT, DEFAULT_POLICY, ENGINE_VERSION, HOURS_PER_MONTH, analyze_key, group_usage,
-    hour_grid, window_bounds,
+    BALANCED, COMMIT, DEFAULT_POLICY, ENGINE_VERSION, HOUR, HOURS_PER_MONTH, analyze_key, bucket_grid,
+    group_usage, window_bounds,
 )
 from .offers import resolve_offers
 
@@ -25,9 +26,13 @@ from .offers import resolve_offers
 class UsageSnapshot:
     scope: str
     currency: str | None
-    # Hours whose billing data is loaded for the scope; absent usage there is a real zero.
+    # Buckets whose billing data is loaded for the scope; absent usage there is a real zero.
     observed_hours: set[str]
     lines: list[UsageLine]
+    # HOUR: ``UsageLine.hour_utc`` is an hour. DAY: it is a day and the cost is that day's average per hour.
+    grain: str = HOUR
+    # How the provider derived the usage (shown in the evidence of every key).
+    basis: dict = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
@@ -58,7 +63,7 @@ def commitment_provider_for(connection: Any) -> CommitmentProvider:
     registration = _PROVIDERS.get(provider)
     connector_type = getattr(connection, "connector_type", None)
     if registration is None or (registration.connector_types and connector_type not in registration.connector_types):
-        raise LookupError(f"sem leitor de uso horário de compromissos para {provider!r} ({connector_type})")
+        raise LookupError(f"sem leitor de uso de compromissos para {provider!r} ({connector_type})")
     return registration
 
 
@@ -134,7 +139,7 @@ def run_commitment_engine(
         instruments = instruments_for(provider)
         series_by_key, excluded = group_usage(usage.lines, provider=provider, scope=usage.scope,
                                               instruments=instruments, observed_hours=usage.observed_hours)
-        window_hours = hour_grid(start, end)
+        window_hours = bucket_grid(start, end, usage.grain)
         previous = {
             (item.key_hash, item.profile, item.term_months, item.payment_option): item
             for item in session.execute(
@@ -151,7 +156,7 @@ def run_commitment_engine(
                 key=key, instrument=instrument, series=series, window_hours=window_hours,
                 observed_hours=usage.observed_hours, existing=inventory, adjustments=key_cuts,
                 offers=resolve_offers(records, key, as_of.date()), as_of=as_of, currency=usage.currency,
-                excluded_resources=excluded.get(key),
+                excluded_resources=excluded.get(key), grain=usage.grain, basis_evidence=usage.basis,
             ):
                 prior = previous.get((result["key_hash"], result["profile"], result.get("term_months"),
                                       result.get("payment_option")))

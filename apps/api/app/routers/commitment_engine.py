@@ -151,7 +151,7 @@ async def list_instruments():
 
 @router.get("/conexoes")
 async def list_connections(db: AsyncSession = Depends(get_db)):
-    """Billing connections with an hourly usage adapter, with their latest completed run."""
+    """Billing connections with a usage adapter, with their latest completed run."""
     from app.services.commitments.runner import provider_of, supports_connection
 
     rows = (await db.execute(select(SourceConnection).order_by(SourceConnection.name))).scalars().all()
@@ -236,7 +236,7 @@ async def run_engine(body: RunRequest, user=Depends(get_current_user), db: Async
     try:
         commitment_provider_for(connection)
     except LookupError as exc:
-        raise HTTPException(422, f"Conexão sem leitor de uso horário: {exc}") from exc
+        raise HTTPException(422, f"Conexão sem leitor de uso: {exc}") from exc
     running = (await db.execute(select(CommitmentRecoRun.id).where(
         CommitmentRecoRun.connection_id == connection.id, CommitmentRecoRun.status == "RUNNING",
     ))).first()

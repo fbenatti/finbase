@@ -3,7 +3,7 @@
 The engine speaks one unit only: on-demand-equivalent cost per hour. A
 commitment of ``c`` covers up to ``c`` of that cost each hour and costs
 ``c × (1 − discount)`` whether used or not. Each cloud plugs in by reading its
-hourly eligible usage into ``UsageLine`` rows and its active commitments into
+eligible usage (per hour, or per day as the day's average per hour) into ``UsageLine`` rows and its active commitments into
 ``ExistingCommitment``; the instrument decides which fields form the key.
 """
 from __future__ import annotations
@@ -76,7 +76,8 @@ def instruments_for(provider: str) -> list[Instrument]:
 
 @dataclass(frozen=True)
 class UsageLine:
-    """Eligible usage of one hour, in on-demand-equivalent cost (covered or not)."""
+    """Eligible usage of one bucket (an hour, or a day of a DAY snapshot), in
+    on-demand-equivalent cost per hour (covered or not)."""
     hour_utc: str
     ondemand_cost: float
     region: str | None = None

@@ -5,12 +5,12 @@ from types import SimpleNamespace
 import pandas as pd
 
 from app.services.commitments.contracts import INSTRUMENTS
-from app.services.commitments.engine import BALANCED, COMMIT, hour_grid
+from app.services.commitments.engine import BALANCED, COMMIT, DAY, day_grid
 from app.services.commitments.providers.oci import compute_hourly_rows, read_usage
 
 AS_OF = datetime(2026, 10, 1, tzinfo=timezone.utc)
 START = AS_OF - timedelta(days=30)
-HOURS = hour_grid(START, AS_OF)
+DAYS = day_grid(START, AS_OF)
 CONNECTION = SimpleNamespace(id=7, code="oci-prod", cloud_scope="oci", connector_type="oci",
                              config_json={"tenancy_ocid": "ocid1.tenancy.oc1..x"})
 
@@ -42,18 +42,20 @@ def test_report_without_cost_columns_yields_nothing():
     assert compute_hourly_rows(pd.DataFrame([{"foo": 1}]), connection_id=7, billing_period="202609").empty
 
 
-def _silver(always_on_cost=2.0, part_time_cost=3.0):
+def _silver(ocpus=2.0, part_time_ocpus=4.0, price=1.0):
+    """Daily billing: an always-on 2-OCPU instance and a 4-OCPU one running 12 h per day."""
     rows = []
-    for hour in HOURS:
-        rows.append({"usage_hour": hour, "resource_id": "ocid1.instance.a", "region": "sa-saopaulo-1",
-                     "sku": "B93113", "currency": "BRL", "cost": always_on_cost})
-        if int(hour[11:13]) < 12:
-            rows.append({"usage_hour": hour, "resource_id": "ocid1.instance.b", "region": "sa-saopaulo-1",
-                         "sku": "B93113", "currency": "BRL", "cost": part_time_cost})
+    for day in DAYS:
+        rows.append({"usage_day": day, "region": "sa-saopaulo-1", "service": "Compute", "sku": "B93113",
+                     "sku_meter": "Compute - Standard - E4 - OCPU", "unit": "OCPU Hours", "currency": "BRL",
+                     "quantity": (ocpus * 24 + part_time_ocpus * 12), "cost": (ocpus * 24 + part_time_ocpus * 12) * price})
+        # Flat fee billed without quantity keeps its cost.
+        rows.append({"usage_day": day, "region": None, "service": "Support", "sku": "FEE", "sku_meter": "fee",
+                     "unit": None, "currency": "BRL", "quantity": 0.0, "cost": 2.4})
     return rows
 
 
-def test_read_usage_filters_the_window_and_builds_lines():
+def test_read_usage_reads_daily_quantity_without_hourly_data():
     queries = []
 
     def execute(sql, timeout_s):
@@ -61,11 +63,36 @@ def test_read_usage_filters_the_window_and_builds_lines():
         return _silver()
 
     snapshot = read_usage(CONNECTION, START, AS_OF, execute=execute)
+    assert "dest_billing_cloud" in queries[0] and "oci_compute_hourly" not in queries[0]
     assert "source_connection_id = 7" in queries[0]
-    assert "usage_hour >= '2026-09-01T00'" in queries[0] and "usage_hour < '2026-10-01T00'" in queries[0]
+    assert "_billing_period IN ('202609')" in queries[0]
+    assert "chargeperiodstart >= '2026-09-01'" in queries[0] and "chargeperiodstart < '2026-10-01'" in queries[0]
+    assert snapshot.grain == DAY and snapshot.observed_hours == set(DAYS)
     assert snapshot.scope == "ocid1.tenancy.oc1..x" and snapshot.currency == "BRL"
-    assert snapshot.observed_hours == set(HOURS)
-    assert {line.resource_id for line in snapshot.lines} == {"ocid1.instance.a", "ocid1.instance.b"}
+    # 96 OCPU hours per day = 4 OCPUs running on average at 1.00 per OCPU hour → 4.00/h; the fee adds 0.10/h.
+    per_day = {}
+    for line in snapshot.lines:
+        per_day[line.hour_utc] = per_day.get(line.hour_utc, 0.0) + line.ondemand_cost
+    assert set(round(value, 6) for value in per_day.values()) == {4.1}
+    top = snapshot.basis["top_skus"][0]
+    assert top["units_running"] == 4.0 and top["unit_price"] == 1.0 and top["quantity_per_day"] == 96.0
+
+
+def test_unit_price_is_the_effective_price_of_the_window():
+    rows = _silver()
+    # Same quantity both days, billed at 1.00 then 3.00: each day is priced at the 2.00 average.
+    rows = [dict(row, usage_day=DAYS[0]) for row in rows[:2]] + [
+        dict(rows[2], usage_day=DAYS[1], cost=rows[2]["quantity"] * 3.0), dict(rows[3], usage_day=DAYS[1])]
+    snapshot = read_usage(CONNECTION, START, AS_OF, execute=lambda sql, timeout_s: rows)
+    compute = [line.ondemand_cost for line in snapshot.lines if line.family == "B93113"]
+    assert compute == [96 * 2.0 / 24] * 2
+
+
+def test_window_without_billing_explains_what_is_missing():
+    import pytest
+
+    with pytest.raises(LookupError, match="quantidade diária"):
+        read_usage(CONNECTION, START, AS_OF, execute=lambda sql, timeout_s: [])
 
 
 def test_oci_run_sizes_universal_credits_from_projected_spend(tmp_path):
@@ -87,9 +114,17 @@ def test_oci_run_sizes_universal_credits_from_projected_spend(tmp_path):
     Base.metadata.create_all(engine, tables=[Base.metadata.tables[name] for name in (
         "commitment_offer", "commitment_reco_run", "commitment_recommendation")])
     registration = CommitmentProvider(
-        provider="oci", read_usage=partial(read_usage, execute=lambda sql, timeout_s: _silver()),
+        provider="oci", read_usage=partial(read_usage, execute=lambda sql, timeout_s: _silver(part_time_ocpus=3.0)),
     )
     with Session(engine, expire_on_commit=False) as db:
+        run = run_commitment_engine(db, CONNECTION, registration=registration, as_of=AS_OF, adjustments=[])
+        assert run.status == "COMPLETED", run.error_message
+        missing = db.execute(select(CommitmentRecommendation).where(
+            CommitmentRecommendation.run_id == run.id)).scalar_one()
+        # Without a negotiated discount the baseline is shown but no saving is invented.
+        assert missing.readiness_status == "MISSING_OFFER" and missing.action_type == "NO_ACTION"
+        assert "31536.00/ano" in missing.rationale[0]
+
         db.add(CommitmentOffer(provider="oci", instrument="oci_universal_credits", term_months=12,
                                payment_option="CONTRACT", source="NEGOTIATED", pricing_mode="DISCOUNT",
                                discount_pct=0.20))
@@ -102,10 +137,13 @@ def test_oci_run_sizes_universal_credits_from_projected_spend(tmp_path):
     assert balanced.action_type == COMMIT
     assert balanced.purchase_path == INSTRUMENTS["oci_universal_credits"].purchase_path == "negotiated"
     # A spend pool is drawn over the year: idle hours of the 12 h/day instance do not matter.
-    # Average 3.5/h → 30 660/year; balanced commits 90% of it at the 20% discount.
-    assert balanced.commit_cost_hour == round(30660 * 0.8 * 0.9 / 8760, 6)
-    assert balanced.monthly_saving == round(30660 * 0.20 / 12, 2)
-    assert balanced.evidence["commit_amount_annual"] == round(30660 * 0.8 * 0.9, 2)
+    # 84 OCPU hours/day at 1.00 + 2.40 fee = 86.40/day = 3.6/h → 31 536/year; balanced commits 90% at 20% off.
+    assert balanced.commit_cost_hour == round(31536 * 0.8 * 0.9 / 8760, 6)
+    assert balanced.monthly_saving == round(31536 * 0.20 / 12, 2)
+    assert balanced.evidence["commit_amount_annual"] == round(31536 * 0.8 * 0.9, 2)
+    assert balanced.evidence["hourly"]["grain"] == DAY
+    assert balanced.evidence["usage_basis"]["top_skus"][0]["units_running"] == 3.5
+    assert any("quantidade faturada por dia" in line for line in balanced.rationale)
     assert balanced.currency == "BRL"
 
 
@@ -121,16 +159,6 @@ def test_hourly_write_failure_never_fails_the_cost_load(monkeypatch):
                           "sku_description": None, "currency": "BRL", "billed_cost": 1.0, "billed_quantity": 1.0,
                           "source_connection_id": 7, "_billing_period": "202609"}])
     task_runner._write_oci_compute_hourly(None, 7, "202609", [part, part])
-
-
-def test_missing_hourly_table_explains_the_reprocess():
-    import pytest
-
-    def execute(sql, timeout_s):
-        raise RuntimeError("line 1:102: Table 'iceberg_finbase.silver.oci_compute_hourly' does not exist")
-
-    with pytest.raises(LookupError, match="reprocesse"):
-        read_usage(CONNECTION, START, AS_OF, execute=execute)
 
 
 def _usage(hour, service="Compute", cost=1.0, resource="ocid1.instance.a"):
@@ -158,15 +186,20 @@ def test_usage_api_hourly_keeps_only_compute_and_queries_one_day_at_a_time(monke
                 _usage(f"{day}T03", service="Block Storage", cost=9.0)]
 
     monkeypatch.setattr(OciExtractor, "_summarized_usages", summarized)
-    frame = OciExtractor.fetch_compute_hourly_month(object.__new__(OciExtractor), "202609", 4)
+    frame, first_hour, end_hour = OciExtractor.fetch_compute_hourly_month(object.__new__(OciExtractor), "202609", 4)
+    assert (first_hour, end_hour) == ("2026-09-01T00", "2026-09-04T00")
     # 1 Sep → 4 Sep (today + 1 day), one query per day, all HOURLY.
     assert [(start.day, (end - start).days, granularity) for start, end, granularity in calls] == [
         (1, 1, "HOURLY"), (2, 1, "HOURLY"), (3, 1, "HOURLY")]
     assert sorted(frame["usage_hour"]) == ["2026-09-01T03", "2026-09-02T03", "2026-09-03T03"]
     assert set(frame["billed_cost"]) == {0.75}
     assert set(frame["source_connection_id"]) == {4} and set(frame["_billing_period"]) == {"202609"}
-    # A month entirely before the lookback keeps whatever series is stored.
-    assert OciExtractor.fetch_compute_hourly_month(object.__new__(OciExtractor), "202501", 4) is None
+    # The Usage API serves HOURLY only for the last 31 days: August starts on the 4th (today − 30 days).
+    calls.clear()
+    _, first_hour, end_hour = OciExtractor.fetch_compute_hourly_month(object.__new__(OciExtractor), "202608", 4)
+    assert (first_hour, end_hour) == ("2026-08-04T00", "2026-09-01T00") and calls[0][0].day == 4
+    # A month entirely before the window keeps whatever series is stored.
+    assert OciExtractor.fetch_compute_hourly_month(object.__new__(OciExtractor), "202607", 4) is None
 
 
 def test_failed_usage_api_hourly_fetch_keeps_the_stored_series(monkeypatch):
@@ -178,3 +211,20 @@ def test_failed_usage_api_hourly_fetch_keeps_the_stored_series(monkeypatch):
 
     monkeypatch.setattr(task_runner, "_persist_download_progress", lambda *args, **kwargs: None)
     assert task_runner._fetch_oci_usage_api_hourly(None, Broken(), 4, "202609") is None
+
+
+def test_usage_api_write_replaces_only_the_fetched_hours(monkeypatch):
+    from app.services import task_runner
+
+    captured = {}
+    monkeypatch.setattr(task_runner.iceberg, "replace_oci_compute_hourly",
+                        lambda frame, **kwargs: captured.update(kwargs))
+    monkeypatch.setattr(task_runner, "_persist_download_progress", lambda *args, **kwargs: None)
+
+    class Fetcher:
+        def fetch_compute_hourly_month(self, billing_period, connection_id):
+            return pd.DataFrame(), "2026-09-23T00", "2026-10-01T00"
+
+    parts, hour_range = task_runner._fetch_oci_usage_api_hourly(None, Fetcher(), 4, "202609")
+    task_runner._write_oci_compute_hourly(None, 4, "202609", parts, hour_range)
+    assert captured == {"connection_id": 4, "billing_period": "202609", "hour_range": ("2026-09-23T00", "2026-10-01T00")}

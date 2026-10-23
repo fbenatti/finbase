@@ -1,27 +1,34 @@
-"""OCI adapter of the commitment engine: hourly compute from the billing.
+"""OCI adapter of the commitment engine: daily billed quantity from the Silver billing.
 
-The cost Bronze is folded to days to save volume, so compute is kept at hour
-grain in ``oci_compute_hourly`` (Silver), the only source the engine reads for
-OCI. It is filled from the cost reports (``lineItem/intervalUsageStart``,
-before the daily fold) or, in Usage API mode, from an HOURLY query of the
-recent days (``OciExtractor.fetch_compute_hourly_month``).
+OCI has no compute reservation: its commitment is Universal Credits, a spend
+pool drawn over the term, so the engine needs the steady consumption, not an
+hourly invoice. It reads the daily FOCUS billing (``dest_billing_cloud``) of
+the connection and turns each SKU's billed quantity (``pricingquantity``, e.g.
+OCPU hours, GB hours) into an average per hour of the day — quantity ÷ 24 is
+the units kept running — priced at the SKU's effective unit price in the
+window (``effectivecost ÷ pricingquantity``). No list price is invented.
 
-Cost basis: the billed cost (``cost/myCost`` / ``computedAmount``) is what the
-tenancy pays today, contract discounts included. OCI offers in the catalog are
-therefore a discount over the current billed rate, not over list price.
+Cost basis: the effective cost is what the tenancy pays today, contract
+discounts included. OCI offers in the catalog are therefore a discount over
+the current billed rate, not over list price.
+
+``compute_hourly_rows`` still keeps compute per hour when cost reports bring
+it (``oci_compute_hourly``), but the engine no longer depends on it.
 """
 from __future__ import annotations
 
-from datetime import datetime
+from collections import defaultdict
+from datetime import datetime, timedelta
 import re
 from typing import Any
 
 import pandas as pd
 
 from ..contracts import UsageLine
+from ..engine import DAY
 from ..runner import CommitmentProvider, UsageSnapshot, register_commitment_provider
 
-HOURLY_TABLE = "oci_compute_hourly"
+BILLING_TABLE = "dest_billing_cloud"
 COMPUTE_SERVICE = "compute"
 _HOUR = re.compile(r"^(\d{4}-\d{2}-\d{2})[T ](\d{2})")
 _SAFE = re.compile(r"^[A-Za-z0-9._:\-]+$")
@@ -80,47 +87,92 @@ def _literal(value: str) -> str:
     return f"'{value}'"
 
 
+def _billing_periods(start: datetime, end: datetime) -> list[str]:
+    periods, cursor = [], start.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+    while cursor < end:
+        periods.append(cursor.strftime("%Y%m"))
+        cursor = (cursor + timedelta(days=32)).replace(day=1)
+    return periods
+
+
 def read_usage(connection: Any, start: datetime, end: datetime, *, execute=None) -> UsageSnapshot:
-    """Hourly compute usage of the connection in [start, end)."""
+    """Daily billed quantity of the connection in [start, end), priced at the effective unit price."""
     from app.services import lakehouse_layers as layers
 
     if execute is None:
         from app.services.trino_service import execute_sync as execute
-    try:
-        rows = execute(
-            f"SELECT usage_hour, resource_id, region, sku, currency, SUM(CAST(billed_cost AS DOUBLE)) AS cost "
-            f"FROM {layers.detail_layer()}.{HOURLY_TABLE} "
-            f"WHERE source_connection_id = {int(connection.id)} "
-            f"AND usage_hour >= {_literal(start.strftime('%Y-%m-%dT%H'))} "
-            f"AND usage_hour < {_literal(end.strftime('%Y-%m-%dT%H'))} "
-            f"GROUP BY usage_hour, resource_id, region, sku, currency",
-            timeout_s=180,
+    periods = ", ".join(_literal(period) for period in _billing_periods(start, end))
+    rows = execute(
+        f"SELECT substr(chargeperiodstart, 1, 10) AS usage_day, regionname AS region, servicename AS service, "
+        f"skuid AS sku, skumeter AS sku_meter, pricingunit AS unit, billingcurrency AS currency, "
+        f"SUM(CAST(pricingquantity AS DOUBLE)) AS quantity, SUM(CAST(effectivecost AS DOUBLE)) AS cost "
+        f"FROM {layers.detail_layer()}.{BILLING_TABLE} "
+        f"WHERE source_connection_id = {int(connection.id)} AND _billing_period IN ({periods}) "
+        f"AND chargeperiodstart >= {_literal(start.strftime('%Y-%m-%d'))} "
+        f"AND chargeperiodstart < {_literal(end.strftime('%Y-%m-%d'))} "
+        f"AND COALESCE(chargecategory, 'Usage') = 'Usage' "
+        f"GROUP BY 1, 2, 3, 4, 5, 6, 7",
+        timeout_s=180,
+    )
+    if not rows:
+        raise LookupError(
+            "Não há fatura da OCI nesta janela: processe os meses recentes desta conexão para o motor ler a quantidade diária."
         )
-    except Exception as exc:
-        if "does not exist" in str(exc).lower():
-            raise LookupError(
-                "Ainda não há fatura horária da OCI: reprocesse os meses recentes desta conexão "
-                "para preencher o compute por hora."
-            ) from exc
-        raise
     return _build(connection, rows)
 
 
+def _unit_prices(rows: list[dict]) -> dict[tuple, float]:
+    """Effective price per unit of each SKU over the window (billed cost ÷ billed quantity)."""
+    totals: dict[tuple, list[float]] = defaultdict(lambda: [0.0, 0.0])
+    for row in rows:
+        quantity = float(row["quantity"] or 0.0)
+        if quantity > 0:
+            total = totals[(row["sku"], row["unit"])]
+            total[0] += float(row["cost"] or 0.0)
+            total[1] += quantity
+    return {sku: cost / quantity for sku, (cost, quantity) in totals.items()}
+
+
 def _build(connection: Any, rows: list[dict]) -> UsageSnapshot:
-    lines = [
-        UsageLine(hour_utc=str(row["usage_hour"]), ondemand_cost=float(row["cost"] or 0.0), region=row["region"],
-                  family=row["sku"], resource_id=row["resource_id"])
-        for row in rows
-    ]
+    prices = _unit_prices(rows)
+    lines, per_sku = [], defaultdict(lambda: {"quantity": 0.0, "cost_hour": 0.0})
+    for row in rows:
+        price = prices.get((row["sku"], row["unit"]))
+        quantity = float(row["quantity"] or 0.0)
+        # A line billed without quantity (flat fee) keeps its cost: there is no unit to price.
+        day_cost = quantity * price if price is not None else float(row["cost"] or 0.0)
+        cost_hour = day_cost / 24
+        lines.append(UsageLine(hour_utc=str(row["usage_day"]), ondemand_cost=cost_hour, region=row["region"],
+                               family=row["sku"]))
+        item = per_sku[(row["service"], row["sku"], row["sku_meter"], row["unit"])]
+        item["quantity"] += quantity
+        item["cost_hour"] += cost_hour
+    days = {line.hour_utc for line in lines}
     currencies = {row["currency"] for row in rows if row["currency"]}
     config = getattr(connection, "config_json", None) or {}
+    top = sorted(per_sku.items(), key=lambda item: item[1]["cost_hour"], reverse=True)[:15]
     return UsageSnapshot(
         scope=str(config.get("tenancy_ocid") or config.get("tenancy") or connection.code),
         currency=next(iter(currencies)) if len(currencies) == 1 else None,
-        # Compute bills every hour a tenancy runs anything, so an hour without
-        # compute lines is treated as not loaded rather than as zero usage.
-        observed_hours={line.hour_utc[:13] for line in lines},
+        # Every day the tenancy runs anything has billing lines, so a day without them is not loaded.
+        observed_hours=days,
         lines=lines,
+        grain=DAY,
+        basis={
+            "source": f"{BILLING_TABLE} (quantidade faturada por dia)",
+            "note": "Base calculada da quantidade faturada por dia (÷ 24 = unidades médias em uso) × preço "
+                    "unitário efetivo de cada SKU na janela; não depende de fatura horária.",
+            "days": len(days),
+            "skus": len(per_sku),
+            "top_skus": [{
+                "service": service, "sku": sku, "sku_meter": meter, "unit": unit,
+                "quantity_per_day": round(values["quantity"] / len(days), 4),
+                # "OCPU Hours" / "GB Hours": quantity per day ÷ 24 is the units running on average.
+                "units_running": round(values["quantity"] / len(days) / 24, 4) if "hour" in str(unit).lower() else None,
+                "unit_price": round(prices[(sku, unit)], 6) if (sku, unit) in prices else None,
+                "cost_hour": round(values["cost_hour"] / len(days), 4),
+            } for (service, sku, meter, unit), values in top],
+        },
     )
 
 

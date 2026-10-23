@@ -1,12 +1,16 @@
 """Provider-neutral commitment sizing engine.
 
-Works only on hourly on-demand-equivalent usage: a commitment is consumed hour
-by hour and an unused hour is lost, so sizing from daily totals would turn
-idle hours into false savings. Without enough hourly data the key is reported
-as ``INSUFFICIENT_HOURLY_DATA`` and no commitment is recommended.
+Usage is a series of on-demand-equivalent cost per hour, one value per bucket:
+an hour, or a day (the day's billed quantity × effective unit price ÷ 24, the
+average units it kept running). A commitment consumed hour by hour (RI,
+Savings Plan, CUD) loses every idle hour, so sizing it from daily averages
+would turn idle hours into false savings: those need the hour grain. Spend
+pools (Universal Credits, MACC, EDP) are drawn over the whole term and are
+sized from the day grain. Without enough data the key is reported as
+``INSUFFICIENT_HOURLY_DATA`` and no commitment is recommended.
 
 For a commitment ``c`` (on-demand cost per hour it covers), discount ``d`` and
-uncovered hourly usage ``u(t)``::
+uncovered usage per hour ``u(t)`` of each bucket::
 
     saving(c) = Σ_t [ min(u(t), c) − c·(1 − d) ]
 
@@ -36,6 +40,10 @@ MISSING_OFFER = "MISSING_OFFER"
 NO_UNCOVERED_USAGE = "NO_UNCOVERED_USAGE"
 NO_ALWAYS_ON_USAGE = "NO_ALWAYS_ON_USAGE"
 
+# Grain of a usage snapshot: the bucket each series value stands for.
+HOUR = "hour"
+DAY = "day"
+
 COMMIT = "COMMIT"
 NO_ACTION = "NO_ACTION"
 
@@ -48,7 +56,7 @@ NO_PROFILE = "NONE"
 DEFAULT_POLICY = {
     "version": "commitment_policy_v1",
     "min_days": 30,
-    # Share of the window's hours that must have loaded data.
+    # Share of the window's buckets (hours or days) that must have loaded data.
     "min_hourly_coverage": 0.98,
     # Reservations (RI, resource CUD) only count resources running this many hours per day on average.
     "reservation_min_daily_hours": 24,
@@ -78,6 +86,19 @@ def hour_grid(start: datetime, end: datetime) -> list[str]:
         hours.append(cursor.strftime("%Y-%m-%dT%H"))
         cursor += timedelta(hours=1)
     return hours
+
+
+def day_grid(start: datetime, end: datetime) -> list[str]:
+    """ISO days (``YYYY-MM-DD``) in [start, end)."""
+    days, cursor = [], start.replace(hour=0, minute=0, second=0, microsecond=0)
+    while cursor < end:
+        days.append(cursor.strftime("%Y-%m-%d"))
+        cursor += timedelta(days=1)
+    return days
+
+
+def bucket_grid(start: datetime, end: datetime, grain: str) -> list[str]:
+    return day_grid(start, end) if grain == DAY else hour_grid(start, end)
 
 
 def window_bounds(as_of: datetime, days: int) -> tuple[datetime, datetime]:
@@ -280,9 +301,14 @@ def analyze_key(
     *, key: CommitmentKey, instrument: Instrument, series: Mapping[str, float], window_hours: list[str],
     observed_hours: set[str], existing: Iterable[ExistingCommitment] = (), adjustments: Iterable[Adjustment] = (),
     offers: Iterable[Offer] = (), as_of: datetime, currency: str | None = None, policy: Mapping = DEFAULT_POLICY,
-    excluded_resources: Mapping[str, float] | None = None,
+    excluded_resources: Mapping[str, float] | None = None, grain: str = HOUR,
+    basis_evidence: Mapping[str, Any] | None = None,
 ) -> list[dict]:
-    """One result per profile (or a single NONE result when the key is not ready)."""
+    """One result per profile (or a single NONE result when the key is not ready).
+
+    ``window_hours``/``observed_hours`` hold buckets of ``grain``; ``series``
+    values are on-demand cost per hour in each bucket.
+    """
     offers = list(offers)
     horizon = as_of + timedelta(days=policy["expiry_horizon_days"])
     matching = [item for item in existing if item.matches(key)]
@@ -295,7 +321,7 @@ def analyze_key(
     uncovered = [max(0.0, series.get(hour, 0.0) - covered - removed) for hour in hours]
     curve = _Curve.of(uncovered)
     coverage = len(hours) / len(window_hours) if window_hours else 0.0
-    days = len(hours) / 24
+    days = len(hours) / (1 if grain == DAY else 24)
 
     base = {
         "provider": key.provider, "commitment_key": key.as_dict(), "instrument": key.instrument,
@@ -311,6 +337,7 @@ def analyze_key(
     }
     evidence = {
         "hourly": {
+            "grain": grain,
             "window_hours": len(window_hours), "observed_hours": len(hours), "coverage": round(coverage, 6),
             "days_observed": round(days, 2),
             "uncovered_p10": curve.quantile(0.10), "uncovered_p50": curve.quantile(0.50),
@@ -329,6 +356,8 @@ def analyze_key(
         "excluded_resources": dict(sorted((excluded_resources or {}).items())),
         "policy": dict(policy),
     }
+    if basis_evidence:
+        evidence["usage_basis"] = dict(basis_evidence)
     risks = [
         f"Compromisso {item.commitment_id} vence em {item.expires_at:%Y-%m-%d}: o uso dele entrou como descoberto."
         for item in renewals
@@ -338,11 +367,17 @@ def analyze_key(
         return [dict(base, profile=NO_PROFILE, action_type=NO_ACTION, readiness_status=status, confidence="LOW",
                      rationale=[message], risks=risks, evidence=evidence)]
 
-    if coverage < policy["min_hourly_coverage"] or days < policy["min_days"]:
+    if grain == DAY and instrument.basis != SPEND:
         return not_ready(INSUFFICIENT_HOURLY_DATA, (
-            f"Dado horário insuficiente: {days:.0f} dia(s) com {coverage:.0%} das horas carregadas; "
-            f"o motor exige {policy['min_days']} dias e {policy['min_hourly_coverage']:.0%} das horas. "
-            "Sem série horária completa não há dimensionamento (evita falso positivo)."
+            f"{instrument.label} é consumido hora a hora: a média diária esconde as horas ociosas e criaria "
+            "economia falsa. Só compromissos de gasto são dimensionados pela quantidade diária."
+        ))
+    if coverage < policy["min_hourly_coverage"] or days < policy["min_days"]:
+        bucket = "dias" if grain == DAY else "horas"
+        return not_ready(INSUFFICIENT_HOURLY_DATA, (
+            f"Dado insuficiente: {days:.0f} dia(s) com {coverage:.0%} das {bucket} carregadas; "
+            f"o motor exige {policy['min_days']} dias e {policy['min_hourly_coverage']:.0%} das {bucket}. "
+            "Sem série completa não há dimensionamento (evita falso positivo)."
         ))
     if curve.total <= 0 and excluded_resources:
         return not_ready(NO_ALWAYS_ON_USAGE, (
@@ -352,10 +387,20 @@ def analyze_key(
     if curve.total <= 0:
         return not_ready(NO_UNCOVERED_USAGE, "Todo o uso elegível já está coberto por compromissos ativos.")
     if not offers:
-        return not_ready(MISSING_OFFER, f"Sem oferta de mercado ou negociada vigente para {key.label()}.")
+        message = f"Sem oferta de mercado ou negociada vigente para {key.label()}."
+        if instrument.basis == SPEND:
+            # The baseline is known without a discount; only the saving needs the negotiated rate.
+            projected = _projected_annual(curve, policy)
+            evidence["projected_annual_spend"] = round(projected, 2)
+            message += (
+                f" Consumo projetado de {projected:.2f}/ano (média de {days:.0f} dias): cadastre o desconto "
+                f"negociado do acordo para calcular a economia; cada ponto percentual vale {projected / 100:.2f}/ano."
+            )
+        return not_ready(MISSING_OFFER, message)
 
     if instrument.basis == SPEND:
-        return _spend_results(base, evidence, risks, instrument, curve, offers, days, policy)
+        return _spend_results(base, evidence, risks, instrument, curve, offers, days, policy,
+                              basis_note=(basis_evidence or {}).get("note"))
 
     options = []
     for offer in offers:
@@ -408,10 +453,14 @@ def analyze_key(
     return results
 
 
+def _projected_annual(curve: "_Curve", policy: Mapping) -> float:
+    return curve.total / curve.hours * HOURS_PER_YEAR * (1 + policy["spend_growth_annual"])
+
+
 def _spend_results(base: dict, evidence: dict, risks: list[str], instrument: Instrument, curve: "_Curve",
-                   offers: list[Offer], days: float, policy: Mapping) -> list[dict]:
+                   offers: list[Offer], days: float, policy: Mapping, basis_note: str | None = None) -> list[dict]:
     """Spend pools: size from the projected yearly spend, not from the hourly floor."""
-    projected = curve.total / curve.hours * HOURS_PER_YEAR * (1 + policy["spend_growth_annual"])
+    projected = _projected_annual(curve, policy)
     options = []
     for offer in offers:
         for profile, amount in size_spend_profiles(projected, offer, policy).items():
@@ -456,6 +505,7 @@ def _spend_results(base: dict, evidence: dict, risks: list[str], instrument: Ins
                 f"Compromisso de {best['commit_amount_annual']:.2f}/ano a {offer['discount']:.0%} de desconto: "
                 f"o consumo previsto cobre {best['expected_utilization']:.0%} do valor comprometido.",
                 "Compromisso de gasto é consumido ao longo do prazo, não hora a hora: o piso horário não se aplica.",
+                *([basis_note] if basis_note else []),
             ],
             risks=profile_risks,
             evidence=dict(evidence, chosen_offer=offer, **{name: best[name] for name in SPEND_ONLY_FIELDS}),
