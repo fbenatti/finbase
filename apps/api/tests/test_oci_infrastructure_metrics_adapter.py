@@ -73,6 +73,27 @@ def test_fetch_fails_closed_when_scope_is_disabled():
         adapter.fetch(_plan(enabled=False))
 
 
+def test_fetch_stops_before_provider_call_when_cancelled(monkeypatch):
+    from app.services.infrastructure_metrics.contracts import CollectionCancelled
+
+    monkeypatch.setattr(oci_metrics, "_summarize_details", lambda query, text, minutes: text)
+
+    class Client:
+        called = False
+
+        def summarize_metrics_data(self, **_kwargs):
+            self.called = True
+            raise AssertionError("cancelled collection must not call OCI")
+
+    client = Client()
+    adapter = oci_metrics.OciMetricsAdapter(
+        client, "compartment-ocid", should_abort=lambda: True,
+    )
+    with pytest.raises(CollectionCancelled):
+        adapter.fetch(_plan())
+    assert client.called is False
+
+
 def test_metric_results_merge_to_wide_silver_row_and_keep_native_percentiles():
     plan = _plan()
     timestamp = plan.start_utc
