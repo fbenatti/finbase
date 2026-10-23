@@ -72,6 +72,46 @@ def read_series(
     return [by_bucket[key] for key in sorted(by_bucket)]
 
 
+def read_hourly_profiles(
+    connection_id: int, resource_ids: list[str], start: datetime, end: datetime,
+    resolution_seconds: int = 300,
+) -> dict[str, dict[str, dict[str, dict]]]:
+    """Hourly P95 of bucket averages and hourly peak, per resource and metric.
+
+    One aggregated query for every resource of a run (the mini charts), instead
+    of shipping each host's 5-minute buckets. Same pruning as ``read_series``.
+    Returns ``{resource_id: {metric: {"YYYY-MM-DDTHH": {"p95", "peak"}}}}``.
+    """
+    from app.services import lakehouse_layers as layers
+    from app.services.trino_service import execute_sync
+
+    if not resource_ids:
+        return {}
+    rows = execute_sync(
+        f"SELECT resource_id, metric, substr(bucket_start_utc, 1, 13) AS hour, "
+        f"approx_percentile(CASE WHEN statistic = 'mean' THEN CAST(value AS DOUBLE) END, 0.95) AS p95, "
+        f"max(CASE WHEN statistic IN ('mean', 'max') THEN CAST(value AS DOUBLE) END) AS peak "
+        f"FROM {layers.detail_layer()}.{SILVER_TABLE} "
+        f"WHERE source_connection_id = {int(connection_id)} "
+        f"AND resource_id IN ({', '.join(_literal(item) for item in resource_ids)}) "
+        f"AND metric IN ({', '.join(_literal(metric) for metric in ANALYZED_METRICS)}) "
+        f"AND CAST(resolution_seconds AS INTEGER) = {int(resolution_seconds)} "
+        f"AND _billing_period IN ({', '.join(repr(period) for period in _periods(start, end))}) "
+        f"AND bucket_start_utc >= '{start:%Y-%m-%dT%H:%M:%S}' AND bucket_start_utc < '{end:%Y-%m-%dT%H:%M:%S}' "
+        f"GROUP BY 1, 2, 3",
+        timeout_s=180,
+    )
+    profiles: dict[str, dict[str, dict[str, dict]]] = {}
+    for row in rows:
+        if row["p95"] is None and row["peak"] is None:
+            continue
+        hour = str(row["hour"]).replace(" ", "T")
+        profiles.setdefault(str(row["resource_id"]), {}).setdefault(str(row["metric"]), {})[hour] = {
+            "p95": row["p95"], "peak": row["peak"],
+        }
+    return profiles
+
+
 def run_opportunity_engine(
     session: Any, connection: Any, *, days: int = 7, resolution_seconds: int = 300,
     user_id: int | None = None, as_of: datetime | None = None, rightsizing=None,
