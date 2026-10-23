@@ -4,7 +4,7 @@ import { dataDisplayText } from "../../utils/dataPresentation";
 import { useEffect, useId, useMemo, useState } from "react";
 import { Alert, Box, Button, Chip, CircularProgress, Stack, Typography } from "@mui/material";
 import {
-  GoldQueryFilter, GoldQueryResult, formatApiError, getGoldSchema, queryDimonTable,
+  GoldQueryFilter, GoldQueryResult, formatApiError, getDimonInfo, queryDimonTable,
 } from "../../services/api";
 import { ORG } from "../../constants/orgLabels";
 
@@ -229,8 +229,8 @@ export default function HierarchicalDecompTree({
     let alive = true;
     setAvailableFields(null);
     setLoading(true);
-    getGoldSchema(table)
-      .then(columns => { if (alive) setAvailableFields(new Set(columns.map(column => column.name.toLowerCase()))); })
+    getDimonInfo(table)
+      .then(info => { if (alive) setAvailableFields(new Set(info.columns.map(column => column.name.toLowerCase()))); })
       .catch(reason => { if (alive) { setError(formatApiError(reason, "Não foi possível consultar as colunas da base")); setLoading(false); } });
     return () => { alive = false; };
   }, [table]);
