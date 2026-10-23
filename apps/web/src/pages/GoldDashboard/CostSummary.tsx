@@ -405,16 +405,6 @@ export default function CostSummary({ table, director, departmentId, path, inclu
         ...markers,
       ];
     }
-    const markers = anomalyPoints.length ? [{
-      type: "scatter",
-      mode: "markers",
-      name: "Anomalias",
-      x: anomalyPoints.map((point) => point.row.label),
-      y: anomalyPoints.map((point) => point.row.total),
-      text: anomalyPoints.map((point) => `${point.count} anomalia(s)`),
-      hovertemplate: "%{x}: %{text}<extra></extra>",
-      marker: { symbol: "diamond", size: 10, color: colors.accent, line: { color: "#FFFFFF", width: 1.5 } },
-    }] : [];
     const traces: any[] = [];
     if (groupBy === "none") {
       traces.push({ type: "bar", name: "Custo efetivado", x: labels, y: series.map((row) => row.actual), marker: { color: chartSemantic.actual } });
@@ -436,7 +426,7 @@ export default function CostSummary({ table, director, departmentId, path, inclu
     }
     traces.push({ type: "bar", name: "Forecast", x: labels, y: series.map((row) => row.forecast), marker: { color: chartSemantic.forecast, opacity: 0.45 } });
     traces.push({ type: "scatter", mode: "lines+markers", name: "Orçamento", x: labels, y: series.map((row) => row.budget), line: { color: chartSemantic.budget, width: 2, dash: "dash" }, marker: { size: 5 } });
-    return [...traces, ...markers];
+    return traces;
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [chartType, groupBy, cumulative, series, grouped, topGroups, anomalyPoints, calendar, daily]);
 
@@ -600,7 +590,7 @@ export default function CostSummary({ table, director, departmentId, path, inclu
           <Box>
             <Typography variant="subtitle1" fontWeight={800} color={colors.text}>{chartType === "daily" ? CHART_LABELS.daily : chartType === "area" ? "Custo acumulado" : "Custo mensal"}</Typography>
             <Typography variant="caption" color="text.secondary">
-              {chartType === "daily" ? "Realizado por dia, média móvel de 7 dias e anomalias. Clique em um dia para ver onde está o custo do mês." : "Efetivado, Forecast, orçamento e anomalias. Clique em um mês ou em um valor para ver onde está o custo."}
+              {chartType === "daily" ? "Realizado por dia, média móvel de 7 dias e anomalias. Clique em um dia para ver onde está o custo do mês." : chartType === "area" ? "Efetivado, Forecast, orçamento e anomalias. Clique em um mês ou em um valor para ver onde está o custo." : "Efetivado, Forecast e orçamento. Clique em um mês ou em um valor para ver onde está o custo."}
             </Typography>
           </Box>
           <Stack direction="row" gap={1} flexWrap="wrap">
