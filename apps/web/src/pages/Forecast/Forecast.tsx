@@ -3,7 +3,7 @@ import { dataDisplayText } from "../../utils/dataPresentation";
 import { useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useMenuSearchParams as useSearchParams } from "../../navigation/useMenuSearchParams";
-import { Alert, Box, Button, CircularProgress, FormControl, IconButton, InputAdornment, InputLabel, MenuItem, Paper, Select, Stack, TextField, Typography } from "@mui/material";
+import { Alert, Box, Button, CircularProgress, InputAdornment, Paper, Stack, TextField, Typography } from "@mui/material";
 import { AddOutlined, RefreshOutlined, SearchOutlined } from "@mui/icons-material";
 import {
   DestinationTable,
@@ -14,21 +14,18 @@ import {
   cancelForecastRun,
   createForecastRun,
   deleteForecastBusinessRule,
-  deleteForecastConfig,
   getDestinationTables,
-  getForecastBusinessRulesGrid,
+  getForecastBusinessRules,
   getForecastConfigs,
-  getForecastConfigsGrid,
   getForecastMetadata,
   getForecastRunsGrid,
 } from "../../services/api";
 import EmptyState from "../../components/EmptyState";
-import ForecastConfigsDataGrid from "./ForecastConfigsDataGrid";
-import ForecastRulesDataGrid from "./ForecastRulesDataGrid";
 import ForecastHistoryDataGrid from "./ForecastHistoryDataGrid";
 import ForecastAccuracy from "../ForecastAccuracy/ForecastAccuracy";
-import ForecastConfigDialog from "./ForecastConfigDialog";
-import ForecastRuleDialog from "./ForecastRuleDialog";
+import ForecastConfigForm from "./ForecastConfigDialog";
+import ForecastRuleForm from "./ForecastRuleDialog";
+import { BEHAVIOR_LABELS } from "./forecastConstants";
 
 type GridQuery = {
   offset: number;
@@ -46,26 +43,17 @@ export default function Forecast() {
   const tab = ["accuracy", "config", "rules", "history"].includes(requestedTab || "") ? requestedTab! : "config";
   const [tables, setTables] = useState<DestinationTable[]>([]);
   const [configs, setConfigs] = useState<ForecastConfig[]>([]);
+  const profile = configs[0] ?? null;
   const [error, setError] = useState("");
   const [message, setMessage] = useState("");
 
-  // ── Configurações (server-side grid) ──
-  const [configsGridRows, setConfigsGridRows] = useState<ForecastConfig[]>([]);
-  const [configsGridTotal, setConfigsGridTotal] = useState(0);
-  const [configsGridLoading, setConfigsGridLoading] = useState(false);
-  const [configsSearch, setConfigsSearch] = useState("");
-  const configsQueryRef = useRef<GridQuery>({ offset: 0, limit: 10, filters: [] });
   const [runningConfigId, setRunningConfigId] = useState<number | null>(null);
 
-  // ── Regras (server-side grid, por configuração) ──
-  const [rulesConfigId, setRulesConfigId] = useState<number | "">("");
-  const [rulesConfig, setRulesConfig] = useState<ForecastConfig | null>(null);
+  // ── Regras do único perfil ──
   const [rulesMeta, setRulesMeta] = useState<ForecastMetadata | null>(null);
-  const [rulesGridRows, setRulesGridRows] = useState<ForecastBusinessRule[]>([]);
-  const [rulesGridTotal, setRulesGridTotal] = useState(0);
-  const [rulesGridLoading, setRulesGridLoading] = useState(false);
-  const [rulesSearch, setRulesSearch] = useState("");
-  const rulesQueryRef = useRef<GridQuery>({ offset: 0, limit: 10, filters: [] });
+  const [rules, setRules] = useState<ForecastBusinessRule[]>([]);
+  const [rulesLoading, setRulesLoading] = useState(false);
+  const [ruleEditor, setRuleEditor] = useState<{ open: boolean; initial: ForecastBusinessRule | null }>({ open: false, initial: null });
 
   // ── Histórico (server-side grid) ──
   const [gridRows, setGridRows] = useState<ForecastRun[]>([]);
@@ -75,10 +63,7 @@ export default function Forecast() {
   const [pollTick, setPollTick] = useState(0);
   const gridQueryRef = useRef<GridQuery>({ offset: 0, limit: 25, filters: [] });
 
-  // ── Diálogos ──
-  const [configDialog, setConfigDialog] = useState<{ open: boolean; initial: ForecastConfig | null }>({ open: false, initial: null });
-  const [ruleDialog, setRuleDialog] = useState<{ open: boolean; initial: ForecastBusinessRule | null }>({ open: false, initial: null });
-  const [deleteConfigPending, setDeleteConfigPending] = useState<ForecastConfig | null>(null);
+  // ── Confirmações ──
   const [rulePendingDeletion, setRulePendingDeletion] = useState<ForecastBusinessRule | null>(null);
   const [cancelRunPending, setCancelRunPending] = useState<ForecastRun | null>(null);
   const [cancellingRunId, setCancellingRunId] = useState<number | null>(null);
@@ -97,100 +82,31 @@ export default function Forecast() {
     void load();
   }, []);
 
-  // ── Configs grid ──
-  const loadConfigsGrid = async (query: GridQuery) => {
-    setConfigsGridLoading(true);
-    try {
-      const data = await getForecastConfigsGrid({ ...query, search: configsSearch.trim() || undefined });
-      setConfigsGridRows(data.items);
-      setConfigsGridTotal(data.total);
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "Não foi possível carregar os perfis de Forecast");
-    } finally {
-      setConfigsGridLoading(false);
-    }
-  };
-
-  const handleConfigsGridQuery = (query: GridQuery) => {
-    configsQueryRef.current = query;
-    void loadConfigsGrid(query);
-  };
-
-  useEffect(() => {
-    if (tab !== "config") return;
-    configsQueryRef.current = { offset: 0, limit: configsQueryRef.current.limit, filters: [] };
-    void loadConfigsGrid(configsQueryRef.current);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [tab]);
-
-  // ── Rules grid ──
-  // The config id is passed explicitly: setRulesConfigId is async, so reading
-  // it from state inside loadRulesGrid would use a stale value (empty on the
-  // first entry to the tab) and skip the load.
-  const loadRulesGrid = async (configId: number | "", query: GridQuery) => {
-    if (!configId) {
-      setRulesGridRows([]);
-      setRulesGridTotal(0);
+  const loadRules = async (config = profile) => {
+    if (!config) {
+      setRules([]);
+      setRulesMeta(null);
       return;
     }
-    setRulesGridLoading(true);
+    setRulesLoading(true);
     try {
-      const data = await getForecastBusinessRulesGrid(configId, { ...query, search: rulesSearch.trim() || undefined });
-      setRulesGridRows(data.items);
-      setRulesGridTotal(data.total);
+      const [items, metadata] = await Promise.all([
+        getForecastBusinessRules(config.id),
+        getForecastMetadata(config.destination_table_id),
+      ]);
+      setRules(items);
+      setRulesMeta(metadata);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Não foi possível carregar as regras");
     } finally {
-      setRulesGridLoading(false);
+      setRulesLoading(false);
     }
   };
 
-  const handleRulesGridQuery = (query: GridQuery) => {
-    rulesQueryRef.current = query;
-    void loadRulesGrid(rulesConfigId, query);
-  };
-
-  const selectRulesConfig = async (id: number) => {
-    setRulesConfigId(id);
-    rulesQueryRef.current = { offset: 0, limit: rulesQueryRef.current.limit, filters: [] };
-    const cfg = configs.find((c) => c.id === id) || null;
-    setRulesConfig(cfg);
-    if (cfg) {
-      try {
-        setRulesMeta(await getForecastMetadata(cfg.destination_table_id));
-      } catch {
-        setRulesMeta(null);
-      }
-    } else {
-      setRulesMeta(null);
-    }
-    void loadRulesGrid(id, rulesQueryRef.current);
-  };
-
-  // Auto-select the first configuration when entering the rules tab.
   useEffect(() => {
-    if (tab !== "rules") return;
-    if (!rulesConfigId && configs.length > 0) {
-      void selectRulesConfig(configs[0].id);
-    } else if (!rulesConfigId) {
-      setRulesGridRows([]);
-      setRulesGridTotal(0);
-    }
+    if (tab === "rules") void loadRules(profile);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [tab, configs]);
-
-  // If the selected configuration disappears, reset the selection.
-  useEffect(() => {
-    if (tab !== "rules") return;
-    if (rulesConfigId && !configs.some((c) => c.id === rulesConfigId)) {
-      setRulesConfigId("");
-      setRulesConfig(null);
-      setRulesMeta(null);
-      setRulesGridRows([]);
-      setRulesGridTotal(0);
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [tab, configs, rulesConfigId]);
+  }, [tab, profile?.id]);
 
   // ── History grid ──
   const loadRuns = async (query: GridQuery) => {
