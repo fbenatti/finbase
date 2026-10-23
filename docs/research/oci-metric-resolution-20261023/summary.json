@@ -1,0 +1,1793 @@
+{
+  "pilot_started_at": "2026-10-23T11:48:07.912336+00:00",
+  "cloud_provider": "oci",
+  "region": "sa-saopaulo-1",
+  "scope": {
+    "instances": 2,
+    "compartments": 1,
+    "metrics": [
+      "CpuUtilization",
+      "MemoryUtilization",
+      "DiskIopsRead",
+      "DiskIopsWritten",
+      "DiskBytesRead",
+      "DiskBytesWritten",
+      "NetworksBytesIn",
+      "NetworksBytesOut"
+    ]
+  },
+  "window_start_utc": "2026-10-22T11:30:00+00:00",
+  "window_end_utc_exclusive": "2026-10-23T11:30:00+00:00",
+  "hours": 24,
+  "discovery_logical_calls": 3,
+  "api_retries": 0,
+  "request_min_spacing_seconds": 0.26,
+  "measurement_notes": [
+    "JSON sizes are locally serialized OCI SDK data, not measured wire bytes.",
+    "Gzip and Parquet sizes are measured local files, not Iceberg production files.",
+    "Returned points are a usage proxy, not an invoice or total billable OCI retrieval.",
+    "Quantiles over bucket means are distinct from provider percentiles within buckets.",
+    "The pilot does not establish seasonal or fleet-wide representativeness."
+  ],
+  "resolutions": [
+    {
+      "minutes": 1,
+      "calls": 128,
+      "errors": 0,
+      "returned_points": 184448,
+      "kept_points": 184320,
+      "json_bytes": 11863882,
+      "sum_response_gzip_bytes": 1475791,
+      "parquet_zstd_bytes": 761826,
+      "api_elapsed_sum_seconds": 15.036344000000003,
+      "api_latency_seconds": {
+        "n": 128,
+        "mean": 0.1174714375,
+        "min": 0.059893,
+        "max": 0.238898,
+        "p90": 0.17436569999999998,
+        "p95": 0.18950719999999993,
+        "p99": 0.22031440000000002
+      },
+      "expected_mean_buckets_per_stream": 1440
+    },
+    {
+      "minutes": 5,
+      "calls": 128,
+      "errors": 0,
+      "returned_points": 36992,
+      "kept_points": 36864,
+      "json_bytes": 2464380,
+      "sum_response_gzip_bytes": 379807,
+      "parquet_zstd_bytes": 208384,
+      "api_elapsed_sum_seconds": 11.603008,
+      "api_latency_seconds": {
+        "n": 128,
+        "mean": 0.0906485,
+        "min": 0.045698,
+        "max": 0.222395,
+        "p90": 0.1350683,
+        "p95": 0.15012534999999996,
+        "p99": 0.17679429000000002
+      },
+      "expected_mean_buckets_per_stream": 288
+    },
+    {
+      "minutes": 15,
+      "calls": 128,
+      "errors": 0,
+      "returned_points": 12416,
+      "kept_points": 12288,
+      "json_bytes": 895258,
+      "sum_response_gzip_bytes": 185547,
+      "parquet_zstd_bytes": 84561,
+      "api_elapsed_sum_seconds": 10.394738999999998,
+      "api_latency_seconds": {
+        "n": 128,
+        "mean": 0.08120889843750001,
+        "min": 0.038202,
+        "max": 0.233936,
+        "p90": 0.1400466,
+        "p95": 0.15620489999999998,
+        "p99": 0.21220913000000002
+      },
+      "expected_mean_buckets_per_stream": 96
+    }
+  ],
+  "comparisons": [
+    {
+      "resource_alias": "vm-1413c3cbc3",
+      "metric": "CpuUtilization",
+      "minutes": 1,
+      "bucket_mean_distribution": {
+        "n": 1440,
+        "mean": 16.259380914059538,
+        "min": 7.25608363410435,
+        "max": 94.66611472574668,
+        "p90": 28.310580759589254,
+        "p95": 30.884556248454167,
+        "p99": 45.20228811311017
+      },
+      "coverage": 1.0,
+      "max_of_provider_maxima": 97.30734451816852,
+      "provider_percentile_points": {
+        "p90": 1440,
+        "p95": 1440,
+        "p99": 1440
+      },
+      "relative_change_vs_1m": {
+        "p90": 0.0,
+        "p95": 0.0,
+        "p99": 0.0,
+        "max": 0.0
+      },
+      "observed_minutes_bucket_mean_over_threshold": {
+        "50": 13,
+        "70": 4,
+        "80": 2,
+        "90": 1
+      }
+    },
+    {
+      "resource_alias": "vm-1413c3cbc3",
+      "metric": "DiskBytesRead",
+      "minutes": 1,
+      "bucket_mean_distribution": {
+        "n": 1440,
+        "mean": 40167488632.888885,
+        "min": 39853174784.0,
+        "max": 40570417152.0,
+        "p90": 40569606144.0,
+        "p95": 40570404864.0,
+        "p99": 40570417152.0
+      },
+      "coverage": 1.0,
+      "max_of_provider_maxima": 40570417152.0,
+      "provider_percentile_points": {
+        "p90": 1440,
+        "p95": 1440,
+        "p99": 1440
+      },
+      "relative_change_vs_1m": {
+        "p90": 0.0,
+        "p95": 0.0,
+        "p99": 0.0,
+        "max": 0.0
+      }
+    },
+    {
+      "resource_alias": "vm-1413c3cbc3",
+      "metric": "DiskBytesWritten",
+      "minutes": 1,
+      "bucket_mean_distribution": {
+        "n": 1440,
+        "mean": 1211251834335.763,
+        "min": 1190174874624.0,
+        "max": 1230112133461.3333,
+        "p90": 1226314554914.1333,
+        "p95": 1228022489463.4666,
+        "p99": 1229670237750.6133
+      },
+      "coverage": 1.0,
+      "max_of_provider_maxima": 1230127010816.0,
+      "provider_percentile_points": {
+        "p90": 1440,
+        "p95": 1440,
+        "p99": 1440
+      },
+      "relative_change_vs_1m": {
+        "p90": 0.0,
+        "p95": 0.0,
+        "p99": 0.0,
+        "max": 0.0
+      }
+    },
+    {
+      "resource_alias": "vm-1413c3cbc3",
+      "metric": "DiskIopsRead",
+      "minutes": 1,
+      "bucket_mean_distribution": {
+        "n": 1440,
+        "mean": 593997.6076388889,
+        "min": 584435.0,
+        "max": 600850.0,
+        "p90": 600831.0,
+        "p95": 600848.0,
+        "p99": 600850.0
+      },
+      "coverage": 1.0,
+      "max_of_provider_maxima": 600850.0,
+      "provider_percentile_points": {
+        "p90": 1440,
+        "p95": 1440,
+        "p99": 1440
+      },
+      "relative_change_vs_1m": {
+        "p90": 0.0,
+        "p95": 0.0,
+        "p99": 0.0,
+        "max": 0.0
+      }
+    },
+    {
+      "resource_alias": "vm-1413c3cbc3",
+      "metric": "DiskIopsWritten",
+      "minutes": 1,
+      "bucket_mean_distribution": {
+        "n": 1440,
+        "mean": 101969794.42349535,
+        "min": 100238853.16666667,
+        "max": 103574109.0,
+        "p90": 103252346.0,
+        "p95": 103388298.55833334,
+        "p99": 103534381.57666667
+      },
+      "coverage": 1.0,
+      "max_of_provider_maxima": 103575213.0,
+      "provider_percentile_points": {
+        "p90": 1440,
+        "p95": 1440,
+        "p99": 1440
+      },
+      "relative_change_vs_1m": {
+        "p90": 0.0,
+        "p95": 0.0,
+        "p99": 0.0,
+        "max": 0.0
+      }
+    },
+    {
+      "resource_alias": "vm-1413c3cbc3",
+      "metric": "MemoryUtilization",
+      "minutes": 1,
+      "bucket_mean_distribution": {
+        "n": 1440,
+        "mean": 36.54604339367322,
+        "min": 34.2441051397656,
+        "max": 58.619633567328584,
+        "p90": 37.33346515764927,
+        "p95": 38.040326015198275,
+        "p99": 43.32870340465587
+      },
+      "coverage": 1.0,
+      "max_of_provider_maxima": 61.716308800751094,
+      "provider_percentile_points": {
+        "p90": 1440,
+        "p95": 1440,
+        "p99": 1440
+      },
+      "relative_change_vs_1m": {
+        "p90": 0.0,
+        "p95": 0.0,
+        "p99": 0.0,
+        "max": 0.0
+      },
+      "observed_minutes_bucket_mean_over_threshold": {
+        "50": 6,
+        "70": 0,
+        "80": 0,
+        "90": 0
+      }
+    },
+    {
+      "resource_alias": "vm-1413c3cbc3",
+      "metric": "NetworksBytesIn",
+      "minutes": 1,
+      "bucket_mean_distribution": {
+        "n": 1440,
+        "mean": 21105664209991.69,
+        "min": 20717072223016.168,
+        "max": 21390550076822.832,
+        "p90": 21335628319194.016,
+        "p95": 21359989804793.14,
+        "p99": 21383618047365.926
+      },
+      "coverage": 1.0,
+      "max_of_provider_maxima": 21390745693739.0,
+      "provider_percentile_points": {
+        "p90": 1440,
+        "p95": 1440,
+        "p99": 1440
+      },
+      "relative_change_vs_1m": {
+        "p90": 0.0,
+        "p95": 0.0,
+        "p99": 0.0,
+        "max": 0.0
+      }
+    },
+    {
+      "resource_alias": "vm-1413c3cbc3",
+      "metric": "NetworksBytesOut",
+      "minutes": 1,
+      "bucket_mean_distribution": {
+        "n": 1440,
+        "mean": 9162113927455.098,
+        "min": 8941601569959.334,
+        "max": 9262004881283.0,
+        "p90": 9243125586013.3,
+        "p95": 9248590882965.482,
+        "p99": 9258259675731.31
+      },
+      "coverage": 1.0,
+      "max_of_provider_maxima": 9262113939547.0,
+      "provider_percentile_points": {
+        "p90": 1440,
+        "p95": 1440,
+        "p99": 1440
+      },
+      "relative_change_vs_1m": {
+        "p90": 0.0,
+        "p95": 0.0,
+        "p99": 0.0,
+        "max": 0.0
+      }
+    },
+    {
+      "resource_alias": "vm-195c58418b",
+      "metric": "CpuUtilization",
+      "minutes": 1,
+      "bucket_mean_distribution": {
+        "n": 1440,
+        "mean": 1.700990311394369,
+        "min": 0.9768819253984405,
+        "max": 4.036584915353012,
+        "p90": 2.2786192384465522,
+        "p95": 2.370074918255344,
+        "p99": 2.549501153397448
+      },
+      "coverage": 1.0,
+      "max_of_provider_maxima": 15.93913694197486,
+      "provider_percentile_points": {
+        "p90": 1440,
+        "p95": 1440,
+        "p99": 1440
+      },
+      "relative_change_vs_1m": {
+        "p90": 0.0,
+        "p95": 0.0,
+        "p99": 0.0,
+        "max": 0.0
+      },
+      "observed_minutes_bucket_mean_over_threshold": {
+        "50": 0,
+        "70": 0,
+        "80": 0,
+        "90": 0
+      }
+    },
+    {
+      "resource_alias": "vm-195c58418b",
+      "metric": "DiskBytesRead",
+      "minutes": 1,
+      "bucket_mean_distribution": {
+        "n": 1440,
+        "mean": 7635607420.207408,
+        "min": 7524101120.0,
+        "max": 7840623616.0,
+        "p90": 7820293324.8,
+        "p95": 7840623616.0,
+        "p99": 7840623616.0
+      },
+      "coverage": 1.0,
+      "max_of_provider_maxima": 7840623616.0,
+      "provider_percentile_points": {
+        "p90": 1440,
+        "p95": 1440,
+        "p99": 1440
+      },
+      "relative_change_vs_1m": {
+        "p90": 0.0,
+        "p95": 0.0,
+        "p99": 0.0,
+        "max": 0.0
+      }
+    },
+    {
+      "resource_alias": "vm-195c58418b",
+      "metric": "DiskBytesWritten",
+      "minutes": 1,
+      "bucket_mean_distribution": {
+        "n": 1440,
+        "mean": 149621162180.26666,
+        "min": 147145475754.66666,
+        "max": 151895862272.0,
+        "p90": 151455080789.3333,
+        "p95": 151655690547.2,
+        "p99": 151855848058.88
+      },
+      "coverage": 1.0,
+      "max_of_provider_maxima": 151896851456.0,
+      "provider_percentile_points": {
+        "p90": 1440,
+        "p95": 1440,
+        "p99": 1440
+      },
+      "relative_change_vs_1m": {
+        "p90": 0.0,
+        "p95": 0.0,
+        "p99": 0.0,
+        "max": 0.0
+      }
+    },
+    {
+      "resource_alias": "vm-195c58418b",
+      "metric": "DiskIopsRead",
+      "minutes": 1,
+      "bucket_mean_distribution": {
+        "n": 1440,
+        "mean": 191862.08252314813,
+        "min": 187178.0,
+        "max": 200284.0,
+        "p90": 199460.55,
+        "p95": 200284.0,
+        "p99": 200284.0
+      },
+      "coverage": 1.0,
+      "max_of_provider_maxima": 200284.0,
+      "provider_percentile_points": {
+        "p90": 1440,
+        "p95": 1440,
+        "p99": 1440
+      },
+      "relative_change_vs_1m": {
+        "p90": 0.0,
+        "p95": 0.0,
+        "p99": 0.0,
+        "max": 0.0
+      }
+    },
+    {
+      "resource_alias": "vm-195c58418b",
+      "metric": "DiskIopsWritten",
+      "minutes": 1,
+      "bucket_mean_distribution": {
+        "n": 1440,
+        "mean": 19016266.141782407,
+        "min": 18719864.833333332,
+        "max": 19320206.166666668,
+        "p90": 19259604.433333334,
+        "p95": 19289929.225,
+        "p99": 19314512.85333333
+      },
+      "coverage": 1.0,
+      "max_of_provider_maxima": 19320341.0,
+      "provider_percentile_points": {
+        "p90": 1440,
+        "p95": 1440,
+        "p99": 1440
+      },
+      "relative_change_vs_1m": {
+        "p90": 0.0,
+        "p95": 0.0,
+        "p99": 0.0,
+        "max": 0.0
+      }
+    },
+    {
+      "resource_alias": "vm-195c58418b",
+      "metric": "MemoryUtilization",
+      "minutes": 1,
+      "bucket_mean_distribution": {
+        "n": 1440,
+        "mean": 31.196731163870634,
+        "min": 30.74640085512297,
+        "max": 32.55192728937347,
+        "p90": 31.714118108063616,
+        "p95": 31.843407593489328,
+        "p99": 32.18527791330916
+      },
+      "coverage": 1.0,
+      "max_of_provider_maxima": 36.0856858655288,
+      "provider_percentile_points": {
+        "p90": 1440,
+        "p95": 1440,
+        "p99": 1440
+      },
+      "relative_change_vs_1m": {
+        "p90": 0.0,
+        "p95": 0.0,
+        "p99": 0.0,
+        "max": 0.0
+      },
+      "observed_minutes_bucket_mean_over_threshold": {
+        "50": 0,
+        "70": 0,
+        "80": 0,
+        "90": 0
+      }
+    },
+    {
+      "resource_alias": "vm-195c58418b",
+      "metric": "NetworksBytesIn",
+      "minutes": 1,
+      "bucket_mean_distribution": {
+        "n": 1440,
+        "mean": 1487258740613.9702,
+        "min": 1446095171387.6667,
+        "max": 1501561292691.0,
+        "p90": 1499448331318.8,
+        "p95": 1499936898845.6584,
+        "p99": 1501074755596.115
+      },
+      "coverage": 1.0,
+      "max_of_provider_maxima": 1501576363802.0,
+      "provider_percentile_points": {
+        "p90": 1440,
+        "p95": 1440,
+        "p99": 1440
+      },
+      "relative_change_vs_1m": {
+        "p90": 0.0,
+        "p95": 0.0,
+        "p99": 0.0,
+        "max": 0.0
+      }
+    },
+    {
+      "resource_alias": "vm-195c58418b",
+      "metric": "NetworksBytesOut",
+      "minutes": 1,
+      "bucket_mean_distribution": {
+        "n": 1440,
+        "mean": 1618122015182.4282,
+        "min": 1573987114615.1667,
+        "max": 1634062545253.3333,
+        "p90": 1631650700724.9502,
+        "p95": 1632259730686.7,
+        "p99": 1633532575620.375
+      },
+      "coverage": 1.0,
+      "max_of_provider_maxima": 1634078935282.0,
+      "provider_percentile_points": {
+        "p90": 1440,
+        "p95": 1440,
+        "p99": 1440
+      },
+      "relative_change_vs_1m": {
+        "p90": 0.0,
+        "p95": 0.0,
+        "p99": 0.0,
+        "max": 0.0
+      }
+    },
+    {
+      "resource_alias": "vm-1413c3cbc3",
+      "metric": "CpuUtilization",
+      "minutes": 5,
+      "bucket_mean_distribution": {
+        "n": 288,
+        "mean": 16.256661265690745,
+        "min": 7.424234088757021,
+        "max": 75.88357053591021,
+        "p90": 28.253084073526733,
+        "p95": 29.995024864794598,
+        "p99": 38.318099545606294
+      },
+      "coverage": 1.0,
+      "max_of_provider_maxima": 97.30734451816852,
+      "provider_percentile_points": {
+        "p90": 288,
+        "p95": 288,
+        "p99": 288
+      },
+      "relative_change_vs_1m": {
+        "p90": -0.0020309257005632405,
+        "p95": -0.028801818504486123,
+        "p99": -0.15229734721121854,
+        "max": -0.1984083137271516
+      },
+      "observed_minutes_bucket_mean_over_threshold": {
+        "50": 5,
+        "70": 5,
+        "80": 0,
+        "90": 0
+      }
+    },
+    {
+      "resource_alias": "vm-1413c3cbc3",
+      "metric": "DiskBytesRead",
+      "minutes": 5,
+      "bucket_mean_distribution": {
+        "n": 288,
+        "mean": 40165495933.155556,
+        "min": 39853071155.2,
+        "max": 40570417152.0,
+        "p90": 40569606144.0,
+        "p95": 40569650094.079994,
+        "p99": 40570417152.0
+      },
+      "coverage": 1.0,
+      "max_of_provider_maxima": 40570417152.0,
+      "provider_percentile_points": {
+        "p90": 288,
+        "p95": 288,
+        "p99": 288
+      },
+      "relative_change_vs_1m": {
+        "p90": 0.0,
+        "p95": -1.860395336294858e-05,
+        "p99": 0.0,
+        "max": 0.0
+      }
+    },
+    {
+      "resource_alias": "vm-1413c3cbc3",
+      "metric": "DiskBytesWritten",
+      "minutes": 5,
+      "bucket_mean_distribution": {
+        "n": 288,
+        "mean": 1211140818142.8147,
+        "min": 1190115022643.2,
+        "max": 1229930602154.6667,
+        "p90": 1226180055913.8132,
+        "p95": 1227871474182.8267,
+        "p99": 1229484547586.7305
+      },
+      "coverage": 1.0,
+      "max_of_provider_maxima": 1230007202816.0,
+      "provider_percentile_points": {
+        "p90": 288,
+        "p95": 288,
+        "p99": 288
+      },
+      "relative_change_vs_1m": {
+        "p90": -0.0001096774068130391,
+        "p95": -0.00012297436075936398,
+        "p99": -0.0001510080980918007,
+        "max": -0.0001475729746325684
+      }
+    },
+    {
+      "resource_alias": "vm-1413c3cbc3",
+      "metric": "DiskIopsRead",
+      "minutes": 5,
+      "bucket_mean_distribution": {
+        "n": 288,
+        "mean": 593951.988773148,
+        "min": 584428.7666666667,
+        "max": 600850.0,
+        "p90": 600831.0,
+        "p95": 600835.6066666667,
+        "p99": 600850.0
+      },
+      "coverage": 1.0,
+      "max_of_provider_maxima": 600850.0,
+      "provider_percentile_points": {
+        "p90": 288,
+        "p95": 288,
+        "p99": 288
+      },
+      "relative_change_vs_1m": {
+        "p90": 0.0,
+        "p95": -2.062640357180452e-05,
+        "p99": 0.0,
+        "max": 0.0
+      }
+    },
+    {
+      "resource_alias": "vm-1413c3cbc3",
+      "metric": "DiskIopsWritten",
+      "minutes": 5,
+      "bucket_mean_distribution": {
+        "n": 288,
+        "mean": 101960522.86655092,
+        "min": 100233584.1,
+        "max": 103558036.7,
+        "p90": 103241297.03333333,
+        "p95": 103375665.92166667,
+        "p99": 103517615.668
+      },
+      "coverage": 1.0,
+      "max_of_provider_maxima": 103565157.0,
+      "provider_percentile_points": {
+        "p90": 288,
+        "p95": 288,
+        "p99": 288
+      },
+      "relative_change_vs_1m": {
+        "p90": -0.00010700935227823931,
+        "p95": -0.00012218632904131705,
+        "p99": -0.00016193566244711912,
+        "max": -0.00015517681161029365
+      }
+    },
+    {
+      "resource_alias": "vm-1413c3cbc3",
+      "metric": "MemoryUtilization",
+      "minutes": 5,
+      "bucket_mean_distribution": {
+        "n": 288,
+        "mean": 36.54272250469228,
+        "min": 34.702166861686365,
+        "max": 50.94939580386699,
+        "p90": 37.367994369873074,
+        "p95": 38.379755807518016,
+        "p99": 41.16694084989014
+      },
+      "coverage": 1.0,
+      "max_of_provider_maxima": 61.716308800751094,
+      "provider_percentile_points": {
+        "p90": 288,
+        "p95": 288,
+        "p99": 288
+      },
+      "relative_change_vs_1m": {
+        "p90": 0.0009248863473560373,
+        "p95": 0.008922893883299757,
+        "p99": -0.049892158890068206,
+        "max": -0.13084758973547336
+      },
+      "observed_minutes_bucket_mean_over_threshold": {
+        "50": 10,
+        "70": 0,
+        "80": 0,
+        "90": 0
+      }
+    },
+    {
+      "resource_alias": "vm-1413c3cbc3",
+      "metric": "NetworksBytesIn",
+      "minutes": 5,
+      "bucket_mean_distribution": {
+        "n": 288,
+        "mean": 21103792144828.598,
+        "min": 20716135565971.965,
+        "max": 21387665092650.066,
+        "p90": 21331890364434.402,
+        "p95": 21357925363376.04,
+        "p99": 21380755779390.7
+      },
+      "coverage": 1.0,
+      "max_of_provider_maxima": 21388842739411.0,
+      "provider_percentile_points": {
+        "p90": 288,
+        "p95": 288,
+        "p99": 288
+      },
+      "relative_change_vs_1m": {
+        "p90": -0.00017519778202409593,
+        "p95": -9.664992520915463e-05,
+        "p99": -0.00013385330624997494,
+        "max": -0.0001348719019569101
+      }
+    },
+    {
+      "resource_alias": "vm-1413c3cbc3",
+      "metric": "NetworksBytesOut",
+      "minutes": 5,
+      "bucket_mean_distribution": {
+        "n": 288,
+        "mean": 9161223166389.484,
+        "min": 8941089809769.9,
+        "max": 9260478205475.4,
+        "p90": 9241662291902.348,
+        "p95": 9248020873660.393,
+        "p99": 9256734142605.021
+      },
+      "coverage": 1.0,
+      "max_of_provider_maxima": 9261110323583.0,
+      "provider_percentile_points": {
+        "p90": 288,
+        "p95": 288,
+        "p99": 288
+      },
+      "relative_change_vs_1m": {
+        "p90": -0.00015831161194730295,
+        "p95": -6.163201641232886e-05,
+        "p99": -0.00016477536596731508,
+        "max": -0.00016483211002023677
+      }
+    },
+    {
+      "resource_alias": "vm-195c58418b",
+      "metric": "CpuUtilization",
+      "minutes": 5,
+      "bucket_mean_distribution": {
+        "n": 288,
+        "mean": 1.7012945130236015,
+        "min": 1.257335470047178,
+        "max": 2.473410568441922,
+        "p90": 2.2544605706570113,
+        "p95": 2.3389232627133394,
+        "p99": 2.4107600400172275
+      },
+      "coverage": 1.0,
+      "max_of_provider_maxima": 15.93913694197486,
+      "provider_percentile_points": {
+        "p90": 288,
+        "p95": 288,
+        "p99": 288
+      },
+      "relative_change_vs_1m": {
+        "p90": -0.010602327664893703,
+        "p95": -0.01314374296865515,
+        "p99": -0.05441892552012964,
+        "max": -0.38725169411539195
+      },
+      "observed_minutes_bucket_mean_over_threshold": {
+        "50": 0,
+        "70": 0,
+        "80": 0,
+        "90": 0
+      }
+    },
+    {
+      "resource_alias": "vm-195c58418b",
+      "metric": "DiskBytesRead",
+      "minutes": 5,
+      "bucket_mean_distribution": {
+        "n": 288,
+        "mean": 7634728191.051852,
+        "min": 7524101120.0,
+        "max": 7840623616.0,
+        "p90": 7820291194.88,
+        "p95": 7840623616.0,
+        "p99": 7840623616.0
+      },
+      "coverage": 1.0,
+      "max_of_provider_maxima": 7840623616.0,
+      "provider_percentile_points": {
+        "p90": 288,
+        "p95": 288,
+        "p99": 288
+      },
+      "relative_change_vs_1m": {
+        "p90": -2.7235807042196405e-07,
+        "p95": 0.0,
+        "p99": 0.0,
+        "max": 0.0
+      }
+    },
+    {
+      "resource_alias": "vm-195c58418b",
+      "metric": "DiskBytesWritten",
+      "minutes": 5,
+      "bucket_mean_distribution": {
+        "n": 288,
+        "mean": 149607957788.44446,
+        "min": 147139459549.86667,
+        "max": 151878708906.66666,
+        "p90": 151440778608.63998,
+        "p95": 151640978923.52,
+        "p99": 151838398889.984
+      },
+      "coverage": 1.0,
+      "max_of_provider_maxima": 151885636608.0,
+      "provider_percentile_points": {
+        "p90": 288,
+        "p95": 288,
+        "p99": 288
+      },
+      "relative_change_vs_1m": {
+        "p90": -9.443183166118078e-05,
+        "p95": -9.700673695092552e-05,
+        "p99": -0.00011490613709674467,
+        "max": -0.0001129284568833545
+      }
+    },
+    {
+      "resource_alias": "vm-195c58418b",
+      "metric": "DiskIopsRead",
+      "minutes": 5,
+      "bucket_mean_distribution": {
+        "n": 288,
+        "mean": 191825.67696759256,
+        "min": 187178.0,
+        "max": 200284.0,
+        "p90": 199460.03,
+        "p95": 200284.0,
+        "p99": 200284.0
+      },
+      "coverage": 1.0,
+      "max_of_provider_maxima": 200284.0,
+      "provider_percentile_points": {
+        "p90": 288,
+        "p95": 288,
+        "p99": 288
+      },
+      "relative_change_vs_1m": {
+        "p90": -2.6070318165147076e-06,
+        "p95": 0.0,
+        "p99": 0.0,
+        "max": 0.0
+      }
+    },
+    {
+      "resource_alias": "vm-195c58418b",
+      "metric": "DiskIopsWritten",
+      "minutes": 5,
+      "bucket_mean_distribution": {
+        "n": 288,
+        "mean": 19014597.375578705,
+        "min": 18719031.933333334,
+        "max": 19317706.533333335,
+        "p90": 19257505.23666667,
+        "p95": 19287811.245,
+        "p99": 19311979.461
+      },
+      "coverage": 1.0,
+      "max_of_provider_maxima": 19318694.0,
+      "provider_percentile_points": {
+        "p90": 288,
+        "p95": 288,
+        "p99": 288
+      },
+      "relative_change_vs_1m": {
+        "p90": -0.00010899479654069195,
+        "p95": -0.00010979718874528151,
+        "p99": -0.0001311652202967797,
+        "max": -0.00012937922668990342
+      }
+    },
+    {
+      "resource_alias": "vm-195c58418b",
+      "metric": "MemoryUtilization",
+      "minutes": 5,
+      "bucket_mean_distribution": {
+        "n": 288,
+        "mean": 31.19790964511977,
+        "min": 30.856845405784274,
+        "max": 32.33100837666749,
+        "p90": 31.663375158704213,
+        "p95": 31.833294247297346,
+        "p99": 31.992445265472025
+      },
+      "coverage": 1.0,
+      "max_of_provider_maxima": 36.0856858655288,
+      "provider_percentile_points": {
+        "p90": 288,
+        "p95": 288,
+        "p99": 288
+      },
+      "relative_change_vs_1m": {
+        "p90": -0.0016000113635983868,
+        "p95": -0.0003175962296839738,
+        "p99": -0.005991330830093375,
+        "max": -0.006786661531346396
+      },
+      "observed_minutes_bucket_mean_over_threshold": {
+        "50": 0,
+        "70": 0,
+        "80": 0,
+        "90": 0
+      }
+    },
+    {
+      "resource_alias": "vm-195c58418b",
+      "metric": "NetworksBytesIn",
+      "minutes": 5,
+      "bucket_mean_distribution": {
+        "n": 288,
+        "mean": 1487104555935.0537,
+        "min": 1446022129516.1,
+        "max": 1501364869420.9666,
+        "p90": 1499294349782.8801,
+        "p95": 1499880429674.405,
+        "p99": 1500881813448.2583
+      },
+      "coverage": 1.0,
+      "max_of_provider_maxima": 1501441123358.0,
+      "provider_percentile_points": {
+        "p90": 288,
+        "p95": 288,
+        "p99": 288
+      },
+      "relative_change_vs_1m": {
+        "p90": -0.00010269212529950365,
+        "p95": -3.764769791107631e-05,
+        "p99": -0.00012853600204612543,
+        "max": -0.00013081268875906512
+      }
+    },
+    {
+      "resource_alias": "vm-195c58418b",
+      "metric": "NetworksBytesOut",
+      "minutes": 5,
+      "bucket_mean_distribution": {
+        "n": 288,
+        "mean": 1617955014838.3564,
+        "min": 1573907011515.6333,
+        "max": 1633848885260.3333,
+        "p90": 1631487664842.18,
+        "p95": 1632192649403.1016,
+        "p99": 1633322133460.2627
+      },
+      "coverage": 1.0,
+      "max_of_provider_maxima": 1633931888329.0,
+      "provider_percentile_points": {
+        "p90": 288,
+        "p95": 288,
+        "p99": 288
+      },
+      "relative_change_vs_1m": {
+        "p90": -9.992082416771314e-05,
+        "p95": -4.1097187130976537e-05,
+        "p99": -0.00012882642394344905,
+        "max": -0.0001307538647285228
+      }
+    },
+    {
+      "resource_alias": "vm-1413c3cbc3",
+      "metric": "CpuUtilization",
+      "minutes": 15,
+      "bucket_mean_distribution": {
+        "n": 96,
+        "mean": 16.228917882985982,
+        "min": 7.53790670256978,
+        "max": 51.48238656717795,
+        "p90": 28.00516144832301,
+        "p95": 30.204197171503935,
+        "p99": 35.29262790577306
+      },
+      "coverage": 1.0,
+      "max_of_provider_maxima": 97.30734451816852,
+      "provider_percentile_points": {
+        "p90": 96,
+        "p95": 96,
+        "p99": 96
+      },
+      "relative_change_vs_1m": {
+        "p90": -0.010788168348075828,
+        "p95": -0.022029103202163877,
+        "p99": -0.21922917226092764,
+        "max": -0.45616880214926475
+      },
+      "observed_minutes_bucket_mean_over_threshold": {
+        "50": 15,
+        "70": 0,
+        "80": 0,
+        "90": 0
+      }
+    },
+    {
+      "resource_alias": "vm-1413c3cbc3",
+      "metric": "DiskBytesRead",
+      "minutes": 15,
+      "bucket_mean_distribution": {
+        "n": 96,
+        "mean": 40160513120.71111,
+        "min": 39852951825.066666,
+        "max": 40570417152.0,
+        "p90": 40569603140.26666,
+        "p95": 40569640311.46667,
+        "p99": 40570416979.05778
+      },
+      "coverage": 1.0,
+      "max_of_provider_maxima": 40570417152.0,
+      "provider_percentile_points": {
+        "p90": 96,
+        "p95": 96,
+        "p99": 96
+      },
+      "relative_change_vs_1m": {
+        "p90": -7.403900660856126e-08,
+        "p95": -1.8845080198133484e-05,
+        "p99": -4.262766684090881e-09,
+        "max": 0.0
+      }
+    },
+    {
+      "resource_alias": "vm-1413c3cbc3",
+      "metric": "DiskBytesWritten",
+      "minutes": 15,
+      "bucket_mean_distribution": {
+        "n": 96,
+        "mean": 1210863371019.3777,
+        "min": 1189972233079.4666,
+        "max": 1229466015220.6223,
+        "p90": 1225851813774.2222,
+        "p95": 1227499185015.4668,
+        "p99": 1229047279643.3066
+      },
+      "coverage": 1.0,
+      "max_of_provider_maxima": 1229696361472.0,
+      "provider_percentile_points": {
+        "p90": 96,
+        "p95": 96,
+        "p99": 96
+      },
+      "relative_change_vs_1m": {
+        "p90": -0.00037734294032213783,
+        "p95": -0.00042613588308825846,
+        "p99": -0.0005066058266533254,
+        "max": -0.0005252514979206546
+      }
+    },
+    {
+      "resource_alias": "vm-1413c3cbc3",
+      "metric": "DiskIopsRead",
+      "minutes": 15,
+      "bucket_mean_distribution": {
+        "n": 96,
+        "mean": 593837.8776620369,
+        "min": 584421.588888889,
+        "max": 600850.0,
+        "p90": 600830.2666666666,
+        "p95": 600835.0694444444,
+        "p99": 600849.9577777778
+      },
+      "coverage": 1.0,
+      "max_of_provider_maxima": 600850.0,
+      "provider_percentile_points": {
+        "p90": 96,
+        "p95": 96,
+        "p99": 96
+      },
+      "relative_change_vs_1m": {
+        "p90": -1.2205317858023661e-06,
+        "p95": -2.152051027151664e-05,
+        "p99": -7.02708199997829e-08,
+        "max": 0.0
+      }
+    },
+    {
+      "resource_alias": "vm-1413c3cbc3",
+      "metric": "DiskIopsWritten",
+      "minutes": 15,
+      "bucket_mean_distribution": {
+        "n": 96,
+        "mean": 101937354.26030092,
+        "min": 100221014.96666667,
+        "max": 103516124.25555556,
+        "p90": 103215598.83333334,
+        "p95": 103344422.37222221,
+        "p99": 103479074.625
+      },
+      "coverage": 1.0,
+      "max_of_provider_maxima": 103536623.0,
+      "provider_percentile_points": {
+        "p90": 96,
+        "p95": 96,
+        "p99": 96
+      },
+      "relative_change_vs_1m": {
+        "p90": -0.00035589667538069047,
+        "p95": -0.00042438251449090946,
+        "p99": -0.0005341892309050357,
+        "max": -0.0005598382163678065
+      }
+    },
+    {
+      "resource_alias": "vm-1413c3cbc3",
+      "metric": "MemoryUtilization",
+      "minutes": 15,
+      "bucket_mean_distribution": {
+        "n": 96,
+        "mean": 36.53510283063692,
+        "min": 35.03207623649025,
+        "max": 46.84387596036069,
+        "p90": 37.50379892051659,
+        "p95": 37.97504067489076,
+        "p99": 39.918371756005705
+      },
+      "coverage": 1.0,
+      "max_of_provider_maxima": 61.716308800751094,
+      "provider_percentile_points": {
+        "p90": 96,
+        "p95": 96,
+        "p99": 96
+      },
+      "relative_change_vs_1m": {
+        "p90": 0.004562495395164668,
+        "p95": -0.001716214006195292,
+        "p99": -0.07870837067983226,
+        "max": -0.2008841899948529
+      },
+      "observed_minutes_bucket_mean_over_threshold": {
+        "50": 0,
+        "70": 0,
+        "80": 0,
+        "90": 0
+      }
+    },
+    {
+      "resource_alias": "vm-1413c3cbc3",
+      "metric": "NetworksBytesIn",
+      "minutes": 15,
+      "bucket_mean_distribution": {
+        "n": 96,
+        "mean": 21099112773406.074,
+        "min": 20713807969640.59,
+        "max": 21380437011992.723,
+        "p90": 21327342165161.766,
+        "p95": 21353009103606.098,
+        "p99": 21373800994699.05
+      },
+      "coverage": 1.0,
+      "max_of_provider_maxima": 21384021690781.0,
+      "provider_percentile_points": {
+        "p90": 96,
+        "p95": 96,
+        "p99": 96
+      },
+      "relative_change_vs_1m": {
+        "p90": -0.0003883716902208869,
+        "p95": -0.0003268120093145603,
+        "p99": -0.0004590922193395744,
+        "max": -0.00047278189638830844
+      }
+    },
+    {
+      "resource_alias": "vm-1413c3cbc3",
+      "metric": "NetworksBytesOut",
+      "minutes": 15,
+      "bucket_mean_distribution": {
+        "n": 96,
+        "mean": 9158996193592.734,
+        "min": 8939793170893.723,
+        "max": 9256582605749.855,
+        "p90": 9240914235266.293,
+        "p95": 9246759735414.111,
+        "p99": 9253369810349.785
+      },
+      "coverage": 1.0,
+      "max_of_provider_maxima": 9258491412963.0,
+      "provider_percentile_points": {
+        "p90": 96,
+        "p95": 96,
+        "p99": 96
+      },
+      "relative_change_vs_1m": {
+        "p90": -0.00023924274602024544,
+        "p95": -0.0001979920589571967,
+        "p99": -0.0005281624789962634,
+        "max": -0.0005854321610326577
+      }
+    },
+    {
+      "resource_alias": "vm-195c58418b",
+      "metric": "CpuUtilization",
+      "minutes": 15,
+      "bucket_mean_distribution": {
+        "n": 96,
+        "mean": 1.7009589245420955,
+        "min": 1.3366165439833708,
+        "max": 2.3719601727765913,
+        "p90": 2.2417852455979945,
+        "p95": 2.304200409402647,
+        "p99": 2.3341129827255096
+      },
+      "coverage": 1.0,
+      "max_of_provider_maxima": 15.93913694197486,
+      "provider_percentile_points": {
+        "p90": 96,
+        "p95": 96,
+        "p99": 96
+      },
+      "relative_change_vs_1m": {
+        "p90": -0.016165049529586726,
+        "p95": -0.02779427280770867,
+        "p99": -0.08448247626203795,
+        "max": -0.4123844233389164
+      },
+      "observed_minutes_bucket_mean_over_threshold": {
+        "50": 0,
+        "70": 0,
+        "80": 0,
+        "90": 0
+      }
+    },
+    {
+      "resource_alias": "vm-195c58418b",
+      "metric": "DiskBytesRead",
+      "minutes": 15,
+      "bucket_mean_distribution": {
+        "n": 96,
+        "mean": 7632530118.162963,
+        "min": 7524101120.0,
+        "max": 7840623616.0,
+        "p90": 7820291072.0,
+        "p95": 7840623616.0,
+        "p99": 7840623616.0
+      },
+      "coverage": 1.0,
+      "max_of_provider_maxima": 7840623616.0,
+      "provider_percentile_points": {
+        "p90": 96,
+        "p95": 96,
+        "p99": 96
+      },
+      "relative_change_vs_1m": {
+        "p90": -2.8807103603730223e-07,
+        "p95": 0.0,
+        "p99": 0.0,
+        "max": 0.0
+      }
+    },
+    {
+      "resource_alias": "vm-195c58418b",
+      "metric": "DiskBytesWritten",
+      "minutes": 15,
+      "bucket_mean_distribution": {
+        "n": 96,
+        "mean": 149574947840.0,
+        "min": 147125459057.77777,
+        "max": 151832512307.2,
+        "p90": 151402948994.84445,
+        "p95": 151599697874.4889,
+        "p99": 151760635876.69333
+      },
+      "coverage": 1.0,
+      "max_of_provider_maxima": 151857632256.0,
+      "provider_percentile_points": {
+        "p90": 96,
+        "p95": 96,
+        "p99": 96
+      },
+      "relative_change_vs_1m": {
+        "p90": -0.0003442063099974433,
+        "p95": -0.0003692091771109237,
+        "p99": -0.0006269905532367698,
+        "max": -0.0004170618201998615
+      }
+    },
+    {
+      "resource_alias": "vm-195c58418b",
+      "metric": "DiskIopsRead",
+      "minutes": 15,
+      "bucket_mean_distribution": {
+        "n": 96,
+        "mean": 191734.66307870368,
+        "min": 187178.0,
+        "max": 200284.0,
+        "p90": 199460.0,
+        "p95": 200284.0,
+        "p99": 200284.0
+      },
+      "coverage": 1.0,
+      "max_of_provider_maxima": 200284.0,
+      "provider_percentile_points": {
+        "p90": 96,
+        "p95": 96,
+        "p99": 96
+      },
+      "relative_change_vs_1m": {
+        "p90": -2.757437498233904e-06,
+        "p95": 0.0,
+        "p99": 0.0,
+        "max": 0.0
+      }
+    },
+    {
+      "resource_alias": "vm-195c58418b",
+      "metric": "DiskIopsWritten",
+      "minutes": 15,
+      "bucket_mean_distribution": {
+        "n": 96,
+        "mean": 19010426.66087963,
+        "min": 18717122.911111113,
+        "max": 19311670.68888889,
+        "p90": 19251605.916666668,
+        "p95": 19281745.272222225,
+        "p99": 19305364.187777776
+      },
+      "coverage": 1.0,
+      "max_of_provider_maxima": 19314734.0,
+      "provider_percentile_points": {
+        "p90": 96,
+        "p95": 96,
+        "p99": 96
+      },
+      "relative_change_vs_1m": {
+        "p90": -0.00041530015293680353,
+        "p95": -0.00042426038386757567,
+        "p99": -0.0004736679420820329,
+        "max": -0.0004417902016234921
+      }
+    },
+    {
+      "resource_alias": "vm-195c58418b",
+      "metric": "MemoryUtilization",
+      "minutes": 15,
+      "bucket_mean_distribution": {
+        "n": 96,
+        "mean": 31.19743675745043,
+        "min": 30.889510953088706,
+        "max": 31.92063701847301,
+        "p90": 31.660967171815038,
+        "p95": 31.76509805792087,
+        "p99": 31.897944703858684
+      },
+      "coverage": 1.0,
+      "max_of_provider_maxima": 36.0856858655288,
+      "provider_percentile_points": {
+        "p90": 96,
+        "p95": 96,
+        "p99": 96
+      },
+      "relative_change_vs_1m": {
+        "p90": -0.001675939279391902,
+        "p95": -0.002459207147933159,
+        "p99": -0.008927473307031975,
+        "max": -0.019393330087295366
+      },
+      "observed_minutes_bucket_mean_over_threshold": {
+        "50": 0,
+        "70": 0,
+        "80": 0,
+        "90": 0
+      }
+    },
+    {
+      "resource_alias": "vm-195c58418b",
+      "metric": "NetworksBytesIn",
+      "minutes": 15,
+      "bucket_mean_distribution": {
+        "n": 96,
+        "mean": 1486718431893.3103,
+        "min": 1445794040957.7556,
+        "max": 1500861616342.889,
+        "p90": 1499238237307.4224,
+        "p95": 1499758669632.0195,
+        "p99": 1500470933923.6155
+      },
+      "coverage": 1.0,
+      "max_of_provider_maxima": 1501107528343.0,
+      "provider_percentile_points": {
+        "p90": 96,
+        "p95": 96,
+        "p99": 96
+      },
+      "relative_change_vs_1m": {
+        "p90": -0.0001401142053310386,
+        "p95": -0.00011882447440027647,
+        "p99": -0.00040225956119002135,
+        "max": -0.0004659658926457606
+      }
+    },
+    {
+      "resource_alias": "vm-195c58418b",
+      "metric": "NetworksBytesOut",
+      "minutes": 15,
+      "bucket_mean_distribution": {
+        "n": 96,
+        "mean": 1617536812795.4802,
+        "min": 1573660510386.7334,
+        "max": 1633298967671.111,
+        "p90": 1631410772339.1555,
+        "p95": 1632045166247.1055,
+        "p99": 1632869774052.1934
+      },
+      "coverage": 1.0,
+      "max_of_provider_maxima": 1633567957317.0,
+      "provider_percentile_points": {
+        "p90": 96,
+        "p95": 96,
+        "p99": 96
+      },
+      "relative_change_vs_1m": {
+        "p90": -0.00014704641482890694,
+        "p95": -0.0001314523880977043,
+        "p99": -0.0004057473833540939,
+        "max": -0.00046728785531510264
+      }
+    }
+  ],
+  "historical_probes": [
+    {
+      "resource_alias": "vm-1413c3cbc3",
+      "metric": "CpuUtilization",
+      "minutes": 1,
+      "statistic": "mean",
+      "start": "2026-10-15T09:30:00+00:00",
+      "end": "2026-10-15T11:30:00+00:00",
+      "historical": true,
+      "elapsed_seconds": 0.287506,
+      "status": "OK",
+      "streams": 1,
+      "json_bytes": 9085,
+      "gzip_bytes": 2249,
+      "returned_points": 121,
+      "kept_points": 120
+    },
+    {
+      "resource_alias": "vm-1413c3cbc3",
+      "metric": "CpuUtilization",
+      "minutes": 5,
+      "statistic": "mean",
+      "start": "2026-09-22T09:30:00+00:00",
+      "end": "2026-09-22T11:30:00+00:00",
+      "historical": true,
+      "status": "ERROR",
+      "code": "InvalidParameter",
+      "http_status": 400,
+      "elapsed_seconds": 0.038715
+    },
+    {
+      "resource_alias": "vm-1413c3cbc3",
+      "metric": "CpuUtilization",
+      "minutes": 15,
+      "statistic": "mean",
+      "start": "2026-09-18T09:30:00+00:00",
+      "end": "2026-09-18T11:30:00+00:00",
+      "historical": true,
+      "status": "ERROR",
+      "code": "InvalidParameter",
+      "http_status": 400,
+      "elapsed_seconds": 0.111789
+    },
+    {
+      "resource_alias": "vm-1413c3cbc3",
+      "metric": "CpuUtilization",
+      "minutes": 60,
+      "statistic": "mean",
+      "start": "2026-08-25T09:30:00+00:00",
+      "end": "2026-08-25T11:30:00+00:00",
+      "historical": true,
+      "elapsed_seconds": 0.180531,
+      "status": "OK",
+      "streams": 1,
+      "json_bytes": 998,
+      "gzip_bytes": 588,
+      "returned_points": 3,
+      "kept_points": 2
+    }
+  ],
+  "calls_total": 388,
+  "errors_total": 2,
+  "completed_at": "2026-10-23T11:49:52.353593+00:00",
+  "supplemental_history_probes": [
+    {
+      "evidence_group": "history_supplement.json",
+      "age_days": 14,
+      "minutes": 1,
+      "start": "2026-10-09T10:30:00+00:00",
+      "end": "2026-10-09T11:30:00+00:00",
+      "status": "OK",
+      "kept_points": 60,
+      "first_point": "2026-10-09T10:30:00+00:00",
+      "last_point": "2026-10-09T11:29:00+00:00"
+    },
+    {
+      "evidence_group": "history_supplement.json",
+      "age_days": 29,
+      "minutes": 1,
+      "start": "2026-09-24T10:30:00+00:00",
+      "end": "2026-09-24T11:30:00+00:00",
+      "status": "OK",
+      "kept_points": 60,
+      "first_point": "2026-09-24T10:30:00+00:00",
+      "last_point": "2026-09-24T11:29:00+00:00"
+    },
+    {
+      "evidence_group": "history_supplement.json",
+      "age_days": 31,
+      "minutes": 1,
+      "start": "2026-09-22T10:30:00+00:00",
+      "end": "2026-09-22T11:30:00+00:00",
+      "status": "OK",
+      "kept_points": 60,
+      "first_point": "2026-09-22T10:30:00+00:00",
+      "last_point": "2026-09-22T11:29:00+00:00"
+    },
+    {
+      "evidence_group": "history_supplement.json",
+      "age_days": 29,
+      "minutes": 5,
+      "start": "2026-09-24T10:30:00+00:00",
+      "end": "2026-09-24T11:30:00+00:00",
+      "status": "OK",
+      "kept_points": 12,
+      "first_point": "2026-09-24T10:30:00+00:00",
+      "last_point": "2026-09-24T11:25:00+00:00"
+    },
+    {
+      "evidence_group": "history_supplement.json",
+      "age_days": 29,
+      "minutes": 15,
+      "start": "2026-09-24T10:30:00+00:00",
+      "end": "2026-09-24T11:30:00+00:00",
+      "status": "OK",
+      "kept_points": 4,
+      "first_point": "2026-09-24T10:30:00+00:00",
+      "last_point": "2026-09-24T11:15:00+00:00"
+    },
+    {
+      "evidence_group": "history_supplement.json",
+      "age_days": 31,
+      "minutes": 15,
+      "start": "2026-09-22T10:30:00+00:00",
+      "end": "2026-09-22T11:30:00+00:00",
+      "status": "ERROR",
+      "code": "InvalidParameter",
+      "http_status": 400,
+      "message": "Invalid time range for given interval (300s): start=2026-09-22T10:30:00Z, end=2026-09-22T11:30:00Z"
+    },
+    {
+      "evidence_group": "history_deep_probe.json",
+      "age_days": 31,
+      "minutes": 1,
+      "statistic": "mean()",
+      "start": "2026-09-22T10:30:00+00:00",
+      "end": "2026-09-22T11:30:00+00:00",
+      "status": "OK",
+      "kept_points": 60,
+      "unique_values": 60,
+      "first_values": [
+        12.76680997561032,
+        13.950826953296966,
+        13.148165597498398,
+        14.167597461220957,
+        14.785399783080827,
+        15.856714658089677,
+        13.952826891809144,
+        14.380506677088336,
+        14.821702987986809,
+        16.030774225849132,
+        14.928569648292573,
+        15.335662437066537
+      ],
+      "first_point": "2026-09-22T10:30:00+00:00",
+      "last_point": "2026-09-22T11:29:00+00:00"
+    },
+    {
+      "evidence_group": "history_deep_probe.json",
+      "age_days": 59,
+      "minutes": 1,
+      "statistic": "mean()",
+      "start": "2026-08-25T10:30:00+00:00",
+      "end": "2026-08-25T11:30:00+00:00",
+      "status": "OK",
+      "kept_points": 60,
+      "unique_values": 60,
+      "first_values": [
+        0.11673126899872426,
+        0.12005323284417417,
+        0.19495320302909938,
+        0.18996370738196533,
+        0.17998651804998647,
+        0.15506722981402382,
+        0.12006509687596871,
+        0.12001820054083194,
+        0.12673055596619448,
+        0.173431136852947,
+        0.14009025315238105,
+        0.13173403805460507
+      ],
+      "first_point": "2026-08-25T10:30:00+00:00",
+      "last_point": "2026-08-25T11:29:00+00:00"
+    },
+    {
+      "evidence_group": "history_deep_probe.json",
+      "age_days": 59,
+      "minutes": 1,
+      "statistic": "count()",
+      "start": "2026-08-25T10:30:00+00:00",
+      "end": "2026-08-25T11:30:00+00:00",
+      "status": "OK",
+      "kept_points": 60,
+      "unique_values": 1,
+      "first_values": [
+        6.0,
+        6.0,
+        6.0,
+        6.0,
+        6.0,
+        6.0,
+        6.0,
+        6.0,
+        6.0,
+        6.0,
+        6.0,
+        6.0
+      ],
+      "first_point": "2026-08-25T10:30:00+00:00",
+      "last_point": "2026-08-25T11:29:00+00:00"
+    },
+    {
+      "evidence_group": "history_deep_probe.json",
+      "age_days": 59,
+      "minutes": 5,
+      "statistic": "mean()",
+      "start": "2026-08-25T10:30:00+00:00",
+      "end": "2026-08-25T11:30:00+00:00",
+      "status": "ERROR",
+      "code": "InvalidParameter",
+      "message": "Invalid time range for given interval (300s): start=2026-08-25T10:30:00Z, end=2026-08-25T11:30:00Z"
+    },
+    {
+      "evidence_group": "history_deep_probe.json",
+      "age_days": 59,
+      "minutes": 15,
+      "statistic": "mean()",
+      "start": "2026-08-25T10:30:00+00:00",
+      "end": "2026-08-25T11:30:00+00:00",
+      "status": "ERROR",
+      "code": "InvalidParameter",
+      "message": "Invalid time range for given interval (300s): start=2026-08-25T10:30:00Z, end=2026-08-25T11:30:00Z"
+    },
+    {
+      "evidence_group": "history_percentiles_probe.json",
+      "age_days": 59,
+      "minutes": 1,
+      "metric": "CpuUtilization",
+      "statistic": "percentile(0.90)",
+      "start": "2026-08-25T10:30:00+00:00",
+      "end": "2026-08-25T11:30:00+00:00",
+      "status": "OK",
+      "kept_points": 60
+    },
+    {
+      "evidence_group": "history_percentiles_probe.json",
+      "age_days": 59,
+      "minutes": 1,
+      "metric": "CpuUtilization",
+      "statistic": "percentile(0.95)",
+      "start": "2026-08-25T10:30:00+00:00",
+      "end": "2026-08-25T11:30:00+00:00",
+      "status": "OK",
+      "kept_points": 60
+    },
+    {
+      "evidence_group": "history_percentiles_probe.json",
+      "age_days": 59,
+      "minutes": 1,
+      "metric": "CpuUtilization",
+      "statistic": "percentile(0.99)",
+      "start": "2026-08-25T10:30:00+00:00",
+      "end": "2026-08-25T11:30:00+00:00",
+      "status": "OK",
+      "kept_points": 60
+    },
+    {
+      "evidence_group": "history_percentiles_probe.json",
+      "age_days": 59,
+      "minutes": 1,
+      "metric": "MemoryUtilization",
+      "statistic": "mean()",
+      "start": "2026-08-25T10:30:00+00:00",
+      "end": "2026-08-25T11:30:00+00:00",
+      "status": "OK",
+      "kept_points": 60
+    }
+  ],
+  "monitoring_calls_total_including_supplement": 403,
+  "observed_connection_counts_by_type": {
+    "oci": 1
+  },
+  "inventory_sanitized": [
+    {
+      "resource_alias": "vm-1413c3cbc3",
+      "shape": "VM.Optimized3.Flex",
+      "shape_config": {
+        "ocpus": 5.0,
+        "memory_in_gbs": 32.0,
+        "baseline_ocpu_utilization": null,
+        "processor_description": "3.0 GHz Intel® Xeon® Gold 6354 (Ice Lake)",
+        "networking_bandwidth_in_gbps": 20.0,
+        "max_vnic_attachments": 10,
+        "gpus": 0,
+        "gpu_description": null,
+        "local_disks": 0,
+        "local_disks_total_size_in_gbs": null,
+        "local_disk_description": null,
+        "vcpus": 10,
+        "resource_management": null,
+        "local_volume_size_in_gbs": null
+      },
+      "lifecycle_state": "RUNNING"
+    },
+    {
+      "resource_alias": "vm-195c58418b",
+      "shape": "VM.Standard.E4.Flex",
+      "shape_config": {
+        "ocpus": 2.0,
+        "memory_in_gbs": 4.0,
+        "baseline_ocpu_utilization": "BASELINE_1_1",
+        "processor_description": "2.55 GHz AMD EPYC™ 7J13 (Milan)",
+        "networking_bandwidth_in_gbps": 2.0,
+        "max_vnic_attachments": 2,
+        "gpus": 0,
+        "gpu_description": null,
+        "local_disks": 0,
+        "local_disks_total_size_in_gbs": null,
+        "local_disk_description": null,
+        "vcpus": 4,
+        "resource_management": null,
+        "local_volume_size_in_gbs": null
+      },
+      "lifecycle_state": "RUNNING"
+    }
+  ]
+}
