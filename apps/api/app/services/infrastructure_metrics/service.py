@@ -8,7 +8,7 @@ import uuid
 
 from .catalog import get_metric
 from .collector import collect, estimated_api_calls, plan_queries
-from .config import config_from_connection
+from .config import InfrastructureMetricsConfig, config_from_connection
 from .contracts import CollectionCancelled, QueryResult
 from .credentials import build_oci_adapter
 from .normalization import query_results_to_silver_rows
@@ -20,13 +20,29 @@ def collect_oci_metrics(
         ("mean", "min", "max", "count", "sum", "p90", "p95", "p99"),
     collection_run_id: str | None = None, persist: bool = False,
     should_abort=None,
+    config_snapshot: dict | None = None,
 ) -> dict:
     """Run the configured, allowlisted OCI pilot and return normalized rows.
 
     Persistence is opt-in. When enabled, rows are merged and atomically
     published by UTC day; scheduled collection remains disabled.
     """
-    config = config_from_connection(connection)
+    if config_snapshot is None:
+        config = config_from_connection(connection)
+    else:
+        if config_snapshot.get("version") != 1:
+            raise ValueError("unsupported infrastructure metrics config snapshot version")
+        config = InfrastructureMetricsConfig(
+            enabled=config_snapshot.get("enabled") is True,
+            compartment_id=config_snapshot.get("compartment_id"),
+            provider_account_id=config_snapshot.get("provider_account_id"),
+            region=config_snapshot.get("region"),
+            resource_ids=tuple(config_snapshot.get("resource_ids") or ()),
+            metric_names=tuple(config_snapshot.get("metric_names") or ()),
+            resolutions_seconds=tuple(int(value) for value in config_snapshot.get("resolutions_seconds", ())),
+            retention_days=int(config_snapshot.get("retention_days", 60)),
+            schedule_enabled=False,
+        )
     scope = config.scope(int(connection.id))
     if start_utc.tzinfo is None or end_utc.tzinfo is None:
         raise ValueError("collection window must use timezone-aware datetimes")
