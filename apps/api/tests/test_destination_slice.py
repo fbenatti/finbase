@@ -122,3 +122,34 @@ def test_partition_spec_json_extra_requires_column():
     )
     assert len(cfg.extras) == 1
     assert cfg.extras[0].transform == "bucket"
+
+
+def test_metric_series_uses_daily_metric_and_connection_slice():
+    cfg = resolve_destination_slice_config(
+        "resource_metric_series",
+        column_names={"metric_day", "_source_connection_id", "resource_id"},
+    )
+    assert cfg.grain == "metric_day"
+    assert cfg.replace_columns == ("metric_day", "_source_connection_id")
+    expr = build_slice_row_filter(cfg, connection_id=7, metric_day="20261023")
+    assert isinstance(expr, And)
+
+
+def test_metric_day_staging_validates_one_connection_and_day():
+    cfg = resolve_destination_slice_config(
+        "resource_metric_series",
+        column_names={"metric_day", "_source_connection_id", "resource_id"},
+    )
+    frame = pd.DataFrame({
+        "_source_connection_id": [7, 7],
+        "metric_day": ["20261023", "20261023"],
+        "resource_id": ["vm-a", "vm-b"],
+    })
+    validate_staging_slice(
+        frame, cfg, connection_id=7, metric_day="20261023",
+    )
+    with pytest.raises(ValueError, match="distintos"):
+        validate_staging_slice(
+            frame.assign(_source_connection_id=[7, 8]), cfg,
+            connection_id=7, metric_day="20261023",
+        )
