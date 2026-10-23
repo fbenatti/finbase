@@ -28,6 +28,7 @@ WORKER_TASK_TYPES: tuple[str, ...] = (
     "ai_cost_relationship_reprocess",
     "gold_reprocess",
     "reservation_collection",
+    "infrastructure_metrics_collection",
     "price_reference_collection",
     "azure_pricesheet_refresh",
     "anomaly_detection",
@@ -39,6 +40,7 @@ _ANALYTIC_WRITER_TASK_TYPES = {
     "reprocess", "reclassification", "forecast", "forecast_accuracy",
     "shared_cost", "ai_cost_relationship_reprocess", "gold_reprocess",
     "azure_pricesheet_refresh", "anomaly_detection",
+    "infrastructure_metrics_collection",
 }
 
 
@@ -413,6 +415,11 @@ def reconcile_stale_running_tasks(session: Session) -> None:
                 row.finished_at = None
                 continue
         if row.task_type == "reservation_collection":
+            row.status = "QUEUED"
+            row.phase = "Reenfileirado após reinício do worker"
+            row.finished_at = None
+            continue
+        if row.task_type == "infrastructure_metrics_collection":
             row.status = "QUEUED"
             row.phase = "Reenfileirado após reinício do worker"
             row.finished_at = None
