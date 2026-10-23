@@ -12,6 +12,10 @@ from enum import Enum
 from typing import Any, Mapping
 
 
+class CollectionCancelled(RuntimeError):
+    """Raised when a queued collection receives a cooperative cancel signal."""
+
+
 class MetricKind(str, Enum):
     GAUGE = "GAUGE"
     COUNTER = "COUNTER"
