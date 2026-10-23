@@ -1,6 +1,7 @@
-"""Explicit OCI infrastructure-metric collection entry point (no persistence)."""
+"""Explicit OCI infrastructure-metric collection entry point."""
 from __future__ import annotations
 
+from collections import defaultdict
 from datetime import datetime
 from typing import Any
 import uuid
@@ -17,13 +18,12 @@ def collect_oci_metrics(
     connection: Any, *, start_utc: datetime, end_utc: datetime,
     resolution_seconds: int, statistics: tuple[str, ...] =
         ("mean", "min", "max", "count", "sum", "p90", "p95", "p99"),
-    collection_run_id: str | None = None,
+    collection_run_id: str | None = None, persist: bool = False,
 ) -> dict:
     """Run the configured, allowlisted OCI pilot and return normalized rows.
 
-    This function is intentionally not wired to a scheduler or a writer. The
-    caller must review the estimate, choose a connection configured for the
-    pilot, and separately implement atomic publication before persisting rows.
+    Persistence is opt-in. When enabled, rows are merged and atomically
+    published by UTC day; scheduled collection remains disabled.
     """
     config = config_from_connection(connection)
     scope = config.scope(int(connection.id))
@@ -44,6 +44,21 @@ def collect_oci_metrics(
         results, source_owner="oci_infrastructure_metrics",
         collection_run_id=collection_run_id or str(uuid.uuid4()),
     )
+    from .counters import derive_counter_rates
+
+    rows.extend(derive_counter_rates(rows))
+    persisted_by_day: dict[str, int] = {}
+    if persist and rows:
+        from .publication import publish_metric_rows
+
+        rows_by_day: dict[str, list[dict]] = defaultdict(list)
+        for row in rows:
+            row["_billing_period"] = row["metric_day"]
+            rows_by_day[str(row["metric_day"])].append(row)
+        for metric_day, day_rows in sorted(rows_by_day.items()):
+            persisted_by_day[metric_day] = publish_metric_rows(
+                day_rows, connection_id=int(connection.id), metric_day=metric_day,
+            )
     return {
         "provider": "oci",
         "connection_id": int(connection.id),
@@ -55,5 +70,6 @@ def collect_oci_metrics(
         "estimated_api_calls": estimated_calls,
         "completed_query_count": len(results),
         "rows_prepared": rows,
-        "persistence_enabled": False,
+        "persistence_enabled": persist,
+        "persisted_by_day": persisted_by_day,
     }
