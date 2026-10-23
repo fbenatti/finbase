@@ -8,11 +8,11 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from datetime import datetime
-from enum import StrEnum
+from enum import Enum
 from typing import Any, Mapping
 
 
-class MetricKind(StrEnum):
+class MetricKind(str, Enum):
     GAUGE = "GAUGE"
     COUNTER = "COUNTER"
     RATE = "RATE"
@@ -20,7 +20,7 @@ class MetricKind(StrEnum):
     DISTRIBUTION = "DISTRIBUTION"
 
 
-class PercentileBasis(StrEnum):
+class PercentileBasis(str, Enum):
     NATIVE_BUCKET = "NATIVE_BUCKET"
     WINDOW_OF_BUCKET_VALUES = "WINDOW_OF_BUCKET_VALUES"
     OBSERVATION_DISTRIBUTION = "OBSERVATION_DISTRIBUTION"
