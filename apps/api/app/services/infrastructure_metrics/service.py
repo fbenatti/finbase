@@ -97,7 +97,7 @@ def collect_oci_metrics(
     if not call_statuses:
         # Keep adapters used by callers/tests that aggregate the call status.
         call_statuses = [result.status_code for result in results
-                         for _ in range(max(1, int(result.attempt_count)))]
+                         for _ in range(max(1, int(getattr(result, "attempt_count", 1))))]
     return {
         "provider": "oci",
         "connection_id": int(connection.id),
