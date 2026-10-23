@@ -2535,6 +2535,7 @@ export async function getForecastAccuracyDeltaSeries(
 export interface ForecastDesvioItem {
   path: string[];
   name: string;
+  sku?: string;
   forecast_value: number;
   actual_value: number;
   variance: number;
