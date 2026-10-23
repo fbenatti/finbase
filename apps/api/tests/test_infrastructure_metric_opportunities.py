@@ -20,9 +20,11 @@ OCI_CATALOG = FlexSizingCatalog(OCI_FLEX_RULES)
 OCI_PRICES = OciFlexPriceBook(ocpu_hour=0.28, memory_gb_hour=0.0079, currency="BRL")
 
 
-def _stats(p95, p99, peak, coverage=1.0, days=7):
+def _stats(p95, p99, peak, coverage=1.0, days=7, peak_p995=None):
     return {"p50": p95 / 2, "p95": p95, "p99": p99, "max": peak, "coverage": coverage,
-            "days_observed": days, "samples": 2016, "expected_buckets": 2016}
+            "days_observed": days, "samples": 2016, "expected_buckets": 2016,
+            "max_p99": peak_p995 if peak_p995 is not None else peak,
+            "max_p995": peak_p995 if peak_p995 is not None else peak}
 
 
 def _oci(cpu, memory, prices=OCI_PRICES, capacity=OCI_VM):
@@ -49,16 +51,28 @@ def test_idle_flex_vm_is_rightsized_down_with_real_price_saving():
     assert result["action_type"] == RIGHTSIZE_DOWN
     # 10 vCPU × max(8%/70%, 15%/90%) = 1,67 vCPU → 1 OCPU (2 vCPU)
     assert result["to_config"]["vcpus"] == 2.0 and result["to_config"]["ocpu"] == 1.0
-    # 32 GB × max(30%/80%, 35%/90%) = 12,44 GB → 13 GB
-    assert result["to_config"]["memory_gb"] == 13.0
-    expected = 730 * ((5 - 1) * 0.28 + (32 - 13) * 0.0079)
+    # 32 GB × max(30%/80%, 35%/90%, pico 40%/95%) = 13,47 GB → 14 GB (o pico define)
+    assert result["to_config"]["memory_gb"] == 14.0
+    assert result["evidence"]["sizing_basis"]["memory"] == "peak"
+    expected = 730 * ((5 - 1) * 0.28 + (32 - 14) * 0.0079)
     assert abs(result["monthly_saving"] - round(expected, 2)) < 0.02
     assert result["confidence"] == "HIGH"
 
 
-def test_peak_above_target_capacity_is_flagged_as_risk():
-    result = _oci(_stats(8, 15, 90), _stats(30, 35, 40))
+def test_isolated_peak_is_tolerated_but_lowers_confidence():
+    # A single 90% peak; 99.5% of the bucket peaks stay at 18% → sizing by averages.
+    result = _oci(_stats(8, 15, 90, peak_p995=18), _stats(30, 35, 40))
+    assert result["action_type"] == RIGHTSIZE_DOWN
     assert result["risks"] and result["confidence"] == "MEDIUM"
+
+
+def test_frequent_peaks_keep_the_cpu_size():
+    """Low averages but routines that use the whole VM every day (inst-tivit-queue-02)."""
+    result = _oci(_stats(33, 41, 99, days=30, peak_p995=97), _stats(37, 39, 63, days=30))
+    # 10 vCPU × 97% = 9.7 vCPU of peak demand → 5 OCPU stays; memory may still shrink.
+    assert result["to_config"]["vcpus"] == 10.0
+    assert result["evidence"]["sizing_basis"]["cpu"] == "peak"
+    assert "os picos" in " ".join(result["rationale"])
 
 
 def test_hot_vm_is_sized_up_with_negative_saving():

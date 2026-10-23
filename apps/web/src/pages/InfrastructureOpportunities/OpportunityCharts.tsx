@@ -175,11 +175,13 @@ export default function OpportunityCharts({ opportunityId, from, to, targets, co
       detail: "Só 1% do tempo fica acima. Protege contra rajadas frequentes que o P95 não enxerga.",
     },
     {
-      level: stats.saturatedAfter === 0 ? "ok" : stats.saturatedAfter < 0.01 ? "warn" : "risk",
+      level: stats.saturatedAfter === 0 ? "ok" : stats.saturatedAfter <= 0.005 ? "warn" : "risk",
       label: `Tempo com pico acima de 100% após a mudança: ${duration(stats.saturatedAfter, view.windowHours)}`,
       detail: stats.saturatedAfter === 0
         ? "Nenhum pico observado ultrapassaria a capacidade recomendada."
-        : `Nesses momentos a demanda passaria da capacidade: ${metric === "cpu" ? "processos esperam CPU (lentidão), sem queda" : "risco de falta de memória"}. Confira se coincidem com rotinas críticas no mapa abaixo.`,
+        : stats.saturatedAfter <= 0.005
+          ? "Dentro da tolerância do motor (até 0,5% do tempo, ≈ 3,6 h/mês). Confira no mapa abaixo em que horários acontecem."
+          : `Acima da tolerância de 0,5% do tempo. Nesses momentos a demanda passaria da capacidade: ${metric === "cpu" ? "processos esperam CPU (lentidão), sem queda" : "risco de falta de memória"}. Confira se coincidem com rotinas críticas no mapa abaixo.`,
     },
   ];
 
@@ -267,7 +269,15 @@ export default function OpportunityCharts({ opportunityId, from, to, targets, co
         { type: "scatter", mode: "lines", x: view.hourKeys, y: afterP95, line: { color: COLORS.after, width: 2 }, hovertemplate: "P95 da hora: %{y:.1f}%<extra>Após</extra>", xaxis: "x", yaxis: "y2" },
       ] as never} layout={{
         ...commonLayout, height: 540, margin: { l: 72, r: 20, t: 36, b: 50 }, hovermode: "x unified", showlegend: false,
-        xaxis: { type: "date", tickformat: "%d/%m", showgrid: false, anchor: "y2" },
+        xaxis: {
+          type: "date", showgrid: false, anchor: "y2", hoverformat: "%d/%m %H:%M",
+          // Mais zoom, mais detalhe: dia → dia e hora → hora e minuto.
+          tickformatstops: [
+            { dtickrange: [null, 3_600_000], value: "%d/%m %H:%M" },
+            { dtickrange: [3_600_000, 86_400_000], value: "%d/%m %Hh" },
+            { dtickrange: [86_400_000, null], value: "%d/%m" },
+          ],
+        },
         yaxis: { domain: [0.56, 1], range: [0, yMax], ticksuffix: "%", gridcolor: COLORS.grid, title: { text: `${view.capacityNow} ${view.unit}` } },
         yaxis2: { domain: [0, 0.44], range: [0, yMax], ticksuffix: "%", gridcolor: COLORS.grid, title: { text: `${view.capacityAfter} ${view.unit}` } },
         shapes: [...zoneShapes("y"), ...zoneShapes("y2")],

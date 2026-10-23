@@ -33,11 +33,18 @@ CPU_METRIC = "cpu.utilization"
 MEMORY_METRIC = "memory.utilization"
 
 DEFAULT_POLICY = {
-    "version": "rightsizing_policy_v1",
+    "version": "rightsizing_policy_v2",
     "cpu_target_p95": 0.70,
     "cpu_target_p99": 0.90,
     "memory_target_p95": 0.80,
     "memory_target_p99": 0.90,
+    # Peaks size the resource too: the P99.5 of the per-bucket native maxima
+    # must fit the new capacity (at most 0.5% of the time with a peak above
+    # it). Memory peaks must always fit with headroom: running out of memory
+    # kills processes instead of queueing them.
+    "cpu_peak_quantile": 99.5,
+    "cpu_peak_limit": 1.00,
+    "memory_peak_limit": 0.95,
     "min_days": 7,
     "min_coverage": 0.90,
     "high_confidence_coverage": 0.98,
@@ -91,6 +98,9 @@ def summarize_series(
         "p99": _linear_quantile(values, 99),
         "average": sum(values) / len(values) if values else None,
         "max": max(maxima) if maxima else (max(values) if values else None),
+        # Distribution of the per-bucket native maxima (provider ``max``).
+        "max_p99": _linear_quantile(maxima, 99),
+        "max_p995": _linear_quantile(maxima, 99.5),
         "daily": [
             {"day": day, "p95": _linear_quantile(day_values, 95), "max": max(day_values),
              "average": sum(day_values) / len(day_values)}
@@ -103,26 +113,56 @@ def summarize_series(
     }
 
 
-def _required(capacity: float, stats: Mapping | None, t95: float, t99: float) -> float | None:
-    if not stats or stats.get("p95") is None or stats.get("p99") is None:
-        return None
-    return max(capacity * stats["p95"] / 100 / t95, capacity * stats["p99"] / 100 / t99)
-
-
 def required_capacity(current: CapacitySnapshot, cpu: Mapping, memory: Mapping | None,
-                      policy: Mapping = DEFAULT_POLICY) -> tuple[float, float, bool]:
-    """vCPU and GB that keep P95/P99 under the policy targets (with hysteresis)."""
-    need_vcpus = _required(current.vcpus, cpu, policy["cpu_target_p95"], policy["cpu_target_p99"])
-    need_gb = _required(current.memory_gb, memory, policy["memory_target_p95"], policy["memory_target_p99"])
-    memory_from_telemetry = need_gb is not None
-    # Without memory telemetry the memory size is preserved, never guessed.
-    need_gb = current.memory_gb if need_gb is None else need_gb
+                      policy: Mapping = DEFAULT_POLICY) -> dict:
+    """vCPU and GB the demand needs, and which criterion set each of them.
+
+    CPU: the largest of P95/target, P99/target and the P99.5 of the bucket
+    peaks; memory: P95/target, P99/target and the observed peak with headroom.
+    Reductions below ``min_change_ratio`` keep the current size.
+    """
+    candidates_cpu = {
+        "p95": current.vcpus * cpu["p95"] / 100 / policy["cpu_target_p95"],
+        "p99": current.vcpus * cpu["p99"] / 100 / policy["cpu_target_p99"],
+    }
+    peak_cpu = cpu.get("max_p995")
+    if peak_cpu is not None:
+        candidates_cpu["peak"] = current.vcpus * peak_cpu / 100 / policy["cpu_peak_limit"]
+    cpu_basis = max(candidates_cpu, key=candidates_cpu.get)
+    need_vcpus = candidates_cpu[cpu_basis]
+
+    memory_from_telemetry = bool(memory and memory.get("p95") is not None and memory.get("p99") is not None)
+    if memory_from_telemetry:
+        candidates_memory = {
+            "p95": current.memory_gb * memory["p95"] / 100 / policy["memory_target_p95"],
+            "p99": current.memory_gb * memory["p99"] / 100 / policy["memory_target_p99"],
+        }
+        if memory.get("max") is not None:
+            candidates_memory["peak"] = current.memory_gb * memory["max"] / 100 / policy["memory_peak_limit"]
+        memory_basis = max(candidates_memory, key=candidates_memory.get)
+        need_gb = candidates_memory[memory_basis]
+    else:
+        # Without memory telemetry the memory size is preserved, never guessed.
+        memory_basis, need_gb = "unchanged", current.memory_gb
+
+    # The criterion that set the need stays as the basis; the hysteresis only
+    # rounds a small reduction back to the current size.
     min_change = policy.get("min_change_ratio", 0)
-    if need_vcpus < current.vcpus and (current.vcpus - need_vcpus) / current.vcpus < min_change:
-        need_vcpus = current.vcpus
-    if need_gb < current.memory_gb and (current.memory_gb - need_gb) / current.memory_gb < min_change:
-        need_gb = current.memory_gb
-    return need_vcpus, need_gb, memory_from_telemetry
+    cpu_kept = need_vcpus < current.vcpus and (current.vcpus - need_vcpus) / current.vcpus < min_change
+    memory_kept = need_gb < current.memory_gb and (current.memory_gb - need_gb) / current.memory_gb < min_change
+    return {
+        "vcpus": current.vcpus if cpu_kept else need_vcpus,
+        "memory_gb": current.memory_gb if memory_kept else need_gb,
+        "memory_from_telemetry": memory_from_telemetry,
+        "cpu_basis": cpu_basis, "memory_basis": memory_basis,
+        "cpu_kept_by_min_change": cpu_kept, "memory_kept_by_min_change": memory_kept,
+    }
+
+
+BASIS_LABEL = {
+    "p95": "pelo P95 das médias", "p99": "pelo P99 das médias", "peak": "pelos picos",
+    "unchanged": "pela falta de telemetria (tamanho preservado)",
+}
 
 
 def _current_option(current: CapacitySnapshot) -> SizeOption:
@@ -176,9 +216,16 @@ def analyze_resource(
         return result
     days = min(stats["days_observed"] for stats in (cpu, memory) if stats)
     coverage = min(stats["coverage"] for stats in (cpu, memory) if stats)
-    need_vcpus, need_gb, memory_from_telemetry = required_capacity(capacity, cpu, memory, policy)
-    target = catalog.fit(capacity, need_vcpus, need_gb)
+    need = required_capacity(capacity, cpu, memory, policy)
+    memory_from_telemetry = need["memory_from_telemetry"]
+    target = catalog.fit(capacity, need["vcpus"], need["memory_gb"])
     result["to_config"] = dict(target.as_dict(), memory_sized_from_telemetry=memory_from_telemetry)
+    result["evidence"]["sizing_basis"] = {
+        "cpu": need["cpu_basis"], "memory": need["memory_basis"],
+        "required_vcpus": need["vcpus"], "required_memory_gb": need["memory_gb"],
+        "cpu_kept_by_min_change": need["cpu_kept_by_min_change"],
+        "memory_kept_by_min_change": need["memory_kept_by_min_change"],
+    }
     if target.vcpus == current.vcpus and target.memory_gb == current.memory_gb:
         result["action_type"] = KEEP
     elif target.vcpus <= current.vcpus and target.memory_gb <= current.memory_gb:
@@ -189,6 +236,22 @@ def analyze_resource(
         f"CPU P95 {cpu['p95']:.1f}% / P99 {cpu['p99']:.1f}% de {current.vcpus:g} vCPU; "
         f"alvo mantém P95 ≤ {policy['cpu_target_p95']:.0%} e P99 ≤ {policy['cpu_target_p99']:.0%}."
     )
+    if cpu.get("max_p995") is not None:
+        result["rationale"].append(
+            f"Picos de CPU: em 99,5% dos intervalos o pico ficou até {cpu['max_p995']:.1f}% "
+            f"({current.vcpus * cpu['max_p995'] / 100:.1f} vCPU); o novo tamanho precisa comportá-los "
+            f"(no máximo 0,5% do tempo com pico acima da capacidade)."
+        )
+    result["rationale"].append(
+        f"O tamanho de CPU foi definido {BASIS_LABEL.get(need['cpu_basis'], need['cpu_basis'])}"
+        + (f" e o de memória {BASIS_LABEL.get(need['memory_basis'], need['memory_basis'])}." if memory_from_telemetry else ".")
+    )
+    for resource, kept in (("CPU", need["cpu_kept_by_min_change"]), ("memória", need["memory_kept_by_min_change"])):
+        if kept:
+            result["rationale"].append(
+                f"A redução de {resource} que os dados permitiriam é menor que "
+                f"{policy.get('min_change_ratio', 0):.0%}; o tamanho atual foi mantido."
+            )
     if memory_from_telemetry:
         result["rationale"].append(
             f"Memória P95 {memory['p95']:.1f}% / P99 {memory['p99']:.1f}% de {current.memory_gb:g} GB; "
@@ -200,14 +263,21 @@ def analyze_resource(
         "cpu_p95": cpu["p95"] * current.vcpus / target.vcpus,
         "cpu_p99": cpu["p99"] * current.vcpus / target.vcpus,
         "cpu_peak": (cpu["max"] or 0) * current.vcpus / target.vcpus,
+        "cpu_peak_p995": (cpu.get("max_p995") or 0) * current.vcpus / target.vcpus,
     }
     if memory_from_telemetry:
         projected["memory_p95"] = memory["p95"] * current.memory_gb / target.memory_gb
         projected["memory_p99"] = memory["p99"] * current.memory_gb / target.memory_gb
     result["evidence"]["projected_utilization"] = projected
-    if projected["cpu_peak"] > 100:
+    if projected["cpu_peak_p995"] > 100 * policy["cpu_peak_limit"]:
         result["risks"].append(
-            f"Pico observado ({cpu['max']:.1f}%) equivaleria a {projected['cpu_peak']:.0f}% no alvo: haverá fila de CPU nesses momentos."
+            f"Picos frequentes: o P99,5 dos picos ({cpu['max_p995']:.1f}%) equivaleria a {projected['cpu_peak_p995']:.0f}% "
+            "no novo tamanho; mais de 0,5% do tempo com fila de CPU."
+        )
+    elif projected["cpu_peak"] > 100:
+        result["risks"].append(
+            f"Pico isolado: o maior pico ({cpu['max']:.1f}%) equivaleria a {projected['cpu_peak']:.0f}% no novo tamanho, "
+            "dentro da tolerância de 0,5% do tempo."
         )
     current_hourly = price_book.hourly(current) if price_book else None
     target_hourly = price_book.hourly(target) if price_book else None
