@@ -88,6 +88,21 @@ def _safe_plan(conn, config, plans, calls: int, start: datetime, end: datetime) 
     }
 
 
+def _collection_config_snapshot(config) -> dict:
+    """Freeze the allowlist and acquisition semantics, excluding credentials."""
+    return {
+        "version": 1,
+        "enabled": config.enabled,
+        "compartment_id": config.compartment_id,
+        "provider_account_id": config.provider_account_id,
+        "region": config.region,
+        "resource_ids": list(config.resource_ids),
+        "metric_names": list(config.metric_names),
+        "resolutions_seconds": list(config.resolutions_seconds),
+        "retention_days": config.retention_days,
+    }
+
+
 @router.post("/planejar")
 async def plan_collection(
     body: CollectionRequest,
@@ -134,6 +149,7 @@ async def queue_collection(
             "resolution_seconds": body.resolution_seconds,
             "statistics": list(body.statistics), "persist": True,
             "request_plan": _safe_plan(conn, config, plans, calls, start, end),
+            "config_snapshot": _collection_config_snapshot(config),
         },
         phase="Na fila: coleta manual de métricas de infraestrutura OCI",
     )
