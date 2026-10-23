@@ -2080,8 +2080,36 @@ async def create_ack(body: AckIn, db: AsyncSession = Depends(get_db)):
         if not target:
             raise HTTPException(422, "target_month obrigatório")
         body.target_month = target
-        forecast_grain, actual_grain = await _desvios_grain(run, snapshot, target, leaf)
-        forecast, actual = _leaf_totals(leaf, forecast_grain, actual_grain)
+        if "SKU" in leaf:
+            sku_index = leaf.index("SKU")
+            sku_scope = leaf[:sku_index]
+            if sku_index + 1 >= len(leaf):
+                raise HTTPException(422, "Informe o valor do SKU para justificar o desvio")
+            sku_value = leaf[sku_index + 1]
+            run, snapshot, forecast_schema = await _history_context(run.id, db)
+            actual_source, date_expr, measure, type_col, type_filter = _accuracy_actual_context(snapshot)
+            forecast_sku, actual_sku = await _forecast_sku_column(snapshot, forecast_schema, actual_source)
+            period_col = snapshot.get("period_column")
+            actual_month = (
+                f"CAST({_qi(period_col)} AS VARCHAR) = {_ql(target)}"
+                if period_col else f"date_format({date_expr}, '%Y%m') = {_ql(target)}"
+            )
+            scope_filter = _department_scope_filter(" > ".join(sku_scope))
+            sku_filter_forecast = f" AND TRIM(CAST({_qi(forecast_sku)} AS VARCHAR)) = {_ql(sku_value)}"
+            sku_filter_actual = f" AND TRIM(CAST({_qi(actual_sku)} AS VARCHAR)) = {_ql(sku_value)}"
+            totals = await trino_execute(
+                f"SELECT 'forecast' AS source, SUM(TRY_CAST(\"forecast_value\" AS DOUBLE)) AS value "
+                f"FROM iceberg.forecast.{run.result_table} WHERE \"forecast_month\" = {_ql(target)} "
+                f"AND \"tipo\" = 'forecast'{scope_filter}{sku_filter_forecast} UNION ALL "
+                f"SELECT 'actual' AS source, SUM(COALESCE(TRY_CAST({_qi(measure)} AS DOUBLE), 0)) AS value "
+                f"FROM {actual_source} WHERE {actual_month}{type_filter}{scope_filter}{sku_filter_actual}",
+                timeout_s=120,
+            )
+            values = {str(row.get("source")): float(row.get("value") or 0) for row in totals}
+            forecast, actual = values.get("forecast", 0.0), values.get("actual", 0.0)
+        else:
+            forecast_grain, actual_grain = await _desvios_grain(run, snapshot, target, leaf)
+            forecast, actual = _leaf_totals(leaf, forecast_grain, actual_grain)
         metrics = _desvio_metrics(forecast, actual)
 
     if not body.target_month:
