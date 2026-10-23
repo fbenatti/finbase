@@ -123,6 +123,7 @@ def build_window_profiles(
             "coverage": coverage,
             "largest_gap_seconds": max(gap_buckets, default=0) * resolution_seconds,
             "value_min": min(values),
+            "p50": _linear_quantile(values, 50),
             "p90": _linear_quantile(values, 90),
             "p95": _linear_quantile(values, 95),
             "p99": _linear_quantile(values, 99),
