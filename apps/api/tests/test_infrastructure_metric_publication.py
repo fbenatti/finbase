@@ -87,6 +87,8 @@ def test_real_normalizer_rows_merge_without_optional_identity_keys():
     assert len(rows) == 1
     assert rows[0]["cloud_partition"] is None
     assert rows[0]["sub_account_id"] is None
+    assert rows[0]["semantic_version"] == 2
+    assert rows[0]["dimension_schema_version"] == 1
     assert len(merge_metric_rows([], rows)) == 1
 
 
