@@ -169,34 +169,58 @@ function SpendSimulation({ item, money, profile, onSaved }: {
             </Box>
           </Box>
         )}
-        <Box sx={{ maxWidth: 720 }}>
-          <Typography variant="subtitle2" fontWeight={600} mb={0.5}>Simulação — perfil {profileLabel}</Typography>
-          <Box component="table" sx={{ width: "100%", borderCollapse: "collapse", "& td, & th": { py: 0.75, px: 1, borderBottom: "1px solid", borderColor: "divider", textAlign: "right" }, "& th:first-of-type, & td:first-of-type": { textAlign: "left" } }}>
-            <thead><tr>
-              <Typography component="th" variant="caption" color="text.secondary">Desconto</Typography>
-              <Typography component="th" variant="caption" color="text.secondary">Consumo com desconto / ano</Typography>
-              <Typography component="th" variant="caption" color="text.secondary">Compromisso / ano ({Math.round(share * 100)}% do consumo)</Typography>
-              <Typography component="th" variant="caption" color="text.secondary">Saving / ano</Typography>
-              <Typography component="th" variant="caption" color="text.secondary">Se o uso cair 20%</Typography>
-            </tr></thead>
-            <tbody>{SIMULATED_DISCOUNTS.map((discount) => (
-              <tr key={discount}>
-                <Typography component="td" variant="body2">{percent(discount)}</Typography>
-                <Typography component="td" variant="body2">{money(projected * (1 - discount))}</Typography>
-                <Typography component="td" variant="body2" fontWeight={600}>{money(projected * (1 - discount) * share)}</Typography>
-                <Typography component="td" variant="body2" fontWeight={700} color="success.main">{money(savingAt(projected, discount))}</Typography>
-                <Typography component="td" variant="body2"
-                            color={savingAt(projected * (1 - USAGE_DROP), discount) < 0 ? "error.main" : undefined}>
-                  {money(savingAt(projected * (1 - USAGE_DROP), discount))}
-                </Typography>
-              </tr>
-            ))}</tbody>
-          </Box>
-          <Typography variant="caption" color="text.secondary">
-            Consumo com desconto = {money(projected)} × (1 − desconto). O perfil {profileLabel} compromete {Math.round(share * 100)}% desse
-            valor e deixa o restante como excedente com o mesmo desconto. Com o uso previsto o saving é o mesmo
-            nos três perfis; o que muda é o risco: se o uso cair, a parte do compromisso não consumida é paga sem uso.
+        <Box sx={{ maxWidth: 820 }}>
+          <Typography variant="subtitle2" fontWeight={600}>Simulação do acordo — perfil {profileLabel}</Typography>
+          <Typography variant="body2" color="text.secondary" mb={1}>
+            Hoje a tenancy paga {money(projected)} por ano. Com o acordo, todo o consumo passa a custar menos pelo desconto,
+            e o contrato fixa um valor anual que é pago mesmo que não seja usado.
           </Typography>
+          <Box component="table" sx={{ width: "100%", borderCollapse: "collapse", "& td, & th": { py: 0.75, px: 1, borderBottom: "1px solid", borderColor: "divider", textAlign: "right", verticalAlign: "bottom" }, "& th:first-of-type, & td:first-of-type": { textAlign: "left" } }}>
+            <thead><tr>
+              <Typography component="th" variant="caption" color="text.secondary">Desconto do acordo</Typography>
+              <Typography component="th" variant="caption" color="text.secondary">Valor no contrato / ano</Typography>
+              <Typography component="th" variant="caption" color="text.secondary">Você paga / ano</Typography>
+              <Typography component="th" variant="caption" color="text.secondary">Economia / ano</Typography>
+              <Typography component="th" variant="caption" color="text.secondary">Economia se o uso cair 20%</Typography>
+            </tr></thead>
+            <tbody>
+              <Box component="tr" sx={{ bgcolor: "action.hover" }}>
+                <Typography component="td" variant="body2">Sem acordo (hoje)</Typography>
+                <Typography component="td" variant="body2" color="text.secondary">—</Typography>
+                <Typography component="td" variant="body2" fontWeight={600}>{money(projected)}</Typography>
+                <Typography component="td" variant="body2" color="text.secondary">—</Typography>
+                <Typography component="td" variant="body2" color="text.secondary">—</Typography>
+              </Box>
+              {SIMULATED_DISCOUNTS.map((discount) => {
+                const contract = projected * (1 - discount) * share;
+                const paid = Math.max(contract, projected * (1 - discount));
+                const dropSaving = savingAt(projected * (1 - USAGE_DROP), discount);
+                return (
+                  <tr key={discount}>
+                    <Typography component="td" variant="body2">{percent(discount)}</Typography>
+                    <Typography component="td" variant="body2">{money(contract)}</Typography>
+                    <Typography component="td" variant="body2">{money(paid)}</Typography>
+                    <Typography component="td" variant="body2" fontWeight={700} color="success.main">{money(projected - paid)}</Typography>
+                    <Typography component="td" variant="body2" color={dropSaving < 0 ? "error.main" : undefined}>{money(dropSaving)}</Typography>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </Box>
+          <Box component="ul" sx={{ mt: 1, mb: 0, pl: 2.5, "& li": { mb: 0.25 } }}>
+            <Typography component="li" variant="caption" color="text.secondary">
+              <b>Valor no contrato:</b> o que você se compromete a pagar à Oracle no ano, usando ou não. O perfil {profileLabel} compromete {Math.round(share * 100)}% do consumo previsto já com desconto.
+            </Typography>
+            <Typography component="li" variant="caption" color="text.secondary">
+              <b>Você paga:</b> com o uso previsto, o consumo inteiro com desconto (o contrato mais o excedente, que mantém o desconto).
+            </Typography>
+            <Typography component="li" variant="caption" color="text.secondary">
+              <b>Economia:</b> hoje menos o que você paga com o acordo. Com o uso previsto é igual nos três perfis; o perfil muda só o risco.
+            </Typography>
+            <Typography component="li" variant="caption" color="text.secondary">
+              <b>Se o uso cair 20%:</b> economia frente a ficar sem acordo nesse cenário. Negativo (vermelho) quer dizer que o acordo custaria mais, porque o contrato é pago mesmo sem uso.
+            </Typography>
+          </Box>
         </Box>
       </Stack>
     </CardContent></Card>
