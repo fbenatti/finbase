@@ -83,6 +83,9 @@ def detect_scope_window(
             materiality=materiality, min_pct=min_pct, ledger_entries=ledger_entries,
             valid_days=valid_days, settings=settings,
         ):
+            event_day = str(signal.get("day") or "")[:10]
+            if not start.isoformat() <= event_day <= end.isoformat():
+                continue
             detector = str(signal.get("detector") or "")
             if detector == "MONTHLY_ACCUMULATED":
                 identity = day_text[:7]
@@ -351,7 +354,9 @@ async def _execute_detection_v2(
             scope_ledger = ledger_by_scope.get(sid, [])
             raw = detect_scope_window(
                 scope_id=sid, rows=scope_rows, end=scope_end, window_days=90,
-                materiality=mat_daily,
+                # Detecta também desvios de baixo valor; a materialidade
+                # configurada continua decidindo se viram ALERT ou WATCH.
+                materiality=0.01,
                 min_pct=min_pct,
                 ledger_entries=scope_ledger,
                 valid_days=valid_days.get(cloud, set()),
