@@ -29,6 +29,7 @@ from app.models.destination import DestinationTable, DestinationColumn, SourceDe
 from app.services.azure_extractor import AzureExtractor, derive_billing_period
 from app.services.gcp_bigquery_extractor import GcpBigQueryExtractor
 from app.services.oci_extractor import OciExtractor, derive_billing_period_oci
+from app.services.commitments.providers.oci import compute_hourly_rows
 from app.services.mongodb_extractor import MongoAtlasExtractor
 from app.services.oci_monitoring_extractor import OciMonitoringExtractor
 from app.services.github_extractor import GithubBillingExtractor
@@ -1158,6 +1159,20 @@ def _process_databricks_month_sync_worker(
             pass
 
 
+def _write_oci_compute_hourly(task_id, connection_id: int, billing_period: str, parts: list[pd.DataFrame]) -> None:
+    """Hourly compute Silver for the commitment engine; a failure never fails the cost load."""
+    frames = [part for part in parts if part is not None and not part.empty]
+    hourly = pd.concat(frames, ignore_index=True) if frames else pd.DataFrame()
+    if not hourly.empty:
+        keys = [c for c in hourly.columns if c not in ("billed_cost", "billed_quantity")]
+        hourly = hourly.groupby(keys, as_index=False, dropna=False)[["billed_cost", "billed_quantity"]].sum()
+    try:
+        _persist_download_progress(task_id, phase=f"Silver: compute horário OCI ({billing_period}, {len(hourly)} linhas)")
+        iceberg.replace_oci_compute_hourly(hourly, connection_id=connection_id, billing_period=billing_period)
+    except Exception as exc:
+        logger.error("Hourly OCI compute write failed (%s/%s): %s", connection_id, billing_period, exc)
+
+
 def _process_oci_blob_sync(
     session: Session,
     extractor: OciExtractor,
@@ -1219,6 +1234,7 @@ def _process_oci_blob_sync(
             _persist_download_blob(task_id, blob_path, "DOWNLOADING", 0, total_bytes_expected)
 
             dfs: list[pd.DataFrame] = []
+            hourly_parts: list[pd.DataFrame] = []
             cumulative_bytes = 0
 
             for idx, obj in enumerate(objects_in_period, 1):
@@ -1243,6 +1259,8 @@ def _process_oci_blob_sync(
 
                 df_part = extractor._parse_csv_bytes(raw_bytes, obj_name)
                 if not df_part.empty:
+                    # O motor de compromissos precisa da hora: o compute é separado antes de virar dia.
+                    hourly_parts.append(compute_hourly_rows(df_part, connection_id=conn.id, billing_period=billing_period))
                     # Agregação parcial imediata por arquivo para economizar memória (reduz de 15k para ~500 linhas)
                     df_part_agg = OciExtractor.aggregate_df_daily(df_part)
                     dfs.append(df_part_agg)
@@ -1304,6 +1322,9 @@ def _process_oci_blob_sync(
             session.delete(ingested)
             session.flush()
             return len(full_df), 0, 0, [f"Bronze write failed: {exc}"]
+
+    if not extractor.uses_usage_api():
+        _write_oci_compute_hourly(task_id, conn.id, billing_period, hourly_parts)
 
     _persist_download_progress(task_id, phase=f"Carga Bronze OCI ({billing_period}) concluída com {len(full_df)} linhas")
     _persist_download_blob(task_id, blob_path, "BRONZE_IMPORTED", cumulative_bytes, cumulative_bytes)

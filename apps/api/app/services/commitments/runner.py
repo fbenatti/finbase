@@ -50,6 +50,8 @@ def provider_of(connection: Any) -> str:
 
 
 def commitment_provider_for(connection: Any) -> CommitmentProvider:
+    from . import providers  # noqa: F401  (registers the cloud adapters)
+
     provider = provider_of(connection)
     if provider not in _PROVIDERS:
         raise LookupError(f"sem leitor de uso horário de compromissos para o provider {provider!r}")

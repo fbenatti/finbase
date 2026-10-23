@@ -2762,6 +2762,33 @@ def _append_or_create_table(namespace: str, table_name: str, df: pd.DataFrame, p
     return len(frame)
 
 
+def replace_oci_compute_hourly(df: pd.DataFrame, *, connection_id: int, billing_period: str) -> int:
+    """Replace one connection+month of the hourly OCI compute Silver in one transaction."""
+    from pyiceberg.expressions import And, EqualTo
+
+    namespace = layers.detail_layer()
+    column_types = {"billed_cost": "DOUBLE", "billed_quantity": "DOUBLE", "source_connection_id": "BIGINT"}
+    frame = df.copy() if df is not None else pd.DataFrame()
+    cat = _get_catalog()
+    try:
+        tbl = cat.load_table(_table_id(namespace, "oci_compute_hourly"))
+    except Exception:
+        if frame.empty:
+            return 0
+        frame = frame.astype({name: "float64" for name in ("billed_cost", "billed_quantity")})
+        frame["source_connection_id"] = frame["source_connection_id"].astype("int64")
+        return _append_or_create_table(namespace, "oci_compute_hourly", frame, "_billing_period")
+    from app.services.write_lock import exclusive_write_lock
+
+    with exclusive_write_lock():
+        tx = tbl.transaction()
+        tx.delete(And(EqualTo("source_connection_id", int(connection_id)), EqualTo("_billing_period", str(billing_period))))
+        if not frame.empty:
+            tx.append(_df_to_arrow(frame, column_types=column_types, target_schema=tbl.schema()))
+        tx.commit_transaction()
+    return len(frame)
+
+
 def upsert_azure_ptu_hourly(df: pd.DataFrame) -> int:
     """Replace gold.dest_azure_ptu_metrics rows for the same connection+hour keys."""
     if df is None or df.empty:
