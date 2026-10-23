@@ -551,7 +551,7 @@ nem reduz o aceite T00–T15. O estado continua **ENTREGA PARCIAL**.
 | --- | --- | --- |
 | Chaves de identidade opcionais usam NULL canônico no merge; teste passa a saída real do normalizador ao merge. | `ef4fce5f`, `3e631f60` | `test_infrastructure_metric_publication.py` |
 | Persistência Bronze acontece antes da normalização/derivação. | `ba8f16d8` | Revisão do fluxo em `service.py`; sem escrita em catálogo real nesta sessão. |
-| Identidade de série v2 incorpora namespace, escopo, owner e campos opcionais; lote rejeita valores conflitantes na mesma chave; Silver recebe lineage por estatística com hash/request/path Bronze. | `b92a6718`, `32d33c2b`, `99e8a998`, `4025b664`, `0cf4f4c2`, `bd2ac3af`, `81e17d65`, `f60735f8`, `c2567643` | Fixtures verificam colisão e hash/path por estatística; ainda sem migração/publicação física em catálogo real. |
+| Identidade de série v2 incorpora namespace, escopo, owner e campos opcionais, mantendo hash/schema de dimensões v1 para não dividir a chave de bucket; lote rejeita valores conflitantes; Silver recebe lineage por estatística com hash/request/path Bronze. | `b92a6718`, `32d33c2b`, `99e8a998`, `4025b664`, `0cf4f4c2`, `bd2ac3af`, `81e17d65`, `f60735f8`, `c2567643`, `40c98f78`, `fd2ef8a2`, `4170be02` | Fixtures verificam colisão e hash/path por estatística; ainda sem compatibilidade operacional de consumidores legados e publicação física em catálogo real. |
 | Contagens de execução usam status das chamadas registradas, não o número de descriptors; fallback para adapters agregados. | `9366989c`, `26d33f05`, `bcd38a99` | Suíte de métricas abaixo. |
 | Introduzido cancelamento cooperativo entre requisições OCI, antes da publicação diária e preservação do estado CANCELLED no worker. | `21b89f4a`, `b4c8da15`, `3298a66f`, `a4c2734d`, `2aee0349` | Teste de cancelamento do adapter; não houve teste integrado de worker concorrente/retomada. |
 | Perfis calculam lacunas ausentes incluindo bordas e emitem dias/perfil serializáveis; modelo declara expected_buckets e quantile_method. | `a7ea546b`, `f9733e38`, `022fb0ca` | `test_infrastructure_metric_profiles.py` |
@@ -574,7 +574,9 @@ python -m pytest -q \
 ```
 
 Resultado inicial após os primeiros incrementos: **85 passed**. Após identidade v2,
-conflitos de lote e linhagem por estatística: **87 passed**. Permanece aviso de configuração de `pytest-asyncio`.
+conflitos de lote e linhagem por estatística: **87 passed**. Também passaram
+3 testes de cobertura RBAC de rotas e `compileall` do worker/pacote. Permanece
+aviso de configuração de `pytest-asyncio`.
 Não foi executada build web nesta continuidade porque nenhuma tela web de
 métricas foi implementada. Não foram chamadas APIs OCI nem feitas consultas ou
 escritas no catálogo real.
@@ -584,7 +586,7 @@ escritas no catálogo real.
 | Item | Estado atual | O que ainda impede o aceite |
 | --- | --- | --- |
 | T00 | PARCIAL | Inventário operacional de conexões, catálogo físico, dependências e divergências ainda não foi produzido. |
-| T01 | PARCIAL | Identidade v2 contempla namespace/scope/owner e campos opcionais na função; faltam conversões por descriptor, integração completa do protocolo e migração/leitores para hashes v1 já persistidos. |
+| T01 | PARCIAL | Identidade v2 contempla namespace/scope/owner e campos opcionais, preservando a chave de bucket baseada em dimensões v1; faltam conversões por descriptor, integração completa do protocolo e compatibilidade de leitores que guardaram series_id v1. |
 | T02 | PARCIAL | Falta autorização por conexão/organização, configuração versionada auditável e budgets persistidos/validados em todos os caminhos. |
 | T03 | PARCIAL — físico não comprovado | Só o initializer da série existe; falta preparar/evoluir todos os modelos, relações, schema diff real e compatibilidade legado. |
 | T04 | PARCIAL | Corrigidos chaves opcionais e conflitos de valores duplicados no lote; falta isolamento/concorrência/rerun e publicação Iceberg real. |
