@@ -9,7 +9,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import StreamingResponse
 import io
 from pydantic import BaseModel, Field
-from sqlalchemy import select, text
+from sqlalchemy import func, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.hierarchy import hierarchy_column, hierarchy_columns_in, hierarchy_level
 from app.database import get_db
@@ -525,6 +525,9 @@ async def list_configs_grid(
 
 @router.post("/configuracoes", status_code=201)
 async def create_config(body: ConfigIn, db: AsyncSession = Depends(get_db)):
+    existing_id = (await db.execute(select(ForecastConfig.id).limit(1))).scalar_one_or_none()
+    if existing_id is not None:
+        raise HTTPException(409, "O Forecast aceita apenas um perfil. Edite o perfil existente.")
     row = ForecastConfig(**body.model_dump()); db.add(row); await db.commit(); await db.refresh(row)
     # A FOCUS configuration is usable out of the box: the editable business
     # rule templates are created with it instead of waiting for an API restart.
@@ -543,6 +546,9 @@ async def update_config(config_id: int, body: ConfigIn, db: AsyncSession = Depen
 async def delete_config(config_id: int, db: AsyncSession = Depends(get_db)):
     row = await db.get(ForecastConfig, config_id)
     if not row: raise HTTPException(404, "Configuração não encontrada")
+    profile_count = (await db.execute(select(func.count()).select_from(ForecastConfig))).scalar_one()
+    if profile_count <= 1:
+        raise HTTPException(409, "O perfil único de Forecast não pode ser removido.")
     active_run = (await db.execute(select(ForecastRun.id).where(ForecastRun.forecast_config_id == config_id, ForecastRun.status.in_(["QUEUED", "RUNNING"])).limit(1))).scalar_one_or_none()
     if active_run: raise HTTPException(409, "Não é possível apagar uma configuração com execução ativa")
     # Keep runs queryable even on older databases whose FK migration has not
@@ -556,6 +562,7 @@ async def delete_config(config_id: int, db: AsyncSession = Depends(get_db)):
 async def duplicate_config(config_id: int, db: AsyncSession = Depends(get_db)):
     src = await db.get(ForecastConfig, config_id)
     if not src: raise HTTPException(404, "Configuração não encontrada")
+    raise HTTPException(409, "O Forecast aceita apenas um perfil. Edite o perfil existente.")
     values = {c.name: getattr(src, c.name) for c in src.__table__.columns if c.name not in {"id", "created_at", "updated_at"}}
     values.update(name=f"{src.name} (cópia)", version=1)
     row = ForecastConfig(**values); db.add(row); await db.commit(); await db.refresh(row)
