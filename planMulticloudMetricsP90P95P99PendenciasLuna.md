@@ -556,6 +556,7 @@ nem reduz o aceite T00–T15. O estado continua **ENTREGA PARCIAL**.
 | Introduzido cancelamento cooperativo entre requisições OCI, antes da publicação diária e preservação do estado CANCELLED no worker. | `21b89f4a`, `b4c8da15`, `3298a66f`, `a4c2734d`, `2aee0349` | Teste de cancelamento do adapter; não houve teste integrado de worker concorrente/retomada. |
 | Perfis calculam lacunas ausentes incluindo bordas e emitem dias/perfil serializáveis; modelo declara expected_buckets e quantile_method. | `a7ea546b`, `f9733e38`, `022fb0ca` | `test_infrastructure_metric_profiles.py` |
 | Bucket com resposta agregada parcialmente falha recebe `PARTIAL` e motivo. | `f7953bed` | Suíte de métricas abaixo. |
+| Router verifica RBAC por `connection:<id>` para leitura/criação, mantém grant global e serializa enqueue com advisory lock; tarefas novas guardam snapshot do plano. | `307e674b`, `2fab3455`, `ba2895c6`, `ea646c03` | Testes unitários de permissão; concorrência do endpoint ainda sem integração de banco. |
 
 Commits de implementação foram feitos logo após cada incremento de código,
 conforme instrução do usuário. As alterações simultâneas observadas em telas de
@@ -574,9 +575,9 @@ python -m pytest -q \
 ```
 
 Resultado inicial após os primeiros incrementos: **85 passed**. Após identidade v2,
-conflitos de lote e linhagem por estatística: **87 passed**. Também passaram
-3 testes de cobertura RBAC de rotas e `compileall` do worker/pacote. Permanece
-aviso de configuração de `pytest-asyncio`.
+conflitos de lote, lineage por estatística, autorização e fila: **92 passed**.
+Também passou `compileall` do router/worker/pacote. Permanece aviso de configuração
+de `pytest-asyncio`.
 Não foi executada build web nesta continuidade porque nenhuma tela web de
 métricas foi implementada. Não foram chamadas APIs OCI nem feitas consultas ou
 escritas no catálogo real.
@@ -587,7 +588,7 @@ escritas no catálogo real.
 | --- | --- | --- |
 | T00 | PARCIAL | Inventário operacional de conexões, catálogo físico, dependências e divergências ainda não foi produzido. |
 | T01 | PARCIAL | Identidade v2 contempla namespace/scope/owner e campos opcionais, preservando a chave de bucket baseada em dimensões v1; faltam conversões por descriptor, integração completa do protocolo e compatibilidade de leitores que guardaram series_id v1. |
-| T02 | PARCIAL | Falta autorização por conexão/organização, configuração versionada auditável e budgets persistidos/validados em todos os caminhos. |
+| T02 | PARCIAL | RBAC por connection id e lock de enqueue implementados; falta autorização de organização, versão auditável da configuração, budgets persistidos e teste integrado de concorrência. |
 | T03 | PARCIAL — físico não comprovado | Só o initializer da série existe; falta preparar/evoluir todos os modelos, relações, schema diff real e compatibilidade legado. |
 | T04 | PARCIAL | Corrigidos chaves opcionais e conflitos de valores duplicados no lote; falta isolamento/concorrência/rerun e publicação Iceberg real. |
 | T05 | PARCIAL | Adapter ainda cobre consulta de métricas; sem inventário/capacity/attachments/capabilities nem validação viva. |
