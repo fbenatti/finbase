@@ -1,5 +1,7 @@
 from datetime import datetime, timezone
 from types import SimpleNamespace
+import hashlib
+import json
 
 import pytest
 
@@ -65,6 +67,21 @@ def test_discovery_is_limited_to_the_allowlist_and_fetch_preserves_partial_stats
     assert result.raw_payloads[1]["error_code"] == "InvalidParameter"
     assert len(client.requests) == 2
     assert all(request[0] == "compartment-ocid" for request in client.requests)
+
+    silver_row, = query_results_to_silver_rows(
+        (result,), source_owner="oci_metrics", collection_run_id="run-17",
+        bronze_persisted=True,
+    )
+    lineage = json.loads(silver_row["statistic_lineage_json"])
+    raw_mean = result.raw_payloads[0]
+    payload_text = json.dumps(raw_mean["payload"], default=str, ensure_ascii=False,
+                              sort_keys=True, separators=(",", ":"))
+    resource_alias = hashlib.sha256(b"private-ocid").hexdigest()[:16]
+    assert lineage["mean"]["payload_hash"] == hashlib.sha256(payload_text.encode()).hexdigest()
+    assert lineage["mean"]["request_id"] == raw_mean["request_id"]
+    assert lineage["mean"]["bronze_path"] == (
+        f"infrastructure_metrics/run-17/CpuUtilization/60/{resource_alias}/mean"
+    )
 
 
 def test_fetch_fails_closed_when_scope_is_disabled():
