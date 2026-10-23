@@ -15,10 +15,9 @@ _SNAPSHOT_PHYSICAL_DEFAULTS = frozenset({
     "dest_cloud_orphan_resources",
     "dest_licencas_ia",
 })
-_METRIC_DAY_PHYSICAL_DEFAULTS = frozenset({
-    "resource_metric_series",
-    "resource_metric_coverage",
-})
+# No table defaults to a metric_day slice today; a destination can still opt
+# in through partition_spec_json.
+_METRIC_DAY_PHYSICAL_DEFAULTS: frozenset[str] = frozenset()
 
 _MAX_EXTRA_PARTITIONS = 2
 # Sentinel for null/empty values when a column is used as an Iceberg identity partition.

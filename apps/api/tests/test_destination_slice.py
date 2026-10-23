@@ -124,9 +124,10 @@ def test_partition_spec_json_extra_requires_column():
     assert cfg.extras[0].transform == "bucket"
 
 
-def test_metric_series_uses_daily_metric_and_connection_slice():
+def test_metric_day_grain_uses_daily_metric_and_connection_slice():
     cfg = resolve_destination_slice_config(
-        "resource_metric_series",
+        "daily_usage_example",
+        {"grain": "metric_day"},
         column_names={"metric_day", "_source_connection_id", "resource_id"},
     )
     assert cfg.grain == "metric_day"
@@ -137,7 +138,8 @@ def test_metric_series_uses_daily_metric_and_connection_slice():
 
 def test_metric_day_staging_validates_one_connection_and_day():
     cfg = resolve_destination_slice_config(
-        "resource_metric_series",
+        "daily_usage_example",
+        {"grain": "metric_day"},
         column_names={"metric_day", "_source_connection_id", "resource_id"},
     )
     frame = pd.DataFrame({

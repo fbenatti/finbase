@@ -11,10 +11,10 @@ from __future__ import annotations
 from collections import defaultdict
 from datetime import datetime, timedelta
 import hashlib
-from typing import Iterable, Mapping
+import json
+import math
+from typing import Any, Iterable, Mapping
 
-from .identity import canonical_json
-from .profiles import _linear_quantile
 from .sizing import CapacitySnapshot, PriceBook, SizeOption, SizingCatalog
 
 ENGINE_VERSION = "rightsizing_v2"
@@ -44,6 +44,22 @@ DEFAULT_POLICY = {
     # Reductions smaller than this keep the current size (avoid churn by noise).
     "min_change_ratio": 0.15,
 }
+
+
+def canonical_json(value: Any) -> str:
+    """Canonical JSON used for hashes; mapping insertion order is irrelevant."""
+    return json.dumps(value, sort_keys=True, separators=(",", ":"), ensure_ascii=False, allow_nan=False, default=str)
+
+
+def _linear_quantile(values: list[float], percentile: int) -> float | None:
+    if not values:
+        return None
+    ordered = sorted(values)
+    position = (len(ordered) - 1) * percentile / 100
+    lower, upper = math.floor(position), math.ceil(position)
+    if lower == upper:
+        return ordered[lower]
+    return ordered[lower] + (ordered[upper] - ordered[lower]) * (position - lower)
 
 
 def summarize_series(

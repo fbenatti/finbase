@@ -1,187 +1,227 @@
+/**
+ * Consumo de infraestrutura — leitura da Silver genérica `compute_usage_metrics`.
+ *
+ * Não coleta nada: as fontes de métricas (ex.: OCI Monitoring) gravam o dado
+ * puro na Bronze pela Extração e a Silver nasce do Reprocessar com os
+ * mapeamentos do catálogo. Serve a qualquer cloud com fonte cadastrada.
+ */
 import { useEffect, useMemo, useState } from "react";
 import {
-  Alert, Box, Button, CircularProgress, FormControl, InputLabel, MenuItem,
-  Paper, Select, Stack, Typography,
+  Alert, Box, CircularProgress, FormControl, InputLabel, MenuItem, Paper, Select, Stack,
+  Table, TableBody, TableCell, TableHead, TableRow, Typography,
 } from "@mui/material";
 import TimelineOutlined from "@mui/icons-material/TimelineOutlined";
-import { api, getConnections, type SourceConnection } from "../../services/api";
+import Plot from "@/components/Plot";
+import { api } from "../../services/api";
+import { listMetricSources, type MetricSource } from "../../services/infraOpportunitiesApi";
 
-type MetricRow = {
+type Resource = {
   resource_id: string;
-  metric: string;
-  source_metric_name: string;
-  bucket_start_utc: string;
-  value_average?: number | null;
-  value_minimum?: number | null;
-  value_maximum?: number | null;
-  native_p95?: number | null;
-  resolution_seconds: number;
-  origin_kind: string;
+  resource_name: string | null;
+  cloud_provider: string | null;
+  resource_type: string | null;
+  metrics: string[];
+  resolutions: number[];
+  first_bucket: string | null;
+  last_bucket: string | null;
+  points: number;
 };
+type SeriesPoint = { t: string; mean: number | null; max: number | null; p95: number | null; p99: number | null };
 type Profile = {
-  p90: number | null;
-  p95: number | null;
-  p99: number | null;
-  value_max: number | null;
-  coverage: number;
-  largest_gap_seconds: number;
-  samples: number;
-  percentile_basis: string;
-  quantile_method: string;
+  samples: number; expected_buckets: number; coverage: number; days_observed: number;
+  p50: number | null; p95: number | null; p99: number | null; average: number | null; max: number | null;
 };
-type MetricConfig = { enabled?: boolean; resource_ids?: string[]; metric_names?: string[] };
+type SeriesResponse = { points: SeriesPoint[]; profile: Profile; daily: { day: string; p95: number | null; max: number; average: number }[] };
 
-const localInput = (date: Date) => {
-  const local = new Date(date.getTime() - date.getTimezoneOffset() * 60_000);
-  return local.toISOString().slice(0, 16);
+const METRIC_LABEL: Record<string, string> = {
+  "cpu.utilization": "CPU (% de uso)",
+  "memory.utilization": "Memória (% de uso)",
+  "disk.read_bytes_counter": "Disco — bytes lidos",
+  "disk.write_bytes_counter": "Disco — bytes gravados",
+  "disk.read_operations_counter": "Disco — operações de leitura",
+  "disk.write_operations_counter": "Disco — operações de escrita",
+  "network.in_bytes_counter": "Rede — bytes recebidos",
+  "network.out_bytes_counter": "Rede — bytes enviados",
 };
-const asUtc = (value: string) => new Date(value).toISOString();
-const numeric = (value: unknown): value is number => typeof value === "number" && Number.isFinite(value);
-
-function MetricSparkline({ rows }: { rows: MetricRow[] }) {
-  const points = rows.filter(row => numeric(row.value_average)).slice().sort(
-    (a, b) => Date.parse(a.bucket_start_utc) - Date.parse(b.bucket_start_utc),
-  );
-  if (points.length < 2) return <Box sx={{ py: 6, textAlign: "center", color: "text.secondary" }}>Ainda não há pontos suficientes para desenhar a série.</Box>;
-  const values = points.map(row => row.value_average as number);
-  const min = Math.min(...values);
-  const max = Math.max(...values);
-  const span = Math.max(max - min, Math.abs(max) * 0.05, 1e-9);
-  const coords = values.map((value, index) => `${28 + index * 744 / (values.length - 1)},${154 - (value - min) * 128 / span}`).join(" ");
-  return <Box sx={{ width: "100%", overflow: "hidden" }}>
-    <svg viewBox="0 0 800 190" role="img" aria-label="Média observada por bucket" style={{ width: "100%", height: 230 }}>
-      <line x1="28" y1="26" x2="772" y2="26" stroke="#e4e9ed" />
-      <line x1="28" y1="90" x2="772" y2="90" stroke="#e4e9ed" />
-      <line x1="28" y1="154" x2="772" y2="154" stroke="#e4e9ed" />
-      <polyline points={coords} fill="none" stroke="#087f8c" strokeWidth="3" strokeLinejoin="round" strokeLinecap="round" />
-      <text x="28" y="178" fill="#66747d" fontSize="11">{new Date(points[0].bucket_start_utc).toLocaleString()}</text>
-      <text x="772" y="178" textAnchor="end" fill="#66747d" fontSize="11">{new Date(points[points.length - 1].bucket_start_utc).toLocaleString()}</text>
-      <text x="28" y="17" fill="#66747d" fontSize="11">máx. {max.toPrecision(4)}</text>
-      <text x="28" y="148" fill="#66747d" fontSize="11">mín. {min.toPrecision(4)}</text>
-    </svg>
-  </Box>;
-}
+const WINDOWS = [1, 7, 14, 30];
+const fmt = (value: number | null | undefined, digits = 1) =>
+  value == null ? "—" : value.toLocaleString("pt-BR", { maximumFractionDigits: digits });
+const localStamp = (utc: string) => {
+  const date = new Date(utc.endsWith("Z") || utc.includes("+") ? utc : `${utc}Z`);
+  const pad = (value: number) => String(value).padStart(2, "0");
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())} ${pad(date.getHours())}:${pad(date.getMinutes())}`;
+};
 
 export default function InfrastructureMetrics() {
-  const [connections, setConnections] = useState<SourceConnection[]>([]);
-  const [connectionId, setConnectionId] = useState("");
-  const [start, setStart] = useState(() => localInput(new Date(Date.now() - 24 * 60 * 60_000)));
-  const [end, setEnd] = useState(() => localInput(new Date()));
-  const [resolution, setResolution] = useState(60);
+  const [sources, setSources] = useState<MetricSource[]>([]);
+  const [sourceId, setSourceId] = useState<number | null>(null);
+  const [resources, setResources] = useState<Resource[]>([]);
   const [resourceId, setResourceId] = useState("");
-  const [metric, setMetric] = useState("");
-  const [rows, setRows] = useState<MetricRow[]>([]);
-  const [profiles, setProfiles] = useState<Profile[]>([]);
-  const [coverageRows, setCoverageRows] = useState<Record<string, unknown>[]>([]);
+  const [metric, setMetric] = useState("cpu.utilization");
+  const [resolution, setResolution] = useState(300);
+  const [days, setDays] = useState(7);
+  const [series, setSeries] = useState<SeriesResponse | null>(null);
   const [loading, setLoading] = useState(false);
-  const [profiling, setProfiling] = useState(false);
   const [error, setError] = useState("");
-  const [message, setMessage] = useState("");
 
   useEffect(() => {
-    let active = true;
-    getConnections().then(items => {
-      const oci = items.filter(item => item.connector_type === "oci");
-      if (!active) return;
-      setConnections(oci);
-      setConnectionId(current => current || String(oci[0]?.id ?? ""));
-    }).catch(() => { if (active) setError("Não foi possível carregar as conexões OCI."); });
-    return () => { active = false; };
+    listMetricSources()
+      .then((items) => { setSources(items); setSourceId((current) => current ?? items[0]?.id ?? null); })
+      .catch(() => setError("Não foi possível carregar as fontes de métricas."));
   }, []);
 
-  const selected = connections.find(item => String(item.id) === connectionId);
-  const metricConfig = (selected?.config_json?.infrastructure_metrics || {}) as MetricConfig;
-  const resources = metricConfig.enabled ? metricConfig.resource_ids || [] : [];
-  const metrics = metricConfig.enabled ? metricConfig.metric_names || [] : [];
-
   useEffect(() => {
-    if (!resources.includes(resourceId)) setResourceId(resources[0] || "");
-    if (!metrics.includes(metric)) setMetric(metrics[0] || "");
-  }, [connectionId, resources.join("|"), metrics.join("|")]);
-
-  useEffect(() => {
-    if (!connectionId || !start || !end) {
-      setRows([]); setProfiles([]); setCoverageRows([]); return;
-    }
-    const controller = new AbortController();
+    if (sourceId == null) return;
     let active = true;
-    setLoading(true); setError(""); setMessage("");
-    const params = {
-      connection_id: Number(connectionId), start_utc: asUtc(start), end_utc: asUtc(end),
-      resource_id: resourceId || undefined, source_metric_name: metric || undefined, resolution_seconds: resolution,
-    };
-    Promise.all([
-      api.get("/custos/metricas-infra/series", { params, signal: controller.signal }),
-      api.get("/custos/metricas-infra/coverage", { params, signal: controller.signal }),
-      api.get("/custos/metricas-infra/perfis", { params: { connection_id: Number(connectionId), start_utc: params.start_utc, end_utc: params.end_utc }, signal: controller.signal }),
-    ]).then(([series, coverage, profile]) => {
-      if (!active) return;
-      setRows((series.data.rows || []).filter((row: MetricRow) => row.resolution_seconds === resolution));
-      setCoverageRows((coverage.data.rows || []).filter((row: Record<string, unknown>) => !resourceId || row.resource_id === resourceId));
-      setProfiles((profile.data.profiles || []).filter((row: Profile & { source_metric_name?: string; resolution_seconds?: number }) =>
-        (!metric || row.source_metric_name === metric) && (!resolution || row.resolution_seconds === resolution),
-      ));
-    }).catch((reason: unknown) => {
-      if (!active || controller.signal.aborted) return;
-      setError("A Silver não conseguiu responder. Verifique se há dados para esta conexão e janela.");
-      setRows([]); setProfiles([]); setCoverageRows([]);
-    }).finally(() => { if (active) setLoading(false); });
-    return () => { active = false; controller.abort(); };
-  }, [connectionId, start, end, resourceId, metric, resolution]);
+    setResources([]);
+    api.get("/custos/metricas-infra/recursos", { params: { connection_id: sourceId } })
+      .then(({ data }) => {
+        if (!active) return;
+        setResources(data.items);
+        setResourceId((current) => (data.items.some((item: Resource) => item.resource_id === current) ? current : data.items[0]?.resource_id ?? ""));
+      })
+      .catch(() => { if (active) setError("A Silver de métricas não respondeu para esta fonte."); });
+    return () => { active = false; };
+  }, [sourceId]);
 
-  const visibleRows = useMemo(() => rows.slice().sort((a, b) => Date.parse(a.bucket_start_utc) - Date.parse(b.bucket_start_utc)), [rows]);
-  const latestProfile = profiles[0];
-  const calculate = async () => {
-    if (!connectionId || !resourceId || !metric) return;
-    setProfiling(true); setError(""); setMessage("");
-    try {
-      const { data } = await api.post("/custos/metricas-infra/perfis/gerar", {
-        connection_id: Number(connectionId), resource_id: resourceId, metric,
-        start_utc: asUtc(start), end_utc: asUtc(end), resolution_seconds: resolution,
-        value_statistic: "value_average",
-      });
-      setProfiles(data.profiles || []);
-      setMessage(data.coverage === "NO_DATA" ? "Não há amostras para calcular o perfil." : "Perfil calculado sobre os buckets disponíveis e salvo na Silver.");
-    } catch {
-      setError("Não foi possível calcular o perfil. Confirme se existem buckets na Silver para os filtros selecionados.");
-    } finally { setProfiling(false); }
-  };
+  const resource = resources.find((item) => item.resource_id === resourceId);
+  const end = useMemo(() => {
+    const last = resource?.last_bucket ? new Date(resource.last_bucket) : new Date();
+    return new Date(last.getTime() + resolution * 1000);
+  }, [resource?.last_bucket, resolution]);
 
-  return <Stack spacing={2.5} sx={{ maxWidth: 1440, mx: "auto", pb: 4 }}>
+  useEffect(() => {
+    if (sourceId == null || !resourceId || !metric) { setSeries(null); return; }
+    const controller = new AbortController();
+    setLoading(true);
+    setError("");
+    api.get("/custos/metricas-infra/series", {
+      params: {
+        connection_id: sourceId, resource_id: resourceId, metric, resolution_seconds: resolution,
+        start_utc: new Date(end.getTime() - days * 86_400_000).toISOString(), end_utc: end.toISOString(),
+      },
+      signal: controller.signal,
+    })
+      .then(({ data }) => setSeries(data))
+      .catch((reason) => {
+        if (controller.signal.aborted) return;
+        setSeries(null);
+        setError(reason?.response?.data?.detail ?? "Não foi possível ler a série.");
+      })
+      .finally(() => { if (!controller.signal.aborted) setLoading(false); });
+    return () => controller.abort();
+  }, [sourceId, resourceId, metric, resolution, days, end]);
+
+  const isPercent = metric.endsWith(".utilization");
+  const x = (series?.points ?? []).map((point) => localStamp(point.t));
+  const profile = series?.profile;
+
+  return <Stack spacing={2.5} sx={{ maxWidth: 1440, mx: "auto", pb: 4, px: { xs: 1.5, md: 3 }, pt: { xs: 1.5, md: 3 } }}>
     <Box sx={{ display: "flex", alignItems: "center", gap: 1.5 }}>
       <TimelineOutlined sx={{ color: "#087f8c", fontSize: 32 }} />
-      <Box><Typography variant="h4">Consumo de infraestrutura</Typography><Typography color="text.secondary">Séries Silver, cobertura e percentis calculados por janela.</Typography></Box>
+      <Box>
+        <Typography variant="h5">Consumo de infraestrutura</Typography>
+        <Typography color="text.secondary">Série da Silver genérica <code>compute_usage_metrics</code>, de qualquer cloud com fonte de métricas cadastrada.</Typography>
+      </Box>
     </Box>
 
-    <Paper variant="outlined" sx={{ p: 2.5, borderTop: "3px solid #087f8c" }}>
-      <Stack direction={{ xs: "column", lg: "row" }} spacing={2} alignItems={{ lg: "center" }}>
-        <FormControl size="small" sx={{ minWidth: 220 }}><InputLabel>Conexão OCI</InputLabel><Select label="Conexão OCI" value={connectionId} onChange={event => setConnectionId(event.target.value)}>{connections.map(item => <MenuItem key={item.id} value={String(item.id)}>{item.name}</MenuItem>)}</Select></FormControl>
-        <FormControl size="small" sx={{ minWidth: 190 }} disabled={!resources.length}><InputLabel>Instância</InputLabel><Select label="Instância" value={resourceId} onChange={event => setResourceId(event.target.value)}>{resources.map(id => <MenuItem key={id} value={id}>{id}</MenuItem>)}</Select></FormControl>
-        <FormControl size="small" sx={{ minWidth: 190 }} disabled={!metrics.length}><InputLabel>Métrica</InputLabel><Select label="Métrica" value={metric} onChange={event => setMetric(event.target.value)}>{metrics.map(name => <MenuItem key={name} value={name}>{name}</MenuItem>)}</Select></FormControl>
-        <FormControl size="small" sx={{ minWidth: 120 }}><InputLabel>Resolução</InputLabel><Select label="Resolução" value={resolution} onChange={event => setResolution(Number(event.target.value))}><MenuItem value={60}>1 minuto</MenuItem><MenuItem value={300}>5 minutos</MenuItem><MenuItem value={900}>15 minutos</MenuItem></Select></FormControl>
-        <Box sx={{ display: "flex", gap: 1, flex: 1 }}><Box><Typography variant="caption" color="text.secondary">Início</Typography><input aria-label="Início" type="datetime-local" value={start} onChange={event => setStart(event.target.value)} style={{ display: "block", minHeight: 38, padding: "0 8px", border: "1px solid #c7d0d6", borderRadius: 4, font: "inherit" }} /></Box><Box><Typography variant="caption" color="text.secondary">Fim</Typography><input aria-label="Fim" type="datetime-local" value={end} onChange={event => setEnd(event.target.value)} style={{ display: "block", minHeight: 38, padding: "0 8px", border: "1px solid #c7d0d6", borderRadius: 4, font: "inherit" }} /></Box></Box>
+    <Paper variant="outlined" sx={{ p: 2, borderTop: "3px solid #087f8c" }}>
+      <Stack direction={{ xs: "column", lg: "row" }} spacing={1.5} useFlexGap flexWrap="wrap">
+        <FormControl size="small" sx={{ minWidth: 240 }}>
+          <InputLabel>Fonte de métricas</InputLabel>
+          <Select label="Fonte de métricas" value={sourceId ?? ""} onChange={(event) => setSourceId(Number(event.target.value))}>
+            {sources.map((item) => <MenuItem key={item.id} value={item.id}>{item.name}</MenuItem>)}
+          </Select>
+        </FormControl>
+        <FormControl size="small" sx={{ minWidth: 240 }} disabled={!resources.length}>
+          <InputLabel>Recurso</InputLabel>
+          <Select label="Recurso" value={resourceId} onChange={(event) => setResourceId(String(event.target.value))}>
+            {resources.map((item) => <MenuItem key={item.resource_id} value={item.resource_id}>{item.resource_name || item.resource_id}</MenuItem>)}
+          </Select>
+        </FormControl>
+        <FormControl size="small" sx={{ minWidth: 220 }} disabled={!resource}>
+          <InputLabel>Métrica</InputLabel>
+          <Select label="Métrica" value={metric} onChange={(event) => setMetric(String(event.target.value))}>
+            {(resource?.metrics ?? []).map((name) => <MenuItem key={name} value={name}>{METRIC_LABEL[name] ?? name}</MenuItem>)}
+          </Select>
+        </FormControl>
+        <FormControl size="small" sx={{ minWidth: 130 }}>
+          <InputLabel>Resolução</InputLabel>
+          <Select label="Resolução" value={resolution} onChange={(event) => setResolution(Number(event.target.value))}>
+            {(resource?.resolutions?.length ? resource.resolutions : [300]).map((seconds) => <MenuItem key={seconds} value={seconds}>{seconds / 60} min</MenuItem>)}
+          </Select>
+        </FormControl>
+        <FormControl size="small" sx={{ minWidth: 120 }}>
+          <InputLabel>Janela</InputLabel>
+          <Select label="Janela" value={days} onChange={(event) => setDays(Number(event.target.value))}>
+            {WINDOWS.map((value) => <MenuItem key={value} value={value}>{value} dia(s)</MenuItem>)}
+          </Select>
+        </FormControl>
       </Stack>
+      {resource && <Typography variant="caption" color="text.secondary" sx={{ display: "block", mt: 1 }}>
+        {(resource.cloud_provider ?? "").toUpperCase()} · {resource.resource_type ?? "—"} · dados de {resource.first_bucket ? localStamp(resource.first_bucket) : "—"} a {resource.last_bucket ? localStamp(resource.last_bucket) : "—"} · {resource.points.toLocaleString("pt-BR")} valores na Silver
+      </Typography>}
     </Paper>
 
-    {!selected && <Alert severity="info">Cadastre uma conexão OCI para consultar métricas.</Alert>}
-    {selected && !metricConfig.enabled && <Alert severity="info">A coleta de infraestrutura está desativada nesta conexão. Ative a opção na edição da conexão e libere as policies OCI indicadas.</Alert>}
+    {!sources.length && !error && <Alert severity="info">Cadastre uma fonte de métricas (ex.: OCI Monitoring) em Conexões de nuvem, colete e reprocesse para ver o consumo aqui.</Alert>}
+    {sources.length > 0 && !resources.length && !error && <Alert severity="info">A Silver ainda não tem dados desta fonte. Rode a Extração da fonte e o Reprocessar da tabela “Métricas de uso de computação”.</Alert>}
     {error && <Alert severity="error">{error}</Alert>}
-    {message && <Alert severity="info">{message}</Alert>}
 
-    <Box sx={{ display: "grid", gridTemplateColumns: { xs: "1fr", lg: "minmax(0, 2.2fr) minmax(280px, 1fr)" }, gap: 2 }}>
-      <Paper variant="outlined" sx={{ p: 2.5, minHeight: 330 }}>
-        <Stack direction="row" justifyContent="space-between" alignItems="baseline"><Typography variant="h6">Série observada</Typography><Typography variant="body2" color="text.secondary">{visibleRows.length.toLocaleString()} buckets na Silver</Typography></Stack>
-        {loading ? <Box sx={{ display: "grid", placeItems: "center", minHeight: 260 }}><CircularProgress size={28} /></Box> : visibleRows.length ? <MetricSparkline rows={visibleRows} /> : <Box sx={{ py: 7, textAlign: "center" }}><Typography color="text.secondary">Sem dados para os filtros selecionados.</Typography><Typography variant="body2" color="text.secondary" sx={{ mt: 0.5 }}>Abrir esta tela consulta somente a Silver; não inicia coleta na OCI.</Typography></Box>}
-        <Typography variant="caption" color="text.secondary">O gráfico mostra value_average por bucket. Percentis nativos do provedor, quando disponíveis, são outra medida.</Typography>
+    {profile && <Box sx={{ display: "grid", gridTemplateColumns: { xs: "repeat(2, minmax(0,1fr))", md: "repeat(6, minmax(0,1fr))" }, gap: 1.5 }}>
+      {[
+        ["P50 (mediana)", profile.p50, "Metade do tempo abaixo deste valor"],
+        ["P95", profile.p95, "95% dos buckets abaixo; 5% do tempo acima"],
+        ["P99", profile.p99, "Só 1% do tempo acima"],
+        ["Pico", profile.max, "Maior valor nativo observado (max)"],
+        ["Média", profile.average, "Média simples dos buckets"],
+      ].map(([label, value, help]) => <Paper key={String(label)} variant="outlined" sx={{ p: 1.5 }}>
+        <Typography variant="caption" color="text.secondary">{label}</Typography>
+        <Typography variant="h6">{fmt(value as number | null)}{isPercent && value != null ? "%" : ""}</Typography>
+        <Typography variant="caption" color="text.secondary">{help}</Typography>
+      </Paper>)}
+      <Paper variant="outlined" sx={{ p: 1.5 }}>
+        <Typography variant="caption" color="text.secondary">Cobertura</Typography>
+        <Typography variant="h6">{fmt(profile.coverage * 100)}%</Typography>
+        <Typography variant="caption" color="text.secondary">{profile.samples.toLocaleString("pt-BR")} de {profile.expected_buckets.toLocaleString("pt-BR")} buckets · {profile.days_observed} dia(s)</Typography>
       </Paper>
+    </Box>}
 
-      <Paper variant="outlined" sx={{ p: 2.5, bgcolor: "#f8fafb" }}>
-        <Typography variant="h6" sx={{ mb: 1.5 }}>Perfil da janela</Typography>
-        {latestProfile ? <><Typography variant="body2" color="text.secondary">Percentis lineares sobre value_average dos buckets</Typography><Stack direction="row" spacing={2} sx={{ my: 2 }}>{([["P90", latestProfile.p90], ["P95", latestProfile.p95], ["P99", latestProfile.p99]] as const).map(([label, value]) => <Box key={label}><Typography variant="caption" color="text.secondary">{label}</Typography><Typography variant="h5" sx={{ fontVariantNumeric: "tabular-nums" }}>{value == null ? "—" : Number(value).toPrecision(4)}</Typography></Box>)}</Stack><Typography variant="body2">Máximo: {latestProfile.value_max == null ? "—" : Number(latestProfile.value_max).toPrecision(4)}</Typography><Typography variant="body2">Cobertura: {(latestProfile.coverage * 100).toFixed(1)}%</Typography><Typography variant="body2">Maior lacuna: {latestProfile.largest_gap_seconds}s</Typography><Typography variant="body2">Amostras: {latestProfile.samples}</Typography><Button sx={{ mt: 2 }} variant="outlined" onClick={() => void calculate()} disabled={profiling}>{profiling ? "Calculando…" : "Recalcular perfil"}</Button></> : <><Typography color="text.secondary">Ainda não há perfil persistido para este recorte.</Typography><Button sx={{ mt: 2 }} variant="contained" onClick={() => void calculate()} disabled={profiling || !metric || !resourceId}>{profiling ? "Calculando…" : "Calcular P90, P95 e P99"}</Button></>}
-        <Alert severity="warning" sx={{ mt: 2 }}>Este P95 resume a janela de buckets. Não é o P95 nativo OCI de cada bucket.</Alert>
-      </Paper>
-    </Box>
+    <Paper variant="outlined" sx={{ p: 2 }}>
+      <Stack direction="row" justifyContent="space-between" alignItems="baseline">
+        <Typography variant="subtitle1" fontWeight={650}>Série no tempo</Typography>
+        <Typography variant="caption" color="text.secondary">horário local · {x.length.toLocaleString("pt-BR")} buckets de {resolution / 60} min</Typography>
+      </Stack>
+      {loading ? <Box sx={{ display: "grid", placeItems: "center", minHeight: 360 }}><CircularProgress size={28} /></Box>
+        : x.length ? <Plot data={[
+          { type: "scatter", mode: "lines", name: "Máximo do bucket", x, y: series!.points.map((p) => p.max), line: { color: "#ed8a3b", width: 1 }, opacity: 0.55 },
+          { type: "scatter", mode: "lines", name: "P99 do bucket", x, y: series!.points.map((p) => p.p99), line: { color: "#8f6bd8", width: 1 }, visible: "legendonly" },
+          { type: "scatter", mode: "lines", name: "P95 do bucket", x, y: series!.points.map((p) => p.p95), line: { color: "#d64c4c", width: 1 }, visible: "legendonly" },
+          { type: "scatter", mode: "lines", name: "Média do bucket", x, y: series!.points.map((p) => p.mean), line: { color: "#0F62FE", width: 1.6 } },
+        ] as never} layout={{
+          autosize: true, height: 380, margin: { l: 56, r: 16, t: 10, b: 60 },
+          paper_bgcolor: "transparent", plot_bgcolor: "transparent", separators: ",.", hovermode: "x unified",
+          xaxis: { type: "date", tickformat: "%d/%m %Hh", showgrid: false, rangeslider: { visible: true, thickness: 0.06 } },
+          yaxis: { ticksuffix: isPercent ? "%" : "", rangemode: "tozero", gridcolor: "#e8edf3" },
+          legend: { orientation: "h", y: -0.25 },
+        } as never} />
+          : <Typography color="text.secondary" sx={{ py: 6, textAlign: "center" }}>Sem buckets para os filtros escolhidos.</Typography>}
+      <Alert severity="info" sx={{ mt: 1 }}>
+        <strong>Como ler:</strong> cada ponto é um bucket de {resolution / 60} min. A OCI calcula média, máximo e P95/P99 <em>dentro</em> do bucket a partir das amostras brutas
+        (≈ a cada 10 s). Os cartões acima (P50/P95/P99) são outra coisa: o percentil da janela inteira, calculado sobre as médias dos buckets.
+      </Alert>
+    </Paper>
 
-    <Paper variant="outlined" sx={{ p: 2.5 }}><Stack direction="row" justifyContent="space-between" alignItems="baseline"><Typography variant="h6">Cobertura e lacunas</Typography><Typography variant="body2" color="text.secondary">{coverageRows.length} registros de cobertura</Typography></Stack>{coverageRows.length ? <Stack spacing={1} sx={{ mt: 1.5 }}>{coverageRows.slice(0, 8).map((row, index) => <Box key={`${String(row.series_id)}-${index}`} sx={{ display: "grid", gridTemplateColumns: "minmax(130px, 1fr) auto auto", gap: 2, py: 1, borderBottom: "1px solid #e4e9ed" }}><Typography variant="body2">{String(row.metric || row.series_id || "Série")}</Typography><Typography variant="body2">{String(row.coverage_status || "—")}</Typography><Typography variant="body2" color="text.secondary">{String(row.missing_buckets ?? 0)} buckets ausentes</Typography></Box>)}</Stack> : <Typography color="text.secondary" sx={{ mt: 1 }}>A cobertura aparecerá quando houver um registro publicado para esta janela.</Typography>}</Paper>
+    {series && series.daily.length > 0 && <Paper variant="outlined" sx={{ p: 2 }}>
+      <Typography variant="subtitle1" fontWeight={650} gutterBottom>Resumo por dia</Typography>
+      <Table size="small">
+        <TableHead><TableRow><TableCell>Dia (UTC)</TableCell><TableCell align="right">Média</TableCell><TableCell align="right">P95</TableCell><TableCell align="right">Maior média</TableCell></TableRow></TableHead>
+        <TableBody>{series.daily.map((row) => <TableRow key={row.day}>
+          <TableCell>{row.day}</TableCell>
+          <TableCell align="right">{fmt(row.average)}{isPercent ? "%" : ""}</TableCell>
+          <TableCell align="right">{fmt(row.p95)}{isPercent ? "%" : ""}</TableCell>
+          <TableCell align="right">{fmt(row.max)}{isPercent ? "%" : ""}</TableCell>
+        </TableRow>)}</TableBody>
+      </Table>
+    </Paper>}
   </Stack>;
 }

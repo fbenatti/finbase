@@ -59,7 +59,7 @@ const emptyForm = {
   gcp_token: "", table_name: "",
   mongo_group_id: "", mongo_contract_type: "", marketplace: false,
   oci_fingerprint: "", oci_region: "sa-saopaulo-1", oci_private_key: "", oci_genai_compartments: "",
-  infraMetricsEnabled: false, infraMetricsCompartment: "", infraMetricsResourceIds: "", infraMetricsResolutions: [60, 300, 900] as number[],
+  mon_credentials_code: "", mon_compartment: "", mon_resource_ids: "", mon_resolution: "5m", mon_history_days: "30",
   github_extraction_type: "token" as "billing" | "license" | "token",
   gemini_extraction_type: "token" as "license" | "token",
   admin_email: "",
@@ -278,7 +278,6 @@ export default function Connections() {
     setError("");
     setFormTestMessage(null);
     const cfg = conn.config_json as Record<string, string>;
-    const infraCfg = cfg.infrastructure_metrics as unknown as Record<string, unknown> | undefined;
     if (conn.connector_type === "azure_mca_invoice") {
       const latestPeriod = latestMcaInvoiceMonth();
       setForm({
@@ -351,11 +350,21 @@ export default function Connections() {
         oci_region: cfg.region || "sa-saopaulo-1",
         oci_private_key: cfg.private_key || cfg.key_content || "",
         oci_genai_compartments: (Array.isArray(cfg.generative_ai_compartment_ids) ? cfg.generative_ai_compartment_ids : []).join("\n"),
-        infraMetricsEnabled: infraCfg?.enabled === true,
-        infraMetricsCompartment: String(infraCfg?.compartment_id || ""),
-        infraMetricsResourceIds: Array.isArray(infraCfg?.resource_ids) ? infraCfg.resource_ids.join("\n") : "",
-        infraMetricsResolutions: Array.isArray(infraCfg?.resolutions_seconds) ? infraCfg.resolutions_seconds as number[] : [60, 300, 900],
         blob_prefixes: prefixesToText(conn.blob_prefixes),
+      });
+    } else if (conn.connector_type === "oci_monitoring") {
+      setForm({
+        ...emptyForm,
+        code: conn.code, name: conn.name,
+        connector_type: conn.connector_type,
+        cloud_name: conn.cloud_name || "",
+        cloud_scope: conn.cloud_scope || "oci",
+        oci_region: cfg.region || "sa-saopaulo-1",
+        mon_credentials_code: cfg.credentials_connection_code || "",
+        mon_compartment: cfg.compartment_id || "",
+        mon_resource_ids: (Array.isArray(cfg.resource_ids) ? cfg.resource_ids : []).join("\n"),
+        mon_resolution: cfg.resolution || "5m",
+        mon_history_days: String(cfg.history_days || 30),
       });
     } else if (conn.connector_type === "mongodb_atlas") {
       setForm({
@@ -548,17 +557,15 @@ export default function Connections() {
       if (form.oci_region) configJson.region = form.oci_region;
       if (form.oci_private_key) configJson.private_key = form.oci_private_key;
       configJson.generative_ai_compartment_ids = form.oci_genai_compartments.split("\n").map(s => s.trim()).filter(Boolean);
-      if (form.infraMetricsEnabled) {
-        configJson.infrastructure_metrics = {
-          enabled: true,
-          compartment_id: form.infraMetricsCompartment.trim(),
-          resource_ids: form.infraMetricsResourceIds.split("\n").map(id => id.trim()).filter(Boolean),
-          metric_names: ["CpuUtilization", "MemoryUtilization", "DiskIopsRead", "DiskIopsWritten", "DiskBytesRead", "DiskBytesWritten", "NetworksBytesIn", "NetworksBytesOut"],
-          resolutions_seconds: form.infraMetricsResolutions,
-          retention_days: 60,
-          schedule_enabled: false,
-        };
-      }
+    } else if (form.connector_type === "oci_monitoring") {
+      configJson.credentials_connection_code = form.mon_credentials_code;
+      configJson.region = form.oci_region;
+      configJson.compartment_id = form.mon_compartment.trim();
+      configJson.resource_ids = form.mon_resource_ids.split("\n").map(id => id.trim()).filter(Boolean);
+      configJson.namespace = "oci_computeagent";
+      configJson.resolution = form.mon_resolution;
+      configJson.history_days = Number(form.mon_history_days) || 30;
+      configJson.statistics = ["mean", "max", "p95", "p99", "count"];
     } else if (form.connector_type === "mongodb_atlas") {
       if (form.tenant_id) configJson.base_url = form.tenant_id;
       if (form.client_id) configJson.public_key = form.client_id;
@@ -634,10 +641,10 @@ export default function Connections() {
 
   const save = async () => {
     if (savingConnection) return;
-    if (form.connector_type === "oci" && form.infraMetricsEnabled) {
-      const resourceIds = form.infraMetricsResourceIds.split("\n").map(id => id.trim()).filter(Boolean);
-      if (!form.infraMetricsCompartment.trim() || resourceIds.length < 1 || resourceIds.length > 2 || form.infraMetricsResolutions.length === 0) {
-        setError("Informe o compartimento, de uma a duas instâncias e ao menos uma resolução para habilitar a coleta.");
+    if (form.connector_type === "oci_monitoring") {
+      const resourceIds = form.mon_resource_ids.split("\n").map(id => id.trim()).filter(Boolean);
+      if (!form.mon_credentials_code || !form.mon_compartment.trim() || resourceIds.length < 1) {
+        setError("Escolha a conexão OCI das credenciais e informe o compartimento e ao menos uma instância.");
         return;
       }
     }
@@ -1057,27 +1064,54 @@ export default function Connections() {
                   onChange={(e) => setForm({ ...form, oci_private_key: e.target.value })}
                   placeholder={savedSecrets ? "•••••• chave já cadastrada" : undefined}
                   helperText={savedSecrets ? "Chave privada já cadastrada no servidor. Deixe em branco para manter ou cole uma nova para trocar." : "Cole o conteúdo completo do arquivo de chave privada (.pem)."} />
-                <Divider sx={{ gridColumn: "1 / -1", mt: 1 }} />
-                <Typography variant="subtitle1" sx={{ gridColumn: "1 / -1", fontWeight: 700 }}>Métricas de infraestrutura</Typography>
-                <FormControlLabel sx={{ gridColumn: "1 / -1" }} control={<Checkbox checked={form.infraMetricsEnabled} onChange={(e) => setForm({ ...form, infraMetricsEnabled: e.target.checked })} />} label="Coletar recursos de infraestrutura nesta conexão" />
-                {form.infraMetricsEnabled && <>
-                  <Alert severity="info" sx={{ gridColumn: "1 / -1" }}>
-                    Coletaremos utilização de CPU e memória, IOPS e bytes de leitura/escrita de disco, e bytes de rede de entrada/saída. Preservamos mean, min, max, count, sum e P90/P95/P99 nativos; counters de disco/rede também geram taxas por diferença entre buckets. O piloto aceita até 2 instâncias, janela manual de até 24 horas por execução e mantém 60 dias na Silver. Amostras OCI têm período de origem de 10 segundos; a coleta compara buckets de 1, 5 e 15 minutos. Cada execução pode gerar até 128 consultas de métricas (2 recursos × 8 métricas × 8 estatísticas); não há agendamento automático.
-                  </Alert>
-                  <TextField label="OCID do compartimento das métricas" value={form.infraMetricsCompartment} onChange={(e) => setForm({ ...form, infraMetricsCompartment: e.target.value })} helperText="Compartimento no qual as métricas de Compute são consultadas." sx={{ gridColumn: "1 / -1" }} />
-                  <TextField label="OCIDs das instâncias permitidas (uma por linha, máximo 2)" multiline minRows={2} value={form.infraMetricsResourceIds} onChange={(e) => setForm({ ...form, infraMetricsResourceIds: e.target.value })} helperText="A coleta consulta somente estas instâncias; não faz descoberta automática de recursos." sx={{ gridColumn: "1 / -1" }} />
-                  <Box sx={{ gridColumn: "1 / -1" }}>
-                    <Typography variant="body2" sx={{ mb: 0.5 }}>Resoluções habilitadas</Typography>
-                    <Stack direction="row" flexWrap="wrap" useFlexGap>
-                      {[60, 300, 900].map((seconds) => <FormControlLabel key={seconds} control={<Checkbox checked={form.infraMetricsResolutions.includes(seconds)} onChange={(e) => setForm({ ...form, infraMetricsResolutions: e.target.checked ? [...new Set([...form.infraMetricsResolutions, seconds])].sort((a, b) => a - b) : form.infraMetricsResolutions.filter((value) => value !== seconds) })} />} label={`${seconds / 60} min`} />)}
-                    </Stack>
+              </>
+            )}
+
+            {form.connector_type === "oci_monitoring" && (
+              <>
+                <Alert severity="info" sx={{ gridColumn: "1 / -1" }}>
+                  Coleta CPU, memória, disco e rede pelo OCI Monitoring. A Bronze guarda os pontos exatamente como a API devolve;
+                  os nomes genéricos vêm dos mapeamentos em <strong>Catálogo de dados → Relações entre tabelas</strong> e a Silver
+                  <code> compute_usage_metrics</code> é materializada pelo Reprocessar. A OCI só entrega buckets de 5/15 minutos dos últimos 30 dias.
+                </Alert>
+                <FormControl sx={{ gridColumn: "1 / -1" }}>
+                  <InputLabel>Credenciais (conexão OCI)</InputLabel>
+                  <Select label="Credenciais (conexão OCI)" value={form.mon_credentials_code}
+                    onChange={(e) => setForm({ ...form, mon_credentials_code: String(e.target.value) })}>
+                    {connectionCatalog.filter((item) => item.connector_type === "oci").map((item) => (
+                      <MenuItem key={item.id} value={item.code}>{item.name} ({item.code})</MenuItem>
+                    ))}
+                  </Select>
+                </FormControl>
+                <TextField label="Região da nuvem" value={form.oci_region}
+                  onChange={(e) => setForm({ ...form, oci_region: e.target.value })} />
+                <TextField label="OCID do compartimento das métricas" value={form.mon_compartment}
+                  onChange={(e) => setForm({ ...form, mon_compartment: e.target.value })} />
+                <TextField label="OCIDs das instâncias (uma por linha)" multiline minRows={2} value={form.mon_resource_ids}
+                  onChange={(e) => setForm({ ...form, mon_resource_ids: e.target.value })}
+                  helperText="A coleta consulta somente estas instâncias; não há descoberta automática." sx={{ gridColumn: "1 / -1" }} />
+                <FormControl>
+                  <InputLabel>Resolução</InputLabel>
+                  <Select label="Resolução" value={form.mon_resolution}
+                    onChange={(e) => setForm({ ...form, mon_resolution: String(e.target.value) })}>
+                    <MenuItem value="5m">5 minutos</MenuItem>
+                    <MenuItem value="15m">15 minutos</MenuItem>
+                    <MenuItem value="1m">1 minuto</MenuItem>
+                  </Select>
+                </FormControl>
+                <TextField label="Histórico (dias)" type="number" value={form.mon_history_days}
+                  onChange={(e) => setForm({ ...form, mon_history_days: e.target.value })}
+                  helperText="Janela coletada a cada execução (até 60 dias; 5/15 min limitados a 30)." />
+                <Alert severity="warning" sx={{ gridColumn: "1 / -1" }}>
+                  <strong>Policies OCI necessárias</strong> para o grupo do usuário da chave API da conexão de credenciais:
+                  <Box component="code" sx={{ display: "block", mt: 1, whiteSpace: "normal", overflowWrap: "anywhere" }}>
+                    Allow group &lt;grupo&gt; to read metrics in compartment &lt;compartimento&gt; where target.metrics.namespace='oci_computeagent'
                   </Box>
-                  <Alert severity="warning" sx={{ gridColumn: "1 / -1" }}>
-                    <strong>Policy OCI necessária:</strong> no Console, abra <em>Identity &amp; Security → Policies</em> e crie a policy no compartimento da tenancy para o grupo do usuário da chave API. Restrinja ao namespace usado pelo piloto:
-                    <Box component="code" sx={{ display: "block", mt: 1, whiteSpace: "normal", overflowWrap: "anywhere" }}>Allow group &lt;grupo_do_usuario_api&gt; to read metrics in compartment &lt;compartimento&gt; where target.metrics.namespace='oci_computeagent'</Box>
-                    <a href="https://docs.oracle.com/en-us/iaas/Content/Identity/Reference/monitoringpolicyreference.htm" target="_blank" rel="noreferrer">Documentação oficial: permissões do Monitoring e QueryMetrics</a>. A policy concede leitura das métricas, sem permissão para publicar métricas ou administrar recursos.
-                  </Alert>
-                </>}
+                  <Box component="code" sx={{ display: "block", mt: 0.5, whiteSpace: "normal", overflowWrap: "anywhere" }}>
+                    Allow group &lt;grupo&gt; to read instances in compartment &lt;compartimento&gt;
+                  </Box>
+                  A primeira lê as métricas; a segunda lê o shape, OCPU e memória usados pelo motor de rightsizing. Nenhuma das duas permite alterar recursos.
+                </Alert>
               </>
             )}
 
