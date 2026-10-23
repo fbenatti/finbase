@@ -29,7 +29,9 @@ def _row_key(row: Mapping) -> tuple:
     missing = [field for field in _REQUIRED_KEY_FIELDS if row.get(field) is None]
     if missing:
         raise ValueError(f"metric row is missing identity fields: {', '.join(missing)}")
-    return tuple(row[field] for field in _KEY_FIELDS)
+    # Optional identity components still participate in the key, but their
+    # absence is represented canonically as NULL (the Silver model permits it).
+    return tuple(row.get(field) for field in _KEY_FIELDS)
 
 
 def _merge_json_map(old_value, new_value) -> str | None:
