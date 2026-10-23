@@ -1,6 +1,5 @@
-import { Dialog, DialogActions, DialogContent, DialogTitle } from "../../components/FinbaseDialog";
 import { dataDisplayText } from "../../utils/dataPresentation";
-import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import {
   Alert, Box, Button, Chip, CircularProgress, FormControl, InputAdornment, InputLabel, MenuItem, OutlinedInput,
   Paper, Select, Stack, TextField, ToggleButton, ToggleButtonGroup, Typography,
@@ -10,7 +9,6 @@ import {
   ForecastConfig,
   ForecastMetadata,
   MappedConnection,
-  createForecastConfig,
   formatApiError,
   getConnectionsForDestination,
   getForecastConfigs,
@@ -19,11 +17,8 @@ import {
 } from "../../services/api";
 
 type Props = {
-  open: boolean;
   initial: ForecastConfig | null;
   tables: DestinationTable[];
-  usedDestinationTableIds: number[];
-  onClose: () => void;
   onSaved: (savedName: string) => void | Promise<void>;
 };
 
@@ -120,7 +115,7 @@ function Step({ n, title, hint, children }: { n: number; title: string; hint: st
   );
 }
 
-export default function ForecastConfigDialog({ open, initial, tables, usedDestinationTableIds, onClose, onSaved }: Props) {
+export default function ForecastConfigForm({ initial, tables, onSaved }: Props) {
   const [name, setName] = useState(emptyState.name);
   const [tableId, setTableId] = useState<number | "">(emptyState.tableId);
   const [meta, setMeta] = useState<ForecastMetadata | null>(emptyState.meta);
@@ -221,9 +216,8 @@ export default function ForecastConfigDialog({ open, initial, tables, usedDestin
   };
 
   useEffect(() => {
-    if (!open) return;
     void applyInitial(initial);
-  }, [open, initial?.id]);
+  }, [initial?.id]);
 
   const selectTable = async (id: number) => {
     const m = await getForecastMetadata(id);
@@ -287,10 +281,9 @@ export default function ForecastConfigDialog({ open, initial, tables, usedDestin
     setSaving(true);
     setError("");
     try {
-      if (initial) await updateForecastConfig(initial.id, body);
-      else await createForecastConfig(body);
+      if (!initial) throw new Error("O perfil único de Forecast ainda não foi carregado.");
+      await updateForecastConfig(initial.id, body);
       await onSaved(name.trim() || "Perfil");
-      onClose();
     } catch (e) {
       setError(formatApiError(e, "Não foi possível gravar o perfil"));
     } finally {
@@ -298,32 +291,19 @@ export default function ForecastConfigDialog({ open, initial, tables, usedDestin
     }
   };
 
-  const selectableTables = useMemo(() => {
-    const used = new Set(usedDestinationTableIds);
-    const available = tables.filter((table) => !used.has(table.id));
-    if (!initial) return available;
-    const current = tables.find((table) => table.id === initial.destination_table_id);
-    if (current && !available.some((table) => table.id === current.id)) {
-      return [current, ...available];
-    }
-    return tables;
-  }, [initial, tables, usedDestinationTableIds]);
-
   const setters = { setModel, setGrowth, setWeight };
-  const selectedTable = selectableTables.find((table) => table.id === tableId);
+  const selectedTable = tables.find((table) => table.id === tableId);
   const methodName = METHOD_LABELS[model]?.split(" — ")[0] ?? model;
   const profileLabel = PROFILES.find((p) => p.key === profile)?.label ?? "Personalizado";
   const rateioCount = intervalConnections.length;
 
   return (
-    <Dialog open={open} onClose={onClose} maxWidth="lg" fullWidth>
-      <DialogTitle>
+    <Paper variant="outlined" sx={{ borderRadius: 2 }}>
+      <Stack spacing={2} sx={{ p: { xs: 1.5, md: 2.5 } }}>
         <Stack direction="row" alignItems="center" spacing={1.5}>
-          <span>{initial ? "Alterar perfil de Forecast" : "Novo perfil de Forecast"}</span>
+          <Typography variant="h6">Configuração do Forecast</Typography>
           {profile !== "custom" && <Chip size="small" variant="outlined" label={profileLabel} />}
         </Stack>
-      </DialogTitle>
-      <DialogContent sx={{ bgcolor: "#FAFBFD" }}>
         {error && <Alert severity="error" sx={{ mb: 2 }} onClose={() => setError("")}>{dataDisplayText(error)}</Alert>}
         {loading && (
           <Stack direction="row" alignItems="center" gap={1} sx={{ mb: 2 }}>
@@ -341,18 +321,13 @@ export default function ForecastConfigDialog({ open, initial, tables, usedDestin
             <Step n={1} title="Identificação e base" hint="Nome do perfil e de qual base consolidada ele projeta.">
               <Stack direction={{ xs: "column", sm: "row" }} spacing={1.5}>
                 <TextField label="Nome do perfil" value={name} onChange={(e) => setName(e.target.value)} fullWidth />
-                <FormControl fullWidth disabled={!!initial}>
+                  <FormControl fullWidth>
                   <InputLabel>Base consolidada</InputLabel>
-                  <Select label="Base consolidada" value={tableId} onChange={(e) => void selectTable(Number(e.target.value))}>
-                    {selectableTables.map((t) => <MenuItem key={t.id} value={t.id}>{t.name}</MenuItem>)}
+                    <Select label="Base consolidada" value={tableId} onChange={(e) => void selectTable(Number(e.target.value))}>
+                    {tables.map((t) => <MenuItem key={t.id} value={t.id}>{t.name}</MenuItem>)}
                   </Select>
                 </FormControl>
               </Stack>
-              {!initial && selectableTables.length === 0 && (
-                <Typography variant="caption" color="text.secondary" component="p" sx={{ mt: 1 }}>
-                  Todas as bases consolidadas já têm um perfil.
-                </Typography>
-              )}
               {meta && (
                 <Stack direction={{ xs: "column", sm: "row" }} spacing={1.5} sx={{ mt: 1.5 }}>
                   <FormControl fullWidth>
@@ -522,13 +497,12 @@ export default function ForecastConfigDialog({ open, initial, tables, usedDestin
             {windows.length === 0 && <Alert severity="warning" sx={{ mt: 2 }}>Escolha ao menos uma janela.</Alert>}
           </Paper>
         </Box>
-      </DialogContent>
-      <DialogActions sx={{ px: 3, py: 2 }}>
-        <Button onClick={onClose}>Cancelar</Button>
+      </Stack>
+      <Stack direction="row" justifyContent="flex-end" sx={{ px: { xs: 1.5, md: 2.5 }, pb: 2.5 }}>
         <Button variant="contained" disabled={saving || loading} onClick={() => void save()}>
           {saving ? "Gravando..." : "Gravar perfil"}
         </Button>
-      </DialogActions>
-    </Dialog>
+      </Stack>
+    </Paper>
   );
 }
