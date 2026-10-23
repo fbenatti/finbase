@@ -114,8 +114,40 @@ class OciMonitoringExtractor:
 
     @property
     def discovers_compartment(self) -> bool:
-        """``discovery = "compartment"``: every instance of the compartment, no allowlist."""
-        return str(self.config.get("discovery") or "") == "compartment"
+        """Instances are discovered, no allowlist: ``discovery`` = ``compartment`` or ``tenancy``.
+
+        ``compartment`` lists one compartment; ``tenancy`` walks every active
+        compartment of the tenancy (the root comes from the credentials).
+        """
+        return str(self.config.get("discovery") or "") in ("compartment", "tenancy")
+
+    @property
+    def discovers_tenancy(self) -> bool:
+        return str(self.config.get("discovery") or "") == "tenancy"
+
+    def compartment_ids(self) -> list[str]:
+        """Compartments to collect: the configured one, or the whole tenancy tree."""
+        if getattr(self, "_compartments", None) is None:
+            if not self.discovers_tenancy:
+                self._compartments = [str(self.config["compartment_id"])]
+            else:
+                import oci
+
+                root = str(self.oci_config()["tenancy"])
+                identity = oci.identity.IdentityClient(self.oci_config(), timeout=(5, 60))
+                # Walk the tree level by level: the subtree flag only works from the root,
+                # and this keeps working when a child compartment is configured later.
+                found, pending = [root], [root]
+                while pending:
+                    parent = pending.pop()
+                    children = oci.pagination.list_call_get_all_results(
+                        identity.list_compartments, parent, lifecycle_state="ACTIVE",
+                    ).data
+                    for child in children:
+                        found.append(child.id)
+                        pending.append(child.id)
+                self._compartments = found
+        return self._compartments
 
     @property
     def resource_ids(self) -> list[str]:
@@ -124,18 +156,18 @@ class OciMonitoringExtractor:
         return self._list("resource_ids")
 
     def instances(self) -> list[dict]:
-        """Non-terminated instances of the compartment (one paginated ListInstances)."""
+        """Non-terminated instances of the discovered compartments (paginated ListInstances each)."""
         if getattr(self, "_instances", None) is None:
             import oci
 
             compute = oci.core.ComputeClient(self.oci_config(), timeout=(5, 60))
-            found = oci.pagination.list_call_get_all_results(
-                compute.list_instances, self.config["compartment_id"],
-            ).data
-            self._instances = [
-                {"resource_id": item.id, "instance": item}
-                for item in found if item.lifecycle_state not in ("TERMINATED", "TERMINATING")
-            ]
+            self._instances = []
+            for compartment_id in self.compartment_ids():
+                found = oci.pagination.list_call_get_all_results(compute.list_instances, compartment_id).data
+                self._instances.extend(
+                    {"resource_id": item.id, "instance": item, "compartment_id": compartment_id}
+                    for item in found if item.lifecycle_state not in ("TERMINATED", "TERMINATING")
+                )
         return self._instances
 
     @property
@@ -175,13 +207,14 @@ class OciMonitoringExtractor:
         if self._client is None:
             import oci
 
+            # Tenancy discovery multiplies the calls per compartment: back off on 429.
             self._client = oci.monitoring.MonitoringClient(
-                self.oci_config(), retry_strategy=oci.retry.NoneRetryStrategy(), timeout=(5, 60),
+                self.oci_config(), retry_strategy=oci.retry.DEFAULT_RETRY_STRATEGY, timeout=(5, 60),
             )
         return self._client
 
     def _validate(self) -> None:
-        if not self.config.get("compartment_id"):
+        if not self.config.get("compartment_id") and not self.discovers_tenancy:
             raise ValueError("Informe o compartment_id da fonte OCI Monitoring")
         if not self.discovers_compartment and not self.resource_ids:
             raise ValueError("Informe resource_ids (allowlist) ou ative a descoberta do compartimento")
@@ -264,15 +297,19 @@ class OciMonitoringExtractor:
             raise ValueError(f"Unidade fora da janela coletável: {blob_path}")
         _start, _end, effective_start, effective_end = match
         namespace = str(self.config.get("namespace") or DEFAULT_NAMESPACE)
-        compartment_id = str(self.config["compartment_id"])
         region = self.oci_config().get("region")
         rows: list[dict[str, Any]] = []
         errors: list[str] = []
-        # Compartment discovery asks once per metric/statistic and receives one
-        # stream per instance; an allowlist asks per resource.
-        resource_filters = [None] if self.discovers_compartment else self.resource_ids
+        # Discovery asks once per compartment holding instances, metric and
+        # statistic, and receives one stream per instance; an allowlist asks per
+        # resource in the configured compartment.
+        if self.discovers_compartment:
+            targets = [(compartment_id, None) for compartment_id in
+                       sorted({item["compartment_id"] for item in self.instances()})]
+        else:
+            targets = [(str(self.config["compartment_id"]), resource_id) for resource_id in self.resource_ids]
         for metric in self._list("metric_names", DEFAULT_METRICS):
-            for resource_id in resource_filters:
+            for compartment_id, resource_id in targets:
                 for statistic in self._list("statistics", DEFAULT_STATISTICS):
                     if should_abort and should_abort():
                         raise RuntimeError("Coleta cancelada")
@@ -308,7 +345,7 @@ class OciMonitoringExtractor:
         try:
             self._validate()
             self.client().list_metrics(
-                self.config["compartment_id"],
+                self.compartment_ids()[0],
                 __import__("oci").monitoring.models.ListMetricsDetails(namespace=self.config.get("namespace") or DEFAULT_NAMESPACE),
                 limit=1,
             )
