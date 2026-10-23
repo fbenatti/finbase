@@ -140,7 +140,7 @@ function DonutCard({ title, items }: { title: string; items: Breakdown[] }) {
   );
 }
 
-export default function CostSummary({ table, director, departmentId, path, includeSharedCost, measureColumn, scope, onDateRangeChange }: {
+export default function CostSummary({ table, director, departmentId, path, includeSharedCost, measureColumn, scope, refreshKey, onDateRangeChange }: {
   table: string;
   director: string;
   departmentId?: number;
@@ -148,6 +148,7 @@ export default function CostSummary({ table, director, departmentId, path, inclu
   includeSharedCost: boolean;
   measureColumn: "realizado" | "realizado_cloud";
   scope: CostScope;
+  refreshKey?: number;
   onDateRangeChange: (from: string, to: string) => void;
 }) {
   const navigate = useNavigate();
@@ -179,7 +180,7 @@ export default function CostSummary({ table, director, departmentId, path, inclu
 
   const scopeKey = JSON.stringify([table, director, departmentId, includeSharedCost, measureColumn, scope]);
   const measures = useMemo(() => [{ column: measureColumn, aggregation: "SUM" as const }], [measureColumn]);
-  const signals = useCostSignals(scope, departmentId, path, table);
+  const signals = useCostSignals(scope, departmentId, path, table, refreshKey);
 
   // Ultimos 90 dias do periodo escolhido, sem passar de hoje.
   const todayIso = isoDay(new Date());
@@ -638,6 +639,7 @@ export default function CostSummary({ table, director, departmentId, path, inclu
         </Paper>
       )}
 
+      {signals.forecastError && <Alert severity="warning">{signals.forecastError}</Alert>}
       <DeviationMatrix
         months={series.map((row) => ({ key: row.key, label: row.label, actual: row.actual, budget: row.budget, closed: row.closed }))}
         anomalies={signals.anomalies}

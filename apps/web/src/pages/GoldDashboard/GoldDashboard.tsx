@@ -753,6 +753,7 @@ export default function GoldDashboard() {
           includeSharedCost={includeSharedCost}
           measureColumn={measureFor(filters)}
           scope={executiveScope}
+          refreshKey={refreshTick}
           onDateRangeChange={(from, to) => {
             setDateFrom(from);
             setDateTo(to);

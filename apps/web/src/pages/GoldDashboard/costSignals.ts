@@ -37,6 +37,7 @@ export type CostSignals = {
   budgetYear: number;
   forecastMonth: string | null;
   forecastMonths: ForecastAccuracyMonth[];
+  forecastError: string;
   justifications: ForecastAck[];
 };
 
@@ -60,20 +61,22 @@ async function scopePairs(table: string | undefined, filters: GoldQueryFilter[],
   return new Set(result.rows.map((row) => scopeKeyOf(row.subaccountname, row.servicename)));
 }
 
-export function useCostSignals(scope: CostSignalScope, departmentId: number | undefined, path: string[], table?: string): CostSignals {
+export function useCostSignals(scope: CostSignalScope, departmentId: number | undefined, path: string[], table?: string, refreshKey = 0): CostSignals {
   const [anomalies, setAnomalies] = useState<AnomalyCase[]>([]);
   const [budget, setBudget] = useState<BudgetAccuracyResponse["totals"] | null>(null);
   const [forecastMonths, setForecastMonths] = useState<ForecastAccuracyMonth[]>([]);
+  const [forecastError, setForecastError] = useState("");
   const [justifications, setJustifications] = useState<ForecastAck[]>([]);
   const [loading, setLoading] = useState(true);
 
   const departmentPath = path.length ? path.join(" > ") : undefined;
   const budgetYear = Number(scope.dateTo.slice(0, 4));
-  const scopeKey = JSON.stringify([scope, departmentId, departmentPath, table]);
+  const scopeKey = JSON.stringify([scope, departmentId, departmentPath, table, refreshKey]);
 
   useEffect(() => {
     let alive = true;
     setLoading(true);
+    setForecastError("");
     const from = periodKey(scope.dateFrom);
     const to = periodKey(scope.dateTo);
     const inRange = (period: unknown) => {
@@ -100,6 +103,7 @@ export function useCostSignals(scope: CostSignalScope, departmentId: number | un
       const months = monthsResult.status === "fulfilled"
         ? monthsResult.value.filter((month) => month.closed && inRange(month.target_month))
         : [];
+      setForecastError(monthsResult.status === "rejected" ? "Não foi possível carregar a acurácia de forecast. Use Recarregar dados para tentar novamente." : "");
       setForecastMonths([...months].sort((a, z) => periodKey(a.target_month).localeCompare(periodKey(z.target_month))));
       setJustifications(acksResult.status === "fulfilled"
         ? acksResult.value.items.filter((ack) => ack.active !== false).sort((a, z) => Math.abs(Number(z.variance || 0)) - Math.abs(Number(a.variance || 0)))
@@ -120,5 +124,5 @@ export function useCostSignals(scope: CostSignalScope, departmentId: number | un
   const openAnomalies = useMemo(() => anomalies.filter((item) => !item.closed_at).length, [anomalies]);
   const forecastMonth = forecastMonths.length ? forecastMonths[forecastMonths.length - 1].target_month : null;
 
-  return { loading, anomalies, anomalyByMonth, anomalyCost, openAnomalies, budget, budgetYear, forecastMonth, forecastMonths, justifications };
+  return { loading, anomalies, anomalyByMonth, anomalyCost, openAnomalies, budget, budgetYear, forecastMonth, forecastMonths, forecastError, justifications };
 }
