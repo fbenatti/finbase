@@ -861,7 +861,7 @@ RESOURCE_PROFILE_DAILY_WINDOW = SilverModel(
     description="Perfil de uso calculado sobre partições diárias UTC e com custo mensal alocado explicitamente.",
     grain=("series_source_connection_id", "series_owner", "series_id", "resolution_seconds",
            "value_statistic", "window_start_utc", "window_end_utc", "algorithm_version", "policy_version"),
-    primary_measure="effective_cost",
+    primary_measure="p95",
     time_field="window_to_day",
     fields=(
         _f("resource_id", "varchar", ROLE_IDENTITY, required=True),
