@@ -2667,6 +2667,9 @@ def _process_oci_monitoring_sync(
     try:
         df, effective_end, call_errors = extractor.fetch_window(
             blob_path, should_abort=(lambda: _check_cancelled(task_id)) if task_id else None,
+            progress=(lambda done, total: (done % 5 == 0 or done == total) and _persist_download_progress(
+                task_id, phase=f"OCI Monitoring: {blob_path} — chamada {done}/{total}",
+            )) if task_id else None,
         )
     except Exception as exc:
         logger.error("Falha ao coletar OCI Monitoring %s: %s", blob_path, exc)

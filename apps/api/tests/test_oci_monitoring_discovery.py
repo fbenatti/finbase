@@ -47,23 +47,29 @@ def test_tenancy_discovery_walks_every_compartment(monkeypatch):
     extractor._validate()  # no compartment_id needed
 
 
-def test_tenancy_collection_queries_each_compartment_with_instances(monkeypatch):
+def test_tenancy_collection_queries_once_from_the_root_with_subtree(monkeypatch):
     extractor = _extractor(monkeypatch, {
-        "discovery": "tenancy", "resolution": "5m", "metric_names": ["CpuUtilization"], "statistics": ["mean"],
+        "discovery": "tenancy", "resolution": "5m", "metric_names": ["CpuUtilization"], "statistics": ["mean", "max"],
     })
     asked = []
 
     class Monitoring:
-        def summarize_metrics_data(self, compartment_id, details):
-            asked.append((compartment_id, details.query))
+        def summarize_metrics_data(self, compartment_id, details, compartment_id_in_subtree=False):
+            asked.append((compartment_id, compartment_id_in_subtree, details.query))
             return SimpleNamespace(headers={}, data=[])
 
-    extractor._client = Monitoring()
+    monkeypatch.setattr(extractor, "_new_client", lambda: Monitoring())
     now = datetime(2026, 10, 23, 12, tzinfo=timezone.utc)
     start, end, _, _ = extractor.windows(now)[-1]
-    extractor.fetch_window(blob_path_for("5m", start, end), now=now)
-    # One query per compartment that holds instances, without a resource filter.
-    assert asked == [("comp-a", "CpuUtilization[5m].mean()"), ("comp-a1", "CpuUtilization[5m].mean()")]
+    progress = []
+    extractor.fetch_window(blob_path_for("5m", start, end), now=now, progress=lambda done, total: progress.append((done, total)))
+    # One query per metric/statistic from the tenancy root covering every
+    # subcompartment (2,162 per-compartment calls became 94 on 23/10/2026).
+    assert sorted(asked) == [
+        (extractor.oci_config()["tenancy"], True, "CpuUtilization[5m].max()"),
+        (extractor.oci_config()["tenancy"], True, "CpuUtilization[5m].mean()"),
+    ]
+    assert progress[-1] == (2, 2)
 
 
 def test_single_compartment_discovery_is_unchanged(monkeypatch):

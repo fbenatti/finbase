@@ -13,10 +13,12 @@ in the catalog mappings, when the Silver is reprocessed.
 from __future__ import annotations
 
 import calendar
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 import json
 import logging
+import threading
 from typing import Any
 
 import pandas as pd
@@ -71,6 +73,12 @@ MAX_AGE = {"5m": timedelta(days=30), "15m": timedelta(days=30)}
 # Units never cross a month, so each Bronze slice belongs to one billing period.
 CHUNK_START_DAYS = (1, 8, 15, 22, 29)
 BLOB_ROOT = "oci-monitoring"
+# Concurrent Monitoring calls per window (OCI allows ~10/s per tenancy).
+DEFAULT_PARALLEL_CALLS = 6
+
+
+class CollectionCancelled(RuntimeError):
+    """Raised inside a window when the extraction task was cancelled."""
 
 
 def _floor(moment: datetime, seconds: int) -> datetime:
@@ -226,14 +234,17 @@ class OciMonitoringExtractor:
         region = self.config.get("region") or (credentials.config_json or {}).get("region")
         return {**config, "region": region} if region else config
 
+    def _new_client(self):
+        import oci
+
+        # Root queries over the whole tenancy answer in 30-50 s; 429s back off.
+        return oci.monitoring.MonitoringClient(
+            self.oci_config(), retry_strategy=oci.retry.DEFAULT_RETRY_STRATEGY, timeout=(5, 180),
+        )
+
     def client(self):
         if self._client is None:
-            import oci
-
-            # Tenancy discovery multiplies the calls per compartment: back off on 429.
-            self._client = oci.monitoring.MonitoringClient(
-                self.oci_config(), retry_strategy=oci.retry.DEFAULT_RETRY_STRATEGY, timeout=(5, 60),
-            )
+            self._client = self._new_client()
         return self._client
 
     def _validate(self) -> None:
@@ -330,7 +341,8 @@ class OciMonitoringExtractor:
             return [(namespace, name, statistics) for name in self._list("metric_names")]
         return list(DEFAULT_COLLECTION_PLAN)
 
-    def fetch_window(self, blob_path: str, now: datetime | None = None, should_abort=None) -> tuple[pd.DataFrame, datetime, list[str]]:
+    def fetch_window(self, blob_path: str, now: datetime | None = None, should_abort=None,
+                     progress=None) -> tuple[pd.DataFrame, datetime, list[str]]:
         """Raw datapoints of one unit, plus the effective end and per-call errors."""
         import oci
 
@@ -343,48 +355,81 @@ class OciMonitoringExtractor:
         region = self.oci_config().get("region")
         rows: list[dict[str, Any]] = []
         errors: list[str] = []
-        # Discovery asks once per compartment holding instances, metric and
-        # statistic, and receives one stream per instance; an allowlist asks per
-        # resource in the configured compartment.
-        if self.discovers_compartment:
-            targets = [(compartment_id, None) for compartment_id in
+        # Tenancy discovery asks once from the root covering every subcompartment;
+        # compartment discovery once per compartment; an allowlist per resource.
+        # Each answer has one stream per resource.
+        if self.discovers_tenancy:
+            targets = [(str(self.oci_config()["tenancy"]), None, True)]
+        elif self.discovers_compartment:
+            targets = [(compartment_id, None, False) for compartment_id in
                        sorted({item["compartment_id"] for item in self.instances()})]
         else:
-            targets = [(str(self.config["compartment_id"]), resource_id) for resource_id in self.resource_ids]
-        for namespace, metric, statistics in self.collection_plan():
-            for compartment_id, resource_id in targets:
-                for statistic in statistics:
-                    if should_abort and should_abort():
-                        raise RuntimeError("Coleta cancelada")
-                    aggregation = AGGREGATIONS[statistic]
-                    selector = f'{{resourceId = "{resource_id}"}}' if resource_id else ""
-                    query = f'{metric}[{resolution}]{selector}.{aggregation}'
-                    details = oci.monitoring.models.SummarizeMetricsDataDetails(
-                        namespace=namespace, query=query, start_time=effective_start,
-                        end_time=effective_end, resolution=resolution,
-                    )
-                    try:
-                        response = self.client().summarize_metrics_data(compartment_id, details)
-                    except oci.exceptions.ServiceError as exc:
-                        errors.append(f"{namespace}/{metric}/{statistic}: {exc.status} {exc.code}")
-                        continue
-                    request_id = (getattr(response, "headers", {}) or {}).get("opc-request-id")
-                    for stream in oci.util.to_dict(response.data) or []:
-                        datapoints = stream.pop("aggregated_datapoints", None) or []
-                        for point in datapoints:
-                            row = {key: _text(value) for key, value in stream.items()}
-                            row.update({key: _text(value) for key, value in point.items()})
-                            row.update({
-                                # What was asked: the response repeats names across
-                                # namespaces (CpuUtilization exists in two).
-                                "requested_metric": f"{namespace}/{metric}",
-                                "query": query, "aggregation": aggregation, "request_resolution": resolution,
-                                "region": region,
-                                "request_start_time": effective_start.isoformat(),
-                                "request_end_time": effective_end.isoformat(),
-                                "opc_request_id": request_id,
-                            })
-                            rows.append(row)
+            targets = [(str(self.config["compartment_id"]), resource_id, False) for resource_id in self.resource_ids]
+        calls = [
+            (namespace, metric, statistic, compartment_id, resource_id, subtree)
+            for namespace, metric, statistics in self.collection_plan()
+            for compartment_id, resource_id, subtree in targets
+            for statistic in statistics
+        ]
+        local = threading.local()
+
+        def call(spec):
+            namespace, metric, statistic, compartment_id, resource_id, subtree = spec
+            if should_abort and should_abort():
+                raise CollectionCancelled("Coleta cancelada")
+            if getattr(local, "client", None) is None:
+                # SDK clients are not shared across threads.
+                local.client = self._new_client()
+            aggregation = AGGREGATIONS[statistic]
+            selector = f'{{resourceId = "{resource_id}"}}' if resource_id else ""
+            query = f'{metric}[{resolution}]{selector}.{aggregation}'
+            details = oci.monitoring.models.SummarizeMetricsDataDetails(
+                namespace=namespace, query=query, start_time=effective_start,
+                end_time=effective_end, resolution=resolution,
+            )
+            try:
+                response = local.client.summarize_metrics_data(
+                    compartment_id, details, compartment_id_in_subtree=subtree,
+                )
+            except oci.exceptions.ServiceError as exc:
+                return [], f"{namespace}/{metric}/{statistic}: {exc.status} {exc.code}"
+            request_id = (getattr(response, "headers", {}) or {}).get("opc-request-id")
+            found = []
+            for stream in oci.util.to_dict(response.data) or []:
+                datapoints = stream.pop("aggregated_datapoints", None) or []
+                for point in datapoints:
+                    row = {key: _text(value) for key, value in stream.items()}
+                    row.update({key: _text(value) for key, value in point.items()})
+                    row.update({
+                        # What was asked: the response repeats names across
+                        # namespaces (CpuUtilization exists in two).
+                        "requested_metric": f"{namespace}/{metric}",
+                        "query": query, "aggregation": aggregation, "request_resolution": resolution,
+                        "region": region,
+                        "request_start_time": effective_start.isoformat(),
+                        "request_end_time": effective_end.isoformat(),
+                        "opc_request_id": request_id,
+                    })
+                    found.append(row)
+            return found, None
+
+        workers = max(1, min(int(self.config.get("parallel_calls") or DEFAULT_PARALLEL_CALLS), 10))
+        done = 0
+        with ThreadPoolExecutor(max_workers=workers, thread_name_prefix="oci-monitoring") as pool:
+            futures = [pool.submit(call, spec) for spec in calls]
+            try:
+                for future in as_completed(futures):
+                    found, error = future.result()
+                    rows.extend(found)
+                    if error:
+                        errors.append(error)
+                    done += 1
+                    if progress:
+                        progress(done, len(calls))
+            except CollectionCancelled:
+                for future in futures:
+                    future.cancel()
+                raise
         return pd.DataFrame(rows), effective_end, errors
 
     def test_connection(self) -> dict:
