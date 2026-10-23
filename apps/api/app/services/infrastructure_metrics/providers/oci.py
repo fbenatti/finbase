@@ -151,8 +151,19 @@ class OciMetricsAdapter:
             import oci
             return oci.util.to_dict(data)
         except ImportError:  # fake clients in contract tests
-            if isinstance(data, (dict, list, str, int, float, type(None))):
+            if isinstance(data, dict):
+                return {str(key): OciMetricsAdapter._serialize_response(value)
+                        for key, value in data.items()}
+            if isinstance(data, (list, tuple)):
+                return [OciMetricsAdapter._serialize_response(value) for value in data]
+            if isinstance(data, (str, int, float, bool, type(None))):
                 return data
+            if isinstance(data, datetime):
+                return data.isoformat()
+            values = getattr(data, "__dict__", None)
+            if isinstance(values, dict):
+                return {str(key): OciMetricsAdapter._serialize_response(value)
+                        for key, value in values.items() if not str(key).startswith("_")}
             return str(data)
 
 
