@@ -1694,6 +1694,8 @@ def consumer_main(worker_id: int):
                                 "failed_query_count": failed,
                                 "rows_prepared": len(result.get("rows_prepared") or []),
                                 "persisted_by_day": persisted,
+                                "coverage_rows_prepared": len(result.get("coverage_rows_prepared") or []),
+                                "coverage_persisted_by_day": result.get("coverage_persisted_by_day") or {},
                             })
                             task_row.result_json = task_result
                             task_row.finished_at = datetime.now(timezone.utc)
