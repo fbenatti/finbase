@@ -120,8 +120,6 @@ def test_disabling_budget_page_affects_only_selected_customer(context):
     assert response.status_code == 200
     assert client.get(f"/navegacao/acessos/{BUDGET}", headers=headers[2]).status_code == 403
     assert client.get(f"/navegacao/acessos/{BUDGET}", headers=headers[3]).status_code == 200
-    assert client.get(f"/navegacao/acessos/{BUDGET}", headers=headers[2]).status_code == 403
-    assert client.get(f"/navegacao/acessos/{BUDGET}", headers=headers[3]).status_code == 200
 
 
 def test_group_disables_children_and_required_admin_cannot_be_disabled(context):
