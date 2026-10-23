@@ -94,7 +94,34 @@ def detect_scope_window(
                 # O dia do pico identifica o sinal de forma estável na retrospectiva.
                 identity = str(signal.get("day") or day_text)[:10]
             found[(detector, identity)] = (signal, profile)
-    return list(found.values())
+    signals = list(found.values())
+    spikes = sorted(
+        (item for item in signals if item[0].get("detector") == "SPIKE"),
+        key=lambda item: (str(item[0].get("episode_start") or item[0]["day"]), str(item[0]["day"])),
+    )
+    merged: list[tuple[dict[str, Any], dict[str, Any]]] = []
+    for signal, profile in spikes:
+        start_day = date.fromisoformat(str(signal.get("episode_start") or signal["day"])[:10])
+        end_day = date.fromisoformat(str(signal.get("episode_end") or signal["day"])[:10])
+        if merged:
+            previous, _ = merged[-1]
+            previous_end = date.fromisoformat(str(previous.pop("_window_end"))[:10])
+            previous["_window_end"] = previous_end.isoformat()
+            if start_day <= previous_end + timedelta(days=1):
+                first_day = min(str(previous.get("episode_start") or previous["day"]), start_day.isoformat())
+                strongest, strongest_profile = max(
+                    ((previous, merged[-1][1]), (signal, profile)),
+                    key=lambda item: float(item[0].get("delta") or 0),
+                )
+                strongest["episode_start"] = first_day
+                strongest["_window_end"] = max(previous_end, end_day).isoformat()
+                merged[-1] = (strongest, strongest_profile)
+                continue
+        signal["_window_end"] = end_day.isoformat()
+        merged.append((signal, profile))
+    for signal, _ in merged:
+        signal.pop("_window_end", None)
+    return [item for item in signals if item[0].get("detector") != "SPIKE"] + merged
 
 
 async def _ensure_tables() -> None:
@@ -579,8 +606,7 @@ async def _sync_cases(
         event_day = str(leader.get("day") or as_of.isoformat())[:10]
         event_period = event_day[:7].replace("-", "")
         episode_start = str(leader.get("episode_start") or event_day)[:10]
-        stable_episode = event_day if event_type == "SPIKE" else episode_start
-        identity = f"config={config_id}|{family}|episode={stable_episode}" if event_type != "MONTHLY_ACCUMULATED" else f"config={config_id}|{family}"
+        identity = f"config={config_id}|{family}|episode={episode_start}" if event_type != "MONTHLY_ACCUMULATED" else f"config={config_id}|{family}"
         case_key = case_key_for(sid, identity, event_type, period=event_period)
         existing = (
             await session.execute(select(AnomalyCase).where(
@@ -588,7 +614,6 @@ async def _sync_cases(
                 AnomalyCase.series_id == sid,
                 AnomalyCase.detector == event_type,
                 (AnomalyCase.period == event_period) if event_type == "MONTHLY_ACCUMULATED"
-                else (AnomalyCase.event_date == event_day) if event_type == "SPIKE"
                 else (AnomalyCase.episode_start == episode_start),
             ).order_by(AnomalyCase.id).limit(1))
         ).scalar_one_or_none()
