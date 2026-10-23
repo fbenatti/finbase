@@ -725,6 +725,58 @@ export async function runEtl(body: {
   return data;
 }
 
+export interface InfrastructureMetricsPlan {
+  connection_id: number;
+  provider: "oci";
+  enabled: boolean;
+  resource_count: number;
+  metric_names: string[];
+  statistics: string[];
+  resolution_seconds: number;
+  start_utc: string;
+  end_utc: string;
+  estimated_api_calls: number;
+  retention_days: number;
+  schedule_enabled: boolean;
+}
+
+export interface InfrastructureMetricsTaskStatus {
+  task_id: number;
+  status: string;
+  phase: string | null;
+  rows_raw: number;
+  rows_destination: number;
+  errors: string[];
+  summary: Record<string, unknown>;
+  started_at: string | null;
+  finished_at: string | null;
+}
+
+export async function planInfrastructureMetricsCollection(body: {
+  connection_id: number;
+  start_utc: string;
+  end_utc: string;
+  resolution_seconds: 60 | 300 | 900;
+}): Promise<InfrastructureMetricsPlan> {
+  const { data } = await api.post("/custos/metricas-infra/planejar", body);
+  return data;
+}
+
+export async function collectInfrastructureMetrics(body: {
+  connection_id: number;
+  start_utc: string;
+  end_utc: string;
+  resolution_seconds: 60 | 300 | 900;
+}): Promise<{ task_id: number; status: string; plan: InfrastructureMetricsPlan }> {
+  const { data } = await api.post("/custos/metricas-infra/coletar", body);
+  return data;
+}
+
+export async function getInfrastructureMetricsTaskStatus(taskId: number): Promise<InfrastructureMetricsTaskStatus> {
+  const { data } = await api.get(`/custos/metricas-infra/tarefas/${taskId}`);
+  return data;
+}
+
 export async function resetSourceForReimport(
   connectionId: number,
 ): Promise<{ status: string; message: string }> {
