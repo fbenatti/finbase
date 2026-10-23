@@ -1151,33 +1151,51 @@ def write_gold(df: pd.DataFrame) -> int:
 # ---------------------------------------------------------------------------
 # Destination tables — dynamic Iceberg tables in the gold namespace
 # ---------------------------------------------------------------------------
-def read_destination(physical_name: str, namespace: str = "silver") -> pd.DataFrame:
-    """Read all data from an existing Iceberg destination table.
+def read_destination(
+    physical_name: str,
+    namespace: str = "silver",
+    *,
+    billing_periods: Iterable[str] | None = None,
+    columns: Iterable[str] | None = None,
+    row_filter: Any | None = None,
+    allow_full_scan: bool = False,
+) -> pd.DataFrame:
+    """Lê um destino Iceberg com poda de partição e projeção de colunas.
 
-    Loads the gold.{physical_name} table and returns its contents as a pandas
-    DataFrame. Returns an empty DataFrame if the table does not exist.
+    A versão anterior fazia ``table.scan().to_pandas()`` da tabela inteira:
+    372 k linhas × 130 colunas em memória para qualquer uso. Agora a leitura
+    exige um recorte (``billing_periods`` na partição, ou ``row_filter``) ou o
+    pedido explícito ``allow_full_scan=True``, e só materializa ``columns``.
+    Tabela inexistente devolve um DataFrame vazio, como antes.
     """
+    from pyiceberg.expressions import In
+
     safe_name = physical_name.replace("-", "_").replace(".", "_")
     tid = _table_id(namespace, safe_name)
-    cat = _get_catalog()
-
-    # Check if table exists first — avoids blowing up the caller
+    filters = []
+    if billing_periods:
+        filters.append(In("_billing_period", [str(period) for period in billing_periods]))
+    if row_filter is not None:
+        filters.append(row_filter)
+    if not filters and not allow_full_scan:
+        raise ValueError(
+            f"read_destination({namespace}.{safe_name}) sem billing_periods/row_filter leria a tabela "
+            "inteira; passe allow_full_scan=True se for isso mesmo"
+        )
     try:
-        existing = cat.list_tables(tid[0])
-        existing_names = [t[1] if isinstance(t, tuple) and len(t) > 1 else t for t in existing]
-        if safe_name not in existing_names:
-            logger.info(f"Table gold.{safe_name} does not exist — returning empty DataFrame")
-            return pd.DataFrame()
-    except Exception:
-        logger.info(f"Unable to list tables in namespace {tid[0]} — returning empty DataFrame")
+        table = _get_catalog().load_table(tid)
+    except Exception as exc:  # noqa: BLE001 — tabela ausente é um caso esperado
+        logger.info("Table %s.%s unavailable (%s) — returning empty DataFrame", namespace, safe_name, exc)
         return pd.DataFrame()
-
-    # Table exists — load and return its contents
+    scan_kwargs: dict[str, Any] = {}
+    if filters:
+        scan_kwargs["row_filter"] = _combine_filters(*filters)
+    if columns:
+        scan_kwargs["selected_fields"] = tuple(columns)
     try:
-        table = cat.load_table(tid)
-        return table.scan().to_pandas()
+        return table.scan(**scan_kwargs).to_pandas()
     except Exception as e:
-        logger.warning(f"Failed to read gold.{safe_name}: {e} — returning empty DataFrame")
+        logger.warning(f"Failed to read {namespace}.{safe_name}: {e} — returning empty DataFrame")
         return pd.DataFrame()
 
 
@@ -2660,9 +2678,10 @@ def merge_planning_rateio(
 
     read_error: Exception | None = None
     existing = pd.DataFrame()
+    before: dict[str, int] = {}
     try:
         table = cat.load_table(tid)
-        existing = table.scan().to_pandas()
+        existing, before = _read_planning_for_merge(table, replace_types)
     except Exception as exc:  # noqa: BLE001 - distinguimos "não existe" de "falhou"
         read_error = exc
 
@@ -2697,7 +2716,7 @@ def merge_planning_rateio(
     # Sem rateio novo e sem rateio anterior não há nada a fazer: republicar
     # reescreveria a tabela inteira e poderia perder linhas se qualquer etapa
     # da escrita falhasse.
-    if rateio_df.empty and not any(_type_counts(existing).get(tipo, 0) for tipo in replace_types):
+    if rateio_df.empty and not any(before.get(tipo, 0) for tipo in replace_types):
         return 0
 
     frames = [frame for frame in (keep, rateio_df) if frame is not None and not frame.empty]
@@ -2705,7 +2724,6 @@ def merge_planning_rateio(
 
     # Guarda de perda de dado: um tipo preservado que existia antes não pode
     # desaparecer do resultado por causa do merge.
-    before = _type_counts(existing)
     after = _type_counts(combined)
     for tipo in preserve_types:
         if before.get(tipo, 0) > 0 and after.get(tipo, 0) == 0:
@@ -2720,6 +2738,24 @@ def merge_planning_rateio(
         namespace, safe_name, before, after,
     )
     return 0 if rateio_df.empty else int(len(rateio_df))
+
+
+def _read_planning_for_merge(table: Any, replace_types: tuple[str, ...]) -> tuple[pd.DataFrame, dict[str, int]]:
+    """Linhas a preservar e contagem por ``tipo`` lendo o mínimo do Iceberg.
+
+    A contagem por tipo (guarda de perda de dado) sai de uma projeção só da
+    coluna ``tipo``; as linhas completas são lidas já sem os tipos que o merge
+    vai substituir. Antes a tabela inteira ia para o pandas duas vezes o
+    necessário. O filtro em pandas continua como autoridade (case-insensitive).
+    """
+    from pyiceberg.expressions import In, IsNull, Not, Or
+
+    tipos = table.scan(selected_fields=("tipo",)).to_pandas()
+    before = _type_counts(tipos)
+    if "tipo" not in tipos.columns:
+        return table.scan().to_pandas(), before
+    keep_filter = Or(IsNull("tipo"), Not(In("tipo", [str(value) for value in replace_types])))
+    return table.scan(row_filter=keep_filter).to_pandas(), before
 
 
 def _type_counts(frame: pd.DataFrame) -> dict[str, int]:
