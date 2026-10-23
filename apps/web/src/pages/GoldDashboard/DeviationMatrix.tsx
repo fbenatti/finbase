@@ -4,7 +4,7 @@ import { AccountBalanceWalletOutlined, CheckCircle, ChevronRightOutlined, GpsFix
 import { CircularProgress } from "@mui/material";
 import { colors } from "../../theme/tokens";
 import type { AnomalyCase } from "../../services/anomaliesApi";
-import { type ForecastAccuracyMonth, type ForecastAck, type ForecastDesvioItem, type ForecastDesvioSubcat, type GoldQueryFilter, getBudgetAccuracy, getForecastAccuracyDesvios, getForecastAccuracyDesviosSubcategories, queryDimonTable } from "../../services/api";
+import { type ForecastAccuracyMonth, type ForecastAck, type GoldQueryFilter, formatApiError, getBudgetAccuracy, getForecastAccuracyDelta, queryDimonTable } from "../../services/api";
 import { pathSegmentFilters } from "./HierarchicalDecompTree";
 import { dayKey, periodKey } from "./costSignals";
 
@@ -244,7 +244,7 @@ export default function DeviationMatrix({ months, anomalies, forecastMonths, jus
 
 // Abre o desvio selecionado pelos filhos da estrutura organizacional. Cada clique
 // desce um nivel; na projecao, quando nao ha mais filhos, mostra os servicos.
-type DrillRow = { name: string; value: number; base?: number; drillable: boolean };
+type DrillRow = { name: string; value: number; base?: number; actual?: number; drillable: boolean };
 
 function DrillPanel({ kind, monthKey, monthLabel, runId, anomalies, table, filters, path, departmentId, onOpenCase }: {
   kind: Kind; monthKey: string; monthLabel: string; runId: number | null; anomalies: AnomalyCase[];
@@ -252,7 +252,7 @@ function DrillPanel({ kind, monthKey, monthLabel, runId, anomalies, table, filte
 }) {
   const [drill, setDrill] = useState<string[]>([]);
   const [rows, setRows] = useState<DrillRow[]>([]);
-  const [services, setServices] = useState<ForecastDesvioSubcat[]>([]);
+  const [levelLabel, setLevelLabel] = useState("Estrutura");
   const [caseRows, setCaseRows] = useState<AnomalyCase[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -263,7 +263,7 @@ function DrillPanel({ kind, monthKey, monthLabel, runId, anomalies, table, filte
     let alive = true;
     setLoading(true);
     setError("");
-    setServices([]);
+    setLevelLabel("Estrutura");
     setCaseRows([]);
     const depth = base.length;
     const prefixOk = (levels: string[]) => base.every((name, i) => levels[i] === name);
@@ -283,19 +283,17 @@ function DrillPanel({ kind, monthKey, monthLabel, runId, anomalies, table, filte
       }
       if (kind === "accuracy") {
         if (!runId) return { rows: [] };
-        const result = await getForecastAccuracyDesvios(runId, monthKey, base.join(" > "), undefined, 200);
-        const items: ForecastDesvioItem[] = [...result.positive, ...result.negative];
-        const groups = new Map<string, DrillRow>();
-        items.filter((item) => item.path.length > depth && prefixOk(item.path)).forEach((item) => {
-          const name = item.path[depth];
-          const row = groups.get(name) ?? { name, value: 0, base: 0, drillable: false };
-          row.value += Number(item.variance || 0);
-          row.base = (row.base ?? 0) + Number(item.forecast_value || 0);
-          row.drillable = true;
-          groups.set(name, row);
-        });
-        const subs = drill.length || !groups.size ? (await getForecastAccuracyDesviosSubcategories(runId, monthKey, base.join(" > "))).records : [];
-        return { rows: [...groups.values()], services: subs };
+        const result = await getForecastAccuracyDelta(runId, monthKey, "showback", base.join(" > "));
+        return {
+          levelLabel: result.level_label,
+          rows: result.records.map((item) => ({
+            name: item.name,
+            value: Number(item.variance || 0),
+            base: Number(item.forecast_value || 0),
+            actual: Number(item.actual_value || 0),
+            drillable: !result.leaf && item.path.length > depth,
+          })),
+        };
       }
       const column = `hierarquia_${depth + 1}`;
       const scoped = [...filters.filter((f) => !f.column.startsWith("hierarquia_")), ...pathSegmentFilters(base, false)];
@@ -318,11 +316,11 @@ function DrillPanel({ kind, monthKey, monthLabel, runId, anomalies, table, filte
     run()
       .then((out) => {
         if (!alive) return;
-        setRows(out.rows.filter((r) => Math.abs(r.value) > 0.5).sort((a, z) => z.value - a.value));
-        setServices(((out as { services?: ForecastDesvioSubcat[] }).services ?? []).filter((s) => Math.abs(s.variance) > 0.5).sort((a, z) => z.variance - a.variance));
+        setRows(out.rows.filter((r) => kind === "accuracy" ? Math.abs(r.base ?? 0) > 0.5 || Math.abs(r.actual ?? 0) > 0.5 : Math.abs(r.value) > 0.5).sort((a, z) => kind === "accuracy" ? Math.abs(z.value) - Math.abs(a.value) : z.value - a.value));
+        setLevelLabel((out as { levelLabel?: string }).levelLabel ?? "Estrutura");
         setCaseRows(((out as { cases?: AnomalyCase[] }).cases ?? []).sort((a, z) => Number(z.anomalous_cost_cloud || 0) - Number(a.anomalous_cost_cloud || 0)));
       })
-      .catch(() => { if (alive) { setRows([]); setError("Não foi possível abrir este nível."); } })
+      .catch((reason) => { if (alive) { setRows([]); setError(formatApiError(reason, "Não foi possível abrir este nível.")); } })
       .finally(() => { if (alive) setLoading(false); });
     return () => { alive = false; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -336,7 +334,7 @@ function DrillPanel({ kind, monthKey, monthLabel, runId, anomalies, table, filte
     <Box sx={{ mt: 2, p: 2, borderRadius: "14px", border: `1px solid ${alpha(meta.color, 0.35)}`, bgcolor: alpha(meta.color, 0.03) }}>
       <Stack direction="row" alignItems="center" gap={0.25} flexWrap="wrap" mb={1.5}>
         <Box sx={{ color: meta.color, display: "flex", mr: 0.75 }}>{meta.icon}</Box>
-        <Typography variant="subtitle2" fontWeight={800} color={colors.text} sx={{ mr: 1 }}>{meta.title} · {monthLabel} · por estrutura</Typography>
+        <Typography variant="subtitle2" fontWeight={800} color={colors.text} sx={{ mr: 1 }}>{meta.title} · {monthLabel} · {kind === "accuracy" ? `por ${levelLabel}` : "por estrutura"}</Typography>
         <Button size="small" onClick={() => setDrill([])} sx={{ textTransform: "none", minWidth: 0, px: 0.75, fontWeight: drill.length ? 500 : 800 }}>{path[path.length - 1] ?? "Toda a nuvem"}</Button>
         {drill.map((name, i) => (
           <Stack key={`${name}-${i}`} direction="row" alignItems="center">
@@ -347,7 +345,7 @@ function DrillPanel({ kind, monthKey, monthLabel, runId, anomalies, table, filte
         {loading && <CircularProgress size={14} sx={{ ml: 1 }} />}
       </Stack>
 
-      <Box sx={{ display: "grid", gap: 2, gridTemplateColumns: { xs: "1fr", md: (services.length || caseRows.length) ? "minmax(0, 1fr) minmax(0, 1fr)" : "1fr" } }}>
+      <Box sx={{ display: "grid", gap: 2, gridTemplateColumns: { xs: "1fr", md: caseRows.length ? "minmax(0, 1fr) minmax(0, 1fr)" : "1fr" } }}>
         <Stack gap={0.75}>
           {!loading && !rows.length && <Typography variant="body2" color="text.secondary">{error || "Nenhum filho com desvio neste nível."}</Typography>}
           {rows.map((row) => (
@@ -364,6 +362,7 @@ function DrillPanel({ kind, monthKey, monthLabel, runId, anomalies, table, filte
                   <Typography variant="body2" fontWeight={700} sx={{ wordBreak: "break-word" }}>{row.name}</Typography>
                   <Typography variant="body2" fontWeight={800} sx={{ color: toneOf(row.value), flexShrink: 0 }}>{fmt(row)}</Typography>
                 </Stack>
+                {kind === "accuracy" && <Typography variant="caption" color="text.secondary">Projetado {brl(row.base ?? 0)} · Realizado {brl(row.actual ?? 0)}</Typography>}
                 <Box sx={{ height: 5, mt: 0.75, borderRadius: 3, bgcolor: "#EEF2F7", overflow: "hidden" }}>
                   <Box sx={{ width: `${(Math.abs(row.value) / max) * 100}%`, height: "100%", bgcolor: toneOf(row.value), borderRadius: 3 }} />
                 </Box>
@@ -372,21 +371,6 @@ function DrillPanel({ kind, monthKey, monthLabel, runId, anomalies, table, filte
             </Stack>
           ))}
         </Stack>
-
-        {services.length > 0 && (
-          <Stack gap={0.75}>
-            <Typography variant="caption" fontWeight={800} color="text.secondary">SERVIÇOS COM DESVIO</Typography>
-            {services.slice(0, 12).map((svc) => (
-              <Stack key={svc.subcategory} direction="row" justifyContent="space-between" gap={1} sx={{ p: 1, borderRadius: "10px", bgcolor: "#fff", border: `1px solid ${colors.border}` }}>
-                <Box sx={{ minWidth: 0 }}>
-                  <Typography variant="body2" fontWeight={700} sx={{ wordBreak: "break-word" }}>{svc.subcategory}</Typography>
-                  <Typography variant="caption" color="text.secondary">Projetado {brl(svc.forecast_value)} · Real {brl(svc.actual_value)}</Typography>
-                </Box>
-                <Typography variant="body2" fontWeight={800} sx={{ color: svc.variance > 0 ? ORANGE : BLUE, flexShrink: 0 }}>{signed(svc.variance)}</Typography>
-              </Stack>
-            ))}
-          </Stack>
-        )}
 
         {caseRows.length > 0 && (
           <Stack gap={0.75}>
