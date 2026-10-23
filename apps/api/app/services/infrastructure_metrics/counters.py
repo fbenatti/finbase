@@ -16,16 +16,17 @@ def derive_counter_rates(rows: Iterable[Mapping]) -> list[dict]:
     a gap is never interpreted as zero. This is a bucket-level estimate, not
     reconstruction of the provider's original 10-second observations.
     """
-    grouped: dict[str, list[Mapping]] = defaultdict(list)
+    grouped: dict[tuple[str, int, str], list[Mapping]] = defaultdict(list)
     for row in rows:
         if row.get("metric_kind") != "COUNTER" or row.get("value_average") is None:
             continue
         if not row.get("series_id") or not row.get("resolution_seconds"):
             continue
-        grouped[str(row["series_id"])].append(row)
+        grouped[(str(row["series_id"]), int(row["resolution_seconds"]),
+                 str(row.get("origin_kind") or "NATIVE"))].append(row)
 
     output: list[dict] = []
-    for parent_id, series_rows in grouped.items():
+    for (parent_id, resolution_seconds, _origin_kind), series_rows in grouped.items():
         ordered = sorted(series_rows, key=lambda row: row["bucket_start_utc"])
         previous = None
         for row in ordered:
@@ -44,7 +45,8 @@ def derive_counter_rates(rows: Iterable[Mapping]) -> list[dict]:
                 region=str(row.get("region_id") or ""),
                 resource_type=str(row.get("resource_type") or ""),
                 resource_id=str(row["resource_id"]), metric=derived_metric,
-                dimensions={"dimensions_hash": row.get("dimensions_hash")},
+                dimensions={"dimensions_hash": row.get("dimensions_hash"),
+                            "resolution_seconds": resolution_seconds},
             )
             reason = None
             rate = None
