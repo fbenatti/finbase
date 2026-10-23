@@ -74,6 +74,19 @@ def test_window_keeps_separate_recovered_spikes():
     assert rows[105]["day"] in starts
 
 
+def test_spike_closes_when_scope_disappears_on_collected_days():
+    from app.services.anomaly_v2.detectors import continuous_episode
+
+    rows = history(days=45, spike=35)
+    rows = [row for index, row in enumerate(rows) if index < 36]
+    end = date.fromisoformat(history(days=45, spike=35)[-1]["day"])
+    valid = {(end - timedelta(days=offset)).isoformat() for offset in range(45)}
+    signal = continuous_episode(rows, as_of=end, materiality=1,
+                                min_pct=.2, valid_days=valid)
+    assert signal is not None
+    assert signal["deviation_status"] == "AUTOCORRIGIDO"
+
+
 def test_one_off_and_monthly_impacts_are_not_multiplied_by_thirty():
     spike = score_signal({"detector": "SPIKE", "delta": 60000, "persistence_days": 1}, materiality=100)
     assert spike["projected_month_impact"] == 0
