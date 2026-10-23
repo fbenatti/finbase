@@ -1,12 +1,11 @@
 import { Dialog, DialogActions, DialogContent, DialogTitle } from "../../components/FinbaseDialog";
 import { dataDisplayText } from "../../utils/dataPresentation";
 import { useCallback, useEffect, useMemo, useState } from "react";
-import Plot from "@/components/Plot";
-import { Alert, Box, Button, Chip, CircularProgress, FormControl, IconButton, InputLabel, LinearProgress, MenuItem, Paper, Select, Stack, Table, TableBody, TableCell, TableContainer, TableHead, TableRow, TextField, Tooltip, Typography } from "@mui/material";
-import { AddOutlined, BlockOutlined, EditOutlined, RemoveOutlined } from "@mui/icons-material";
+import { Alert, Box, Button, Chip, CircularProgress, FormControl, IconButton, InputLabel, MenuItem, Paper, Select, Stack, TextField, Tooltip, Typography } from "@mui/material";
+import { AddOutlined, BlockOutlined, EditOutlined } from "@mui/icons-material";
 import {
-  ForecastAck, ForecastAccuracyDeltaSeries, ForecastDesvioItem, ForecastDesvios, ForecastDesvioSubcat,
-  createForecastAck, deactivateForecastAck, getForecastAccuracyDeltaSeries, getForecastAccuracyDesvios, getForecastAccuracyDesviosSubcategories,
+  ForecastAck, ForecastDesvioItem, ForecastDesvios,
+  createForecastAck, deactivateForecastAck, getForecastAccuracyDesvios, formatApiError,
   getForecastAcks, updateForecastAck,
 } from "../../services/api";
 import AckRegisterDialog from "./AckRegisterDialog";
@@ -90,9 +89,6 @@ export default function DesviosTab({ runId, targetMonth, department }: { runId: 
   const [data, setData] = useState<ForecastDesvios | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
-  const [expanded, setExpanded] = useState<string | null>(null);
-  const [subcats, setSubcats] = useState<Record<string, ForecastDesvioSubcat[]>>({});
-  const [subcatLoading, setSubcatLoading] = useState(false);
   const [acks, setAcks] = useState<ForecastAck[]>([]);
   const [ackTarget, setAckTarget] = useState<ForecastDesvioItem | null>(null);
   const [ackEditing, setAckEditing] = useState<ForecastAck | null>(null);
@@ -100,8 +96,6 @@ export default function DesviosTab({ runId, targetMonth, department }: { runId: 
   const [ackReason, setAckReason] = useState("");
   const [savingAck, setSavingAck] = useState(false);
   const [message, setMessage] = useState("");
-  // Dialog com o gráfico acumulado do período para um ServiceSubcategory.
-  const [seriesDialog, setSeriesDialog] = useState<{ subcategory: string; data: ForecastAccuracyDeltaSeries | null; loading: boolean; error: string } | null>(null);
   // Cadastro livre de um item (Ack) com departamento + data (pode ser futura).
   const [registerOpen, setRegisterOpen] = useState(false);
   // Confirmação de desativação de Ack.
@@ -129,13 +123,6 @@ export default function DesviosTab({ runId, targetMonth, department }: { runId: 
     await loadAcks(targetMonth);
   };
 
-  const openSubcatSeries = (item: ForecastDesvioItem, sub: ForecastDesvioSubcat) => {
-    if (runId == null) return;
-    setSeriesDialog({ subcategory: sub.subcategory, data: null, loading: true, error: "" });
-    getForecastAccuracyDeltaSeries(runId, targetMonth || undefined, item.path.join(" > "), sub.subcategory)
-      .then(data => setSeriesDialog({ subcategory: sub.subcategory, data, loading: false, error: "" }))
-      .catch(e => setSeriesDialog({ subcategory: sub.subcategory, data: null, loading: false, error: e instanceof Error ? e.message : String(e) }));
-  };
 
   const ackByPath = useMemo(() => {
     const map = new Map<string, ForecastAck>();
@@ -161,29 +148,14 @@ export default function DesviosTab({ runId, targetMonth, department }: { runId: 
     let cancelled = false;
     setLoading(true);
     setError("");
-    setExpanded(null);
-    setSubcats({});
     getForecastAccuracyDesvios(runId, targetMonth || undefined, department || undefined)
       .then((result) => { if (!cancelled) setData(result); })
-      .catch(e => { if (!cancelled) setError(e instanceof Error ? e.message : String(e)); })
+      .catch(e => { if (!cancelled) setError(formatApiError(e, "Não foi possível carregar os desvios por SKU")); })
       .finally(() => { if (!cancelled) setLoading(false); });
     void loadAcks(targetMonth);
     return () => { cancelled = true; };
   }, [runId, targetMonth, department, loadAcks]);
 
-  const toggle = useCallback((path: string) => {
-    setExpanded(current => {
-      const next = current === path ? null : path;
-      if (next && runId != null && !subcats[next]) {
-        setSubcatLoading(true);
-        getForecastAccuracyDesviosSubcategories(runId, targetMonth || undefined, next, department || undefined)
-          .then(result => setSubcats(prev => ({ ...prev, [next]: result.records })))
-          .catch(e => setError(e instanceof Error ? e.message : String(e)))
-          .finally(() => setSubcatLoading(false));
-      }
-      return next;
-    });
-  }, [runId, targetMonth, subcats]);
 
   const openAck = (item: ForecastDesvioItem) => {
     const existing = ackByPath.get(item.path.join(" > ")) || null;
@@ -225,7 +197,7 @@ export default function DesviosTab({ runId, targetMonth, department }: { runId: 
       {error && <Alert severity="error" sx={{ mb: 2 }} onClose={() => setError("")}>{dataDisplayText(error)}</Alert>}
       <Stack direction="row" justifyContent="space-between" alignItems="flex-start" sx={{ mb: 2 }} gap={1} flexWrap="wrap">
         <Typography variant="body2" color="text.secondary">
-          Compare as unidades com maior diferença entre o forecast e o efetivado. Abra uma linha para investigar as subcategorias.
+          Compare os SKUs com maior diferença entre o forecast e o efetivado. A hierarquia acima filtra o escopo da análise.
         </Typography>
         <Button variant="outlined" size="small" startIcon={<AddOutlined fontSize="small" />} onClick={() => setRegisterOpen(true)}>
           Cadastrar item
@@ -242,11 +214,11 @@ export default function DesviosTab({ runId, targetMonth, department }: { runId: 
         <>
           <Box sx={{ display: "grid", gridTemplateColumns: { xs: "1fr", md: "repeat(3, minmax(0, 1fr))" }, gap: 1, mb: 2 }}>
             <Paper variant="outlined" sx={{ px: 1.5, py: 1.25, borderRadius: 1.5, borderLeft: "3px solid #DC2626" }}>
-              <Typography variant="caption" color="text.secondary">Unidades acima do previsto</Typography>
+              <Typography variant="caption" color="text.secondary">SKUs acima do previsto</Typography>
               <Typography variant="h6" sx={{ lineHeight: 1.25, color: "#B42318" }}>{data.positive.length}</Typography>
             </Paper>
             <Paper variant="outlined" sx={{ px: 1.5, py: 1.25, borderRadius: 1.5, borderLeft: "3px solid #16A34A" }}>
-              <Typography variant="caption" color="text.secondary">Unidades abaixo do previsto</Typography>
+              <Typography variant="caption" color="text.secondary">SKUs abaixo do previsto</Typography>
               <Typography variant="h6" sx={{ lineHeight: 1.25, color: "#15803D" }}>{data.negative.length}</Typography>
             </Paper>
             <Paper variant="outlined" sx={{ px: 1.5, py: 1.25, borderRadius: 1.5 }}>
@@ -264,10 +236,8 @@ export default function DesviosTab({ runId, targetMonth, department }: { runId: 
             </Paper>
           )}
           <Box sx={{ display: "grid", gridTemplateColumns: { xs: "1fr", xl: "repeat(2, minmax(0, 1fr))" }, alignItems: "start", gap: 2 }}>
-            <DesvioTable title="Acima do previsto · maior gasto" items={data.positive} color="#DC2626"
-              expanded={expanded} onToggle={toggle} subcats={subcats} subcatLoading={subcatLoading} onAck={openAck} ackByPath={ackByPath} onSubcatSeries={openSubcatSeries} onDeactivateAck={setDeactivateTarget} />
-            <DesvioTable title="Abaixo do previsto · menor gasto" items={data.negative} color="#16A34A"
-              expanded={expanded} onToggle={toggle} subcats={subcats} subcatLoading={subcatLoading} onAck={openAck} ackByPath={ackByPath} onSubcatSeries={openSubcatSeries} onDeactivateAck={setDeactivateTarget} />
+            <DesvioTable title="Acima do previsto · maior gasto" items={data.positive} color="#DC2626" maxVariance={Math.max(...displayedItems.map(item => Math.abs(Number(item.variance || 0))), 1)} onAck={openAck} ackByPath={ackByPath} onDeactivateAck={setDeactivateTarget} />
+            <DesvioTable title="Abaixo do previsto · menor gasto" items={data.negative} color="#16A34A" maxVariance={Math.max(...displayedItems.map(item => Math.abs(Number(item.variance || 0))), 1)} onAck={openAck} ackByPath={ackByPath} onDeactivateAck={setDeactivateTarget} />
           </Box>
           {data.positive.length === 0 && data.negative.length === 0 && (
             <Typography variant="body2" color="text.secondary">Sem variações para o mês/unidade selecionados.</Typography>
@@ -279,7 +249,7 @@ export default function DesviosTab({ runId, targetMonth, department }: { runId: 
         <DialogTitle>{ackEditing ? `Alterar justificativa — ${ackTarget?.name}` : `Justificativa da variação — ${ackTarget?.name}`}</DialogTitle>
         <DialogContent>
           <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
-            {ackTarget && ackTarget.path.join(" > ")} — projetado {ackTarget && money.format(Number(ackTarget.forecast_value || 0))} × efetivado {ackTarget && money.format(Number(ackTarget.actual_value || 0))} (delta {ackTarget && money.format(Number(ackTarget.variance || 0))}).
+            SKU {ackTarget?.sku || ackTarget?.name} — escopo {ackTarget && ackTarget.path.slice(0, ackTarget.path.indexOf("SKU")).join(" > ")} — projetado {ackTarget && money.format(Number(ackTarget.forecast_value || 0))} × efetivado {ackTarget && money.format(Number(ackTarget.actual_value || 0))} (delta {ackTarget && money.format(Number(ackTarget.variance || 0))}).
           </Typography>
           <FormControl fullWidth sx={{ mb: 2, mt: 1 }}>
             <InputLabel>Categoria</InputLabel>
@@ -309,113 +279,6 @@ export default function DesviosTab({ runId, targetMonth, department }: { runId: 
             {savingAck ? "Gravando..." : ackEditing ? "Gravar edição" : "Registrar justificativa"}
           </Button>
         </DialogActions>
-      </Dialog>
-
-      <Dialog open={seriesDialog !== null} onClose={() => setSeriesDialog(null)} maxWidth="lg" fullWidth>
-        {seriesDialog && (
-          <>
-            <DialogTitle>
-              <Stack direction="row" justifyContent="space-between" alignItems="center" gap={2} flexWrap="wrap">
-                <Box>
-                  <Typography variant="h6">Período — {seriesDialog.subcategory}</Typography>
-                  <Typography variant="body2" color="text.secondary">
-                    {seriesDialog.data?.target_month || targetMonth} · {seriesDialog.data?.department || department || "Todas as unidades"}
-                  </Typography>
-                </Box>
-                <Button size="small" onClick={() => setSeriesDialog(null)}>Fechar</Button>
-              </Stack>
-            </DialogTitle>
-            <DialogContent dividers>
-              {seriesDialog.loading && <LinearProgress sx={{ mb: 1.5, borderRadius: 1 }} />}
-              {seriesDialog.error && <Alert severity="error" sx={{ mb: 1.5 }}>{dataDisplayText(seriesDialog.error)}</Alert>}
-              {seriesDialog.data && seriesDialog.data.points.length > 0 && (
-                <>
-                  <Stack direction="row" spacing={3} sx={{ mb: 2 }} flexWrap="wrap">
-                    <Box>
-                      <Typography variant="caption" color="text.secondary">Projetado (mês)</Typography>
-                      <Typography variant="subtitle1" fontWeight={600}>{money.format(seriesDialog.data.forecast_total)}</Typography>
-                    </Box>
-                    <Box>
-                      <Typography variant="caption" color="text.secondary">Efetivado (mês)</Typography>
-                      <Typography variant="subtitle1" fontWeight={600}>{money.format(seriesDialog.data.actual_total)}</Typography>
-                    </Box>
-                    <Box>
-                      <Typography variant="caption" color="text.secondary">Delta</Typography>
-                      <Typography variant="subtitle1" fontWeight={600} sx={{ color: Number(seriesDialog.data.variance || 0) >= 0 ? "#DC2626" : "#16A34A" }}>
-                        {money.format(seriesDialog.data.variance)} ({pct(seriesDialog.data.variance_pct)})
-                      </Typography>
-                    </Box>
-                    <Box>
-                      <Typography variant="caption" color="text.secondary">Precisão</Typography>
-                      <Typography variant="subtitle1" fontWeight={600}>{pct(seriesDialog.data.accuracy)}</Typography>
-                    </Box>
-                    <Box>
-                      <Typography variant="caption" color="text.secondary">Início da variação a crescer</Typography>
-                      <Typography variant="subtitle1" fontWeight={600} sx={{ color: seriesDialog.data.daily_deviation_day != null ? "#DC2626" : "#16A34A" }}>
-                        {seriesDialog.data.daily_deviation_day != null ? `dia ${seriesDialog.data.daily_deviation_day}` : "não houve (redução)"}
-                      </Typography>
-                    </Box>
-                  </Stack>
-                  <Plot
-                    data={[
-                      {
-                        type: "bar",
-                        name: "Efetivado (dentro do ritmo diário)",
-                        x: seriesDialog.data.points.map(p => p.day),
-                        y: seriesDialog.data.points.map(p => Math.min(p.actual, p.forecast_rate)),
-                        marker: { color: "#16A34A" },
-                      },
-                      {
-                        type: "bar",
-                        name: "Excesso do dia (variação)",
-                        x: seriesDialog.data.points.map(p => p.day),
-                        y: seriesDialog.data.points.map(p => Math.max(0, p.actual - p.forecast_rate)),
-                        marker: { color: "#DC2626" },
-                      },
-                      {
-                        type: "scatter",
-                        mode: "lines",
-                        name: "Previsto (ritmo diário)",
-                        x: seriesDialog.data.points.map(p => p.day),
-                        y: seriesDialog.data.points.map(p => p.forecast_rate),
-                        line: { color: "#0F62FE", dash: "dash", width: 2 },
-                      },
-                      ...(seriesDialog.data.daily_deviation_day != null ? [{
-                        type: "scatter" as const,
-                        mode: "lines" as const,
-                        name: "Início da variação",
-                        x: [seriesDialog.data.daily_deviation_day, seriesDialog.data.daily_deviation_day],
-                        y: [0, Math.max(...seriesDialog.data.points.map(p => p.actual))],
-                        line: { color: "#DC2626", dash: "dot" as const, width: 1.5 },
-                        hovertemplate: "Variação começou a crescer — dia %{x}<extra></extra>",
-                      }] : []),
-                    ]}
-                    layout={{
-                      autosize: true,
-                      height: 420,
-                      margin: { l: 70, r: 20, t: 40, b: 50 },
-                      paper_bgcolor: "transparent",
-                      plot_bgcolor: "transparent",
-                      barmode: "stack",
-                      xaxis: { title: { text: "Dia do período" }, dtick: 1 },
-                      yaxis: { title: { text: "Valor diário (R$)" }, tickformat: ".2s" },
-                      showlegend: true,
-                      legend: { orientation: "h", y: -0.18 },
-                    }}
-                    config={{ displayModeBar: true, responsive: true }}
-                    style={{ width: "100%" }}
-                    useResizeHandler
-                  />
-                  <Typography variant="caption" color="text.secondary" sx={{ mt: 1, display: "block" }}>
-                    Consumo diário vs ritmo previsto (total mensal ÷ dias). A partir do dia{" "}
-                    {seriesDialog.data.daily_deviation_day ?? "—"} o efetivado do dia passa a ultrapassar o
-                    rate projetado — é quando a variação começa a crescer (excesso empilhado em vermelho).
-                  </Typography>
-                </>
-              )}
-            </DialogContent>
-          </>
-        )}
       </Dialog>
 
       <AckRegisterDialog
