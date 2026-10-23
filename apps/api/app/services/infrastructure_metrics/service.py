@@ -92,7 +92,7 @@ def collect_oci_metrics(
             )
     call_statuses = [
         int(raw.get("status_code") or result.status_code)
-        for result in results for raw in result.raw_payloads
+        for result in results for raw in getattr(result, "raw_payloads", ())
     ]
     if not call_statuses:
         # Keep adapters used by callers/tests that aggregate the call status.
