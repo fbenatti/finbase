@@ -1633,6 +1633,83 @@ def consumer_main(worker_id: int):
                         finally:
                             s2.close()
 
+                elif task.task_type == "infrastructure_metrics_collection":
+                    from app.services.processing_logs import sync_etl_task_log
+
+                    connection_id = task.connection_id
+                    payload = dict(task.result_json or {})
+                    print(f"Picked up infrastructure_metrics_collection task {task_id}: connection={connection_id}")
+                    task.status = "RUNNING"
+                    task.phase = "Coletando métricas OCI da allowlist"
+                    sync_etl_task_log(session, task)
+                    session.commit()
+                    session.close()
+                    from app.database import SyncSession as _MetricsSession
+                    from app.models.etl_task import EtlTask as _EtlTask
+                    from app.models.source_connection import SourceConnection as _SourceConnection
+                    metrics_session = None
+                    try:
+                        from datetime import datetime as _datetime
+                        from app.services.infrastructure_metrics.service import collect_oci_metrics
+
+                        metrics_session = _MetricsSession()
+                        metric_connection = metrics_session.get(_SourceConnection, connection_id)
+                        if not metric_connection or metric_connection.connector_type != "oci":
+                            raise ValueError("OCI connection is unavailable")
+                        result = collect_oci_metrics(
+                            metric_connection,
+                            start_utc=_datetime.fromisoformat(payload["start_utc"]),
+                            end_utc=_datetime.fromisoformat(payload["end_utc"]),
+                            resolution_seconds=int(payload["resolution_seconds"]),
+                            statistics=tuple(payload.get("statistics") or ("mean", "p95")),
+                            collection_run_id=str(task_id),
+                            persist=payload.get("persist") is True,
+                        )
+                        task_row = metrics_session.get(_EtlTask, task_id)
+                        if task_row:
+                            failed = int(result.get("failed_query_count") or 0)
+                            persisted = result.get("persisted_by_day") or {}
+                            persisted_count = sum(int(count) for count in persisted.values())
+                            task_row.status = "COMPLETED_WITH_ERRORS" if failed else "COMPLETED"
+                            task_row.phase = (
+                                f"OCI métricas: {len(result.get('rows_prepared') or [])} linhas preparadas; "
+                                f"{failed} consulta(s) com erro"
+                            )[:200]
+                            task_row.rows_raw = int(result.get("completed_query_count") or 0)
+                            task_row.rows_normalized = len(result.get("rows_prepared") or [])
+                            task_row.rows_destination = persisted_count
+                            task_row.errors = [f"{failed} query(s) failed"] if failed else []
+                            task_row.result_json = {
+                                "provider": "oci",
+                                "region": result.get("region"),
+                                "resource_count": result.get("resource_count"),
+                                "metric_count": result.get("metric_count"),
+                                "resolution_seconds": result.get("resolution_seconds"),
+                                "statistics": result.get("statistics"),
+                                "estimated_api_calls": result.get("estimated_api_calls"),
+                                "completed_query_count": result.get("completed_query_count"),
+                                "failed_query_count": failed,
+                                "rows_prepared": len(result.get("rows_prepared") or []),
+                                "persisted_by_day": persisted,
+                            }
+                            task_row.finished_at = datetime.now(timezone.utc)
+                            sync_etl_task_log(metrics_session, task_row)
+                            metrics_session.commit()
+                    except Exception as exc:
+                        print(f"Infrastructure metrics task {task_id} failed: {type(exc).__name__}")
+                        if metrics_session is not None:
+                            task_row = metrics_session.get(_EtlTask, task_id)
+                            if task_row:
+                                task_row.status = "FAILED"
+                                task_row.phase = f"Falha na coleta OCI: {type(exc).__name__}"[:200]
+                                task_row.errors = [type(exc).__name__]
+                                task_row.finished_at = datetime.now(timezone.utc)
+                                sync_etl_task_log(metrics_session, task_row)
+                                metrics_session.commit()
+                    finally:
+                        if metrics_session is not None:
+                            metrics_session.close()
+
                 elif task.task_type == "reservation_collection":
                     # Coleta EXCLUSIVA de benefícios Azure (RI + Savings Plans) via
                     # ARM → Bronze. NÃO toca nos blobs de custo: reservas vivem em
