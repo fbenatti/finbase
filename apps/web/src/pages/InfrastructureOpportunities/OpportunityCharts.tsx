@@ -18,8 +18,9 @@ import CheckCircleIcon from "@mui/icons-material/CheckCircleOutlined";
 import WarningIcon from "@mui/icons-material/WarningAmberOutlined";
 import ErrorIcon from "@mui/icons-material/ErrorOutlineOutlined";
 import Plot from "@/components/Plot";
-import type { FlexConfig, OpportunitySeries } from "../../services/infraOpportunitiesApi";
+import type { FlexConfig, OpportunitySeries, RecurringPeakWindow } from "../../services/infraOpportunitiesApi";
 import { getOpportunitySeries } from "../../services/infraOpportunitiesApi";
+import { PEAK_SLOT_COLOR } from "./RecurringPeaksPanel";
 
 type Metric = "cpu" | "memory";
 
@@ -57,6 +58,8 @@ type Props = {
   targets: { cpu: number; memory: number; cpuP99?: number; memoryP99?: number };
   coverage?: number | null;
   daysObserved?: number | null;
+  /** Horários de picos recorrentes detectados pelo motor, contornados no mapa. */
+  recurringWindows?: RecurringPeakWindow[];
 };
 
 type Check = { level: "ok" | "warn" | "risk"; label: string; detail: string };
@@ -73,7 +76,7 @@ function CheckRow({ check }: { check: Check }) {
   </Stack>;
 }
 
-export default function OpportunityCharts({ opportunityId, from, to, targets, coverage, daysObserved }: Props) {
+export default function OpportunityCharts({ opportunityId, from, to, targets, coverage, daysObserved, recurringWindows }: Props) {
   // A base da análise: buckets de 5 min da Silver genérica.
   const resolution = 300;
   const [metric, setMetric] = useState<Metric>("cpu");
@@ -202,6 +205,16 @@ export default function OpportunityCharts({ opportunityId, from, to, targets, co
     font: { family: "inherit", color: COLORS.muted, size: 12 },
   };
   const dayLabels = view.days.map((day) => `${day.slice(8, 10)}/${day.slice(5, 7)}`);
+  // Recurring slots: whole columns for daily jobs, single cells for weekly ones
+  // (engine weekdays: 0 = Monday).
+  const weekdayOf = (day: string) => (new Date(`${day}T12:00:00`).getDay() + 6) % 7;
+  const slotShapes = (recurringWindows ?? []).flatMap((window) => window.hours.flatMap((hour) => (
+    window.weekdays == null
+      ? [{ type: "rect", xref: "x", yref: "paper", x0: hour - 0.5, x1: hour + 0.5, y0: 0, y1: 1, line: { color: PEAK_SLOT_COLOR, width: 2.5 }, fillcolor: "rgba(0,0,0,0)" }]
+      : view.days.flatMap((day, row) => (window.weekdays!.includes(weekdayOf(day))
+        ? [{ type: "rect", xref: "x", yref: "y", x0: hour - 0.5, x1: hour + 0.5, y0: row - 0.5, y1: row + 0.5, line: { color: PEAK_SLOT_COLOR, width: 2 }, fillcolor: "rgba(0,0,0,0)" }]
+        : []))
+  )));
 
   return <Stack spacing={2}>
     <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap alignItems="center">
@@ -343,12 +356,15 @@ export default function OpportunityCharts({ opportunityId, from, to, targets, co
         xaxis: { domain: [0, 0.74], tickangle: 0, dtick: 2 },
         xaxis2: { domain: [0.86, 1], title: { text: "horas > 100%" }, rangemode: "tozero", showgrid: false },
         yaxis: { autorange: "reversed", type: "category" },
+        shapes: slotShapes,
         showlegend: false,
       } as never} />
       <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap sx={{ mt: 1 }}>
         <Chip size="small" variant="outlined" color={view.saturatedHoursPerDay.some(Boolean) ? "warning" : "success"}
               label={`Dias com algum pico acima de 100%: ${view.saturatedHoursPerDay.filter(Boolean).length} de ${view.days.length}`} />
         <Chip size="small" variant="outlined" label={`Horas com pico acima de 100%: ${view.saturatedHoursPerDay.reduce((a, b) => a + b, 0)}`} />
+        {!!recurringWindows?.length && <Chip size="small" variant="outlined" sx={{ borderColor: PEAK_SLOT_COLOR, color: PEAK_SLOT_COLOR }}
+              label={`Contorno roxo: picos recorrentes ${recurringWindows.map((window) => `${window.start}–${window.end}`).join(", ")}`} />}
       </Stack>
     </Paper>
   </Stack>;

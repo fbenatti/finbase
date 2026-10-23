@@ -11,6 +11,7 @@ import CloseIcon from "@mui/icons-material/CloseOutlined";
 import ArrowForwardIcon from "@mui/icons-material/ArrowForwardOutlined";
 import type { OpportunityDetail, SeriesStats } from "../../services/infraOpportunitiesApi";
 import OpportunityCharts from "./OpportunityCharts";
+import RecurringPeaksPanel from "./RecurringPeaksPanel";
 import { getOpportunity, setOpportunityState } from "../../services/infraOpportunitiesApi";
 import {
   ACTION_COLOR, ACTION_LABEL, CONFIDENCE_COLOR, CONFIDENCE_LABEL, READINESS_LABEL, STATE_LABEL, money, pct, sizeLabel,
@@ -68,6 +69,7 @@ export default function OpportunityDrawer({ opportunityId, onClose, onChanged }:
   const currency = item?.currency ?? "BRL";
   const from = item?.from_config;
   const to = item?.to_config;
+  const peaks = evidence?.recurring_peaks?.detection.detected ? evidence.recurring_peaks : null;
 
   return <Drawer anchor="right" open={opportunityId != null} onClose={onClose}
                  PaperProps={{ sx: { width: { xs: "100%", md: "min(1360px, 94vw)" }, p: { xs: 2, md: 3 } } }}>
@@ -132,6 +134,9 @@ export default function OpportunityDrawer({ opportunityId, onClose, onChanged }:
         </Table>
       </Paper>
 
+      {peaks && <RecurringPeaksPanel key={item.id} item={item} peaks={peaks} currency={currency}
+                                     onChanged={(next) => { setItem({ ...item, ...next }); onChanged(); }} />}
+
       <Box>
         <Typography variant="h6" sx={{ mb: 0.5 }}>De / para do consumo</Typography>
         <Typography variant="body2" color="text.secondary" sx={{ mb: 1.5 }}>
@@ -139,6 +144,7 @@ export default function OpportunityDrawer({ opportunityId, onClose, onChanged }:
         </Typography>
         <OpportunityCharts
           opportunityId={item.id} from={from ?? null} to={to ?? null}
+          recurringWindows={peaks?.detection.windows}
           coverage={item.coverage}
           daysObserved={Math.min(evidence?.cpu?.days_observed ?? 0, evidence?.memory?.days_observed ?? evidence?.cpu?.days_observed ?? 0) || null}
           targets={{
