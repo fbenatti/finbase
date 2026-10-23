@@ -15,19 +15,13 @@ const money = new Intl.NumberFormat("pt-BR", { maximumFractionDigits: 0 });
 const pct = (value: number | null | undefined) => value == null ? "—" : (value * 100).toFixed(1) + "%";
 const ACK_CATEGORIES = ["Pico sazonal", "Migração", "Projeto novo", "Erro de precificação", "Outro"];
 
-function DesvioTable({
-  title, items, color, expanded, onToggle, subcats, subcatLoading, onAck, ackByPath, onSubcatSeries, onDeactivateAck,
-}: {
-  title: string; items: ForecastDesvioItem[]; color: string;
-  expanded: string | null; onToggle: (path: string) => void;
-  subcats: Record<string, ForecastDesvioSubcat[]>;
-  subcatLoading: boolean; onAck: (item: ForecastDesvioItem) => void;
+function DesvioTable({ title, items, color, maxVariance, onAck, ackByPath, onDeactivateAck }: {
+  title: string; items: ForecastDesvioItem[]; color: string; maxVariance: number;
+  onAck: (item: ForecastDesvioItem) => void;
   ackByPath: Map<string, ForecastAck>;
-  onSubcatSeries: (item: ForecastDesvioItem, sub: ForecastDesvioSubcat) => void;
   onDeactivateAck: (ack: ForecastAck) => void;
 }) {
   if (items.length === 0) return null;
-  const maxVariance = Math.max(...items.map(item => Math.abs(Number(item.variance || 0))), 1);
   return (
     <Paper variant="outlined" sx={{ minWidth: 0, overflow: "hidden", borderRadius: 2 }}>
       <Box sx={{ px: 2, py: 1.5, borderBottom: "1px solid", borderColor: "divider", display: "flex", alignItems: "center", justifyContent: "space-between", gap: 1 }}>
@@ -35,124 +29,60 @@ function DesvioTable({
           <Box sx={{ width: 9, height: 9, borderRadius: "50%", bgcolor: color }} />
           <Typography variant="subtitle1" fontWeight={750}>{title}</Typography>
         </Stack>
-        <Chip size="small" label={`${items.length} ${items.length === 1 ? "unidade" : "unidades"}`} sx={{ fontWeight: 650 }} />
+        <Chip size="small" label={`${items.length} ${items.length === 1 ? "SKU" : "SKUs"}`} sx={{ fontWeight: 650 }} />
       </Box>
       <Stack spacing={0}>
         {items.map(item => {
           const key = item.path.join(" > ");
-          const open = expanded === key;
           const ack = ackByPath.get(key);
+          const variance = Number(item.variance || 0);
+          const barWidth = Math.max(4, Math.min(100, Math.abs(variance) / maxVariance * 100));
+          const scope = item.path.slice(0, item.path.indexOf("SKU") >= 0 ? item.path.indexOf("SKU") : -1).join(" › ");
           return (
-            <FragmentRow key={key} item={item} color={color} open={open} ack={ack} maxVariance={maxVariance}
-              onToggle={() => onToggle(key)} subcats={subcats[key]} subcatLoading={subcatLoading && open}
-              onAck={() => onAck(item)} onSubcatSeries={sub => onSubcatSeries(item, sub)}
-              onDeactivateAck={() => ack && onDeactivateAck(ack)} />
+            <Box key={key} sx={{ borderBottom: "1px solid", borderColor: "divider", bgcolor: ack ? "#F5F9FF" : "background.paper", "&:last-of-type": { borderBottom: 0 } }}>
+              <Box sx={{ px: 2, py: 1.5, display: "grid", alignItems: "center", gap: 1.5, gridTemplateColumns: { xs: "minmax(0, 1fr) auto", md: "minmax(145px, 1.5fr) repeat(2, minmax(82px, .8fr)) minmax(118px, 1fr) minmax(64px, .55fr) auto" } }}>
+                <Box sx={{ minWidth: 0, gridColumn: { xs: "1", md: "auto" } }}>
+                  <Stack direction="row" alignItems="center" gap={0.75} flexWrap="wrap">
+                    <Typography variant="body2" fontWeight={700}>{item.sku || item.name}</Typography>
+                    {ack && <Chip size="small" color="info" label={ack.category} />}
+                  </Stack>
+                  {scope && <Tooltip title={scope}><Typography variant="caption" color="text.secondary" noWrap sx={{ display: "block", maxWidth: { xs: "70vw", md: 260 } }}>{scope}</Typography></Tooltip>}
+                </Box>
+                {[
+                  { label: "Previsto", value: money.format(Number(item.forecast_value || 0)) },
+                  { label: "Efetivado", value: money.format(Number(item.actual_value || 0)) },
+                ].map(metric => (
+                  <Box key={metric.label} sx={{ pl: { xs: 0, md: 0 }, minWidth: 0 }}>
+                    <Typography variant="caption" color="text.secondary">{metric.label}</Typography>
+                    <Typography variant="body2" fontWeight={600} noWrap>{metric.value}</Typography>
+                  </Box>
+                ))}
+                <Box sx={{ minWidth: 0 }}>
+                  <Typography variant="caption" color="text.secondary">Variação</Typography>
+                  <Typography variant="body2" fontWeight={750} sx={{ color }}>{variance > 0 ? "+" : ""}{money.format(variance)} <Box component="span" sx={{ fontSize: "0.75rem", fontWeight: 500 }}>({pct(item.variance_pct)})</Box></Typography>
+                  <Box sx={{ mt: 0.5, width: "100%", height: 4, borderRadius: 4, bgcolor: "action.hover", overflow: "hidden" }}>
+                    <Box sx={{ width: `${barWidth}%`, height: "100%", bgcolor: color }} />
+                  </Box>
+                </Box>
+                <Box sx={{ minWidth: 0 }}>
+                  <Typography variant="caption" color="text.secondary">Precisão</Typography>
+                  <Typography variant="body2" fontWeight={700}>{pct(item.accuracy)}</Typography>
+                </Box>
+                <Box sx={{ gridColumn: { xs: "2", md: "auto" }, gridRow: { xs: "1", md: "auto" }, justifySelf: "end" }}>
+                  {ack ? (
+                    <Stack direction="row" alignItems="center">
+                      <Tooltip title="Alterar justificativa"><IconButton size="small" aria-label={`Editar justificativa de ${item.sku || item.name}`} onClick={() => onAck(item)}><EditOutlined fontSize="small" /></IconButton></Tooltip>
+                      <Tooltip title="Desativar justificativa"><IconButton size="small" color="error" aria-label={`Desativar justificativa de ${item.sku || item.name}`} onClick={() => onDeactivateAck(ack)}><BlockOutlined fontSize="small" /></IconButton></Tooltip>
+                    </Stack>
+                  ) : <Button size="small" variant="outlined" onClick={() => onAck(item)}>Justificar</Button>}
+                </Box>
+              </Box>
+              {ack && <Typography variant="caption" color="text.secondary" sx={{ display: "block", px: 2, pb: 1.25, pl: { xs: 2, md: 3 } }}>{ack.reason}</Typography>}
+            </Box>
           );
         })}
       </Stack>
     </Paper>
-  );
-}
-
-function FragmentRow({ item, color, open, onToggle, subcats, subcatLoading, onAck, ack, onSubcatSeries, onDeactivateAck, maxVariance }: {
-  item: ForecastDesvioItem; color: string; open: boolean; onToggle: () => void;
-  subcats: ForecastDesvioSubcat[] | undefined; subcatLoading: boolean; onAck: () => void;
-  ack: ForecastAck | undefined; onSubcatSeries: (sub: ForecastDesvioSubcat) => void;
-  onDeactivateAck: () => void; maxVariance: number;
-}) {
-  const stop = (event: React.MouseEvent) => event.stopPropagation();
-  const variance = Number(item.variance || 0);
-  const barWidth = Math.max(4, Math.min(100, Math.abs(variance) / maxVariance * 100));
-
-  return (
-    <Box sx={{ borderBottom: "1px solid", borderColor: "divider", bgcolor: ack ? "#F5F9FF" : "background.paper", "&:last-of-type": { borderBottom: 0 } }}>
-      <Box
-        role="group"
-        onClick={onToggle}
-        sx={{ px: 2, py: 1.5, cursor: "pointer", display: "grid", alignItems: "center", gap: 1.5, gridTemplateColumns: { xs: "minmax(0, 1fr) auto", md: "minmax(145px, 1.5fr) repeat(2, minmax(82px, .8fr)) minmax(118px, 1fr) minmax(64px, .55fr) auto" }, "&:hover": { bgcolor: "action.hover" }, "&:focus-visible": { outline: "2px solid", outlineColor: "primary.main", outlineOffset: -2 } }}
-      >
-        <Box sx={{ minWidth: 0, gridColumn: { xs: "1", md: "auto" }, display: "flex", alignItems: "center", gap: 1 }}>
-          <IconButton size="small" aria-label={`${open ? "Recolher" : "Expandir"} ${item.name}`} onClick={event => { event.stopPropagation(); onToggle(); }}>
-            {open ? <RemoveOutlined fontSize="small" /> : <AddOutlined fontSize="small" />}
-          </IconButton>
-          <Box sx={{ minWidth: 0 }}>
-            <Stack direction="row" alignItems="center" gap={0.75} flexWrap="wrap">
-              <Typography variant="body2" fontWeight={700}>{item.name}</Typography>
-              {ack && <Chip size="small" color="info" label={ack.category} />}
-            </Stack>
-            <Tooltip title={item.path.join(" > ")}>
-              <Typography variant="caption" color="text.secondary" noWrap sx={{ display: "block", maxWidth: { xs: "70vw", md: 260 } }}>{item.path.join(" › ")}</Typography>
-            </Tooltip>
-          </Box>
-        </Box>
-        {[
-          { label: "Previsto", value: money.format(Number(item.forecast_value || 0)) },
-          { label: "Efetivado", value: money.format(Number(item.actual_value || 0)) },
-        ].map(metric => (
-          <Box key={metric.label} sx={{ pl: { xs: 5, md: 0 }, minWidth: 0 }}>
-            <Typography variant="caption" color="text.secondary">{metric.label}</Typography>
-            <Typography variant="body2" fontWeight={600} noWrap>{metric.value}</Typography>
-          </Box>
-        ))}
-        <Box sx={{ pl: { xs: 5, md: 0 }, minWidth: 0 }}>
-          <Typography variant="caption" color="text.secondary">Variação</Typography>
-          <Typography variant="body2" fontWeight={750} sx={{ color }}>{variance > 0 ? "+" : ""}{money.format(variance)} <Box component="span" sx={{ fontSize: "0.75rem", fontWeight: 500 }}>({pct(item.variance_pct)})</Box></Typography>
-          <Box sx={{ mt: 0.5, width: "100%", height: 4, borderRadius: 4, bgcolor: "action.hover", overflow: "hidden" }}>
-            <Box sx={{ width: `${barWidth}%`, height: "100%", bgcolor: color }} />
-          </Box>
-        </Box>
-        <Box sx={{ pl: { xs: 5, md: 0 }, minWidth: 0 }}>
-          <Typography variant="caption" color="text.secondary">Precisão</Typography>
-          <Typography variant="body2" fontWeight={700}>{pct(item.accuracy)}</Typography>
-        </Box>
-        <Box onClick={stop} sx={{ gridColumn: { xs: "2", md: "auto" }, gridRow: { xs: "1", md: "auto" }, justifySelf: "end" }}>
-          {ack ? (
-            <Stack direction="row" alignItems="center">
-              <Tooltip title="Alterar justificativa"><IconButton size="small" aria-label={`Editar justificativa de ${item.name}`} onClick={onAck}><EditOutlined fontSize="small" /></IconButton></Tooltip>
-              <Tooltip title="Desativar justificativa"><IconButton size="small" color="error" aria-label={`Desativar justificativa de ${item.name}`} onClick={onDeactivateAck}><BlockOutlined fontSize="small" /></IconButton></Tooltip>
-            </Stack>
-          ) : <Button size="small" variant="outlined" onClick={onAck}>Justificar</Button>}
-        </Box>
-      </Box>
-      {ack && <Typography variant="caption" color="text.secondary" sx={{ display: "block", px: 2, pb: 1.25, pl: { xs: 7, md: 6 } }}>{ack.reason}</Typography>}
-      {open && (
-        <Box sx={{ bgcolor: "#F7F9FC", px: { xs: 1, md: 2 }, py: 1.5, borderTop: "1px solid", borderColor: "divider" }}>
-          {subcatLoading ? <LinearProgress sx={{ m: 1 }} /> : subcats && subcats.length > 0 ? (
-            <TableContainer>
-              <Table size="small">
-                <TableHead>
-                  <TableRow>
-                    <TableCell>ServiceSubcategory</TableCell>
-                    <TableCell align="right">Previsto</TableCell>
-                    <TableCell align="right">Efetivado</TableCell>
-                    <TableCell align="right">Variação (R$)</TableCell>
-                    <TableCell align="right">Precisão</TableCell>
-                  </TableRow>
-                </TableHead>
-                <TableBody>
-                  {subcats.slice(0, 10).map(sub => (
-                    <TableRow key={sub.subcategory}>
-                      <TableCell>
-                        <Stack direction="row" alignItems="center" gap={0.5}>
-                          <IconButton size="small" onClick={() => onSubcatSeries(sub)} aria-label={`Gráfico do período de ${sub.subcategory}`} title="Gráfico do período (Estimado × efetivado dia a dia)">
-                            <AddOutlined fontSize="small" />
-                          </IconButton>
-                          <Typography variant="body2">{sub.subcategory}</Typography>
-                        </Stack>
-                      </TableCell>
-                      <TableCell align="right">{money.format(Number(sub.forecast_value || 0))}</TableCell>
-                      <TableCell align="right">{money.format(Number(sub.actual_value || 0))}</TableCell>
-                      <TableCell align="right" sx={{ color: Number(sub.variance || 0) >= 0 ? "#DC2626" : "#16A34A" }}>{money.format(Number(sub.variance || 0))}</TableCell>
-                      <TableCell align="right">{pct(sub.accuracy)}</TableCell>
-                    </TableRow>
-                  ))}
-                </TableBody>
-              </Table>
-            </TableContainer>
-          ) : <Typography variant="body2" color="text.secondary">Nenhuma subcategoria neste nível.</Typography>}
-        </Box>
-      )}
-    </Box>
   );
 }
 
