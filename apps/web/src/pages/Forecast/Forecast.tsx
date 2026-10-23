@@ -453,66 +453,7 @@ export default function Forecast() {
       </Box>
     </Box>
 
-      {/* Diálogos fora da área com CSS de toolbar compacta (40px) */}
-      <ForecastConfigDialog
-        open={configDialog.open}
-        initial={configDialog.initial}
-        tables={tables}
-        usedDestinationTableIds={configs.map((item) => item.destination_table_id)}
-        onClose={() => setConfigDialog({ open: false, initial: null })}
-        onSaved={async (savedName) => {
-          setError("");
-          setMessage(`Configuração "${savedName}" salva com sucesso.`);
-          await load();
-          await loadConfigsGrid(configsQueryRef.current);
-        }}
-      />
-      {ruleDialog.open && rulesConfig && (
-        <ForecastRuleDialog
-          open={ruleDialog.open}
-          initial={ruleDialog.initial}
-          config={rulesConfig}
-          meta={rulesMeta}
-          onClose={() => setRuleDialog({ open: false, initial: null })}
-          onSaved={async (savedName) => {
-            setError("");
-            setMessage(`Regra "${savedName}" salva com sucesso.`);
-            await loadRulesGrid(rulesConfigId, rulesQueryRef.current);
-          }}
-        />
-      )}
-
       {/* Confirmações Material — nunca window.confirm */}
-      <Dialog open={Boolean(deleteConfigPending)} onClose={() => setDeleteConfigPending(null)} maxWidth="xs" fullWidth>
-        <DialogTitle>Remover perfil?</DialogTitle>
-        <DialogContent>
-          <Typography>
-            Você está prestes a excluir a configuração <strong>{deleteConfigPending?.name}</strong>. Execuções já concluídas permanecem no histórico.
-          </Typography>
-        </DialogContent>
-        <DialogActions sx={{ px: 3, pb: 2 }}>
-          <Button onClick={() => setDeleteConfigPending(null)}>Cancelar</Button>
-          <Button variant="contained" color="error" onClick={() => void removeConfig()}>
-            Excluir configuração
-          </Button>
-        </DialogActions>
-      </Dialog>
-
-      <Dialog open={Boolean(rulePendingDeletion)} onClose={() => setRulePendingDeletion(null)} maxWidth="xs" fullWidth>
-        <DialogTitle>Remover regra?</DialogTitle>
-        <DialogContent>
-          <Typography>
-            Você está prestes a excluir a regra <strong>{rulePendingDeletion?.name}</strong>. Esta ação não pode ser desfeita.
-          </Typography>
-        </DialogContent>
-        <DialogActions sx={{ px: 3, pb: 2 }}>
-          <Button onClick={() => setRulePendingDeletion(null)}>Cancelar</Button>
-          <Button variant="contained" color="error" onClick={() => void removeRule()}>
-            Remover regra
-          </Button>
-        </DialogActions>
-      </Dialog>
-
       <Dialog open={Boolean(cancelRunPending)} onClose={() => setCancelRunPending(null)} maxWidth="xs" fullWidth>
         <DialogTitle>Interromper esta execução?</DialogTitle>
         <DialogContent>
