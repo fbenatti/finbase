@@ -8,7 +8,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import select, text
 from app.config import settings
 from app.database import engine, Base, async_session
-from app.routers import connections, csv_upload, etl, rules, periods, analysis, destinations, schema, forecast, clone_rules, planning, anomalies, savings, azure_tag_policy, gold, reservations, scheduled_shutdown, azure_resource_graph, azure_sources, azure_mca_commitment, oci_operational, ideas, financial_contracts, auth as auth_router, users as users_router, groups as groups_router, roles as roles_router, audit as audit_router, sso as sso_router, sso_providers as sso_providers_router, integrations, processing_logs
+from app.routers import connections, csv_upload, etl, rules, periods, analysis, destinations, schema, forecast, clone_rules, planning, anomalies, savings, azure_tag_policy, gold, reservations, azure_resource_graph, azure_sources, azure_mca_commitment, oci_operational, ideas, financial_contracts, auth as auth_router, users as users_router, groups as groups_router, roles as roles_router, audit as audit_router, sso as sso_router, sso_providers as sso_providers_router, integrations, processing_logs
 from app.routers import modules as modules_router
 from app.routers import connector_visibility as connector_visibility_router
 from app.core.navigation_middleware import NavigationPolicyMiddleware
@@ -146,7 +146,6 @@ async def lifespan(app: FastAPI):
         from app.models.ingested_blob import IngestedBlob  # noqa: F401
         from app.models.rules import EtlMapping, BusinessRule, ClassificationRule, ClassificationFieldValue, OrganizationMoveAudit, DepartmentSharedCost, DepartmentSharedCostTarget  # noqa: F401
         from app.models.financial_contract import FinancialContract, FinancialContractConnection, FinancialContractBudgetScope, ContractSettlementRun, ContractSettlementMonth  # noqa: F401
-        from app.models.contract_story import ContractStoryLedger  # noqa: F401
         from app.models.period_status import PeriodStatus  # noqa: F401
         from app.models.etl_task import EtlTask  # noqa: F401
         from app.models.processing_log import ProcessingLog  # noqa: F401
@@ -162,7 +161,6 @@ async def lifespan(app: FastAPI):
         from app.models.saving import SavingAction, SavingMeasurement  # noqa: F401
         from app.models.ai_cost import AiCostLink, AiCostLinkSource, AiCostAllocation, AiCostPoolAllocation  # noqa: F401
         from app.models.gold_mart_rule import GoldMartRule, GoldMartRuleSource  # noqa: F401
-        from app.models.shutdown_exception_rule import ShutdownExceptionRule  # noqa: F401
         from app.models.azure_ptu import AzurePtuProjectMapping, AzurePtuSubproject, AzurePtuUsageEvent, AzurePtuCheckpoint  # noqa: F401
         from app.models.orphan_annotation import OrphanAnnotation  # noqa: F401
         from app.models.idea import Idea, IdeaAssignee, IdeaVote, IdeaComment, IdeaStatusInterval  # noqa: F401
@@ -176,6 +174,12 @@ async def lifespan(app: FastAPI):
             AnomalyCase, AnomalyCaseEvent, AnomalyAction, AnomalyNotification,
         )
         await conn.run_sync(Base.metadata.create_all)
+        # Remove the retired contract story feature and all of its persisted data/configuration.
+        await conn.execute(text("DROP TABLE IF EXISTS contract_story_ledger"))
+        await conn.execute(text("DELETE FROM customer_module WHERE module_code = 'planejamento_historia_dos_contratos'"))
+        await conn.execute(text("DELETE FROM role_permission WHERE scope = 'planejamento_historia_dos_contratos'"))
+        await conn.execute(text("DELETE FROM user_grant WHERE scope = 'planejamento_historia_dos_contratos'"))
+        await conn.execute(text("DELETE FROM navigation_module WHERE code = 'planejamento_historia_dos_contratos'"))
         # As migrações são DDL: `ALTER TABLE` pede ACCESS EXCLUSIVE e fica atrás
         # de qualquer worker que esteja no meio de uma transação. Sem limite, o
         # startup esperava minutos — e, com a API já servindo, travava as coletas
@@ -532,37 +536,10 @@ async def lifespan(app: FastAPI):
             # **nunca** armazena nome de função ou Python vindo do usuário.
             "ALTER TABLE gold_rule ADD COLUMN IF NOT EXISTS materializer_key VARCHAR(60)",
             "CREATE INDEX IF NOT EXISTS ix_gold_rule_materializer ON gold_rule (materializer_key)",
-            """CREATE TABLE IF NOT EXISTS shutdown_exception_rule (
-              id SERIAL PRIMARY KEY,
-              name VARCHAR(200) NOT NULL,
-              description TEXT,
-              owner_email VARCHAR(200),
-              scope_type VARCHAR(50) NOT NULL DEFAULT 'resource',
-              scope_value VARCHAR(500),
-              tag_key VARCHAR(200),
-              tag_value VARCHAR(500),
-              filter_json JSONB NOT NULL DEFAULT '{}'::jsonb,
-              valid_from VARCHAR(6),
-              valid_until VARCHAR(6),
-              is_active BOOLEAN NOT NULL DEFAULT TRUE,
-              created_at TIMESTAMPTZ DEFAULT now(),
-              updated_at TIMESTAMPTZ DEFAULT now()
-            )""",
+            # O desligamento agendado foi removido do produto.
+            "DROP TABLE IF EXISTS shutdown_exception_rule",
         ):
             await _execute_migration(conn, statement)
-        # A auxiliar mensal de VMs saiu de Gold (`_tmp_vm_monthly`) para Silver
-        # (`vm_monthly_history`). Atualiza apenas a regra conhecida que contém
-        # a referência antiga; SQLs personalizados de outras regras são intactos.
-        await _execute_migration(conn, """
-            UPDATE gold_rule
-            SET sql_template = REPLACE(
-                sql_template,
-                'iceberg.gold._tmp_vm_monthly',
-                'iceberg.silver.vm_monthly_history'
-            ), updated_at = now()
-            WHERE code = 'saving_desligue_vm'
-              AND sql_template LIKE '%iceberg.gold._tmp_vm_monthly%'
-        """)
         # Built-in schedules are idempotent and remain editable by users.
         await _execute_migration(conn, """
             INSERT INTO scheduled_task
@@ -766,7 +743,6 @@ async def lifespan(app: FastAPI):
                   ('classification_rule', 'conditions', 'json'),
                   ('business_rule', 'conditions', 'json'),
                   ('saving_action', 'filters', 'json'),
-                  ('shutdown_exception_rule', 'filter_json', 'json'),
                   ('pivot_view', 'config_json', 'json'),
                   ('dashboard', 'global_filters', 'json'),
                   ('dashboard_widget', 'config_json', 'json'),
@@ -943,6 +919,11 @@ async def lifespan(app: FastAPI):
         from app.routers.forecast import ensure_default_config, ensure_provider_forecast_rules
         await ensure_default_config(db)
         await ensure_provider_forecast_rules(db)
+        # The anomaly migration runs before the forecast bootstrap. Reconcile
+        # the default anomaly profile again after a forecast becomes available.
+        from app.services.anomaly_migrations import ensure_default_anomaly_config
+        async with engine.begin() as conn:
+            await ensure_default_anomaly_config(conn)
         from app.routers.planning import ensure_default_budget_ids, ensure_default_financial_types, ensure_planning_paths_synced
         await ensure_default_financial_types(db)
         await ensure_default_budget_ids(db)
@@ -1007,7 +988,6 @@ app.include_router(savings.router)
 app.include_router(azure_tag_policy.router)
 app.include_router(gold.router)
 app.include_router(reservations.router)
-app.include_router(scheduled_shutdown.router)
 app.include_router(azure_resource_graph.router)
 app.include_router(azure_sources.router)
 app.include_router(azure_mca_commitment.router)
@@ -1022,8 +1002,3 @@ app.include_router(access_router.router)
 @app.get("/saude")
 async def health():
     return {"status": "ok"}
-        # The anomaly migration runs before the forecast bootstrap. Reconcile
-        # the default anomaly profile again after a forecast becomes available.
-        from app.services.anomaly_migrations import ensure_default_anomaly_config
-        async with engine.begin() as conn:
-            await ensure_default_anomaly_config(conn)

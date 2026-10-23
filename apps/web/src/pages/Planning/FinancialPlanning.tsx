@@ -5,7 +5,6 @@ import BudgetAccuracy from "./BudgetAccuracy";
 import Planning from "./Planning";
 import VisaoContabil, { EMPTY_FILTERS } from "../GoldDashboard/VisaoContabil";
 import FinancialContractsDashboard from "../FinancialContracts/FinancialContractsDashboard";
-import ContractStoryDashboard from "./ContractStoryDashboard";
 import DollarEvolution from "./DollarEvolution";
 
 const TABS = [
@@ -26,11 +25,10 @@ export default function FinancialPlanning() {
     || searchParams.get("dashboard") === "visao-financeira-contratos"
     || searchParams.get("dashboard") === "contrato-com-compromisso"
     || (["contract", "contrato"].includes(searchParams.get("tab") || "") && searchParams.get("contract") === "compromisso");
-  const legacyStoryTab = ["contract", "contrato"].includes(searchParams.get("tab") || "") && !legacyCommitmentTab;
   const requestedTab = searchParams.get("tab");
-  const requested = legacyCommitmentTab || legacyStoryTab ? "dashboard" : requestedTab || "dashboard";
+  const requested = legacyCommitmentTab ? "dashboard" : requestedTab || "dashboard";
   const active = TABS.find(tab => tab.code === requested) || TABS[0];
-  const executiveSubtab = legacyCommitmentTab ? "compromisso" : legacyStoryTab ? "historia-contrato" : searchParams.get("executive") || "orcamento";
+  const executiveSubtab = legacyCommitmentTab ? "compromisso" : searchParams.get("executive") || "orcamento";
 
   return (
     <Box sx={{ minWidth: 0 }}>
@@ -45,7 +43,7 @@ export default function FinancialPlanning() {
           <VisaoContabil table="dest_dm_cost_visao_completa" filters={EMPTY_FILTERS} filterKey="financial-planning" dollarEvolution={<DollarEvolution />} />
         ) : active.code === "dashboard" ? (
           <>
-            {executiveSubtab === "historia-contrato" ? <ContractStoryDashboard /> : executiveSubtab === "compromisso" ? <FinancialContractsDashboard /> : <FinancialDashboard />}
+            {executiveSubtab === "compromisso" ? <FinancialContractsDashboard /> : <FinancialDashboard />}
           </>
         ) : (
           <Planning type={active.code} title={active.title} help={active.help} budget={"budget" in active && active.budget} />

@@ -231,26 +231,6 @@
     "api_prefixes": []
   },
   {
-    "code": "planejamento_historia_dos_contratos",
-    "parent_code": "section_panorama",
-    "label": "Evolução dos contratos",
-    "path": "/planejamento/historia-dos-contratos",
-    "renderer": "FinancialPlanning",
-    "view_params": {
-      "tab": "dashboard",
-      "executive": "historia-contrato"
-    },
-    "permission_module": "planning",
-    "position": 4,
-    "icon": "HistoryOutlined",
-    "required": false,
-    "development_only": false,
-    "legacy_path": "/planejamento",
-    "api_prefixes": [
-      "/planejamento/historia-contratos"
-    ]
-  },
-  {
     "code": "planejamento_consumo_de_compromissos",
     "parent_code": "section_panorama",
     "label": "Uso de compromissos",

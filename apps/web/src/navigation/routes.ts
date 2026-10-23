@@ -45,8 +45,6 @@ export function normalizeLegacyParams(path: string, input: URLSearchParams): URL
     const contractTab = tab === "contract" || tab === "contrato";
     if (tab === "contratos-financeiros" || ["visao-financeira-contratos", "contrato-com-compromisso"].includes(params.get("dashboard") || "") || (contractTab && params.get("contract") === "compromisso")) {
       params.set("tab", "dashboard"); params.set("executive", "compromisso");
-    } else if (contractTab) {
-      params.set("tab", "dashboard"); params.set("executive", "historia-contrato");
     }
   }
   return params;
