@@ -253,7 +253,7 @@ async def generate_metric_profile(
     connection = await db.get(SourceConnection, body.connection_id)
     if not connection or connection.connector_type != "oci":
         raise HTTPException(404, "Conexão OCI não encontrada")
-    await _authorize_connection(user, db, connection.id, "read")
+    await _authorize_connection(user, db, connection.id, "create")
     try:
         config = config_from_connection(connection)
         if not config.enabled:
