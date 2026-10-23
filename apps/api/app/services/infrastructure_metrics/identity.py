@@ -7,7 +7,8 @@ from collections.abc import Mapping
 from typing import Any
 
 
-IDENTITY_VERSION = "v2"
+DIMENSIONS_HASH_VERSION = "v1"
+SERIES_IDENTITY_VERSION = "v2"
 
 
 def canonical_json(value: Any) -> str:
@@ -17,7 +18,7 @@ def canonical_json(value: Any) -> str:
 
 
 def dimensions_hash(dimensions: Mapping[str, Any]) -> str:
-    payload = f"{IDENTITY_VERSION}:{canonical_json(dimensions)}".encode("utf-8")
+    payload = f"{DIMENSIONS_HASH_VERSION}:{canonical_json(dimensions)}".encode("utf-8")
     return hashlib.sha256(payload).hexdigest()
 
 
@@ -29,7 +30,7 @@ def series_id(*, provider: str, connection_id: int, account_id: str, region: str
               sub_account_id: str | None = None) -> str:
     """Hash full source/resource/metric identity; excludes bucket timestamps."""
     identity = {
-        "version": IDENTITY_VERSION,
+        "version": SERIES_IDENTITY_VERSION,
         "provider": provider.strip().lower(),
         "connection_id": int(connection_id),
         "account_id": account_id,
