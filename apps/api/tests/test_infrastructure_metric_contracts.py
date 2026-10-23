@@ -61,8 +61,9 @@ def test_catalog_covers_the_eight_pilot_metrics_and_native_percentiles():
     assert len(OCI_METRICS) == 8
     assert all(metric.native_percentiles == (90, 95, 99) for metric in OCI_METRICS)
     assert {metric.canonical_unit for metric in OCI_METRICS} >= {
-        "percent", "operations/second", "bytes/second",
+        "percent", "operations", "bytes",
     }
+    assert all(metric.kind.value == "COUNTER" for metric in OCI_METRICS[2:])
     with pytest.raises(LookupError):
         get_metric("oci", "oci_computeagent", "UnknownMetric")
 
