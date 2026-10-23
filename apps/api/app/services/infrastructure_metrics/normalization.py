@@ -54,6 +54,8 @@ def query_results_to_silver_rows(
                 account_id=scope.account_id, region=scope.region,
                 resource_type="instance", resource_id=resource_id,
                 metric=descriptor.canonical_metric, dimensions=point.dimensions,
+                namespace=descriptor.namespace, metric_scope=descriptor.scope,
+                source_owner=source_owner,
             )
             key = (identity, timestamp, plan.resolution_seconds)
             row = rows_by_key.get(key)
@@ -61,7 +63,9 @@ def query_results_to_silver_rows(
                 interval = plan.resolution_seconds
                 row = {
                     "cloud_provider": scope.provider.lower(),
+                    "cloud_partition": None,
                     "provider_account_id": scope.account_id,
+                    "sub_account_id": None,
                     "region_id": scope.region,
                     "resource_type": "instance",
                     "resource_id": resource_id,
@@ -75,11 +79,11 @@ def query_results_to_silver_rows(
                     "unit_scale": 1.0 if descriptor.unit == descriptor.canonical_unit else None,
                     "metric_kind": descriptor.kind.value,
                     "canonical_value_statistic": "mean",
-                    "semantic_version": 1,
+                    "semantic_version": 2,
                     "source_descriptor_hash": descriptor_hash,
                     "dimensions_json": labels_json,
                     "dimensions_hash": labels_digest,
-                    "dimension_schema_version": 1,
+                    "dimension_schema_version": 2,
                     "bucket_start_utc": timestamp.replace(tzinfo=None),
                     "bucket_end_utc": timestamp.replace(tzinfo=None) + timedelta(seconds=interval),
                     "aggregation_interval_seconds": interval,
@@ -108,8 +112,8 @@ def query_results_to_silver_rows(
                     "collection_run_id": collection_run_id,
                     "request_id": plan.request_id,
                     "payload_hash": None,
-                    "mapping_version": "oci_metrics_v1",
-                    "schema_version": 1,
+                    "mapping_version": "oci_metrics_v2",
+                    "schema_version": 2,
                     "metric_day": timestamp.strftime("%Y%m%d"),
                     "quality_status": "PARTIAL" if result.error_code or result.status_code >= 400 else "OK",
                     "quality_reason": result.error_code if result.error_code else (
