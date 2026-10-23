@@ -853,6 +853,9 @@ async def lifespan(app: FastAPI):
             # forecast_run.cutoff_date is now NULL until the engine computes the
             # data-driven cutoff (MAX collected − cutoff_days); never "today".
             "ALTER TABLE forecast_run ALTER COLUMN cutoff_date DROP NOT NULL",
+            "ALTER TABLE infra_opportunity_run ADD COLUMN IF NOT EXISTS policy_revision INTEGER",
+            "ALTER TABLE infra_opportunity_run ADD COLUMN IF NOT EXISTS policy_aggressiveness VARCHAR(20)",
+            "ALTER TABLE infra_opportunity_run ADD COLUMN IF NOT EXISTS policy_params JSON",
         ):
             await _execute_migration(conn, statement)
 
