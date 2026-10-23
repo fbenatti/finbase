@@ -79,6 +79,14 @@ def collect_oci_metrics(
             persisted_by_day[metric_day] = publish_metric_rows(
                 day_rows, connection_id=int(connection.id), metric_day=metric_day,
             )
+    call_statuses = [
+        int(raw.get("status_code") or result.status_code)
+        for result in results for raw in result.raw_payloads
+    ]
+    if not call_statuses:
+        # Keep adapters used by callers/tests that aggregate the call status.
+        call_statuses = [result.status_code for result in results
+                         for _ in range(max(1, int(result.attempt_count)))]
     return {
         "provider": "oci",
         "connection_id": int(connection.id),
@@ -88,8 +96,9 @@ def collect_oci_metrics(
         "resolution_seconds": resolution_seconds,
         "statistics": list(statistics),
         "estimated_api_calls": estimated_calls,
-        "completed_query_count": len(results),
-        "failed_query_count": sum(result.status_code >= 400 for result in results),
+        # These counts are HTTP attempts, not metric descriptors.
+        "completed_query_count": sum(status < 400 for status in call_statuses),
+        "failed_query_count": sum(status >= 400 for status in call_statuses),
         "rows_prepared": rows,
         "persistence_enabled": persist,
         "raw_rows_persisted": raw_persisted_count,
