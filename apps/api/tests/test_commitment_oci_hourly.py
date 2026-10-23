@@ -75,7 +75,20 @@ def test_read_usage_reads_daily_quantity_without_hourly_data():
         per_day[line.hour_utc] = per_day.get(line.hour_utc, 0.0) + line.ondemand_cost
     assert set(round(value, 6) for value in per_day.values()) == {4.1}
     top = snapshot.basis["top_skus"][0]
-    assert top["units_running"] == 4.0 and top["unit_price"] == 1.0 and top["quantity_per_day"] == 96.0
+    assert top["units_in_use"] == 4.0 and top["unit_price"] == 1.0 and top["quantity_per_day"] == 96.0
+
+
+def test_each_unit_of_measure_becomes_units_in_use():
+    from app.services.commitments.providers.oci import COUNTED_UNIT, MONTHLY_UNIT, unit_kind, units_in_use
+
+    # As billed per day by OCI: a 4-OCPU instance all day, 14 000 GB of block volume in October.
+    assert units_in_use(96.0, unit_kind("OCPU Hours"), "2026-10-10") == 4.0
+    assert units_in_use(384.0, unit_kind("Gigabyte Per Hour"), "2026-10-10") == 16.0
+    assert unit_kind("GB Months") == unit_kind("Desktops per Month") == MONTHLY_UNIT
+    assert round(units_in_use(14000 / 31, MONTHLY_UNIT, "2026-10-10"), 6) == 14000
+    assert round(units_in_use(14000 / 30, MONTHLY_UNIT, "2026-09-10"), 6) == 14000
+    assert unit_kind("10K Requests") == unit_kind("Million Datapoints") == COUNTED_UNIT
+    assert units_in_use(5.0, COUNTED_UNIT, "2026-10-10") is None
 
 
 def test_unit_price_is_the_effective_price_of_the_window():
@@ -142,7 +155,7 @@ def test_oci_run_sizes_universal_credits_from_projected_spend(tmp_path):
     assert balanced.monthly_saving == round(31536 * 0.20 / 12, 2)
     assert balanced.evidence["commit_amount_annual"] == round(31536 * 0.8 * 0.9, 2)
     assert balanced.evidence["hourly"]["grain"] == DAY
-    assert balanced.evidence["usage_basis"]["top_skus"][0]["units_running"] == 3.5
+    assert balanced.evidence["usage_basis"]["top_skus"][0]["units_in_use"] == 3.5
     assert any("quantidade faturada por dia" in line for line in balanced.rationale)
     assert balanced.currency == "BRL"
 

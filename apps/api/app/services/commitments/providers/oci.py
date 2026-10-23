@@ -3,10 +3,20 @@
 OCI has no compute reservation: its commitment is Universal Credits, a spend
 pool drawn over the term, so the engine needs the steady consumption, not an
 hourly invoice. It reads the daily FOCUS billing (``dest_billing_cloud``) of
-the connection and turns each SKU's billed quantity (``pricingquantity``, e.g.
-OCPU hours, GB hours) into an average per hour of the day — quantity ÷ 24 is
-the units kept running — priced at the SKU's effective unit price in the
-window (``effectivecost ÷ pricingquantity``). No list price is invented.
+the connection and reads each SKU's billed quantity (``pricingquantity``) in
+its unit of measure, as OCI bills it per day:
+
+- ``… Hours`` / ``… Per Hour`` (OCPU, ECPU, GB of memory, load balancer,
+  Mbps): unit-hours of the day — ÷ 24 is the units kept running (a 4-OCPU
+  instance on all day bills 96 OCPU hours);
+- ``… Months`` / ``… per Month`` (block volume GB, performance units,
+  desktops): the month pro-rated to the day — × days of the month is the
+  units provisioned (14 000 GB in October bill 451.61 GB months a day);
+- anything else (requests, API calls, datapoints): consumption counted per day.
+
+The day's cost is that quantity at the SKU's effective unit price in the
+window (``effectivecost ÷ pricingquantity``), so prices come from the billing
+and no list price is invented.
 
 Cost basis: the effective cost is what the tenancy pays today, contract
 discounts included. OCI offers in the catalog are therefore a discount over
@@ -18,6 +28,7 @@ it (``oci_compute_hourly``), but the engine no longer depends on it.
 from __future__ import annotations
 
 from collections import defaultdict
+import calendar
 from datetime import datetime, timedelta
 import re
 from typing import Any
@@ -32,6 +43,35 @@ BILLING_TABLE = "dest_billing_cloud"
 COMPUTE_SERVICE = "compute"
 _HOUR = re.compile(r"^(\d{4}-\d{2}-\d{2})[T ](\d{2})")
 _SAFE = re.compile(r"^[A-Za-z0-9._:\-]+$")
+
+# Unit of measure → how a day's quantity becomes average units in use.
+HOURLY_UNIT = "hour"
+MONTHLY_UNIT = "month"
+COUNTED_UNIT = "count"
+_UNIT_TREATMENT = {
+    HOURLY_UNIT: "unidade-hora por dia ÷ 24 = unidades médias em uso",
+    MONTHLY_UNIT: "unidade-mês rateada por dia × dias do mês = unidades provisionadas",
+    COUNTED_UNIT: "consumo contado por dia (sem unidade contínua em uso)",
+}
+
+
+def unit_kind(unit: str | None) -> str:
+    text = str(unit or "").lower()
+    if re.search(r"\bhours?\b", text):
+        return HOURLY_UNIT
+    if re.search(r"\bmonths?\b", text):
+        return MONTHLY_UNIT
+    return COUNTED_UNIT
+
+
+def units_in_use(quantity: float, kind: str, day: str) -> float | None:
+    """Average units in use that day for a quantity billed in the unit's measure."""
+    if kind == HOURLY_UNIT:
+        return quantity / 24
+    if kind == MONTHLY_UNIT:
+        year, month = int(day[:4]), int(day[5:7])
+        return quantity * calendar.monthrange(year, month)[1]
+    return None
 
 _COLUMNS = {
     "lineItem/intervalUsageStart": "usage_start",
@@ -135,19 +175,27 @@ def _unit_prices(rows: list[dict]) -> dict[tuple, float]:
 
 def _build(connection: Any, rows: list[dict]) -> UsageSnapshot:
     prices = _unit_prices(rows)
-    lines, per_sku = [], defaultdict(lambda: {"quantity": 0.0, "cost_hour": 0.0})
+    lines = []
+    per_sku = defaultdict(lambda: {"quantity": 0.0, "units": 0.0, "cost_hour": 0.0})
+    per_unit = defaultdict(lambda: {"skus": set(), "cost_hour": 0.0})
     for row in rows:
         price = prices.get((row["sku"], row["unit"]))
         quantity = float(row["quantity"] or 0.0)
+        day = str(row["usage_day"])
         # A line billed without quantity (flat fee) keeps its cost: there is no unit to price.
         day_cost = quantity * price if price is not None else float(row["cost"] or 0.0)
         cost_hour = day_cost / 24
-        lines.append(UsageLine(hour_utc=str(row["usage_day"]), ondemand_cost=cost_hour, region=row["region"],
-                               family=row["sku"]))
+        lines.append(UsageLine(hour_utc=day, ondemand_cost=cost_hour, region=row["region"], family=row["sku"]))
+        kind = unit_kind(row["unit"])
         item = per_sku[(row["service"], row["sku"], row["sku_meter"], row["unit"])]
         item["quantity"] += quantity
+        item["units"] += units_in_use(quantity, kind, day) or 0.0
         item["cost_hour"] += cost_hour
+        unit = per_unit[str(row["unit"] or "(sem unidade)")]
+        unit["skus"].add(row["sku"])
+        unit["cost_hour"] += cost_hour
     days = {line.hour_utc for line in lines}
+    count = len(days)
     currencies = {row["currency"] for row in rows if row["currency"]}
     config = getattr(connection, "config_json", None) or {}
     top = sorted(per_sku.items(), key=lambda item: item[1]["cost_hour"], reverse=True)[:15]
@@ -160,17 +208,21 @@ def _build(connection: Any, rows: list[dict]) -> UsageSnapshot:
         grain=DAY,
         basis={
             "source": f"{BILLING_TABLE} (quantidade faturada por dia)",
-            "note": "Base calculada da quantidade faturada por dia (÷ 24 = unidades médias em uso) × preço "
-                    "unitário efetivo de cada SKU na janela; não depende de fatura horária.",
-            "days": len(days),
+            "note": "Base calculada da quantidade faturada por dia na unidade de medida de cada SKU (horas ÷ 24, "
+                    "meses × dias do mês) × preço unitário efetivo da janela; não depende de fatura horária.",
+            "days": count,
             "skus": len(per_sku),
+            "units": [{
+                "unit": unit, "treatment": _UNIT_TREATMENT[unit_kind(unit)], "skus": len(values["skus"]),
+                "cost_hour": round(values["cost_hour"] / count, 4),
+            } for unit, values in sorted(per_unit.items(), key=lambda item: -item[1]["cost_hour"])],
             "top_skus": [{
                 "service": service, "sku": sku, "sku_meter": meter, "unit": unit,
-                "quantity_per_day": round(values["quantity"] / len(days), 4),
-                # "OCPU Hours" / "GB Hours": quantity per day ÷ 24 is the units running on average.
-                "units_running": round(values["quantity"] / len(days) / 24, 4) if "hour" in str(unit).lower() else None,
+                "treatment": _UNIT_TREATMENT[unit_kind(unit)],
+                "quantity_per_day": round(values["quantity"] / count, 4),
+                "units_in_use": round(values["units"] / count, 4) if unit_kind(unit) != COUNTED_UNIT else None,
                 "unit_price": round(prices[(sku, unit)], 6) if (sku, unit) in prices else None,
-                "cost_hour": round(values["cost_hour"] / len(days), 4),
+                "cost_hour": round(values["cost_hour"] / count, 4),
             } for (service, sku, meter, unit), values in top],
         },
     )
