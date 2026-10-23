@@ -124,6 +124,9 @@ export default function Extraction({ embedded = false }: { embedded?: boolean })
   const enabledInfraResolutions = Array.isArray(infraConfig.resolutions_seconds)
     ? (infraConfig.resolutions_seconds as number[]).filter((value): value is 60 | 300 | 900 => [60, 300, 900].includes(value as number))
     : [];
+  const activeInfraResolution = enabledInfraResolutions.includes(infraResolution)
+    ? infraResolution
+    : enabledInfraResolutions[0] ?? 60;
   const [ptuPeriods, setPtuPeriods] = useState<AvailablePeriod[]>([]);
   const [selPtuPeriods, setSelPtuPeriods] = useState<string[]>([]);
   const [loadingPtuPeriods, setLoadingPtuPeriods] = useState(false);
@@ -303,7 +306,7 @@ export default function Extraction({ embedded = false }: { embedded?: boolean })
       connection_id: connId as number,
       start_utc: start.toISOString(),
       end_utc: end.toISOString(),
-      resolution_seconds: infraResolution,
+      resolution_seconds: activeInfraResolution,
     };
   };
 
@@ -573,7 +576,7 @@ export default function Extraction({ embedded = false }: { embedded?: boolean })
                     <TextField size="small" type="datetime-local" label="Fim" value={infraEnd} onChange={(event) => { setInfraEnd(event.target.value); setInfraPlan(null); }} InputLabelProps={{ shrink: true }} sx={{ minWidth: 220 }} />
                     <FormControl size="small" sx={{ minWidth: 145 }}>
                       <InputLabel>Resolução</InputLabel>
-                      <Select label="Resolução" value={infraResolution} onChange={(event) => { setInfraResolution(Number(event.target.value) as 60 | 300 | 900); setInfraPlan(null); }}>
+                      <Select label="Resolução" value={activeInfraResolution} onChange={(event) => { setInfraResolution(Number(event.target.value) as 60 | 300 | 900); setInfraPlan(null); }}>
                         {[60, 300, 900].filter((value) => enabledInfraResolutions.includes(value as 60 | 300 | 900)).map((seconds) => <MenuItem key={seconds} value={seconds}>{seconds / 60} minuto(s)</MenuItem>)}
                       </Select>
                     </FormControl>
