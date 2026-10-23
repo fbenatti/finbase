@@ -2,10 +2,23 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import timedelta
 from typing import Any
 
 from .catalog import OCI_METRICS
 from .contracts import MetricScope
+
+
+# Longest window one collection may request per resolution. Coarser buckets
+# return fewer points per call, so a 5m/15m run can span several days.
+MAX_WINDOW_BY_RESOLUTION = {60: timedelta(hours=24), 300: timedelta(days=7), 900: timedelta(days=7)}
+
+
+def max_collection_window(resolution_seconds: int) -> timedelta:
+    try:
+        return MAX_WINDOW_BY_RESOLUTION[int(resolution_seconds)]
+    except KeyError as exc:
+        raise ValueError("resolution must be 60, 300 or 900 seconds") from exc
 
 
 @dataclass(frozen=True)

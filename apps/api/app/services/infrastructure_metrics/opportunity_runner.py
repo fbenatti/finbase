@@ -13,10 +13,11 @@ from .opportunities import (
 )
 
 ANALYZED_METRICS = ("CpuUtilization", "MemoryUtilization")
-SERIES_FIELDS = ("resource_id", "source_metric_name", "bucket_start_utc", "value_average", "value_maximum")
-# 1m comes straight from the provider; 5m/15m are local rollups of the 1m
-# buckets that keep the 1m maximum (see plan section 3.3).
-ORIGIN_BY_RESOLUTION = {60: "NATIVE", 300: "DERIVED_ROLLUP", 900: "DERIVED_ROLLUP"}
+SERIES_FIELDS = ("resource_id", "source_metric_name", "bucket_start_utc", "value_average", "value_maximum", "origin_kind")
+# Native buckets come first: at 5m/15m OCI computes max over the raw samples.
+# Local rollups of 1m buckets (which keep the 1m maximum) fill only the
+# windows that were collected at 1m.
+ORIGINS_BY_RESOLUTION = {60: ("NATIVE",), 300: ("NATIVE", "DERIVED_ROLLUP"), 900: ("NATIVE", "DERIVED_ROLLUP")}
 
 
 def read_native_series(
@@ -31,20 +32,22 @@ def read_native_series(
     if not iceberg_service.table_exists("resource_metric_series", namespace="silver"):
         return []
     table = iceberg_service.get_catalog().load_table(("silver", "resource_metric_series"))
-    expression = And(
-        EqualTo("_source_connection_id", connection_id),
-        EqualTo("resource_id", resource_id),
-        EqualTo("source_metric_name", metric),
-        EqualTo("origin_kind", ORIGIN_BY_RESOLUTION[resolution_seconds]),
-        EqualTo("resolution_seconds", resolution_seconds),
-        GreaterThanOrEqual("bucket_start_utc", start.replace(tzinfo=None)),
-        LessThan("bucket_start_utc", end.replace(tzinfo=None)),
-    )
-    rows = table.scan(row_filter=expression, selected_fields=SERIES_FIELDS).to_arrow().to_pylist()
-    for row in rows:
-        if isinstance(row["bucket_start_utc"], datetime):
-            row["bucket_start_utc"] = row["bucket_start_utc"].isoformat()
-    return rows
+    by_bucket: dict[str, dict] = {}
+    for origin in ORIGINS_BY_RESOLUTION[resolution_seconds]:
+        expression = And(
+            EqualTo("_source_connection_id", connection_id),
+            EqualTo("resource_id", resource_id),
+            EqualTo("source_metric_name", metric),
+            EqualTo("origin_kind", origin),
+            EqualTo("resolution_seconds", resolution_seconds),
+            GreaterThanOrEqual("bucket_start_utc", start.replace(tzinfo=None)),
+            LessThan("bucket_start_utc", end.replace(tzinfo=None)),
+        )
+        for row in table.scan(row_filter=expression, selected_fields=SERIES_FIELDS).to_arrow().to_pylist():
+            if isinstance(row["bucket_start_utc"], datetime):
+                row["bucket_start_utc"] = row["bucket_start_utc"].isoformat()
+            by_bucket.setdefault(row["bucket_start_utc"], row)
+    return [by_bucket[key] for key in sorted(by_bucket)]
 
 
 def read_billing_prices(resource_ids: tuple[str, ...]) -> dict[str, dict]:
@@ -76,7 +79,7 @@ def run_opportunity_engine(
     """Analyze every allowlisted instance and persist one run with its results."""
     from app.models.infrastructure_opportunity import InfraOpportunity, InfraOpportunityRun
 
-    if resolution_seconds not in ORIGIN_BY_RESOLUTION:
+    if resolution_seconds not in ORIGINS_BY_RESOLUTION:
         raise ValueError("resolution_seconds must be 60, 300 or 900")
     config = config_from_connection(connection)
     if not config.enabled:

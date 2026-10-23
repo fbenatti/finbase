@@ -17,7 +17,7 @@ from app.models.etl_task import EtlTask
 from app.models.source_connection import SourceConnection
 from app.services.infrastructure_metrics.catalog import get_metric
 from app.services.infrastructure_metrics.collector import DEFAULT_STATISTICS, estimated_api_calls, plan_queries
-from app.services.infrastructure_metrics.config import config_from_connection
+from app.services.infrastructure_metrics.config import config_from_connection, max_collection_window
 
 router = APIRouter(prefix="/custos/metricas-infra", tags=["infrastructure-metrics"])
 MAX_API_CALLS = 128
@@ -89,8 +89,11 @@ async def _validated_plan(body: CollectionRequest, db: AsyncSession, user, actio
         raise HTTPException(422, "start_utc e end_utc devem incluir fuso horário")
     start = body.start_utc.astimezone(timezone.utc)
     end = body.end_utc.astimezone(timezone.utc)
-    if end <= start or end - start > timedelta(hours=24):
-        raise HTTPException(422, "A janela deve ser positiva e ter no máximo 24 horas")
+    limit = max_collection_window(body.resolution_seconds)
+    if end <= start or end - start > limit:
+        raise HTTPException(
+            422, f"A janela deve ser positiva e ter no máximo {int(limit.total_seconds() // 3600)} horas nesta resolução",
+        )
     conn = await db.get(SourceConnection, body.connection_id)
     if not conn or conn.connector_type != "oci":
         raise HTTPException(404, "Conexão OCI não encontrada")

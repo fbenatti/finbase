@@ -84,7 +84,7 @@ def test_service_rejects_windows_larger_than_the_pilot_budget():
         },
     )
     start = datetime(2026, 1, 1, tzinfo=timezone.utc)
-    with pytest.raises(ValueError, match="at most 24 hours"):
+    with pytest.raises(ValueError, match="resolution limit"):
         service.collect_oci_metrics(
             connection, start_utc=start, end_utc=start + timedelta(hours=25),
             resolution_seconds=60, statistics=("mean",),
@@ -159,3 +159,12 @@ def test_service_can_opt_in_to_day_slice_publication(monkeypatch):
     assert initialized == [True, True]
     assert len(published) == 2
     assert published[0][1:] == (4, "20260101")
+
+
+def test_window_limit_depends_on_resolution():
+    from app.services.infrastructure_metrics.config import max_collection_window
+
+    assert max_collection_window(60) == timedelta(hours=24)
+    assert max_collection_window(300) == timedelta(days=7)
+    with pytest.raises(ValueError):
+        max_collection_window(120)

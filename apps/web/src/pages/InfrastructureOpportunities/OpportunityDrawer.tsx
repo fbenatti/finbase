@@ -142,7 +142,7 @@ export default function OpportunityDrawer({ opportunityId, onClose, onChanged }:
 
       <Paper variant="outlined" sx={{ p: 2 }}>
         <Typography variant="subtitle2">Consumo na janela analisada</Typography>
-        <Typography variant="caption" color="text.secondary">Percentis lineares sobre as médias dos buckets da análise ({(evidence?.cpu as { resolution_seconds?: number } | null)?.resolution_seconds === 300 ? "5 min, rollup do 1 min com máximo preservado" : "1 min, origem NATIVE"}) · “No alvo” = utilização projetada após a ação (P95 / P99)</Typography>
+        <Typography variant="caption" color="text.secondary">Percentis lineares sobre as médias dos buckets de {((evidence?.cpu as { resolution_seconds?: number } | null)?.resolution_seconds ?? 60) / 60} min ({Object.entries((evidence?.cpu as { origins?: Record<string, number> } | null)?.origins ?? { NATIVE: 0 }).map(([origin, count]) => `${origin === "NATIVE" ? "nativo OCI" : "rollup local do 1 min"}${count ? `: ${count.toLocaleString("pt-BR")}` : ""}`).join(" · ")}) · pico = máximo nativo · “No alvo” = utilização projetada após a ação (P95 / P99)</Typography>
         <Table size="small" sx={{ mt: 1 }}>
           <TableHead><TableRow>
             <TableCell>Métrica</TableCell><TableCell align="right">P50</TableCell><TableCell align="right">P95</TableCell>

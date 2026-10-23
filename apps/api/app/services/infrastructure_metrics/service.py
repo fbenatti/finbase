@@ -8,7 +8,7 @@ import uuid
 
 from .catalog import get_metric
 from .collector import collect, estimated_api_calls, plan_queries
-from .config import InfrastructureMetricsConfig, config_from_connection
+from .config import InfrastructureMetricsConfig, config_from_connection, max_collection_window
 from .contracts import CollectionCancelled, QueryResult
 from .coverage import build_coverage_rows
 from .credentials import build_oci_adapter
@@ -47,8 +47,8 @@ def collect_oci_metrics(
     scope = config.scope(int(connection.id))
     if start_utc.tzinfo is None or end_utc.tzinfo is None:
         raise ValueError("collection window must use timezone-aware datetimes")
-    if end_utc <= start_utc or end_utc - start_utc > timedelta(hours=24):
-        raise ValueError("pilot collection window must be positive and at most 24 hours")
+    if end_utc <= start_utc or end_utc - start_utc > max_collection_window(resolution_seconds):
+        raise ValueError("collection window must be positive and within the resolution limit")
     if resolution_seconds not in config.resolutions_seconds:
         raise ValueError("requested resolution is not enabled in pilot configuration")
     descriptors = tuple(

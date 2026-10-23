@@ -64,6 +64,9 @@ def summarize_series(
     values = [float(row["value_average"]) for row in by_bucket.values()]
     maxima = [float(row["value_maximum"]) for row in by_bucket.values() if row.get("value_maximum") is not None]
     expected = int((window_end - window_start).total_seconds() // resolution_seconds)
+    origins: dict[str, int] = defaultdict(int)
+    for row in by_bucket.values():
+        origins[str(row.get("origin_kind") or "NATIVE")] += 1
     daily: dict[str, list[float]] = defaultdict(list)
     for bucket, row in by_bucket.items():
         daily[bucket[:10]].append(float(row["value_average"]))
@@ -84,6 +87,7 @@ def summarize_series(
         ],
         "quantile_method": "linear",
         "resolution_seconds": resolution_seconds,
+        "origins": dict(sorted(origins.items())),
         "percentile_basis": f"WINDOW_OF_{resolution_seconds // 60}M_BUCKET_AVERAGES",
     }
 
@@ -208,7 +212,7 @@ def analyze_resource(
     result["evidence"]["projected_utilization"] = projected
     if projected["cpu_peak_1m"] > 100:
         result["risks"].append(
-            f"Pico de 1 minuto ({cpu['max']:.1f}%) equivaleria a {projected['cpu_peak_1m']:.0f}% no alvo: haverá fila de CPU nesses minutos."
+            f"Pico observado ({cpu['max']:.1f}%) equivaleria a {projected['cpu_peak_1m']:.0f}% no alvo: haverá fila de CPU nesses momentos."
         )
     if days < policy["min_days"] or coverage < policy["min_coverage"]:
         result["readiness_status"] = INCOMPLETE
