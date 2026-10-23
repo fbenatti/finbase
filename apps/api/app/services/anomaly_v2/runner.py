@@ -198,6 +198,7 @@ async def execute_detection_v2(
     should_abort: Callable[[], bool] | None = None,
     detected_at: datetime | None = None,
     force: bool = False,
+    window_days: int = 90,
 ) -> dict[str, Any]:
     from contextlib import suppress
     from app.services.anomaly_v2.query_control import cancel_event
@@ -216,7 +217,8 @@ async def execute_detection_v2(
     watcher = asyncio.create_task(watch_cancellation()) if should_abort else None
     try:
         return await _execute_detection_v2(config_id, run_id=run_id, progress=progress,
-            should_abort=should_abort, detected_at=detected_at, force=force)
+            should_abort=should_abort, detected_at=detected_at, force=force,
+            window_days=window_days)
     except TrinoCancelled:
         async with async_session() as session:
             return await _finish_cancelled(session, run_id)
@@ -236,6 +238,7 @@ async def _execute_detection_v2(
     should_abort: Callable[[], bool] | None = None,
     detected_at: datetime | None = None,
     force: bool = False,
+    window_days: int = 90,
 ) -> dict[str, Any]:
     from app.models.anomaly import AnomalyConfig, AnomalyRun
 
@@ -266,7 +269,11 @@ async def _execute_detection_v2(
         await session.commit()
         lag = int(config_row.data_lag_days if config_row.data_lag_days is not None else 2)
         as_of = _analysis_end(detected_at, lag)
-        history_days = int(config.get("history_days") or 90)
+        window_days = max(1, int(window_days))
+        history_days = max(
+            int(config.get("history_days") or 90),
+            window_days + int(engine_settings["baseline_variability_days"]),
+        )
 
         report(1, 8, "Verificando prontidão")
         source_snapshot_id = await _source_snapshot_id(config)
@@ -338,7 +345,7 @@ async def _execute_detection_v2(
         quality_by_day: dict[str, dict[str, float]] = {}
         valid_days = valid_days_by_cloud(history, settings=engine_settings)
 
-        report(5, 8, "Detectando desvios dos últimos 90 dias")
+        report(5, 8, f"Detectando desvios dos últimos {window_days} dias")
         all_signals: list[dict[str, Any]] = []
         rows_by_scope: dict[str, list[dict[str, Any]]] = defaultdict(list)
         for row in history:
@@ -353,7 +360,7 @@ async def _execute_detection_v2(
             scope_end = date.fromisoformat(current_max.get(cloud, as_of.isoformat()))
             scope_ledger = ledger_by_scope.get(sid, [])
             raw = detect_scope_window(
-                scope_id=sid, rows=scope_rows, end=scope_end, window_days=90,
+                scope_id=sid, rows=scope_rows, end=scope_end, window_days=window_days,
                 # Detecta também desvios de baixo valor; a materialidade
                 # configurada continua decidindo se viram ALERT ou WATCH.
                 materiality=0.01,
@@ -475,6 +482,7 @@ async def _execute_detection_v2(
             "daily_build_rows": daily_build.get("row_count"),
             "ledger_entries": len(ledger),
             "model_version": MODEL_VERSION,
+            "evaluation_window_days": window_days,
         }
         if run_id:
             run = await session.get(AnomalyRun, run_id)
@@ -492,7 +500,7 @@ async def _execute_detection_v2(
                 run.rows_written = int(result.get("rows_written") or 0)
                 run.source_snapshot_id = source_snapshot_id
                 run.data_cutoff = as_of.isoformat()
-                run.evaluation_start = (as_of - timedelta(days=89)).isoformat()
+                run.evaluation_start = (as_of - timedelta(days=window_days - 1)).isoformat()
                 run.evaluation_end = as_of.isoformat()
                 run.reference_kind = "V2_BASELINE"
                 run.assessment_table = SIGNAL_TABLE
