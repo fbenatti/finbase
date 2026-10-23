@@ -271,95 +271,132 @@ export default function Forecast() {
         )}
 
         {tab === "rules" && (
-          <Paper elevation={0} sx={{ p: { xs: 1.5, md: 2 }, borderRadius: 2, bgcolor: "background.paper", border: "1px solid", borderColor: "divider" }}>
-            <Stack direction={{ xs: "column", md: "row" }} justifyContent="space-between" alignItems={{ md: "flex-start" }} sx={{ mb: 2, gap: 2 }}>
-              <Box>
-                <Typography variant="h6">Ajustes do perfil</Typography>
-                <Typography variant="body2" color="text.secondary">
-                  Cada regra de negócio ajusta o Forecast depois do cálculo matemático: exclui parcelas, troca valores ou suspende o escopo.
-                </Typography>
-              </Box>
-              <Stack direction={{ xs: "column", sm: "row" }} spacing={1} alignItems={{ sm: "center" }} flexShrink={0}>
-                <FormControl sx={{ minWidth: 260 }}>
-                  <InputLabel>Perfil de Forecast</InputLabel>
-                  <Select
-                    label="Perfil de Forecast"
-                    value={rulesConfigId}
-                    onChange={(e) => void selectRulesConfig(Number(e.target.value))}
+          <Stack spacing={2}>
+            <Paper elevation={0} sx={{ p: { xs: 1.5, md: 2 }, borderRadius: 2, bgcolor: "background.paper", border: "1px solid", borderColor: "divider" }}>
+              <Stack direction={{ xs: "column", md: "row" }} justifyContent="space-between" alignItems={{ md: "center" }} sx={{ gap: 2 }}>
+                <Box>
+                  <Typography variant="h6">Regras de negócio do Forecast</Typography>
+                  <Typography variant="body2" color="text.secondary">
+                    As regras abaixo são aplicadas ao único perfil: {profile?.name ?? "perfil não configurado"}.
+                  </Typography>
+                </Box>
+                <Stack direction="row" spacing={1} flexShrink={0}>
+                  <Button size="small" startIcon={<RefreshOutlined />} disabled={!profile || rulesLoading} onClick={() => void loadRules(profile)}>
+                    Atualizar
+                  </Button>
+                  <Button
+                    size="small"
+                    variant="contained"
+                    startIcon={<AddOutlined />}
+                    disabled={!profile || rulesLoading}
+                    onClick={() => setRuleEditor({ open: true, initial: null })}
                   >
-                    {configs.map((c) => (
-                      <MenuItem key={c.id} value={c.id}>{c.name}</MenuItem>
-                    ))}
-                  </Select>
-                </FormControl>
-                <Button
-                  size="small"
-                  variant="contained"
-                  startIcon={<AddOutlined />}
-                  disabled={!rulesConfigId}
-                  onClick={() => setRuleDialog({ open: true, initial: null })}
-                >
-                  Nova regra
-                </Button>
+                    Nova regra
+                  </Button>
+                </Stack>
               </Stack>
-            </Stack>
-            <Box sx={{ display: "grid", gap: 1.5, mb: 2, gridTemplateColumns: { xs: "1fr", md: "repeat(3, minmax(0, 1fr))" } }}>
-              {[
-                { label: "Regras do perfil", value: rulesConfigId ? rulesGridTotal : "—" },
-                { label: "Ativas nesta página", value: rulesGridRows.filter((r) => r.active).length },
-                { label: "Perfil em uso", value: rulesConfig?.name ?? "Nenhum" },
-              ].map((kpi) => (
-                <Paper key={kpi.label} variant="outlined" sx={{ p: 1.5, borderRadius: 2, bgcolor: "#FAFBFD", minWidth: 0 }}>
-                  <Typography variant="caption" color="text.secondary">{kpi.label}</Typography>
-                  <Typography variant="h5" fontWeight={700} noWrap>{kpi.value}</Typography>
-                </Paper>
-              ))}
-            </Box>
-            {configs.length === 0 ? (
-              <Alert severity="info">Nenhum perfil de Forecast. Crie um em Perfis de Forecast.</Alert>
-            ) : !rulesConfigId ? (
-              <Alert severity="info">Escolha um perfil para ver as regras.</Alert>
-            ) : (
-              <>
-                <TextField
-                  fullWidth
-                  size="small"
-                  placeholder="Buscar por nome, tipo, comportamento ou coluna"
-                  value={rulesSearch}
-                  onChange={(event) => setRulesSearch(event.target.value)}
-                  slotProps={{
-                    input: {
-                      startAdornment: (
-                        <InputAdornment position="start">
-                          <SearchOutlined fontSize="small" />
-                        </InputAdornment>
-                      ),
-                      sx: { height: 40 },
-                    },
-                  }}
-                  sx={{ mb: 2, maxWidth: 520 }}
-                />
-                {!rulesGridLoading && rulesGridRows.length === 0 ? (
-                  <Box sx={{ py: 7 }}>
-                    <EmptyState
-                      message={rulesSearch ? "Nenhuma regra encontrada na busca." : "Nenhuma regra cadastrada para este perfil."}
-                    />
-                  </Box>
-                ) : (
-                  <ForecastRulesDataGrid
-                    key={rulesConfigId}
-                    rows={rulesGridRows}
-                    total={rulesGridTotal}
-                    loading={rulesGridLoading}
-                    search={rulesSearch}
-                    onQuery={handleRulesGridQuery}
-                    onEdit={(rule) => setRuleDialog({ open: true, initial: rule })}
-                    onDelete={setRulePendingDeletion}
-                  />
-                )}
-              </>
+              <Box sx={{ display: "grid", gap: 1.5, mt: 2, gridTemplateColumns: { xs: "1fr 1fr", md: "repeat(3, minmax(0, 1fr))" } }}>
+                {[
+                  { label: "Regras cadastradas", value: rules.length },
+                  { label: "Regras ativas", value: rules.filter((rule) => rule.active).length },
+                  { label: "Perfil", value: profile?.name ?? "Não configurado" },
+                ].map((item) => (
+                  <Paper key={item.label} variant="outlined" sx={{ p: 1.5, borderRadius: 2, bgcolor: "#FAFBFD", minWidth: 0 }}>
+                    <Typography variant="caption" color="text.secondary">{item.label}</Typography>
+                    <Typography variant="subtitle1" fontWeight={700} noWrap>{item.value}</Typography>
+                  </Paper>
+                ))}
+              </Box>
+            </Paper>
+
+            {ruleEditor.open && profile && (
+              <ForecastRuleForm
+                key={ruleEditor.initial?.id ?? "new-rule"}
+                open
+                initial={ruleEditor.initial}
+                config={profile}
+                meta={rulesMeta}
+                onClose={() => setRuleEditor({ open: false, initial: null })}
+                onSaved={async (savedName) => {
+                  setError("");
+                  setMessage(`Regra "${savedName}" salva com sucesso.`);
+                  await loadRules(profile);
+                }}
+              />
             )}
-          </Paper>
+
+            {!profile ? (
+              <Alert severity="info">O perfil único do Forecast ainda não foi carregado.</Alert>
+            ) : rulesLoading ? (
+              <Stack direction="row" alignItems="center" spacing={1} sx={{ py: 3 }}>
+                <CircularProgress size={18} />
+                <Typography variant="body2" color="text.secondary">Carregando regras...</Typography>
+              </Stack>
+            ) : rules.length === 0 ? (
+              <EmptyState message="Nenhuma regra de negócio cadastrada para o perfil." />
+            ) : (
+              <Stack spacing={1.5}>
+                {rules.map((rule) => {
+                  const identity = rule.identification_clauses?.length
+                    ? rule.identification_clauses.map((clause) => `${clause.column} em ${(clause.values || []).join(", ")}`).join(" OU ")
+                    : rule.identification_column
+                      ? `${rule.identification_column} = ${(rule.identification_values || []).join(", ") || "—"}`
+                      : "—";
+                  const scope = Object.entries(rule.scope || {}).map(([key, value]) => `${key}=${value}`).join(", ") || "Todas as séries";
+                  const details = [
+                    { label: "Identificação", value: identity },
+                    { label: "Escopo", value: scope },
+                    { label: "Tipo de cobrança", value: rule.charge_type || "—" },
+                    { label: "Comportamento", value: BEHAVIOR_LABELS[rule.behavior] || rule.behavior },
+                    { label: "Opções do comportamento", value: JSON.stringify(rule.behavior_options || {}) },
+                    { label: "Coluna de valor", value: rule.value_column || "—" },
+                    { label: "Coluna de referência", value: rule.reference_column || "—" },
+                    { label: "Valores de referência", value: (rule.reference_values || []).join(", ") || "—" },
+                    { label: "Vigência", value: `${rule.start_period?.length === 6 ? `${rule.start_period.slice(0, 4)}-${rule.start_period.slice(4)}` : rule.start_period} até ${rule.end_period ? (rule.end_period.length === 6 ? `${rule.end_period.slice(0, 4)}-${rule.end_period.slice(4)}` : rule.end_period) : "sem fim"}` },
+                    { label: "Crescimento", value: `${(Number(rule.growth_rate || 0) * 100).toLocaleString("pt-BR", { maximumFractionDigits: 2 })}%` },
+                    { label: "Valor substituto", value: rule.replacement_value == null ? "—" : String(rule.replacement_value) },
+                    { label: "Cancelar em refund", value: rule.cancel_on_refund ? "Sim" : "Não" },
+                    { label: "Prioridade", value: String(rule.priority) },
+                    { label: "Versão", value: String(rule.version) },
+                  ];
+                  return (
+                    <Paper key={rule.id} variant="outlined" sx={{ p: { xs: 1.5, md: 2 }, borderRadius: 2 }}>
+                      <Stack direction={{ xs: "column", sm: "row" }} justifyContent="space-between" alignItems={{ sm: "center" }} spacing={1.5} sx={{ mb: 2 }}>
+                        <Stack direction="row" alignItems="center" spacing={1}>
+                          <Typography variant="subtitle1" fontWeight={700}>{rule.name}</Typography>
+                          <Typography component="span" variant="caption" sx={{ color: rule.active ? "success.main" : "text.secondary" }}>
+                            {rule.active ? "Ativa" : "Inativa"}
+                          </Typography>
+                        </Stack>
+                        <Stack direction="row" spacing={1}>
+                          <Button size="small" onClick={() => setRuleEditor({ open: true, initial: rule })}>Editar</Button>
+                          <Button size="small" color="error" onClick={() => setRulePendingDeletion(rule)}>Remover</Button>
+                        </Stack>
+                      </Stack>
+                      <Box sx={{ display: "grid", gap: 1.5, gridTemplateColumns: { xs: "1fr", sm: "repeat(2, minmax(0, 1fr))", lg: "repeat(3, minmax(0, 1fr))" } }}>
+                        {details.map((detail) => (
+                          <Box key={detail.label} sx={{ minWidth: 0 }}>
+                            <Typography variant="caption" color="text.secondary">{detail.label}</Typography>
+                            <Typography variant="body2" sx={{ overflowWrap: "anywhere" }}>{detail.value}</Typography>
+                          </Box>
+                        ))}
+                      </Box>
+                      {rulePendingDeletion?.id === rule.id && (
+                        <Alert severity="warning" sx={{ mt: 2 }} action={
+                          <Stack direction="row" spacing={1}>
+                            <Button size="small" onClick={() => setRulePendingDeletion(null)}>Cancelar</Button>
+                            <Button size="small" color="error" onClick={() => void removeRule()}>Confirmar remoção</Button>
+                          </Stack>
+                        }>
+                          Remover a regra “{rule.name}”?
+                        </Alert>
+                      )}
+                    </Paper>
+                  );
+                })}
+              </Stack>
+            )}
+          </Stack>
         )}
 
         {tab === "history" && (
