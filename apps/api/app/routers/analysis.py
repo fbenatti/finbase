@@ -122,7 +122,6 @@ class QueryRequest(BaseModel):
     catalog: str | None = None
 
 
-class QueryResponse(BaseModel):
 _PUBLIC_QUERY_SCHEMAS = {
     "origem": "bronze",
     "preparacao": "silver",
@@ -141,6 +140,7 @@ def _resolve_public_query_schemas(sql: str) -> str:
 
 
     columns: list[str]
+class QueryResponse(BaseModel):
     rows: list[dict[str, Any]]
     row_count: int
 
@@ -2800,23 +2800,23 @@ async def run_query(req: QueryRequest, request: Request, db: AsyncSession = Depe
     connection_codes = (await db.execute(select(SourceConnection.code))).scalars().all()
     allowed.update(".".join(_bronze_table_id(code)) for code in connection_codes if code)
     try:
-        check_read_only_select(req.sql, allowed)
+        check_read_only_select(resolved_sql, allowed)
     except SqlRejected as exc:
         raise HTTPException(status_code=403, detail=str(exc))
     async with _ClientCancelScope(request) as scope:
         try:
-            rows = await trino_execute(req.sql, catalog=req.catalog, **scope.trino_kwargs)
+            rows = await trino_execute(resolved_sql, catalog=req.catalog, **scope.trino_kwargs)
         except TrinoCancelled:
             raise _cancelled_http()
         except TrinoError as e:
-            rows = _run_local_bronze_star_query(req.sql, str(e))
+            rows = _run_local_bronze_star_query(resolved_sql, str(e))
             if rows is not None:
                 columns = list(rows[0].keys()) if rows else []
                 return QueryResponse(columns=columns, rows=rows, row_count=len(rows))
             # O detalhe pode estar no catálogo PyIceberg local enquanto o Trino
             # lê pelo catálogo PostgreSQL. Suporta as agregações padrão do
             # destino pela mesma tabela Iceberg local.
-            rows = _run_local_gold_query(req.sql)
+            rows = _run_local_gold_query(resolved_sql)
             if rows is None:
                 raise HTTPException(status_code=502, detail=str(e))
         except ConnectionError as e:
