@@ -1664,9 +1664,10 @@ def consumer_main(worker_id: int):
                             statistics=tuple(payload.get("statistics") or ("mean", "p95")),
                             collection_run_id=str(task_id),
                             persist=payload.get("persist") is True,
+                            should_abort=lambda: _is_etl_task_cancelled(task_id),
                         )
                         task_row = metrics_session.get(_EtlTask, task_id)
-                        if task_row:
+                        if task_row and task_row.status != "CANCELLED":
                             failed = int(result.get("failed_query_count") or 0)
                             persisted = result.get("persisted_by_day") or {}
                             persisted_count = sum(int(count) for count in persisted.values())
@@ -1699,7 +1700,7 @@ def consumer_main(worker_id: int):
                         print(f"Infrastructure metrics task {task_id} failed: {type(exc).__name__}")
                         if metrics_session is not None:
                             task_row = metrics_session.get(_EtlTask, task_id)
-                            if task_row:
+                            if task_row and task_row.status != "CANCELLED" and not _is_etl_task_cancelled(task_id):
                                 task_row.status = "FAILED"
                                 task_row.phase = f"Falha na coleta OCI: {type(exc).__name__}"[:200]
                                 task_row.errors = [type(exc).__name__]
