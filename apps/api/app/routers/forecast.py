@@ -213,7 +213,8 @@ async def ensure_default_config(db: AsyncSession) -> None:
     if not destination:
         return
     try:
-        metadata = _apply_destination_suggestions(destination, await fetch_metadata(destination.physical_name))
+        _, destination_metadata = await _dest_metadata(db, destination.id)
+        metadata = _apply_destination_suggestions(destination, destination_metadata)
     except Exception:
         return
     if not metadata.get("default_measure") or not metadata.get("default_date"):
