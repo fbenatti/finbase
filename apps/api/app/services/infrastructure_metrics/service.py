@@ -44,17 +44,26 @@ def collect_oci_metrics(
     estimated_calls = estimated_api_calls(plans)
     adapter = build_oci_adapter(connection, config)
     results: tuple[QueryResult, ...] = collect(adapter, plans)
+    run_id = collection_run_id or str(uuid.uuid4())
     rows = query_results_to_silver_rows(
         results, source_owner="oci_infrastructure_metrics",
-        collection_run_id=collection_run_id or str(uuid.uuid4()),
+        collection_run_id=run_id,
     )
     from .counters import derive_counter_rates
 
     rows.extend(derive_counter_rates(rows))
     persisted_by_day: dict[str, int] = {}
-    if persist and rows:
+    raw_persisted_count = 0
+    if persist:
+        from .bronze import persist_raw_query_results
         from .publication import publish_metric_rows
 
+        raw_persisted_count = persist_raw_query_results(
+            connection_code=str(connection.code), connection_id=int(connection.id),
+            collection_run_id=run_id, results=results,
+        )
+        if raw_persisted_count != estimated_calls:
+            raise RuntimeError("raw metric responses were not fully persisted to Bronze")
         rows_by_day: dict[str, list[dict]] = defaultdict(list)
         for row in rows:
             row["_billing_period"] = row["metric_day"]
@@ -76,5 +85,6 @@ def collect_oci_metrics(
         "failed_query_count": sum(result.status_code >= 400 for result in results),
         "rows_prepared": rows,
         "persistence_enabled": persist,
+        "raw_rows_persisted": raw_persisted_count,
         "persisted_by_day": persisted_by_day,
     }
