@@ -123,6 +123,23 @@ class QueryRequest(BaseModel):
 
 
 class QueryResponse(BaseModel):
+_PUBLIC_QUERY_SCHEMAS = {
+    "origem": "bronze",
+    "preparacao": "silver",
+    "consolidacao": "gold",
+}
+
+
+def _resolve_public_query_schemas(sql: str) -> str:
+    """Translate product-facing schema aliases to physical query schemas."""
+    return re.sub(
+        r"\bdados\.(origem|preparacao|consolidacao)\.",
+        lambda match: f"iceberg.{_PUBLIC_QUERY_SCHEMAS[match.group(1).lower()]}.",
+        sql,
+        flags=re.IGNORECASE,
+    )
+
+
     columns: list[str]
     rows: list[dict[str, Any]]
     row_count: int
@@ -2878,6 +2895,7 @@ def _run_local_gold_query(sql: str) -> list[dict[str, Any]] | None:
             return None
         fields = [f.strip().strip('"') for f in generic.group(2).split(",")]
         allowed = {"hierarquia_1", "projeto_nome", "_billing_period", "RegionName", "cloud_origem", "ServiceName"}
+    resolved_sql = _resolve_public_query_schemas(req.sql)
         if not fields or any(f not in allowed for f in fields):
             return None
         table = get_catalog().load_table((layers.detail_layer(), "dest_billing_cloud"))

@@ -265,7 +265,9 @@ export default function PivotAnalysis({ destinations, initialTableId, showSearch
       return [`${column} IN (${literals.join(", ")})`];
     });
     const sourceName = tableName.replace(/-/g, "_").replace(/\./g, "_");
-    const from = `iceberg.silver.${sourceName}`;
+    const sourceLayer = catalogSource?.layer || "silver";
+    const publicLayer = sourceLayer === "bronze" ? "origem" : sourceLayer === "gold" ? "consolidacao" : "preparacao";
+    const from = `dados.${publicLayer}.${sourceName}`;
     const groupBy = dimensionSql.length ? `\nGROUP BY ${dimensionSql.join(", ")}` : "";
     const orderDims = [...rows, ...cols].filter((name, index, all) => all.indexOf(name) === index && !isOriginDim(name)).map(quote);
     const orderBy = orderDims.length ? `\nORDER BY ${orderDims.join(", ")}` : "";

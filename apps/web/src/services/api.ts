@@ -7,6 +7,20 @@ export const api = axios.create({
   timeout: 120000,
 });
 
+const DISPLAY_MESSAGE_FIELDS = new Set([
+  "detail", "message", "error", "error_message", "last_test_message",
+  "current_blob", "phase", "reason", "warning", "warnings", "note", "notes", "checkpoint",
+]);
+
+function sanitizeApiDisplayMessages(value: unknown, field?: string): unknown {
+  if (typeof value === "string") return field && DISPLAY_MESSAGE_FIELDS.has(field) ? dataDisplayText(value) : value;
+  if (Array.isArray(value)) return value.map((item) => sanitizeApiDisplayMessages(item, field));
+  if (value && typeof value === "object") {
+    return Object.fromEntries(Object.entries(value).map(([key, item]) => [key, sanitizeApiDisplayMessages(item, key.toLowerCase())]));
+  }
+  return value;
+}
+
 export async function getMcaCommitmentStatus() {
   const { data } = await api.get("/custos/compromisso-mca/situacao");
   return data;
@@ -218,8 +232,12 @@ async function tryRefresh(): Promise<string | null> {
 }
 
 api.interceptors.response.use(
-  (response) => response,
+  (response) => {
+    response.data = sanitizeApiDisplayMessages(response.data);
+    return response;
+  },
   async (error) => {
+    if (error.response) error.response.data = sanitizeApiDisplayMessages(error.response.data);
     const original = error.config || {};
     const url: string = original.url || "";
     // login/refresh/sso jamais repetem via refresh (evita loop); as demais

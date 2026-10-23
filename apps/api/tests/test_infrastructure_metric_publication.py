@@ -52,6 +52,19 @@ def test_new_rows_append_to_preserved_existing_day_and_duplicate_old_key_fails()
         merge_metric_rows([old, old], [new])
 
 
+def test_conflicting_incoming_duplicate_bucket_is_rejected():
+    with pytest.raises(ValueError, match="conflicting duplicate bucket values"):
+        merge_metric_rows([], [_row(value_average=10), _row(value_average=11)])
+
+
+def test_non_conflicting_partial_incoming_duplicate_bucket_combines_statistics():
+    mean = _row(native_p95=None)
+    p95 = _row(value=None, value_average=None, native_p95=75.0)
+    merged, = merge_metric_rows([], [mean, p95])
+    assert merged["value_average"] == 40.0
+    assert merged["native_p95"] == 75.0
+
+
 def test_real_normalizer_rows_merge_without_optional_identity_keys():
     from datetime import datetime, timedelta, timezone
 
