@@ -35,6 +35,8 @@ class CommitmentProvider:
     provider: str
     read_usage: Callable[[Any, datetime, datetime], UsageSnapshot]
     read_inventory: Callable[[Any], list[ExistingCommitment]] = field(default=lambda connection: [])
+    # Billing connector types this adapter reads (a metrics connection of the same cloud is not one).
+    connector_types: tuple[str, ...] = ()
 
 
 _PROVIDERS: dict[str, CommitmentProvider] = {}
@@ -53,9 +55,19 @@ def commitment_provider_for(connection: Any) -> CommitmentProvider:
     from . import providers  # noqa: F401  (registers the cloud adapters)
 
     provider = provider_of(connection)
-    if provider not in _PROVIDERS:
-        raise LookupError(f"sem leitor de uso horário de compromissos para o provider {provider!r}")
-    return _PROVIDERS[provider]
+    registration = _PROVIDERS.get(provider)
+    connector_type = getattr(connection, "connector_type", None)
+    if registration is None or (registration.connector_types and connector_type not in registration.connector_types):
+        raise LookupError(f"sem leitor de uso horário de compromissos para {provider!r} ({connector_type})")
+    return registration
+
+
+def supports_connection(connection: Any) -> bool:
+    try:
+        commitment_provider_for(connection)
+    except LookupError:
+        return False
+    return True
 
 
 def offer_records(session: Any, provider: str) -> list[OfferRecord]:
@@ -69,7 +81,7 @@ def offer_records(session: Any, provider: str) -> list[OfferRecord]:
         payment_option=row.payment_option, source=row.source, pricing_mode=row.pricing_mode,
         discount_pct=row.discount_pct, region=row.region, family=row.family, platform=row.platform,
         scope=row.scope, valid_from=row.valid_from, valid_until=row.valid_until, priority=row.priority,
-        burn_down=bool(row.burn_down),
+        burn_down=bool(row.burn_down), min_commit_annual=row.min_commit_annual,
     ) for row in rows]
 
 
@@ -163,7 +175,8 @@ def run_commitment_engine(
         session.rollback()
         run = session.get(CommitmentRecoRun, run.id)
         run.status = "FAILED"
-        run.error_message = f"{type(exc).__name__}: {exc}"[:2000]
+        # LookupError carries a message meant for the user (e.g. data still missing).
+        run.error_message = (str(exc) if isinstance(exc, LookupError) else f"{type(exc).__name__}: {exc}")[:2000]
     run.finished_at = datetime.now(timezone.utc)
     session.commit()
     return run

@@ -216,6 +216,7 @@ async def lifespan(app: FastAPI):
             "ALTER TABLE department ADD COLUMN IF NOT EXISTS id_orcamento VARCHAR(80)",
             "CREATE INDEX IF NOT EXISTS ix_department_id_orcamento ON department (id_orcamento)",
             "UPDATE department SET id_orcamento = NULLIF(BTRIM(custom_fields->>'IDOrcamento'), '') WHERE id_orcamento IS NULL AND custom_fields->>'IDOrcamento' IS NOT NULL",
+            "ALTER TABLE commitment_offer ADD COLUMN IF NOT EXISTS min_commit_annual DOUBLE PRECISION",
             "ALTER TABLE planning_version ADD COLUMN IF NOT EXISTS title VARCHAR(200)",
             "ALTER TABLE planning_version ADD COLUMN IF NOT EXISTS description TEXT",
             "ALTER TABLE planning_version ADD COLUMN IF NOT EXISTS event_type VARCHAR(40)",

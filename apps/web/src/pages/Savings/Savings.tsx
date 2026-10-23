@@ -17,7 +17,7 @@ const statusColor: Record<string, "default"|"primary"|"success"|"error"|"warning
 const empty = {name:"",description:"",category:"",owner:"",destination_table_id:0,date_column:"",cost_column:"",currency_column:"",filters:[] as SavingFilter[],start_date:new Date().toISOString().slice(0,10),duration_days:30,baseline_monthly:0,projected_monthly:0};
 const TABS = [
  { id: "calcular", label: "Calcular oportunidade" },
- { id: "compras-compromissos", label: "Compra de RIs e Savings Plans" },
+ { id: "compras-compromissos", label: "Compra de RIs e compromissos" },
  { id: "orfaos", label: "Recursos órfãos e ociosos" },
 ] as const;
 type TabId = (typeof TABS)[number]["id"];

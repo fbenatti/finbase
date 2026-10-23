@@ -24,10 +24,11 @@ import hashlib
 import json
 from typing import Any, Iterable, Mapping
 
-from .contracts import Adjustment, CommitmentKey, ExistingCommitment, Instrument, Offer, UsageLine, key_for
+from .contracts import SPEND, Adjustment, CommitmentKey, ExistingCommitment, Instrument, Offer, UsageLine, key_for
 
 ENGINE_VERSION = "commitment_v1"
 HOURS_PER_MONTH = 730
+HOURS_PER_YEAR = 8760
 
 READY = "READY"
 INSUFFICIENT_HOURLY_DATA = "INSUFFICIENT_HOURLY_DATA"
@@ -60,6 +61,9 @@ DEFAULT_POLICY = {
     "discount_rate_annual": 0.12,
     "ladder_tranches": 4,
     "min_monthly_saving": 1.0,
+    # Spend commitments: balanced commits this share of the projected consumption.
+    "spend_commit_share": 0.90,
+    "spend_growth_annual": 0.0,
 }
 
 
@@ -209,6 +213,61 @@ def price_commitment(curve: _Curve, c: float, offer: Offer, policy: Mapping = DE
     }
 
 
+def size_spend_profiles(projected_annual: float, offer: Offer, policy: Mapping = DEFAULT_POLICY) -> dict[str, float | None]:
+    """Yearly commitment per profile for a spend pool; None when the tier does not fit the profile.
+
+    The pool is drawn over the whole term, so idle hours do not matter: what
+    matters is whether the projected spend at the committed rate fills it.
+    """
+    consumption = projected_annual * (1 - offer.discount)
+    caps = {
+        CONSERVATIVE: consumption * (1 - policy["usage_drop"]),
+        BALANCED: consumption * policy["spend_commit_share"],
+        AGGRESSIVE: consumption,
+    }
+    floor = offer.min_commit_annual or 0.0
+    sizes: dict[str, float | None] = {}
+    for profile, cap in caps.items():
+        if floor <= cap:
+            sizes[profile] = cap
+        else:
+            # Only the aggressive profile may commit above the projection to reach a better tier.
+            sizes[profile] = floor if profile == AGGRESSIVE else None
+    return sizes
+
+
+def price_spend_commitment(projected_annual: float, amount: float, offer: Offer,
+                           policy: Mapping = DEFAULT_POLICY) -> dict:
+    """Saving of a yearly spend commitment; consumption above it keeps the discount, a shortfall is paid."""
+    rate_kept = 1 - offer.discount
+
+    def annual_saving(spend: float) -> float:
+        return spend - max(amount, spend * rate_kept)
+
+    saving = annual_saving(projected_annual)
+    consumption = projected_annual * rate_kept
+    rate = policy["discount_rate_annual"]
+    npv = sum(saving / 12 / (1 + rate) ** (month / 12) for month in range(1, offer.term_months + 1))
+    return {
+        "commit_ondemand_hour": round(amount / rate_kept / HOURS_PER_YEAR, 6),
+        "commit_cost_hour": round(amount / HOURS_PER_YEAR, 6),
+        "expected_utilization": round(min(1.0, consumption / amount), 6) if amount else None,
+        "expected_coverage": round(min(1.0, amount / consumption), 6) if consumption else None,
+        "monthly_saving": round(saving / 12, 2),
+        "term_saving": round(saving * offer.term_months / 12, 2),
+        "upfront_cost": 0.0,
+        "npv": round(npv, 2),
+        "payback_months": 0.0,
+        "saving_if_usage_drops": round(annual_saving(projected_annual * (1 - policy["usage_drop"])) / 12, 2),
+        "commit_amount_annual": round(amount, 2),
+        "projected_annual_spend": round(projected_annual, 2),
+        "expected_shortfall_annual": round(max(0.0, amount - consumption), 2),
+    }
+
+
+SPEND_ONLY_FIELDS = ("commit_amount_annual", "projected_annual_spend", "expected_shortfall_annual")
+
+
 def _iso(value: datetime | None) -> str | None:
     return value.isoformat() if value else None
 
@@ -295,6 +354,9 @@ def analyze_key(
     if not offers:
         return not_ready(MISSING_OFFER, f"Sem oferta de mercado ou negociada vigente para {key.label()}.")
 
+    if instrument.basis == SPEND:
+        return _spend_results(base, evidence, risks, instrument, curve, offers, days, policy)
+
     options = []
     for offer in offers:
         for profile, c in size_profiles(curve, offer.discount, policy).items():
@@ -342,5 +404,60 @@ def analyze_key(
                 "reduz o risco de mudança de uso.",
             ],
             risks=profile_risks, evidence=dict(evidence, chosen_offer=offer),
+        ))
+    return results
+
+
+def _spend_results(base: dict, evidence: dict, risks: list[str], instrument: Instrument, curve: "_Curve",
+                   offers: list[Offer], days: float, policy: Mapping) -> list[dict]:
+    """Spend pools: size from the projected yearly spend, not from the hourly floor."""
+    projected = curve.total / curve.hours * HOURS_PER_YEAR * (1 + policy["spend_growth_annual"])
+    options = []
+    for offer in offers:
+        for profile, amount in size_spend_profiles(projected, offer, policy).items():
+            if amount:
+                options.append({"profile": profile, "offer": offer.as_dict(),
+                                **price_spend_commitment(projected, amount, offer, policy)})
+    evidence = dict(evidence, projected_annual_spend=round(projected, 2), options=options)
+    results = []
+    for profile in PROFILES:
+        best = max((option for option in options if option["profile"] == profile),
+                   key=lambda option: option["npv"], default=None)
+        if best is None or best["monthly_saving"] < policy["min_monthly_saving"]:
+            results.append(dict(
+                base, profile=profile, action_type=NO_ACTION, readiness_status=READY, confidence="MEDIUM",
+                rationale=["Nenhuma faixa de compromisso de gasto cabe no gasto projetado com economia."],
+                risks=list(risks), evidence=evidence,
+            ))
+            continue
+        offer = best["offer"]
+        profile_risks = list(risks) + [instrument.process_note]
+        if best["expected_shortfall_annual"] > 0:
+            profile_risks.append(
+                f"O compromisso passa o consumo projetado em {best['expected_shortfall_annual']:.2f}/ano: "
+                "essa diferença é paga sem uso."
+            )
+        if best["saving_if_usage_drops"] < 0:
+            profile_risks.append(
+                f"Se o uso cair {policy['usage_drop']:.0%}, o acordo passa a dar prejuízo "
+                f"({best['saving_if_usage_drops']:.2f}/mês)."
+            )
+        confident = days >= policy["high_confidence_days"] and profile != AGGRESSIVE and best["saving_if_usage_drops"] >= 0
+        results.append(dict(
+            base, **{name: value for name, value in best.items() if name not in ("profile", "offer", *SPEND_ONLY_FIELDS)},
+            profile=profile, action_type=COMMIT, readiness_status=READY,
+            confidence="HIGH" if confident else "MEDIUM",
+            term_months=offer["term_months"], payment_option=offer["payment_option"],
+            offer_source=offer["source"], offer_id=offer["offer_id"], discount_pct=offer["discount"],
+            rationale=[
+                f"Gasto projetado de {projected:.2f}/ano (on-demand equivalente, média de {days:.0f} dias"
+                + (f", crescimento de {policy['spend_growth_annual']:.0%}" if policy["spend_growth_annual"] else "")
+                + ").",
+                f"Compromisso de {best['commit_amount_annual']:.2f}/ano a {offer['discount']:.0%} de desconto: "
+                f"o consumo previsto cobre {best['expected_utilization']:.0%} do valor comprometido.",
+                "Compromisso de gasto é consumido ao longo do prazo, não hora a hora: o piso horário não se aplica.",
+            ],
+            risks=profile_risks,
+            evidence=dict(evidence, chosen_offer=offer, **{name: best[name] for name in SPEND_ONLY_FIELDS}),
         ))
     return results

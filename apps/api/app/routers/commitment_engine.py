@@ -18,7 +18,7 @@ from app.core.deps import get_current_user
 from app.database import get_db
 from app.models.commitment import CommitmentOffer, CommitmentRecommendation, CommitmentRecoRun
 from app.models.source_connection import SourceConnection
-from app.services.commitments.contracts import INSTRUMENTS, NEGOTIATED
+from app.services.commitments.contracts import INSTRUMENTS, NEGOTIATED, SPEND
 from app.services.commitments.offers import UPFRONT_FRACTION
 
 router = APIRouter(prefix="/custos/reservas/motor", tags=["commitment_engine"])
@@ -43,6 +43,7 @@ class OfferBody(BaseModel):
     valid_until: date | None = None
     priority: int = 0
     burn_down: bool = False
+    min_commit_annual: float | None = Field(None, ge=0)
     contract_id: int | None = None
     currency: str | None = Field(None, max_length=10)
     notes: str | None = Field(None, max_length=4000)
@@ -62,6 +63,8 @@ class OfferBody(BaseModel):
             raise ValueError(f"{instrument.label} aceita {', '.join(instrument.payment_options)}")
         if self.pricing_mode == "EXTRA_OVER_MARKET" and self.source != "NEGOTIATED":
             raise ValueError("EXTRA_OVER_MARKET só vale para oferta negociada")
+        if self.min_commit_annual and instrument.basis != SPEND:
+            raise ValueError("faixa de compromisso anual só vale para compromisso de gasto")
         if self.valid_from and self.valid_until and self.valid_until < self.valid_from:
             raise ValueError("valid_until anterior a valid_from")
         return self
@@ -93,7 +96,8 @@ def _offer_dict(row: CommitmentOffer) -> dict:
         "pricing_mode": row.pricing_mode, "discount_pct": row.discount_pct, "region": row.region,
         "family": row.family, "platform": row.platform, "scope": row.scope,
         "valid_from": _iso(row.valid_from), "valid_until": _iso(row.valid_until), "priority": row.priority,
-        "burn_down": row.burn_down, "contract_id": row.contract_id, "currency": row.currency,
+        "burn_down": row.burn_down, "min_commit_annual": row.min_commit_annual,
+        "contract_id": row.contract_id, "currency": row.currency,
         "notes": row.notes, "active": row.active, "updated_at": _iso(row.updated_at),
     }
 
@@ -126,11 +130,12 @@ def _reco_dict(item: CommitmentRecommendation, *, full: bool = False) -> dict:
         "monthly_saving": item.monthly_saving, "term_saving": item.term_saving, "upfront_cost": item.upfront_cost,
         "npv": item.npv, "payback_months": item.payback_months,
         "saving_if_usage_drops": item.saving_if_usage_drops, "currency": item.currency,
-        "risks": item.risks or [], "state_note": item.state_note, "state_changed_at": _iso(item.state_changed_at),
+        "risks": item.risks or [], "rationale": item.rationale or [],
+        "state_note": item.state_note, "state_changed_at": _iso(item.state_changed_at),
         "inputs_hash": item.inputs_hash, "engine_version": item.engine_version,
     }
     if full:
-        data.update({"rationale": item.rationale or [], "evidence": item.evidence or {}})
+        data["evidence"] = item.evidence or {}
     return data
 
 
@@ -138,9 +143,29 @@ def _reco_dict(item: CommitmentRecommendation, *, full: bool = False) -> dict:
 async def list_instruments():
     return {"items": [{
         "code": item.code, "provider": item.provider, "label": item.label, "key_fields": list(item.key_fields),
+        "basis": item.basis,
         "purchase_path": item.purchase_path, "terms_months": list(item.terms_months),
         "payment_options": list(item.payment_options) or ["CONTRACT"], "process_note": item.process_note,
     } for item in INSTRUMENTS.values()], "payment_upfront_fraction": UPFRONT_FRACTION}
+
+
+@router.get("/conexoes")
+async def list_connections(db: AsyncSession = Depends(get_db)):
+    """Billing connections with an hourly usage adapter, with their latest completed run."""
+    from app.services.commitments.runner import provider_of, supports_connection
+
+    rows = (await db.execute(select(SourceConnection).order_by(SourceConnection.name))).scalars().all()
+    items = []
+    for row in rows:
+        if not supports_connection(row):
+            continue
+        latest = (await db.execute(
+            select(CommitmentRecoRun).where(CommitmentRecoRun.connection_id == row.id)
+            .order_by(CommitmentRecoRun.id.desc()).limit(1)
+        )).scalar_one_or_none()
+        items.append({"id": row.id, "code": row.code, "name": row.name, "provider": provider_of(row),
+                      "latest_run": _run_dict(latest) if latest else None})
+    return {"items": items}
 
 
 @router.get("/ofertas")

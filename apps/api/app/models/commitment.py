@@ -28,6 +28,8 @@ class CommitmentOffer(Base):
     valid_until = Column(Date)
     priority = Column(Integer, nullable=False, default=0)
     burn_down = Column(Boolean, nullable=False, default=False)
+    # Spend commitments: yearly amount the deal requires for this discount (tier).
+    min_commit_annual = Column(Float)
     contract_id = Column(Integer, ForeignKey("financial_contract.id", ondelete="SET NULL"), index=True)
     currency = Column(String(10))
     notes = Column(Text)

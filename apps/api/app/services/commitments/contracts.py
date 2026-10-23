@@ -15,6 +15,11 @@ from typing import Any, Mapping
 SELF_SERVICE = "self_service"
 NEGOTIATED = "negotiated"
 
+# HOURLY: consumed hour by hour (RI, Savings Plan, CUD), an idle hour is lost.
+# SPEND: a spend pool drawn over the whole term (Universal Credits, MACC, EDP).
+HOURLY = "hourly"
+SPEND = "spend"
+
 KEY_FIELDS = ("region", "family", "platform")
 
 
@@ -31,6 +36,7 @@ class Instrument:
     process_note: str = ""
     # Reservations bind to a running resource: only resources on every hour count.
     always_on_only: bool = False
+    basis: str = HOURLY
 
 
 _SELF_SERVICE_NOTE = "Compra self-service no portal ou via API da cloud."
@@ -48,19 +54,19 @@ INSTRUMENTS: dict[str, Instrument] = {item.code: item for item in (
     Instrument("aws_reserved_instance", "aws", "AWS Reserved Instance", ("region", "family", "platform"),
                SELF_SERVICE, (12, 36), _PAYMENTS, _SELF_SERVICE_NOTE, always_on_only=True),
     Instrument("aws_edp", "aws", "AWS EDP (compromisso de gasto)", (), NEGOTIATED, (12, 36, 60), (),
-               _NEGOTIATED_NOTE),
+               _NEGOTIATED_NOTE, basis=SPEND),
     Instrument("azure_savings_plan", "azure", "Azure Savings Plan for Compute", (), SELF_SERVICE,
                (12, 36), ("NO_UPFRONT", "ALL_UPFRONT"), _SELF_SERVICE_NOTE),
     Instrument("azure_reservation", "azure", "Azure Reservation", ("region", "family", "platform"),
                SELF_SERVICE, (12, 36), ("NO_UPFRONT", "ALL_UPFRONT"), _SELF_SERVICE_NOTE, always_on_only=True),
     Instrument("azure_macc", "azure", "Azure MACC (compromisso de gasto)", (), NEGOTIATED, (12, 36, 60), (),
-               _NEGOTIATED_NOTE),
+               _NEGOTIATED_NOTE, basis=SPEND),
     Instrument("gcp_cud_flexible", "gcp", "GCP CUD flexível (por gasto)", (), SELF_SERVICE, (12, 36),
                ("NO_UPFRONT",), _SELF_SERVICE_NOTE),
     Instrument("gcp_cud_resource", "gcp", "GCP CUD por recurso", ("region", "family"), SELF_SERVICE,
                (12, 36), ("NO_UPFRONT",), _SELF_SERVICE_NOTE, always_on_only=True),
     Instrument("oci_universal_credits", "oci", "OCI Universal Credits (compromisso anual)", (), NEGOTIATED,
-               (12, 36), (), "A OCI não tem reserva de compute. " + _NEGOTIATED_NOTE),
+               (12, 36), (), "A OCI não tem reserva de compute. " + _NEGOTIATED_NOTE, basis=SPEND),
 )}
 
 
@@ -144,6 +150,8 @@ class Offer:
     offer_id: int | None = None
     upfront_fraction: float = 0.0
     burn_down: bool = False
+    # Spend commitments: the yearly amount the deal requires for this discount (a tier).
+    min_commit_annual: float | None = None
     basis: Mapping[str, Any] = field(default_factory=dict)
 
     def as_dict(self) -> dict:
@@ -169,3 +177,4 @@ class OfferRecord:
     valid_until: date | None = None
     priority: int = 0
     burn_down: bool = False
+    min_commit_annual: float | None = None

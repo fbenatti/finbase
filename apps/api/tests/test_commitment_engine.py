@@ -235,3 +235,51 @@ def test_reservation_key_with_only_part_time_resources_is_reported():
                          excluded_resources=excluded[ri_key])
     assert result["readiness_status"] == NO_ALWAYS_ON_USAGE
     assert excluded[ri_key] == {"i-2": 20.0}
+
+
+def _spend_offer(discount, tier=None, offer_id=20):
+    return OfferRecord(offer_id=offer_id, provider="oci", instrument=OCI.code, term_months=12,
+                       payment_option="CONTRACT", source="NEGOTIATED", pricing_mode="DISCOUNT",
+                       discount_pct=discount, min_commit_annual=tier)
+
+
+def test_spend_commitment_profiles_follow_projected_spend_not_the_hourly_floor():
+    key = CommitmentKey(provider="oci", instrument=OCI.code, scope="tenancy-1")
+    # Busy 12 h a day: the hourly floor is 0, but the pool is drawn over the year.
+    series = {hour: (10.0 if int(hour[11:13]) < 12 else 0.0) for hour in HOURS}
+    results = _by_profile(_analyze(series, [_spend_offer(0.20)], key=key, instrument=OCI))
+    projected = 5.0 * 8760
+    consumption = projected * 0.80
+    assert results[CONSERVATIVE]["commit_cost_hour"] == round(consumption * 0.80 / 8760, 6)
+    assert results[BALANCED]["commit_cost_hour"] == round(consumption * 0.90 / 8760, 6)
+    assert results[AGGRESSIVE]["commit_cost_hour"] == round(consumption / 8760, 6)
+    for item in results.values():
+        assert item["action_type"] == COMMIT
+        assert item["monthly_saving"] == round(projected * 0.20 / 12, 2)
+    # Aggressive commits the whole projection: a 20% drop leaves part of the pool unused.
+    assert results[AGGRESSIVE]["saving_if_usage_drops"] < results[CONSERVATIVE]["saving_if_usage_drops"]
+    assert results[BALANCED]["evidence"]["projected_annual_spend"] == round(projected, 2)
+
+
+def test_spend_tier_above_projection_is_only_aggressive_and_shows_shortfall():
+    key = CommitmentKey(provider="oci", instrument=OCI.code, scope="tenancy-1")
+    series = {hour: 5.0 for hour in HOURS}
+    projected = 5.0 * 8760
+    big_tier = _spend_offer(0.30, tier=projected * 0.75, offer_id=21)  # above the 70% consumed at 30%
+    offers = [_spend_offer(0.20, offer_id=20), big_tier]
+    results = _by_profile(_analyze(series, offers, key=key, instrument=OCI))
+    assert results[BALANCED]["offer_id"] == 20
+    aggressive = results[AGGRESSIVE]
+    assert aggressive["offer_id"] == 21
+    shortfall = projected * 0.75 - projected * 0.70
+    assert aggressive["evidence"]["expected_shortfall_annual"] == round(shortfall, 2)
+    # Paying 5% of the year unused still beats the 20% tier: 25% saved.
+    assert aggressive["monthly_saving"] == round((projected - projected * 0.75) / 12, 2)
+    assert any("sem uso" in risk for risk in aggressive["risks"])
+
+
+def test_tiered_negotiated_offers_are_all_kept():
+    key = CommitmentKey(provider="oci", instrument=OCI.code, scope="tenancy-1")
+    offers = resolve_offers([_spend_offer(0.20, offer_id=1), _spend_offer(0.25, tier=100000, offer_id=2),
+                             _spend_offer(0.30, tier=500000, offer_id=3)], key, AS_OF.date())
+    assert [(offer.offer_id, offer.min_commit_annual) for offer in offers] == [(1, None), (2, 100000), (3, 500000)]

@@ -11,7 +11,8 @@ from app.services.commitments.providers.oci import compute_hourly_rows, read_usa
 AS_OF = datetime(2026, 10, 1, tzinfo=timezone.utc)
 START = AS_OF - timedelta(days=30)
 HOURS = hour_grid(START, AS_OF)
-CONNECTION = SimpleNamespace(id=7, code="oci-prod", cloud_scope="oci", config_json={"tenancy_ocid": "ocid1.tenancy.oc1..x"})
+CONNECTION = SimpleNamespace(id=7, code="oci-prod", cloud_scope="oci", connector_type="oci",
+                             config_json={"tenancy_ocid": "ocid1.tenancy.oc1..x"})
 
 
 def test_compute_lines_are_kept_per_hour_and_resource():
@@ -67,7 +68,7 @@ def test_read_usage_filters_the_window_and_builds_lines():
     assert {line.resource_id for line in snapshot.lines} == {"ocid1.instance.a", "ocid1.instance.b"}
 
 
-def test_oci_run_recommends_the_universal_credits_floor(tmp_path):
+def test_oci_run_sizes_universal_credits_from_projected_spend(tmp_path):
     from sqlalchemy import create_engine, select
     from sqlalchemy.orm import Session
 
@@ -75,9 +76,13 @@ def test_oci_run_recommends_the_universal_credits_floor(tmp_path):
     import app.models.financial_contract  # noqa: F401  (FK target)
     import app.models.source_connection  # noqa: F401  (FK target)
     from app.models.commitment import CommitmentOffer, CommitmentRecommendation
-    from app.services.commitments.runner import CommitmentProvider, commitment_provider_for, run_commitment_engine
+    from app.services.commitments.runner import (
+        CommitmentProvider, commitment_provider_for, run_commitment_engine, supports_connection,
+    )
 
     assert commitment_provider_for(CONNECTION).provider == "oci"
+    monitoring = SimpleNamespace(id=8, code="oci-metrics", cloud_scope="oci", connector_type="oci_monitoring")
+    assert not supports_connection(monitoring)
     engine = create_engine("sqlite://")
     Base.metadata.create_all(engine, tables=[Base.metadata.tables[name] for name in (
         "commitment_offer", "commitment_reco_run", "commitment_recommendation")])
@@ -96,8 +101,11 @@ def test_oci_run_recommends_the_universal_credits_floor(tmp_path):
         )).scalar_one()
     assert balanced.action_type == COMMIT
     assert balanced.purchase_path == INSTRUMENTS["oci_universal_credits"].purchase_path == "negotiated"
-    # The 12 h/day instance adds 3/h half of the time, under the 80% break-even: only the 2/h floor is committed.
-    assert balanced.commit_ondemand_hour == 2.0
+    # A spend pool is drawn over the year: idle hours of the 12 h/day instance do not matter.
+    # Average 3.5/h → 30 660/year; balanced commits 90% of it at the 20% discount.
+    assert balanced.commit_cost_hour == round(30660 * 0.8 * 0.9 / 8760, 6)
+    assert balanced.monthly_saving == round(30660 * 0.20 / 12, 2)
+    assert balanced.evidence["commit_amount_annual"] == round(30660 * 0.8 * 0.9, 2)
     assert balanced.currency == "BRL"
 
 
@@ -113,3 +121,22 @@ def test_hourly_write_failure_never_fails_the_cost_load(monkeypatch):
                           "sku_description": None, "currency": "BRL", "billed_cost": 1.0, "billed_quantity": 1.0,
                           "source_connection_id": 7, "_billing_period": "202609"}])
     task_runner._write_oci_compute_hourly(None, 7, "202609", [part, part])
+
+
+def test_missing_hourly_table_explains_the_reprocess():
+    import pytest
+
+    def execute(sql, timeout_s):
+        raise RuntimeError("line 1:102: Table 'iceberg_finbase.silver.oci_compute_hourly' does not exist")
+
+    with pytest.raises(LookupError, match="reprocesse"):
+        read_usage(CONNECTION, START, AS_OF, execute=execute)
+
+
+def test_usage_api_connection_is_told_it_has_no_hourly_billing():
+    import pytest
+
+    connection = SimpleNamespace(id=4, code="oci", cloud_scope="oci", connector_type="oci",
+                                 config_json={"extraction_mode": "usage_api"})
+    with pytest.raises(LookupError, match="Usage API"):
+        read_usage(connection, START, AS_OF, execute=lambda sql, timeout_s: _silver())

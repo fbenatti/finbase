@@ -84,17 +84,34 @@ def read_usage(connection: Any, start: datetime, end: datetime, *, execute=None)
     """Hourly compute usage of the connection in [start, end)."""
     from app.services import lakehouse_layers as layers
 
+    if (getattr(connection, "config_json", None) or {}).get("extraction_mode") == "usage_api":
+        raise LookupError(
+            "Esta conexão OCI lê a Usage API, que hoje é ingerida por dia. O motor precisa da fatura por hora: "
+            "use os relatórios de custo (CSV) ou habilite a leitura horária da Usage API."
+        )
     if execute is None:
         from app.services.trino_service import execute_sync as execute
-    rows = execute(
-        f"SELECT usage_hour, resource_id, region, sku, currency, SUM(CAST(billed_cost AS DOUBLE)) AS cost "
-        f"FROM {layers.detail_layer()}.{HOURLY_TABLE} "
-        f"WHERE source_connection_id = {int(connection.id)} "
-        f"AND usage_hour >= {_literal(start.strftime('%Y-%m-%dT%H'))} "
-        f"AND usage_hour < {_literal(end.strftime('%Y-%m-%dT%H'))} "
-        f"GROUP BY usage_hour, resource_id, region, sku, currency",
-        timeout_s=180,
-    )
+    try:
+        rows = execute(
+            f"SELECT usage_hour, resource_id, region, sku, currency, SUM(CAST(billed_cost AS DOUBLE)) AS cost "
+            f"FROM {layers.detail_layer()}.{HOURLY_TABLE} "
+            f"WHERE source_connection_id = {int(connection.id)} "
+            f"AND usage_hour >= {_literal(start.strftime('%Y-%m-%dT%H'))} "
+            f"AND usage_hour < {_literal(end.strftime('%Y-%m-%dT%H'))} "
+            f"GROUP BY usage_hour, resource_id, region, sku, currency",
+            timeout_s=180,
+        )
+    except Exception as exc:
+        if "does not exist" in str(exc).lower():
+            raise LookupError(
+                "Ainda não há fatura horária da OCI: reprocesse os meses desta conexão "
+                "(relatórios de custo CSV) para preencher o compute por hora."
+            ) from exc
+        raise
+    return _build(connection, rows)
+
+
+def _build(connection: Any, rows: list[dict]) -> UsageSnapshot:
     lines = [
         UsageLine(hour_utc=str(row["usage_hour"]), ondemand_cost=float(row["cost"] or 0.0), region=row["region"],
                   family=row["sku"], resource_id=row["resource_id"])
@@ -112,4 +129,4 @@ def read_usage(connection: Any, start: datetime, end: datetime, *, execute=None)
     )
 
 
-register_commitment_provider(CommitmentProvider(provider="oci", read_usage=read_usage))
+register_commitment_provider(CommitmentProvider(provider="oci", read_usage=read_usage, connector_types=("oci",)))

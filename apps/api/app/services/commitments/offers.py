@@ -43,35 +43,49 @@ def _best(records: list[OfferRecord]) -> OfferRecord | None:
 
 
 def resolve_offers(records: Iterable[OfferRecord], key: CommitmentKey, as_of: date) -> list[Offer]:
-    """One effective offer per (term, payment) for the key, sorted by term and payment."""
-    groups: dict[tuple[int, str], dict[str, list[OfferRecord]]] = {}
+    """Effective offers for the key: one per (term, payment) plus one per spend tier.
+
+    A negotiated offer without a tier overrides the market one of the same
+    (term, payment); tiered negotiated offers (``min_commit_annual``) are extra
+    options the engine weighs against the projected spend.
+    """
+    market: dict[tuple[int, str], list[OfferRecord]] = {}
+    negotiated: dict[tuple[int, str, float], list[OfferRecord]] = {}
     for record in records:
         if not _applies(record, key, as_of):
             continue
-        layer = groups.setdefault((record.term_months, record.payment_option), {MARKET: [], NEGOTIATED: []})
-        layer.setdefault(record.source, []).append(record)
-    offers: list[Offer] = []
-    for (term, payment), layer in sorted(groups.items()):
-        market = _best(layer.get(MARKET, []))
-        negotiated = _best(layer.get(NEGOTIATED, []))
-        chosen, discount, basis = None, None, {}
-        if negotiated is not None:
-            if negotiated.pricing_mode == EXTRA_OVER_MARKET:
-                if market is not None:
-                    discount = 1 - (1 - market.discount_pct) * (1 - negotiated.discount_pct)
-                    chosen = negotiated
-                    basis = {"market_offer_id": market.offer_id, "market_discount": market.discount_pct,
-                             "extra_discount": negotiated.discount_pct}
-            else:
-                chosen, discount = negotiated, negotiated.discount_pct
-        if chosen is None and market is not None:
-            chosen, discount = market, market.discount_pct
-        if chosen is None or discount is None or not 0 < discount < 1:
-            continue
-        offers.append(Offer(
-            instrument=key.instrument, term_months=term, payment_option=payment, discount=round(discount, 6),
-            source=chosen.source, offer_id=chosen.offer_id,
-            upfront_fraction=UPFRONT_FRACTION.get(payment, 0.0), burn_down=chosen.burn_down,
-            basis={"pricing_mode": chosen.pricing_mode, **basis},
-        ))
-    return offers
+        if record.source == MARKET:
+            market.setdefault((record.term_months, record.payment_option), []).append(record)
+        else:
+            tier = float(record.min_commit_annual or 0.0)
+            negotiated.setdefault((record.term_months, record.payment_option, tier), []).append(record)
+    chosen: list[tuple[OfferRecord, float, dict]] = []
+    for (term, payment, tier), group in negotiated.items():
+        deal = _best(group)
+        base_market = _best(market.get((term, payment), []))
+        if deal.pricing_mode == EXTRA_OVER_MARKET:
+            if base_market is None:
+                continue
+            discount = 1 - (1 - base_market.discount_pct) * (1 - deal.discount_pct)
+            chosen.append((deal, discount, {"market_offer_id": base_market.offer_id,
+                                            "market_discount": base_market.discount_pct,
+                                            "extra_discount": deal.discount_pct}))
+        else:
+            chosen.append((deal, deal.discount_pct, {}))
+    overridden = {(term, payment) for (term, payment, tier), group in negotiated.items()
+                  if tier == 0 and any(deal is _best(group) for deal, _, _ in chosen)}
+    for (term, payment), group in market.items():
+        if (term, payment) not in overridden:
+            best = _best(group)
+            chosen.append((best, best.discount_pct, {}))
+    offers = [
+        Offer(
+            instrument=key.instrument, term_months=record.term_months, payment_option=record.payment_option,
+            discount=round(discount, 6), source=record.source, offer_id=record.offer_id,
+            upfront_fraction=UPFRONT_FRACTION.get(record.payment_option, 0.0), burn_down=record.burn_down,
+            min_commit_annual=record.min_commit_annual if record.source != MARKET else None,
+            basis={"pricing_mode": record.pricing_mode, **basis},
+        )
+        for record, discount, basis in chosen if 0 < discount < 1
+    ]
+    return sorted(offers, key=lambda offer: (offer.term_months, offer.payment_option, offer.min_commit_annual or 0.0))
