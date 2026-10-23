@@ -31,6 +31,21 @@ def test_profiles_compute_linear_p90_p95_p99_and_record_basis():
     assert profile["percentile_basis"] == "WINDOW_OF_BUCKET_VALUES"
     assert profile["quantile_method"] == "linear"
     assert profile["coverage"] == 1
+    assert profile["largest_gap_seconds"] == 0
+    assert profile["window_from_day"] == "20260101"
+    assert profile["window_to_day"] == "20260101"
+    assert isinstance(profile["profile_built_at"], str)
+
+
+def test_profile_gap_counts_missing_buckets_at_edges_and_inside_window():
+    start = datetime(2026, 1, 1, tzinfo=timezone.utc)
+    rows = [_row(start + timedelta(minutes=i), float(i)) for i in (1, 4)]
+    profile, = build_window_profiles(
+        rows, window_start=start, window_end=start + timedelta(minutes=6),
+        resolution_seconds=60,
+    )
+    # One missing at the start, two between samples and one at the end.
+    assert profile["largest_gap_seconds"] == 120
 
 
 def test_profiles_ignore_other_resolutions_and_fail_on_conflicting_duplicates():
