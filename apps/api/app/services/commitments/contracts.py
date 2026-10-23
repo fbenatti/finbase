@@ -29,6 +29,8 @@ class Instrument:
     terms_months: tuple[int, ...]
     payment_options: tuple[str, ...] = ("NO_UPFRONT",)
     process_note: str = ""
+    # Reservations bind to a running resource: only resources on every hour count.
+    always_on_only: bool = False
 
 
 _SELF_SERVICE_NOTE = "Compra self-service no portal ou via API da cloud."
@@ -44,19 +46,19 @@ INSTRUMENTS: dict[str, Instrument] = {item.code: item for item in (
     Instrument("aws_ec2_instance_savings_plan", "aws", "AWS EC2 Instance Savings Plan", ("region", "family"),
                SELF_SERVICE, (12, 36), _PAYMENTS, _SELF_SERVICE_NOTE),
     Instrument("aws_reserved_instance", "aws", "AWS Reserved Instance", ("region", "family", "platform"),
-               SELF_SERVICE, (12, 36), _PAYMENTS, _SELF_SERVICE_NOTE),
+               SELF_SERVICE, (12, 36), _PAYMENTS, _SELF_SERVICE_NOTE, always_on_only=True),
     Instrument("aws_edp", "aws", "AWS EDP (compromisso de gasto)", (), NEGOTIATED, (12, 36, 60), (),
                _NEGOTIATED_NOTE),
     Instrument("azure_savings_plan", "azure", "Azure Savings Plan for Compute", (), SELF_SERVICE,
                (12, 36), ("NO_UPFRONT", "ALL_UPFRONT"), _SELF_SERVICE_NOTE),
     Instrument("azure_reservation", "azure", "Azure Reservation", ("region", "family", "platform"),
-               SELF_SERVICE, (12, 36), ("NO_UPFRONT", "ALL_UPFRONT"), _SELF_SERVICE_NOTE),
+               SELF_SERVICE, (12, 36), ("NO_UPFRONT", "ALL_UPFRONT"), _SELF_SERVICE_NOTE, always_on_only=True),
     Instrument("azure_macc", "azure", "Azure MACC (compromisso de gasto)", (), NEGOTIATED, (12, 36, 60), (),
                _NEGOTIATED_NOTE),
     Instrument("gcp_cud_flexible", "gcp", "GCP CUD flexível (por gasto)", (), SELF_SERVICE, (12, 36),
                ("NO_UPFRONT",), _SELF_SERVICE_NOTE),
     Instrument("gcp_cud_resource", "gcp", "GCP CUD por recurso", ("region", "family"), SELF_SERVICE,
-               (12, 36), ("NO_UPFRONT",), _SELF_SERVICE_NOTE),
+               (12, 36), ("NO_UPFRONT",), _SELF_SERVICE_NOTE, always_on_only=True),
     Instrument("oci_universal_credits", "oci", "OCI Universal Credits (compromisso anual)", (), NEGOTIATED,
                (12, 36), (), "A OCI não tem reserva de compute. " + _NEGOTIATED_NOTE),
 )}
@@ -74,6 +76,7 @@ class UsageLine:
     region: str | None = None
     family: str | None = None
     platform: str | None = None
+    resource_id: str | None = None
 
 
 @dataclass(frozen=True)

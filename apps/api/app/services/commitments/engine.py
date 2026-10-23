@@ -17,6 +17,7 @@ saving. Every offer (term × payment) is priced and the best NPV wins per profil
 from __future__ import annotations
 
 from bisect import bisect_left
+from collections import defaultdict
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 import hashlib
@@ -32,6 +33,7 @@ READY = "READY"
 INSUFFICIENT_HOURLY_DATA = "INSUFFICIENT_HOURLY_DATA"
 MISSING_OFFER = "MISSING_OFFER"
 NO_UNCOVERED_USAGE = "NO_UNCOVERED_USAGE"
+NO_ALWAYS_ON_USAGE = "NO_ALWAYS_ON_USAGE"
 
 COMMIT = "COMMIT"
 NO_ACTION = "NO_ACTION"
@@ -47,6 +49,8 @@ DEFAULT_POLICY = {
     "min_days": 30,
     # Share of the window's hours that must have loaded data.
     "min_hourly_coverage": 0.98,
+    # Reservations (RI, resource CUD) only count resources running this many hours per day on average.
+    "reservation_min_daily_hours": 24,
     "high_confidence_days": 60,
     # Commitments expiring within this horizon no longer count as coverage.
     "expiry_horizon_days": 90,
@@ -77,19 +81,45 @@ def window_bounds(as_of: datetime, days: int) -> tuple[datetime, datetime]:
     return end - timedelta(days=days), end
 
 
+def daily_running_hours(lines: Iterable[UsageLine], observed_hours: set[str]) -> dict[str, float]:
+    """Average hours per day each resource ran (billed usage) over the observed hours."""
+    days = len(observed_hours) / 24
+    running: dict[str, set[str]] = defaultdict(set)
+    for line in lines:
+        hour = line.hour_utc[:13]
+        if line.resource_id and line.ondemand_cost > 0 and hour in observed_hours:
+            running[line.resource_id].add(hour)
+    return {resource: len(hours) / days for resource, hours in running.items()} if days else {}
+
+
 def group_usage(
     lines: Iterable[UsageLine], *, provider: str, scope: str, instruments: Iterable[Instrument],
-) -> dict[CommitmentKey, dict[str, float]]:
-    """Hourly series per commitment key; each instrument aggregates over its flexible fields."""
-    instruments = list(instruments)
+    observed_hours: set[str] | None = None, policy: Mapping = DEFAULT_POLICY,
+) -> tuple[dict[CommitmentKey, dict[str, float]], dict[CommitmentKey, dict[str, float]]]:
+    """Hourly series per commitment key and, for reservations, the resources left out.
+
+    Each instrument aggregates over its flexible fields. Reservations only take
+    resources running ``reservation_min_daily_hours`` per day on average: a
+    resource that is off part of the day leaves the reservation idle then.
+    """
+    lines, instruments = list(lines), list(instruments)
+    hours_by_resource = daily_running_hours(lines, observed_hours if observed_hours is not None else
+                                            {line.hour_utc[:13] for line in lines})
+    minimum = policy["reservation_min_daily_hours"]
     series: dict[CommitmentKey, dict[str, float]] = {}
+    excluded: dict[CommitmentKey, dict[str, float]] = {}
     for line in lines:
         hour = line.hour_utc[:13]
         for instrument in instruments:
             key = key_for(provider, instrument, scope, line)
             bucket = series.setdefault(key, {})
+            if instrument.always_on_only:
+                daily = hours_by_resource.get(line.resource_id or "", 0.0)
+                if daily < minimum - 1e-9:
+                    excluded.setdefault(key, {})[line.resource_id or "(sem resource_id)"] = round(daily, 2)
+                    continue
             bucket[hour] = bucket.get(hour, 0.0) + float(line.ondemand_cost)
-    return series
+    return series, excluded
 
 
 @dataclass(frozen=True)
@@ -191,6 +221,7 @@ def analyze_key(
     *, key: CommitmentKey, instrument: Instrument, series: Mapping[str, float], window_hours: list[str],
     observed_hours: set[str], existing: Iterable[ExistingCommitment] = (), adjustments: Iterable[Adjustment] = (),
     offers: Iterable[Offer] = (), as_of: datetime, currency: str | None = None, policy: Mapping = DEFAULT_POLICY,
+    excluded_resources: Mapping[str, float] | None = None,
 ) -> list[dict]:
     """One result per profile (or a single NONE result when the key is not ready)."""
     offers = list(offers)
@@ -235,6 +266,8 @@ def analyze_key(
                       "expires_at": _iso(item.expires_at)} for item in renewals],
         "adjustments": [vars(item) for item in applied],
         "process_note": instrument.process_note,
+        # Resource → average running hours per day, left out of a reservation for running under the minimum.
+        "excluded_resources": dict(sorted((excluded_resources or {}).items())),
         "policy": dict(policy),
     }
     risks = [
@@ -251,6 +284,11 @@ def analyze_key(
             f"Dado horário insuficiente: {days:.0f} dia(s) com {coverage:.0%} das horas carregadas; "
             f"o motor exige {policy['min_days']} dias e {policy['min_hourly_coverage']:.0%} das horas. "
             "Sem série horária completa não há dimensionamento (evita falso positivo)."
+        ))
+    if curve.total <= 0 and excluded_resources:
+        return not_ready(NO_ALWAYS_ON_USAGE, (
+            f"Nenhum recurso fica ligado {policy['reservation_min_daily_hours']}h por dia em média: "
+            f"{len(excluded_resources)} recurso(s) fora do cálculo de reserva."
         ))
     if curve.total <= 0:
         return not_ready(NO_UNCOVERED_USAGE, "Todo o uso elegível já está coberto por compromissos ativos.")

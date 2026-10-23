@@ -118,7 +118,8 @@ def run_commitment_engine(
         records = offers if offers is not None else offer_records(session, provider)
         cuts = adjustments if adjustments is not None else rightsizing_adjustments(session, provider)
         instruments = instruments_for(provider)
-        series_by_key = group_usage(usage.lines, provider=provider, scope=usage.scope, instruments=instruments)
+        series_by_key, excluded = group_usage(usage.lines, provider=provider, scope=usage.scope,
+                                              instruments=instruments, observed_hours=usage.observed_hours)
         window_hours = hour_grid(start, end)
         previous = {
             (item.key_hash, item.profile, item.term_months, item.payment_option): item
@@ -136,6 +137,7 @@ def run_commitment_engine(
                 key=key, instrument=instrument, series=series, window_hours=window_hours,
                 observed_hours=usage.observed_hours, existing=inventory, adjustments=key_cuts,
                 offers=resolve_offers(records, key, as_of.date()), as_of=as_of, currency=usage.currency,
+                excluded_resources=excluded.get(key),
             ):
                 prior = previous.get((result["key_hash"], result["profile"], result.get("term_months"),
                                       result.get("payment_option")))

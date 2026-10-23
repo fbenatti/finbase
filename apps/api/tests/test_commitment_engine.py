@@ -5,7 +5,7 @@ from app.services.commitments.contracts import (
 )
 from app.services.commitments.engine import (
     AGGRESSIVE, BALANCED, COMMIT, CONSERVATIVE, INSUFFICIENT_HOURLY_DATA, MISSING_OFFER, NO_ACTION,
-    NO_UNCOVERED_USAGE, READY, analyze_key, group_usage, hour_grid,
+    NO_ALWAYS_ON_USAGE, NO_UNCOVERED_USAGE, READY, analyze_key, group_usage, hour_grid,
 )
 from app.services.commitments.offers import resolve_offers
 
@@ -142,10 +142,11 @@ def test_oci_spend_commitment_is_flagged_as_negotiated_process():
 
 def test_usage_is_grouped_per_instrument_key_fields():
     lines = [
-        UsageLine("2026-09-01T00", 1.0, region="us-east-1", family="m5", platform="linux"),
-        UsageLine("2026-09-01T00", 2.0, region="us-east-1", family="c5", platform="linux"),
+        UsageLine("2026-09-01T00", 1.0, region="us-east-1", family="m5", platform="linux", resource_id="i-1"),
+        UsageLine("2026-09-01T00", 2.0, region="us-east-1", family="c5", platform="linux", resource_id="i-2"),
     ]
-    series = group_usage(lines, provider="aws", scope="acct-1", instruments=[SP, RI])
+    series, excluded = group_usage(lines, provider="aws", scope="acct-1", instruments=[SP, RI])
+    assert excluded == {}
     assert series[KEY] == {"2026-09-01T00": 3.0}
     ri_m5 = CommitmentKey("aws", RI.code, "acct-1", "us-east-1", "m5", "linux")
     assert series[ri_m5] == {"2026-09-01T00": 1.0}
@@ -172,7 +173,8 @@ def test_runner_persists_recommendations_and_keeps_state(tmp_path):
     engine = create_engine("sqlite://")
     Base.metadata.create_all(engine, tables=[Base.metadata.tables[name] for name in (
         "commitment_offer", "commitment_reco_run", "commitment_recommendation")])
-    lines = [UsageLine(hour, 5.0, region="us-east-1", family="m5", platform="linux") for hour in HOURS]
+    lines = [UsageLine(hour, 5.0, region="us-east-1", family="m5", platform="linux", resource_id="i-1")
+             for hour in HOURS]
     registration = CommitmentProvider(
         provider="aws",
         read_usage=lambda connection, start, end: UsageSnapshot("acct-1", "USD", set(HOURS), lines),
@@ -200,3 +202,36 @@ def test_runner_persists_recommendations_and_keeps_state(tmp_path):
         )).scalar_one()
         assert again.state == "APPROVED"
         assert db.get(CommitmentRecoRun, rerun.id).status == "COMPLETED"
+
+
+def test_reservations_only_count_resources_running_all_day():
+    # i-1 runs every hour; i-2 runs 12 h a day (12 h/day on average).
+    lines = [UsageLine(hour, 2.0, region="us-east-1", family="m5", platform="linux", resource_id="i-1")
+             for hour in HOURS]
+    lines += [UsageLine(hour, 3.0, region="us-east-1", family="m5", platform="linux", resource_id="i-2")
+              for hour in HOURS if int(hour[11:13]) < 12]
+    series, excluded = group_usage(lines, provider="aws", scope="acct-1", instruments=[SP, RI],
+                                   observed_hours=set(HOURS))
+    ri_key = CommitmentKey("aws", RI.code, "acct-1", "us-east-1", "m5", "linux")
+    assert set(series[ri_key].values()) == {2.0}
+    assert excluded[ri_key] == {"i-2": 12.0}
+    # The Savings Plan is not tied to a resource: both count, and the hourly floor decides.
+    assert series[KEY][HOURS[0]] == 5.0 and series[KEY][HOURS[13]] == 2.0
+    assert KEY not in excluded
+
+    balanced = _by_profile(_analyze(series[ri_key], [_market(0.40, instrument=RI.code)], key=ri_key, instrument=RI,
+                                    excluded_resources=excluded[ri_key]))[BALANCED]
+    assert balanced["commit_ondemand_hour"] == 2.0
+    assert balanced["evidence"]["excluded_resources"] == {"i-2": 12.0}
+
+
+def test_reservation_key_with_only_part_time_resources_is_reported():
+    lines = [UsageLine(hour, 3.0, region="us-east-1", family="m5", platform="linux", resource_id="i-2")
+             for hour in HOURS if int(hour[11:13]) < 20]
+    series, excluded = group_usage(lines, provider="aws", scope="acct-1", instruments=[RI],
+                                   observed_hours=set(HOURS))
+    ri_key = CommitmentKey("aws", RI.code, "acct-1", "us-east-1", "m5", "linux")
+    (result,) = _analyze(series[ri_key], [_market(0.40, instrument=RI.code)], key=ri_key, instrument=RI,
+                         excluded_resources=excluded[ri_key])
+    assert result["readiness_status"] == NO_ALWAYS_ON_USAGE
+    assert excluded[ri_key] == {"i-2": 20.0}
