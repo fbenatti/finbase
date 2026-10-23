@@ -595,7 +595,7 @@ async def _budget_accuracy_actuals(
           SELECT {levels}, CAST("period" AS VARCHAR) AS period,
                  CAST(0 AS DOUBLE) AS actual_value,
                  SUM(COALESCE(TRY_CAST("realizado" AS DOUBLE), 0)) AS forecast_value, 0 AS has_actual
-          FROM iceberg.{GOLD}.dest_dm_cost_visao_completa
+          FROM iceberg.{layers.detail_layer()}.dest_billing_cloud_planning
           WHERE CAST("period" AS VARCHAR) IN ({periods})
             AND lower(TRIM(CAST("tipo" AS VARCHAR))) = 'forecast'{cloud_filter}
           {scope_filter}
