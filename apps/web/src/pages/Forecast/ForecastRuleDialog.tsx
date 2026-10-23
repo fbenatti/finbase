@@ -1,4 +1,3 @@
-import { Dialog, DialogActions, DialogContent, DialogTitle } from "../../components/FinbaseDialog";
 import { dataDisplayText } from "../../utils/dataPresentation";
 import { useEffect, useState, type ReactNode } from "react";
 import {
@@ -128,7 +127,7 @@ function Step({ n, title, hint, children }: { n: number; title: string; hint: st
   );
 }
 
-export default function ForecastRuleDialog({ open, initial, config, meta, onClose, onSaved }: Props) {
+export default function ForecastRuleForm({ open, initial, config, meta, onClose, onSaved }: Props) {
   const [rule, setRule] = useState<any>(emptyRule);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
@@ -217,15 +216,13 @@ export default function ForecastRuleDialog({ open, initial, config, meta, onClos
       : "";
 
   return (
-    <Dialog open={open} onClose={onClose} maxWidth="lg" fullWidth>
-      <DialogTitle>
+    <Paper variant="outlined" sx={{ borderRadius: 2 }}>
+      <Stack spacing={2} sx={{ p: { xs: 1.5, md: 2.5 } }}>
         <Stack direction="row" alignItems="center" spacing={1.5}>
-          <span>{initial ? "Alterar regra de negócio do Forecast" : "Nova regra de negócio do Forecast"}</span>
+          <Typography variant="h6">{initial ? "Editar regra de negócio" : "Nova regra de negócio"}</Typography>
           <Chip size="small" variant="outlined" label={rule.active !== false ? "Ativa" : "Inativa"} />
         </Stack>
         <Typography variant="body2" color="text.secondary">Perfil: {config.name}</Typography>
-      </DialogTitle>
-      <DialogContent sx={{ bgcolor: "#FAFBFD" }}>
         {error && <Alert severity="error" sx={{ mb: 2 }} onClose={() => setError("")}>{dataDisplayText(error)}</Alert>}
 
         <Box sx={{ display: "grid", gap: 2, alignItems: "start", gridTemplateColumns: { xs: "1fr", md: "minmax(0, 1fr) 320px" } }}>
@@ -454,13 +451,13 @@ export default function ForecastRuleDialog({ open, initial, config, meta, onClos
             </Stack>
           </Paper>
         </Box>
-      </DialogContent>
-      <DialogActions sx={{ px: 3, py: 2 }}>
+      </Stack>
+      <Stack direction="row" justifyContent="flex-end" spacing={1} sx={{ px: { xs: 1.5, md: 2.5 }, pb: 2.5 }}>
         <Button onClick={onClose}>Cancelar</Button>
         <Button variant="contained" disabled={saving} onClick={() => void save()}>
           {saving ? "Salvando..." : initial ? "Salvar regra" : "Incluir regra"}
         </Button>
-      </DialogActions>
-    </Dialog>
+      </Stack>
+    </Paper>
   );
 }
