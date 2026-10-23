@@ -60,6 +60,20 @@ def test_continued_increase_is_not_absorbed_into_episode_reference():
     assert episode["expected"] == 100
 
 
+def test_window_keeps_separate_recovered_spikes():
+    rows = history(days=140, spike=50)
+    rows[105]["cost_cloud"] = 5000.0
+    end = date.fromisoformat(rows[-1]["day"])
+    found = runner.detect_scope_window(
+        scope_id="scope", rows=rows, end=end, window_days=90,
+        materiality=50, min_pct=.2, ledger_entries=[],
+        valid_days={row["day"] for row in rows}, commitment_scope_ids=set(), settings={},
+    )
+    starts = {signal.get("episode_start") for signal, _ in found if signal["detector"] == "SPIKE"}
+    assert rows[50]["day"] in starts
+    assert rows[105]["day"] in starts
+
+
 def test_one_off_and_monthly_impacts_are_not_multiplied_by_thirty():
     spike = score_signal({"detector": "SPIKE", "delta": 60000, "persistence_days": 1}, materiality=100)
     assert spike["projected_month_impact"] == 0
