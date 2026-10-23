@@ -95,6 +95,12 @@ def collect_oci_metrics(
     from .counters import derive_counter_rates
 
     rows.extend(derive_counter_rates(rows))
+    if resolution_seconds == 60:
+        from .rollups import build_metric_rollups
+
+        rollups = build_metric_rollups(rows, collection_run_id=run_id)
+        rows.extend(rollups)
+        rows.extend(derive_counter_rates(rollups))
     coverage_rows = build_coverage_rows(
         results, source_owner="oci_infrastructure_metrics", collection_run_id=run_id,
     )
