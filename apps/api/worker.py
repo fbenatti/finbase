@@ -368,6 +368,55 @@ def _queue_scheduled_anomaly_detection(source_task_id: int, task_json: dict, ses
     return [task.id]
 
 
+def _queue_scheduled_rightsizing(source_task_id: int, task_json: dict, session) -> list[int]:
+    """Enfileira o motor de rightsizing ao fim do pipeline de coleta, se habilitado.
+
+    Só a última publicação do agendamento libera o motor: com outras fatias do
+    mesmo agendamento ainda na fila, a Silver ainda não está completa.
+    """
+    if not task_json.get("scheduled_pipeline"):
+        return []
+    schedule_id = task_json.get("schedule_id")
+    if schedule_id is None:
+        return []
+    from app.models.scheduled_task import ScheduledTask
+    from app.models.source_connection import SourceConnection
+    from app.services.infrastructure_metrics.registry import metric_source_types
+
+    schedule = session.get(ScheduledTask, int(schedule_id))
+    if schedule is None:
+        return []
+    cfg = schedule.config_json or {}
+    if not cfg.get("rightsizing_after_pipeline"):
+        return []
+    pending = session.query(EtlTask).filter(
+        EtlTask.task_type.in_(["reprocess", "reclassification", "rightsizing_analysis"]),
+        EtlTask.status.in_(["QUEUED", "RUNNING"]),
+        EtlTask.id != source_task_id,
+    ).all()
+    if any(isinstance(row.result_json, dict) and row.result_json.get("schedule_id") == schedule_id for row in pending):
+        return []
+    connection_ids = [int(x) for x in (schedule.connection_ids or [schedule.connection_id]) if x]
+    queued: list[int] = []
+    for connection in session.query(SourceConnection).filter(
+        SourceConnection.id.in_(connection_ids),
+        SourceConnection.connector_type.in_(metric_source_types()),
+    ).all():
+        task = EtlTask(
+            task_type="rightsizing_analysis", status="QUEUED", connection_id=connection.id,
+            connection_ids=[connection.id], errors=[], phase="Motor de rightsizing após a coleta",
+            result_json={
+                "schedule_id": schedule_id, "scheduled_pipeline": True, "source_etl_task_id": source_task_id,
+                "days": int(cfg.get("rightsizing_days") or 30),
+                "resolution_seconds": int(cfg.get("rightsizing_resolution_seconds") or 300),
+            },
+        )
+        session.add(task)
+        session.flush()
+        queued.append(task.id)
+    return queued
+
+
 def _queue_scheduled_accuracy(forecast_task_id: int, task_json: dict, session) -> None:
     if not task_json.get("scheduled_pipeline") or not task_json.get("accuracy"):
         return
@@ -1361,6 +1410,14 @@ def consumer_main(worker_id: int):
                                 # tarefa do grupo enfileira a Gold (visão completa
                                 # = realizado + forecast + rateio) na fila do worker.
                                 if succeeded:
+                                    queued_rightsizing = _queue_scheduled_rightsizing(
+                                        task_id, terminal_task.result_json or {}, terminal_session
+                                    )
+                                    if queued_rightsizing:
+                                        terminal_task.phase = (
+                                            (terminal_task.phase or "")
+                                            + f" · Rightsizing na fila: {len(queued_rightsizing)}"
+                                        )[:200]
                                     if (terminal_task.result_json or {}).get("scheduled_pipeline") or (terminal_task.result_json or {}).get("scheduled_reprocess"):
                                         scheduled_forecasts = _queue_scheduled_forecasts(task_id, terminal_task.result_json or {}, terminal_session)
                                         if scheduled_forecasts:
@@ -1632,6 +1689,53 @@ def consumer_main(worker_id: int):
                                 s2.commit()
                         finally:
                             s2.close()
+
+                elif task.task_type == "rightsizing_analysis":
+                    from app.services.processing_logs import sync_etl_task_log
+
+                    connection_id = task.connection_id
+                    payload = dict(task.result_json or {})
+                    print(f"Picked up rightsizing_analysis task {task_id}: connection={connection_id}")
+                    task.status = "RUNNING"
+                    task.phase = "Executando o motor de rightsizing"
+                    sync_etl_task_log(session, task)
+                    session.commit()
+                    session.close()
+                    from app.database import SyncSession as _RightsizingSession
+                    from app.models.source_connection import SourceConnection as _RsConnection
+                    rs_session = _RightsizingSession()
+                    try:
+                        from app.services.infrastructure_metrics.opportunity_runner import run_opportunity_engine
+
+                        run = run_opportunity_engine(
+                            rs_session, rs_session.get(_RsConnection, connection_id),
+                            days=int(payload.get("days") or 30),
+                            resolution_seconds=int(payload.get("resolution_seconds") or 300),
+                        )
+                        task_row = rs_session.get(EtlTask, task_id)
+                        task_row.status = "COMPLETED" if run.status == "COMPLETED" else "FAILED"
+                        task_row.phase = (
+                            f"Rightsizing #{run.id}: {run.resources_analyzed} recurso(s), "
+                            f"{run.opportunities_count} oportunidade(s), {run.total_monthly_saving or 0:.2f}/mês"
+                            if run.status == "COMPLETED" else f"Rightsizing #{run.id} falhou"
+                        )[:200]
+                        task_row.errors = [run.error_message[:500]] if run.error_message else []
+                        task_row.result_json = {**payload, "opportunity_run_id": run.id}
+                        task_row.finished_at = datetime.now(timezone.utc)
+                        sync_etl_task_log(rs_session, task_row)
+                        rs_session.commit()
+                    except Exception as exc:
+                        rs_session.rollback()
+                        task_row = rs_session.get(EtlTask, task_id)
+                        if task_row:
+                            task_row.status = "FAILED"
+                            task_row.phase = f"Falha no motor de rightsizing: {type(exc).__name__}"[:200]
+                            task_row.errors = [str(exc)[:500]]
+                            task_row.finished_at = datetime.now(timezone.utc)
+                            sync_etl_task_log(rs_session, task_row)
+                            rs_session.commit()
+                    finally:
+                        rs_session.close()
 
                 elif task.task_type == "reservation_collection":
                     # Coleta EXCLUSIVA de benefícios Azure (RI + Savings Plans) via
