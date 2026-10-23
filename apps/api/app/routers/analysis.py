@@ -2280,28 +2280,10 @@ async def _expected_view_core(
     if "tipo" in actual_columns:
         tipo_col = _quote_ident(actual_columns["tipo"])
         tipo_actual = f" AND ({tipo_col} IS NULL OR lower(CAST({tipo_col} AS VARCHAR)) IN ('realizado', ''))"
-    try:
-        cutoff_rows = await trino_execute(
-            f"""
-            SELECT MIN({forecast_period}) AS period
-            FROM iceberg.{forecast_namespace}.{forecast_name}
-            WHERE ({forecast_scope_filter}){dimension_filter}
-              {forecast_year_clause}
-              AND lower(CAST({forecast_type} AS VARCHAR)) = 'forecast'
-            """,
-            **interactive,
-        )
-    except TrinoCancelled:
-        raise
-    except Exception as exc:
-        raise HTTPException(status_code=503, detail=f"Falha ao consultar a Visão Esperada: {exc}")
-    cutoff = str(cutoff_rows[0]["period"]) if cutoff_rows and cutoff_rows[0].get("period") is not None else None
-    cutoff_lit = _quote_literal(cutoff) if cutoff else None
-    # Realizado always comes from Gold for every collected month. A global
-    # ``actual_period < MIN(forecast)`` cutoff hid recent loads (e.g. July
-    # azure-marketplace) whenever another series already had forecast rows in
-    # an earlier month.
-    forecast_from = f" AND {forecast_period} >= {cutoff_lit}" if cutoff_lit else ""
+    # Antes havia aqui um ``SELECT MIN(period)`` dos forecasts para filtrar o
+    # próprio forecast por ``period >= MIN(period)`` — uma tautologia que custava
+    # uma ida ao Trino em série antes das agregações. O realizado nunca dependeu
+    # desse corte: vem da Gold para todo mês coletado.
     # A Visão Diretoria muda a ordem de navegação para 1 → 2 → 4 → 3 → 5 → 6.
     # Aplicar a exceção apenas no terceiro nível fazia o gráfico de drivers
     # pular para Cloud (nível 3) em escopos onde o próximo nó deveria ser a
@@ -2341,7 +2323,6 @@ async def _expected_view_core(
       WHERE ({forecast_scope_filter}){dimension_filter}
         {forecast_year_clause}
         AND lower(CAST({forecast_type} AS VARCHAR)) = 'forecast'
-        {forecast_from}
       GROUP BY 1, 2
     """
     planning_sql = None
@@ -2371,18 +2352,36 @@ async def _expected_view_core(
           WHERE {' AND '.join(planning_filters)}
           GROUP BY 1, 2, 3
         """
+    rateio_sql = None
+    if body.include_shared_cost:
+        medida_col = forecast_columns.get("rateio_medida")
+        if forecast_name.endswith("_planning") and not medida_col:
+            medida_sql = ", 'forecast' AS rateio_medida"
+            group_rateio = ""
+        else:
+            medida_sql = f", lower(CAST({_quote_ident(medida_col)} AS VARCHAR)) AS rateio_medida" if medida_col else ""
+            group_rateio = f", 3" if medida_col else ""
+        rateio_sql = f"""
+          SELECT {forecast_period} AS period,
+                 COALESCE(NULLIF(TRIM(CAST({forecast_driver} AS VARCHAR)), ''), 'Sem departamento filho') AS driver
+                 {medida_sql},
+                 SUM(COALESCE(TRY_CAST({forecast_value} AS DOUBLE), 0)) AS value
+          FROM iceberg.{forecast_namespace}.{forecast_name}
+          WHERE ({forecast_scope_filter}){dimension_filter}
+            {forecast_year_clause}
+            AND lower(CAST({forecast_type} AS VARCHAR)) = '{RATEIO_TIPO}'
+          GROUP BY 1, 2{group_rateio}
+        """
     try:
-        # These scans are independent after the cutoff query. Running them in
-        # parallel removes one full Trino round-trip from the dashboard path.
+        # Realizado, forecast, planning e rateio são leituras independentes:
+        # todas partem na mesma hora, e a view espera só pela mais lenta.
         tasks = [
             trino_execute(actual_sql, **interactive),
             trino_execute(forecast_sql, **interactive),
+            trino_execute(planning_sql, **interactive) if planning_sql else asyncio.sleep(0, result=[]),
+            trino_execute(rateio_sql, **interactive) if rateio_sql else asyncio.sleep(0, result=[]),
         ]
-        if planning_sql:
-            tasks.append(trino_execute(planning_sql, **interactive))
-        results = await asyncio.gather(*tasks)
-        actual_fact_rows, forecast_fact_rows = results[:2]
-        planning_fact_rows = results[2] if len(results) > 2 else []
+        actual_fact_rows, forecast_fact_rows, planning_fact_rows, rateio_fact_rows = await asyncio.gather(*tasks)
     except TrinoCancelled:
         raise
     except Exception as exc:
@@ -2437,30 +2436,7 @@ async def _expected_view_core(
             value = float(row.get("forecast_value") or 0)
             forecast_by_driver[driver] = forecast_by_driver.get(driver, 0.0) + value
     if body.include_shared_cost:
-        medida_col = forecast_columns.get("rateio_medida")
-        if forecast_name.endswith("_planning") and not medida_col:
-            medida_sql = ", 'forecast' AS rateio_medida"
-            group_rateio = ""
-        else:
-            medida_sql = f", lower(CAST({_quote_ident(medida_col)} AS VARCHAR)) AS rateio_medida" if medida_col else ""
-            group_rateio = f", 3" if medida_col else ""
-        rateio_sql = f"""
-          SELECT {forecast_period} AS period,
-                 COALESCE(NULLIF(TRIM(CAST({forecast_driver} AS VARCHAR)), ''), 'Sem departamento filho') AS driver
-                 {medida_sql},
-                 SUM(COALESCE(TRY_CAST({forecast_value} AS DOUBLE), 0)) AS value
-          FROM iceberg.{forecast_namespace}.{forecast_name}
-          WHERE ({forecast_scope_filter}){dimension_filter}
-            {forecast_year_clause}
-            AND lower(CAST({forecast_type} AS VARCHAR)) = '{RATEIO_TIPO}'
-          GROUP BY 1, 2{group_rateio}
-        """
-        try:
-            rateio_rows = await trino_execute(rateio_sql, **interactive)
-        except TrinoCancelled:
-            raise
-        except Exception as exc:
-            raise HTTPException(status_code=503, detail=f"Falha ao consultar o rateio de custo compartilhado: {exc}")
+        rateio_rows = rateio_fact_rows
         actual_rateio: list[dict[str, Any]] = []
         forecast_rateio: list[dict[str, Any]] = []
         closed_periods = {
@@ -2905,6 +2881,17 @@ def _run_local_bronze_star_query(sql: str, trino_error: str) -> list[dict[str, A
 # ---------------------------------------------------------------------------
 # Pre-built analysis queries
 # ---------------------------------------------------------------------------
+def _catalog_total_records(namespace: str, table: str) -> int | None:
+    """``total-records`` do snapshot atual; ``None`` quando o metadado não diz."""
+    from app.services.iceberg_service import get_catalog
+
+    snapshot = get_catalog().load_table((namespace, table)).current_snapshot()
+    if snapshot is None:
+        return 0
+    value = (snapshot.summary or {}).get("total-records")
+    return int(value) if value is not None else None
+
+
 @router.get("/resumo")
 async def get_summary(
     connection_code: str | None = Query(None),
@@ -2941,17 +2928,31 @@ async def get_summary(
             ORDER BY "_billing_period" DESC, "cloud_origem"
         """
     else:
-        # For bronze/silver, return row counts per table
-        tables = list_tables(layer)
-        rows: list[dict] = []
-        for tbl in tables:
+        # For bronze/silver, return row counts per table. O total vem do resumo
+        # do snapshot no catálogo (sem Trino), lido em série numa única thread:
+        # o catálogo PyIceberg serializa acessos concorrentes e dez threads
+        # demoram dez vezes mais que uma. Só o que o catálogo não souber vai ao
+        # Trino, em paralelo.
+        def catalog_counts() -> dict[str, int | None]:
+            counts: dict[str, int | None] = {}
+            for tbl in list_tables(layer):
+                try:
+                    counts[tbl] = _catalog_total_records(layer, tbl)
+                except Exception:
+                    counts[tbl] = None
+            return counts
+
+        async def count_rows(tbl: str, known: int | None) -> dict[str, Any]:
+            if known is not None:
+                return {"layer": layer, "table": tbl, "row_count": known}
             try:
-                result = await trino_execute(
-                    f"SELECT COUNT(*) AS cnt FROM iceberg.{layer}.{tbl}"
-                )
-                rows.append({"layer": layer, "table": tbl, "row_count": result[0]["cnt"] if result else 0})
+                result = await trino_execute(f"SELECT COUNT(*) AS cnt FROM iceberg.{layer}.{tbl}")
+                return {"layer": layer, "table": tbl, "row_count": result[0]["cnt"] if result else 0}
             except Exception:
-                rows.append({"layer": layer, "table": tbl, "row_count": -1})
+                return {"layer": layer, "table": tbl, "row_count": -1}
+
+        known = await asyncio.to_thread(catalog_counts)
+        rows = list(await asyncio.gather(*(count_rows(tbl, total) for tbl, total in known.items())))
         return {"summary": rows}
 
     try:
@@ -3062,126 +3063,143 @@ async def query_source_data(
 # Destination table data (classified + business rules in Iceberg/Parquet)
 # ═══════════════════════════════════════════════════════════════════════
 
+def _planning_breakdown(rows: list[dict[str, Any]]) -> dict[str, Any]:
+    """Totais e períodos do planning e do rateio a partir de **uma** agregação.
+
+    ``rows`` tem ``(period, shared, cnt)``: contagem por mês e por "é rateio".
+    Antes eram quatro queries em série por destino (COUNT planning, períodos
+    planning, COUNT rateio, períodos rateio); a mesma informação cabe num GROUP BY.
+    """
+    total = 0
+    shared_total = 0
+    periods: dict[str, int] = {}
+    shared_periods: dict[str, int] = {}
+    for row in rows:
+        period = str(row.get("period"))
+        count = int(row.get("cnt") or 0)
+        total += count
+        periods[period] = periods.get(period, 0) + count
+        if row.get("shared"):
+            shared_total += count
+            shared_periods[period] = shared_periods.get(period, 0) + count
+
+    def listed(mapping: dict[str, int]) -> list[dict[str, Any]]:
+        ordered = sorted(mapping.items(), key=lambda item: item[0], reverse=True)[:20]
+        return [{"period": period, "count": count} for period, count in ordered]
+
+    return {"rows": total, "periods": listed(periods), "shared_rows": shared_total, "shared_periods": listed(shared_periods)}
+
+
+def _destination_periods_sync(table_name: str) -> tuple[int, list[dict[str, Any]]]:
+    """Fallback sem Trino: conta por período lendo só a coluna de partição."""
+    import pyarrow.compute as pc
+    from app.services.iceberg_service import get_catalog
+
+    arrow_table = get_catalog().load_table(table_name).scan().select("_billing_period").to_arrow()
+    counted = pc.value_counts(arrow_table.column("_billing_period"))
+    periods = [
+        {"period": str(counted.field(0)[i].as_py()), "count": counted.field(1)[i].as_py()}
+        for i in range(len(counted))
+    ]
+    return len(arrow_table), periods
+
+
+async def _destination_entries(tid: int, tname: str, phys: str, desc: str | None) -> list[dict[str, Any]]:
+    safe_name = phys.replace("-", "_").replace(".", "_")
+    table_name = f"silver.{safe_name}"
+    planning_name = f"{safe_name}_planning"
+
+    async def main_counts() -> tuple[int, list[dict[str, Any]]]:
+        try:
+            # Total e períodos saem do mesmo GROUP BY (poucos meses por tabela).
+            rows = await trino_execute(
+                f"SELECT _billing_period, COUNT(*) AS cnt FROM iceberg.{table_name} "
+                f"GROUP BY _billing_period ORDER BY _billing_period DESC"
+            )
+            periods = [{"period": str(p["_billing_period"]), "count": p["cnt"]} for p in (rows or [])]
+            return sum(int(p["count"] or 0) for p in periods), periods[:20]
+        except Exception:
+            try:
+                return await asyncio.to_thread(_destination_periods_sync, table_name)
+            except Exception:
+                return 0, []
+
+    async def planning_counts() -> dict[str, Any] | None:
+        try:
+            schema = await _describe_layer_schema(planning_name, None, namespace=layers.detail_layer())
+        except Exception:
+            return None
+        columns = {name.lower(): name for name in schema}
+        period_col = columns.get("period")
+        if not period_col:
+            return None
+        tipo_col = columns.get("tipo")
+        # Planning antigo grava rateio como tipo=rateio; o novo, shared_cost.
+        shared_expr = (
+            f"lower(CAST({_quote_ident(tipo_col)} AS VARCHAR)) IN ('rateio', 'shared_cost')" if tipo_col else "FALSE"
+        )
+        try:
+            rows = await trino_execute(
+                f"SELECT {_quote_ident(period_col)} AS period, {shared_expr} AS shared, COUNT(*) AS cnt "
+                f"FROM iceberg.{layers.detail_layer()}.{planning_name} GROUP BY 1, 2"
+            )
+        except Exception:
+            return None
+        return _planning_breakdown(rows)
+
+    (row_cnt, periods), planning = await asyncio.gather(main_counts(), planning_counts())
+    entries: list[dict[str, Any]] = [{
+        "id": tid,
+        "name": tname,
+        "physical_name": phys,
+        "description": desc,
+        "row_count": row_cnt,
+        "periods": periods,
+    }]
+    # Forecast is deliberately stored separately from the realized Gold.
+    # Expose it as an analysis-only pseudo-destination using a negative ID;
+    # it remains configuration-free and never becomes a reprocess target.
+    if planning and planning["rows"]:
+        entries.append({
+            "id": -int(tid),
+            "name": f"{tname} — Forecast / Planning",
+            "physical_name": planning_name,
+            "description": "Projeções mensais: realizado e forecast",
+            "row_count": planning["rows"],
+            "periods": planning["periods"],
+            "analysis_only": True,
+            "analysis_kind": "forecast",
+            "base_destination_id": int(tid),
+        })
+    # Rateio rows share the monthly planning table with forecast. Expose
+    # them separately so this pivot source stays independent of forecast.
+    if planning and planning["shared_rows"]:
+        entries.append({
+            "id": shared_cost_pivot_id(int(tid)),
+            "name": f"Custo compartilhado · {tname}",
+            "physical_name": planning_name,
+            "description": "Linhas de rateio de consumo (tipo shared_cost)",
+            "row_count": planning["shared_rows"],
+            "periods": planning["shared_periods"],
+            "analysis_only": True,
+            "analysis_kind": "shared_cost",
+            "base_destination_id": int(tid),
+        })
+    return entries
+
+
 @router.get("/destinos")
 async def list_destinations_data(db: AsyncSession = Depends(get_db)):
-    """List destination tables with row counts (Trino with PyIceberg fallback)."""
+    """List destination tables with row counts (Trino with PyIceberg fallback).
+
+    Os destinos são lidos em paralelo; cada um faz duas queries simultâneas
+    (períodos da tabela e do planning) em vez de cinco em série.
+    """
     tables = (await db.execute(
         text("SELECT id, name, physical_name, description FROM destination_table WHERE active = true ORDER BY id")
     )).all()
-
-    result = []
-    for t in tables:
-        tid, tname, phys, desc = t[0], t[1], t[2], t[3]
-        safe_name = phys.replace("-", "_").replace(".", "_")
-        table_name = f"silver.{safe_name}"
-        row_cnt = 0
-        periods: list[dict] = []
-        try:
-            trino_result = await trino_execute(f"SELECT COUNT(*) AS cnt FROM iceberg.{table_name}")
-            row_cnt = trino_result[0]["cnt"] if trino_result else 0
-            pr = await trino_execute(
-                f"SELECT _billing_period, COUNT(*) AS cnt FROM iceberg.{table_name} "
-                f"GROUP BY _billing_period ORDER BY _billing_period DESC LIMIT 20"
-            )
-            periods = [{"period": str(p["_billing_period"]), "count": p["cnt"]} for p in (pr or [])]
-        except Exception:
-            # Trino down — fall back to PyIceberg (lightweight: scan only billing_period)
-            try:
-                from app.services.iceberg_service import get_catalog
-                cat = get_catalog()
-                tbl = cat.load_table(table_name)
-                arrow_table = tbl.scan().select("_billing_period").to_arrow()
-                row_cnt = len(arrow_table)
-                # Count by billing period
-                import pyarrow.compute as pc
-                bp_col = arrow_table.column("_billing_period")
-                counted = pc.value_counts(bp_col)
-                for i in range(len(counted)):
-                    periods.append({
-                        "period": str(counted.field(0)[i].as_py()),
-                        "count": counted.field(1)[i].as_py(),
-                    })
-            except Exception:
-                row_cnt = 0
-
-        result.append({
-            "id": tid,
-            "name": tname,
-            "physical_name": phys,
-            "description": desc,
-            "row_count": row_cnt,
-            "periods": periods,
-        })
-
-        # Forecast is deliberately stored separately from the realized Gold.
-        # Expose it as an analysis-only pseudo-destination using a negative ID;
-        # it remains configuration-free and never becomes a reprocess target.
-        planning_name = f"{safe_name}_planning"
-        try:
-            planning_count = await trino_execute(
-                f"SELECT COUNT(*) AS cnt FROM iceberg.silver.{planning_name}"
-            )
-            planning_rows = planning_count[0]["cnt"] if planning_count else 0
-            planning_periods = await trino_execute(
-                f"SELECT period, COUNT(*) AS cnt FROM iceberg.silver.{planning_name} "
-                "GROUP BY period ORDER BY period DESC LIMIT 20"
-            )
-            planning_period_list = [
-                {"period": str(p["period"]), "count": p["cnt"]}
-                for p in (planning_periods or [])
-            ]
-            if planning_rows:
-                result.append({
-                    "id": -int(tid),
-                    "name": f"{tname} — Forecast / Planning",
-                    "physical_name": planning_name,
-                    "description": "Projeções mensais: realizado e forecast",
-                    "row_count": planning_rows,
-                    "periods": planning_period_list,
-                    "analysis_only": True,
-                    "analysis_kind": "forecast",
-                    "base_destination_id": int(tid),
-                })
-        except Exception:
-            pass
-
-        # Rateio rows share the monthly planning table with forecast. Expose
-        # them separately so this pivot source stays independent of forecast.
-        try:
-            planning_schema = await _describe_layer_schema(planning_name, None, namespace=layers.detail_layer())
-            columns = {name.lower(): name for name in planning_schema}
-            period_col = columns.get("period")
-            tipo_col = columns.get("tipo")
-            if period_col and tipo_col:
-                # Older planning snapshots store shared-cost rows as
-                # tipo=rateio; newer ones use tipo=shared_cost. Expose either
-                # format as long as the table contains rows to analyze.
-                where = f"lower(CAST({_quote_ident(tipo_col)} AS VARCHAR)) IN ('rateio', 'shared_cost')"
-                shared_count = await trino_execute(
-                    f"SELECT COUNT(*) AS cnt FROM iceberg.{layers.detail_layer()}.{planning_name} WHERE {where}"
-                )
-                shared_rows = int((shared_count[0] or {}).get("cnt") or 0) if shared_count else 0
-                if shared_rows:
-                    shared_period_rows = await trino_execute(
-                        f"SELECT {_quote_ident(period_col)} AS period, COUNT(*) AS cnt "
-                        f"FROM iceberg.{layers.detail_layer()}.{planning_name} WHERE {where} "
-                        f"GROUP BY 1 ORDER BY 1 DESC LIMIT 20"
-                    )
-                    result.append({
-                        "id": shared_cost_pivot_id(int(tid)),
-                        "name": f"Custo compartilhado · {tname}",
-                        "physical_name": planning_name,
-                        "description": "Linhas de rateio de consumo (tipo shared_cost)",
-                        "row_count": shared_rows,
-                        "periods": [{"period": str(p["period"]), "count": p["cnt"]} for p in (shared_period_rows or [])],
-                        "analysis_only": True,
-                        "analysis_kind": "shared_cost",
-                        "base_destination_id": int(tid),
-                    })
-        except Exception:
-            pass
-
-    return result
+    groups = await asyncio.gather(*(_destination_entries(t[0], t[1], t[2], t[3]) for t in tables))
+    return [entry for group in groups for entry in group]
 
 
 @router.get("/destinos/{table_id}/dados")
