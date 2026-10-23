@@ -6,7 +6,7 @@ from typing import Literal
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, ConfigDict
-from sqlalchemy import select
+from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.deps import get_current_user
@@ -105,6 +105,10 @@ async def queue_collection(
     db: AsyncSession = Depends(get_db),
 ):
     conn, config, plans, calls, start, end = await _validated_plan(body, db, user, "create")
+    await db.execute(
+        text("SELECT pg_advisory_xact_lock(hashtext(:lock_key))"),
+        {"lock_key": f"infrastructure-metrics:{int(conn.id)}"},
+    )
     active = (await db.execute(
         select(EtlTask).where(
             EtlTask.task_type == "infrastructure_metrics_collection",
@@ -113,7 +117,15 @@ async def queue_collection(
         ).order_by(EtlTask.id.desc()).limit(1)
     )).scalar_one_or_none()
     if active:
-        return {"task_id": active.id, "status": active.status, "plan": _safe_plan(conn, config, plans, calls, start, end)}
+        active_result = active.result_json if isinstance(active.result_json, dict) else {}
+        active_plan = active_result.get("request_plan")
+        if not isinstance(active_plan, dict):
+            raise HTTPException(
+                409,
+                f"A tarefa {active.id} já está ativa, mas não possui snapshot do plano; "
+                "aguarde-a terminar antes de solicitar outra coleta.",
+            )
+        return {"task_id": active.id, "status": active.status, "plan": active_plan}
     task = EtlTask(
         task_type="infrastructure_metrics_collection", status="QUEUED",
         connection_id=conn.id, connection_ids=[conn.id], errors=[],
@@ -121,6 +133,7 @@ async def queue_collection(
             "start_utc": start.isoformat(), "end_utc": end.isoformat(),
             "resolution_seconds": body.resolution_seconds,
             "statistics": list(body.statistics), "persist": True,
+            "request_plan": _safe_plan(conn, config, plans, calls, start, end),
         },
         phase="Na fila: coleta manual de métricas de infraestrutura OCI",
     )
