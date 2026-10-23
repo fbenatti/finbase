@@ -52,6 +52,30 @@ def test_new_rows_append_to_preserved_existing_day_and_duplicate_old_key_fails()
         merge_metric_rows([old, old], [new])
 
 
+def test_real_normalizer_rows_merge_without_optional_identity_keys():
+    from datetime import datetime, timedelta, timezone
+
+    from app.services.infrastructure_metrics.catalog import OCI_METRICS
+    from app.services.infrastructure_metrics.contracts import (
+        MetricPoint, MetricScope, QueryPlan, QueryResult,
+    )
+    from app.services.infrastructure_metrics.normalization import query_results_to_silver_rows
+
+    start = datetime(2026, 10, 23, tzinfo=timezone.utc)
+    scope = MetricScope("oci", 4, "synthetic-account", "synthetic-region",
+                        ("synthetic-vm",), enabled=True)
+    plan = QueryPlan(OCI_METRICS[0], scope, start, start + timedelta(minutes=1),
+                     60, ("mean",), request_id="synthetic-request")
+    result = QueryResult(plan, 200, points=(MetricPoint(
+        start, {"resourceId": "synthetic-vm"}, {"mean": 10.0}),))
+    rows = query_results_to_silver_rows(
+        (result,), source_owner="oci_infrastructure_metrics", collection_run_id="test-run")
+
+    assert len(rows) == 1
+    assert "cloud_partition" not in rows[0]
+    assert len(merge_metric_rows([], rows)) == 1
+
+
 def test_initializes_empty_multicloud_metric_series_table(monkeypatch):
     from app.services import iceberg_service
     from app.services.infrastructure_metrics.publication import ensure_metric_series_table
