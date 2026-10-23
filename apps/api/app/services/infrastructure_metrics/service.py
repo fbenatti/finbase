@@ -9,7 +9,7 @@ import uuid
 from .catalog import get_metric
 from .collector import collect, estimated_api_calls, plan_queries
 from .config import config_from_connection
-from .contracts import QueryResult
+from .contracts import CollectionCancelled, QueryResult
 from .credentials import build_oci_adapter
 from .normalization import query_results_to_silver_rows
 
@@ -19,6 +19,7 @@ def collect_oci_metrics(
     resolution_seconds: int, statistics: tuple[str, ...] =
         ("mean", "min", "max", "count", "sum", "p90", "p95", "p99"),
     collection_run_id: str | None = None, persist: bool = False,
+    should_abort=None,
 ) -> dict:
     """Run the configured, allowlisted OCI pilot and return normalized rows.
 
@@ -47,10 +48,18 @@ def collect_oci_metrics(
 
         ensure_metric_series_table()
     adapter = build_oci_adapter(connection, config)
+    if should_abort:
+        adapter._should_abort = should_abort
+        if should_abort():
+            raise CollectionCancelled("infrastructure metric collection cancelled")
     results: tuple[QueryResult, ...] = collect(adapter, plans)
+    if should_abort and should_abort():
+        raise CollectionCancelled("infrastructure metric collection cancelled")
     run_id = collection_run_id or str(uuid.uuid4())
     raw_persisted_count = 0
     if persist:
+        if should_abort and should_abort():
+            raise CollectionCancelled("infrastructure metric collection cancelled")
         # Preserve the provider responses before normalization/derivations can
         # fail. This keeps an acquired run recoverable from Bronze.
         from .bronze import persist_raw_query_results
@@ -76,6 +85,8 @@ def collect_oci_metrics(
             row["_billing_period"] = row["metric_day"]
             rows_by_day[str(row["metric_day"])].append(row)
         for metric_day, day_rows in sorted(rows_by_day.items()):
+            if should_abort and should_abort():
+                raise CollectionCancelled("infrastructure metric collection cancelled")
             persisted_by_day[metric_day] = publish_metric_rows(
                 day_rows, connection_id=int(connection.id), metric_day=metric_day,
             )
