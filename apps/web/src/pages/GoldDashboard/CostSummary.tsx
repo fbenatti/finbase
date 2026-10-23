@@ -399,8 +399,8 @@ export default function CostSummary({ table, director, departmentId, path, inclu
         marker: { symbol: "diamond", size: 10, color: colors.accent, line: { color: "#FFFFFF", width: 1.5 } },
       }] : [];
       return [
+        { type: "scatter", mode: "lines", name: "Forecast", x, y: cumulative.map((row) => row.forecast), line: { color: chartSemantic.forecast, width: 3, shape: "spline", smoothing: 0.4 }, fill: "tozeroy", fillcolor: "rgba(14, 165, 198, 0.18)" },
         { type: "scatter", mode: "lines", name: "Custo efetivado", x, y: cumulative.map((row) => row.actual), line: { color: chartSemantic.actual, width: 3, shape: "spline", smoothing: 0.4 }, fill: "tozeroy", fillcolor: "rgba(15, 98, 254, 0.16)" },
-        { type: "scatter", mode: "lines", name: "Forecast", x, y: cumulative.map((row) => row.forecast), line: { color: chartSemantic.forecast, width: 2.25, dash: "dot" } },
         { type: "scatter", mode: "lines", name: "Orçamento", x, y: cumulative.map((row) => row.budget), line: { color: chartSemantic.budget, width: 2, dash: "dash" } },
         ...markers,
       ];
