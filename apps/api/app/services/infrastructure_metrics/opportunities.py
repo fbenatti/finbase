@@ -50,6 +50,21 @@ DEFAULT_POLICY = {
     "high_confidence_coverage": 0.98,
     # Reductions smaller than this keep the current size (avoid churn by noise).
     "min_change_ratio": 0.15,
+    # Recurring peaks (see peak_patterns): a bucket peaks when its max reaches
+    # the threshold (lowered to multiplier × P90 of the maxima, never below the
+    # floor); an hour recurs when it peaks on min_day_ratio of the days (or of
+    # the same weekdays, min_weeks times at least) starting within jitter_minutes of the
+    # usual time; peaks above max_time_share of the time are continuous load.
+    "peak_pattern_threshold": 80.0,
+    "peak_pattern_floor": 40.0,
+    "peak_pattern_baseline_multiplier": 2.0,
+    "peak_pattern_min_day_ratio": 0.70,
+    "peak_pattern_min_weeks": 4,
+    "peak_pattern_jitter_minutes": 15,
+    # Chance, over all slots tested, of flagging peaks that have no schedule.
+    "peak_pattern_max_false_alarm": 0.001,
+    "peak_pattern_max_time_share": 0.10,
+    "peak_pattern_timezone": "America/Sao_Paulo",
 }
 
 
