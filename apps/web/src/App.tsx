@@ -4,7 +4,7 @@ import { ModulePage, CatalogLegacyRedirect, DefaultModule } from "./navigation/M
 import { resolveCatalogRoute, widgetSearch } from "./navigation/routes";
 import { Routes, Route, Navigate, useLocation, useParams } from "react-router-dom";
 import { Box, CircularProgress } from "@mui/material";
-import { lazy, Suspense } from "react";
+import { lazy, Suspense, useEffect } from "react";
 import type { ReactElement } from "react";
 import Layout from "./layout/Layout";
 import { AuthProvider, useAuth } from "./auth/AuthContext";
@@ -103,6 +103,13 @@ const CATALOG_RENDERERS = { Modules, Connectors, GoldDashboard, Anomalies, Finan
 function ApplicationRoutes() {
   const { user } = useAuth();
   const navigation = useNavigation();
+  useEffect(() => {
+    try {
+      window.localStorage.removeItem("openfinops.contract-story.v1");
+    } catch {
+      // O armazenamento local pode estar indisponível no navegador.
+    }
+  }, []);
   if (user && navigation.loading) return <Box sx={{ p: 6, textAlign: "center" }}><CircularProgress /></Box>;
   if (user && navigation.error) return <Box sx={{ p: 4 }}><Alert severity="error">{navigation.error}</Alert><Button onClick={() => void navigation.reload()}>Tentar novamente</Button></Box>;
   return (
