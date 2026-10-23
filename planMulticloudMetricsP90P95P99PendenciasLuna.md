@@ -636,3 +636,55 @@ alterações antes do merge da branch.
 reler este documento, o PLAN completo e as solicitações de UI/Extração/Silver;
 executar a revisão da seção 8 inteira e manter explicitamente pendentes os
 aceites que dependem de catálogo, credenciais e medição operacional reais.
+
+### Atualização incremental — perfis persistidos e API (23/10/2026)
+
+Depois do registro acima, foram adicionados:
+
+| Incremento | Commit | Evidência local | Limite restante |
+| --- | --- | --- | --- |
+| Inicializador/evolução da tabela lógica `resource_profile_daily_window` com partição por dia final e conexão, e writer idempotente por chave natural do perfil. | `ad2675a9`, correção de posicionamento em `f4a257c9` | Teste de bootstrap do schema com catálogo fake em `test_infrastructure_metric_publication.py`. | Sem catálogo real; publicação real, field IDs legados e concorrência permanecem sem comprovação. |
+| `POST /custos/metricas-infra/perfis/gerar` lê uma série limitada da Silver, exige conexão autorizada, allowlist de recurso/métrica, seleciona resolução/estatística e persiste perfil versionado; `GET /perfis` lê perfis com janela limitada. | `6096021d`, validação de allowlist e correção de origem `NATIVE` em `98381fc8` | Rotas carregam com a suíte de RBAC e de métricas. | Sem teste de integração da rota com Iceberg real; sem paginação além do limite fixo, Gold ou tela de monitoramento. |
+| Perfil passou a emitir P50 junto de P90/P95/P99; bootstrap de tabela diária ganhou teste dedicado. | `12d6d683`, `d2d3d326`, `1edb4ffd` | Suíte atual: **99 passed**; `py_compile` do router e publisher passou. | Teste de perfil usa fixture local; não atesta o perfil operacional na tabela real. |
+
+O perfil produzido usa `WINDOW_OF_BUCKET_VALUES` e o método linear. O endpoint
+aceita somente `origin_kind=NATIVE`, uma resolução e uma estatística explícitas;
+portanto o P95 é calculado sobre os valores médios (ou outra estatística
+selecionada) dos buckets guardados na Silver. Isso não representa P95 nativo
+OCI por bucket. O perfil não preenche custos, capacidade/headroom ou duração de
+limiares: esses campos ficam nulos até existirem fontes válidas.
+
+### Situação revisada T00–T15 após API de perfis
+
+| Item | Estado | Evidência/pendência atual |
+| --- | --- | --- |
+| T00 | PARCIAL | Sem inventário do ambiente operacional e schemas físicos. |
+| T01 | PARCIAL | Identidade v2 e contratos OCI; falta conversão semântica por descriptor, migração e consumidores legados. |
+| T02 | PARCIAL | Allowlist validada para coleta/perfil e RBAC por conexão; faltam isolamento organizacional, auditoria de versões e budgets completos persistidos. |
+| T03 | PARCIAL — físico não comprovado | Inicializadores lógicos existem para série, coverage e perfil; faltam inventário/relacionamentos, schema diff e inspeção no catálogo real. |
+| T04 | PARCIAL | Normalizador→merge em memória coberto; falta publicação/reconciliação Iceberg real, concorrência e teste completo de rerun. |
+| T05 | PARCIAL | Adaptador OCI de métricas existe; inventário, capacidades, relações e validação viva pendentes. |
+| T06 | PARCIAL | Cancelamento cooperativo e config congelada; checkpoints/retomada, backoff, budgets e progresso por chunk pendentes. |
+| T07 | PENDENTE — evidência operacional | Sem piloto real do worker em 24h. |
+| T08 | NÃO IMPLEMENTADO | Sem planner/backfill efetivo de 60 dias, cutoff ou lifecycle. |
+| T09 | PARCIAL | Coverage e rollups 5m/15m integrados na coleta; cálculo/persistência de perfil via API agora conectado. Faltam predecessor de counter entre chunks, maturidade da qualidade, limiares/capacidade e validação física. |
+| T10 | PENDENTE | Sem experimento operacional de sete dias e ADR com custos/volume da Silver real. |
+| T11 | PARCIAL | Rotas de controle, séries, coverage e perfis disponíveis; faltam comparação, config/discovery completas, Gold, fluxo de Extração e integração de ponta a ponta em catálogo real. |
+| T12 | NÃO IMPLEMENTADO | Continua faltando página/menu de monitoramento dedicado e visualização dos perfis. |
+| T13 | NÃO IMPLEMENTADO | Adaptadores AWS/Azure/GCP não foram adicionados. |
+| T14 | NÃO IMPLEMENTADO | Contrato versionado de readiness para análise de capacidade futura continua ausente. |
+| T15 | PARCIAL | Registro incrementado e testes locais registrados; faltam runbook e reconciliação de ambiente/rollback. |
+
+Resultado de teste após os últimos commits de código:
+
+```bash
+cd apps/api
+python -m py_compile app/routers/infrastructure_metrics.py app/services/infrastructure_metrics/publication.py
+python -m pytest -q tests/test_infrastructure_metric_*.py tests/test_oci_infrastructure_metrics_adapter.py tests/test_semantic_normalization.py tests/test_authz_route_coverage.py
+```
+
+Resultado: **99 passed**. A compilação Python também passou. A advertência do
+`pytest-asyncio` sobre configuração de escopo do event loop permanece. Não houve
+build web, porque nenhuma alteração de UI de métricas foi feita. Não houve
+chamada OCI, consulta ou gravação em catálogo real. Estado geral permanece
+**ENTREGA PARCIAL**.
