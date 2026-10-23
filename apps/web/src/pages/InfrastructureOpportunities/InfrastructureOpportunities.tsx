@@ -17,10 +17,9 @@ import RefreshIcon from "@mui/icons-material/RefreshOutlined";
 import PlayArrowIcon from "@mui/icons-material/PlayArrowOutlined";
 import DataGrid from "../../components/FinbaseDataGrid";
 import { dataDisplayText } from "../../utils/dataPresentation";
-import { getConnections, type SourceConnection } from "../../services/api";
-import type { Opportunity, OpportunityRun, OpportunitySummary } from "../../services/infraOpportunitiesApi";
+import type { MetricSource, Opportunity, OpportunityRun, OpportunitySummary } from "../../services/infraOpportunitiesApi";
 import {
-  getOpportunitySummary, listOpportunities, listOpportunityRuns, runOpportunityEngine,
+  getOpportunitySummary, listMetricSources, listOpportunities, listOpportunityRuns, runOpportunityEngine,
 } from "../../services/infraOpportunitiesApi";
 import OpportunityDrawer from "./OpportunityDrawer";
 import {
@@ -37,7 +36,7 @@ export default function InfrastructureOpportunities() {
     Number.isInteger(requestedTab) && requestedTab >= 0 && requestedTab < TABS.length ? requestedTab : 0,
   );
 
-  const [connections, setConnections] = useState<SourceConnection[]>([]);
+  const [connections, setConnections] = useState<MetricSource[]>([]);
   const [connectionId, setConnectionId] = useState<number | null>(null);
   const [days, setDays] = useState(7);
   const [resolution, setResolution] = useState(300);
@@ -53,12 +52,10 @@ export default function InfrastructureOpportunities() {
   const [openId, setOpenId] = useState<number | null>(null);
 
   useEffect(() => {
-    getConnections().then((list) => {
-      const oci = list.filter((item) => item.connector_type === "oci");
-      setConnections(oci);
-      const enabled = oci.find((item) => (item.config_json?.infrastructure_metrics as { enabled?: boolean } | undefined)?.enabled);
-      setConnectionId((current) => current ?? (enabled ?? oci[0])?.id ?? null);
-    }).catch(() => setError("Não foi possível carregar as conexões OCI."));
+    listMetricSources().then((list) => {
+      setConnections(list);
+      setConnectionId((current) => current ?? list[0]?.id ?? null);
+    }).catch(() => setError("Não foi possível carregar as fontes de métricas."));
   }, []);
 
   const load = useCallback(async () => {
@@ -110,9 +107,10 @@ export default function InfrastructureOpportunities() {
   const columns: GridColDef<Opportunity>[] = [
     { field: "action_type", headerName: "Ação", width: 150, renderCell: ({ row }) => <Chip size="small" color={ACTION_COLOR[row.action_type]} label={ACTION_LABEL[row.action_type]} /> },
     { field: "resource_name", headerName: "Recurso", flex: 1, minWidth: 180 },
-    { field: "shape", headerName: "Shape", width: 170, valueGetter: (_, row) => row.from_config?.shape ?? "—" },
-    { field: "from_config", headerName: "De", width: 140, valueGetter: (_, row) => sizeLabel(row.from_config) },
-    { field: "to_config", headerName: "Para", width: 140, valueGetter: (_, row) => sizeLabel(row.to_config) },
+    { field: "provider", headerName: "Nuvem", width: 80, valueGetter: (_, row) => (row.provider ?? "").toUpperCase() },
+    { field: "sku", headerName: "Tipo / shape", width: 170, valueGetter: (_, row) => row.from_config?.sku ?? "—" },
+    { field: "from_config", headerName: "De", width: 175, valueGetter: (_, row) => sizeLabel(row.from_config) },
+    { field: "to_config", headerName: "Para", width: 175, valueGetter: (_, row) => sizeLabel(row.to_config) },
     { field: "cpu_p95", headerName: "CPU P95", width: 90, valueFormatter: (value) => pct(value as number | null) },
     { field: "memory_p95", headerName: "Mem. P95", width: 95, valueFormatter: (value) => pct(value as number | null) },
     { field: "current_monthly_cost", headerName: "Custo / mês", width: 120, valueFormatter: (value) => money(value as number | null, currency) },
@@ -135,8 +133,8 @@ export default function InfrastructureOpportunities() {
         </Stack>
         <Stack direction="row" spacing={1} alignItems="center" flexWrap="wrap" useFlexGap>
           <FormControl size="small" sx={{ minWidth: 200 }}>
-            <InputLabel>Conexão OCI</InputLabel>
-            <Select label="Conexão OCI" value={connectionId ?? ""} onChange={(event) => setConnectionId(Number(event.target.value))}>
+            <InputLabel>Fonte de métricas</InputLabel>
+            <Select label="Fonte de métricas" value={connectionId ?? ""} onChange={(event) => setConnectionId(Number(event.target.value))}>
               {connections.map((item) => <MenuItem key={item.id} value={item.id}>{item.name}</MenuItem>)}
             </Select>
           </FormControl>

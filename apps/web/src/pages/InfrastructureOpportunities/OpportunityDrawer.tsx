@@ -13,7 +13,7 @@ import type { OpportunityDetail, SeriesStats } from "../../services/infraOpportu
 import OpportunityCharts from "./OpportunityCharts";
 import { getOpportunity, setOpportunityState } from "../../services/infraOpportunitiesApi";
 import {
-  ACTION_COLOR, ACTION_LABEL, CONFIDENCE_COLOR, CONFIDENCE_LABEL, READINESS_LABEL, STATE_LABEL, money, pct,
+  ACTION_COLOR, ACTION_LABEL, CONFIDENCE_COLOR, CONFIDENCE_LABEL, READINESS_LABEL, STATE_LABEL, money, pct, sizeLabel,
 } from "./opportunityLabels";
 
 const unitPrice = (value: number, currency: string) =>
@@ -96,7 +96,7 @@ export default function OpportunityDrawer({ opportunityId, onClose, onChanged }:
                  PaperProps={{ sx: { width: { xs: "100%", md: 1040 }, p: { xs: 2, md: 3 } } }}>
     <Stack direction="row" justifyContent="space-between" alignItems="flex-start">
       <Box sx={{ minWidth: 0 }}>
-        <Typography variant="overline" color="text.secondary">Oportunidade de rightsizing · Oracle Cloud</Typography>
+        <Typography variant="overline" color="text.secondary">Oportunidade de rightsizing · {(item?.provider ?? "").toUpperCase() || "—"}</Typography>
         <Typography variant="h6" sx={{ overflowWrap: "anywhere" }}>{item?.resource_name ?? "Carregando…"}</Typography>
         {item && <Typography variant="caption" color="text.secondary" sx={{ overflowWrap: "anywhere" }}>{item.resource_id}</Typography>}
       </Box>
@@ -117,15 +117,15 @@ export default function OpportunityDrawer({ opportunityId, onClose, onChanged }:
         <Box sx={{ display: "grid", gridTemplateColumns: "1fr auto 1fr", alignItems: "center", gap: 2 }}>
           <Box>
             <Typography variant="caption" color="text.secondary">Atual</Typography>
-            <Typography variant="h6">{from ? `${from.ocpus} OCPU · ${from.memory_gb} GB` : "—"}</Typography>
-            <Typography variant="body2" color="text.secondary">{from?.shape ?? "—"} · {from?.vcpus ?? "—"} vCPU</Typography>
+            <Typography variant="h6">{from ? `${from.vcpus} vCPU · ${from.memory_gb} GB` : "—"}</Typography>
+            <Typography variant="body2" color="text.secondary">{from?.sku ?? "—"}{from?.ocpu ? ` · ${from.ocpu} OCPU` : ""}</Typography>
             <Typography variant="body2" fontWeight={650}>{money(item.current_monthly_cost, currency)} / mês</Typography>
           </Box>
           <ArrowForwardIcon color="action" />
           <Box>
             <Typography variant="caption" color="text.secondary">Recomendado</Typography>
-            <Typography variant="h6" color={item.action_type === "RIGHTSIZE_DOWN" ? "success.main" : undefined}>{to ? `${to.ocpus} OCPU · ${to.memory_gb} GB` : "—"}</Typography>
-            <Typography variant="body2" color="text.secondary">{to?.shape ?? "—"} · {to?.vcpus ?? "—"} vCPU</Typography>
+            <Typography variant="h6" color={item.action_type === "RIGHTSIZE_DOWN" ? "success.main" : undefined}>{to ? `${to.vcpus} vCPU · ${to.memory_gb} GB` : "—"}</Typography>
+            <Typography variant="body2" color="text.secondary">{to?.sku ?? "—"}{to?.ocpu ? ` · ${to.ocpu} OCPU` : ""}</Typography>
             <Typography variant="body2" fontWeight={650}>{money(item.target_monthly_cost, currency)} / mês</Typography>
           </Box>
         </Box>
@@ -199,7 +199,7 @@ export default function OpportunityDrawer({ opportunityId, onClose, onChanged }:
             <TableCell>#{row.run_id}</TableCell>
             <TableCell>{row.window_start_utc?.slice(0, 10)} → {row.window_end_utc?.slice(0, 10)}</TableCell>
             <TableCell>{ACTION_LABEL[row.action_type as keyof typeof ACTION_LABEL] ?? row.action_type}</TableCell>
-            <TableCell>{row.to_config ? `${row.to_config.ocpus} OCPU · ${row.to_config.memory_gb} GB` : "—"}</TableCell>
+            <TableCell>{sizeLabel(row.to_config)}</TableCell>
             <TableCell align="right">{money(row.monthly_saving, currency)}</TableCell>
           </TableRow>)}</TableBody>
         </Table>

@@ -1,6 +1,14 @@
 import { api } from "./api";
 
-export type FlexConfig = { shape: string; ocpus: number; memory_gb: number; vcpus?: number | null; memory_sized_from_telemetry?: boolean };
+/** Tamanho neutro (vCPU/GB); `ocpu` e afins são unidades do provedor, só para exibição. */
+export type FlexConfig = { sku: string; vcpus: number; memory_gb: number; ocpu?: number | null; memory_sized_from_telemetry?: boolean };
+
+export type MetricSource = { id: number; code: string; name: string; connector_type: string; provider: string | null };
+
+export async function listMetricSources(): Promise<MetricSource[]> {
+  const { data } = await api.get("/custos/metricas-infra/oportunidades/fontes");
+  return data.items;
+}
 
 export type SeriesStats = {
   samples: number;

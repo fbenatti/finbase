@@ -39,5 +39,5 @@ export const money = (value: number | null | undefined, currency = "BRL") =>
 
 export const pct = (value: number | null | undefined) => (value == null ? "—" : `${value.toFixed(1)}%`);
 
-export const sizeLabel = (config: { ocpus: number; memory_gb: number } | null | undefined) =>
-  config ? `${config.ocpus} OCPU · ${config.memory_gb} GB` : "—";
+export const sizeLabel = (config: { vcpus: number; memory_gb: number; ocpu?: number | null } | null | undefined) =>
+  config ? `${config.vcpus} vCPU · ${config.memory_gb} GB${config.ocpu ? ` (${config.ocpu} OCPU)` : ""}` : "—";

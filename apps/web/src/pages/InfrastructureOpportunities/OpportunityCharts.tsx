@@ -63,9 +63,9 @@ export default function OpportunityCharts({ opportunityId, from, to, targets }: 
 
   const view = useMemo(() => {
     if (!series || !from || !to) return null;
-    const capacityNow = metric === "cpu" ? from.ocpus : from.memory_gb;
-    const capacityAfter = metric === "cpu" ? to.ocpus : to.memory_gb;
-    const unit = metric === "cpu" ? "OCPU" : "GB";
+    const capacityNow = metric === "cpu" ? from.vcpus : from.memory_gb;
+    const capacityAfter = metric === "cpu" ? to.vcpus : to.memory_gb;
+    const unit = metric === "cpu" ? "vCPU" : "GB";
     const ratio = capacityNow / capacityAfter;
     const target = metric === "cpu" ? targets.cpu : targets.memory;
     const points = series.points.filter((point) => point[`${metric}_avg`] != null);

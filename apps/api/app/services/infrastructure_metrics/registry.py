@@ -36,6 +36,8 @@ class ProviderRegistration:
     adapter: MetricsAdapter | None = None
     config_parser: Any = None
     rightsizing: Any = None
+    # Connector types that land usage metrics for this provider.
+    metric_source_types: tuple[str, ...] = ()
 
     @property
     def collectable(self) -> bool:
@@ -61,6 +63,7 @@ def _oci_rightsizing():
 _PROVIDERS: dict[str, ProviderRegistration] = {
     "oci": ProviderRegistration(
         provider="oci", metrics=OCI_METRICS, config_parser=_oci_config, rightsizing=_oci_rightsizing,
+        metric_source_types=("oci_monitoring",),
     ),
 }
 
@@ -96,4 +99,9 @@ def register_adapter(adapter: MetricsAdapter) -> None:
     _PROVIDERS[key] = ProviderRegistration(
         provider=current.provider, metrics=current.metrics, adapter=adapter,
         config_parser=current.config_parser, rightsizing=current.rightsizing,
+        metric_source_types=current.metric_source_types,
     )
+
+
+def metric_source_types() -> tuple[str, ...]:
+    return tuple(t for registration in _PROVIDERS.values() for t in registration.metric_source_types)

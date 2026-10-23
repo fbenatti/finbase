@@ -104,6 +104,24 @@ def _execute(connection_id: int, days: int, resolution_seconds: int, user_id: in
         session.close()
 
 
+@router.get("/fontes")
+async def list_sources(user=Depends(get_current_user), db: AsyncSession = Depends(get_db)):
+    """Metric sources the engine can analyze (any cloud with rightsizing registered)."""
+    from app.services.infrastructure_metrics.registry import metric_source_types
+
+    permissions = await get_effective_permissions(db, user.id)
+    rows = (await db.execute(
+        select(SourceConnection).where(SourceConnection.connector_type.in_(metric_source_types()))
+        .order_by(SourceConnection.name)
+    )).scalars().all()
+    return {"items": [
+        {"id": row.id, "code": row.code, "name": row.name, "connector_type": row.connector_type,
+         "provider": row.cloud_scope}
+        for row in rows
+        if has_permission(permissions, "infrastructure_metrics", "read", f"connection:{row.id}")
+    ]}
+
+
 @router.post("/executar")
 async def run_engine(body: RunRequest, user=Depends(get_current_user), db: AsyncSession = Depends(get_db)):
     connection = await db.get(SourceConnection, body.connection_id)
