@@ -90,7 +90,9 @@ def detect_scope_window(
                 identity = (day - timedelta(days=int(profile["history_days"]) - 1)).isoformat()
                 signal["episode_start"] = identity
             else:
-                identity = str(signal.get("episode_start") or signal.get("day") or day_text)[:10]
+                # A janela móvel pode alterar o início estimado do mesmo episódio.
+                # O dia do pico identifica o sinal de forma estável na retrospectiva.
+                identity = str(signal.get("day") or day_text)[:10]
             found[(detector, identity)] = (signal, profile)
     return list(found.values())
 
