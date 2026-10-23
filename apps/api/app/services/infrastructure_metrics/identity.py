@@ -7,7 +7,7 @@ from collections.abc import Mapping
 from typing import Any
 
 
-IDENTITY_VERSION = "v1"
+IDENTITY_VERSION = "v2"
 
 
 def canonical_json(value: Any) -> str:
@@ -23,7 +23,10 @@ def dimensions_hash(dimensions: Mapping[str, Any]) -> str:
 
 def series_id(*, provider: str, connection_id: int, account_id: str, region: str,
               resource_type: str, resource_id: str, metric: str,
-              dimensions: Mapping[str, Any]) -> str:
+              dimensions: Mapping[str, Any], namespace: str | None = None,
+              metric_scope: str | None = None, source_owner: str | None = None,
+              cloud_partition: str | None = None,
+              sub_account_id: str | None = None) -> str:
     """Hash full source/resource/metric identity; excludes bucket timestamps."""
     identity = {
         "version": IDENTITY_VERSION,
@@ -31,6 +34,11 @@ def series_id(*, provider: str, connection_id: int, account_id: str, region: str
         "connection_id": int(connection_id),
         "account_id": account_id,
         "region": region,
+        "cloud_partition": cloud_partition,
+        "sub_account_id": sub_account_id,
+        "namespace": namespace,
+        "metric_scope": metric_scope,
+        "source_owner": source_owner,
         "resource_type": resource_type,
         "resource_id": resource_id,
         "metric": metric,
