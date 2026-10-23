@@ -219,6 +219,89 @@ def ensure_metric_coverage_table(*, namespace: str = "silver") -> bool:
                 with table.update_schema() as update:
                     update.union_by_name(target)
             return False
+
+
+def ensure_metric_profile_table(*, namespace: str = "silver") -> bool:
+    """Create/evolve the versioned daily profile table under the write lock."""
+    from pyiceberg.schema import Schema
+    from pyiceberg.types import BooleanType, DoubleType, LongType, NestedField, StringType, TimestampType
+
+    from app.services import iceberg_service
+    from app.services.destination_slice import build_iceberg_partition_spec, resolve_destination_slice_config_for_fields
+    from app.services.silver_models import RESOURCE_PROFILE_DAILY_WINDOW
+    from app.services.write_lock import exclusive_write_lock
+
+    types = {"varchar": StringType(), "decimal": DoubleType(), "double": DoubleType(),
+             "bigint": LongType(), "boolean": BooleanType(), "timestamp": TimestampType()}
+    target = Schema(*[
+        NestedField(index, field.name, types[field.type], required=field.required)
+        for index, field in enumerate(RESOURCE_PROFILE_DAILY_WINDOW.fields, start=1)
+    ])
+    name = RESOURCE_PROFILE_DAILY_WINDOW.table
+    names = {field.name for field in target.fields}
+    spec = {"grain": "snapshot_date", "snapshot_column": "window_to_day",
+            "connection_column": "series_source_connection_id"}
+    with exclusive_write_lock():
+        if iceberg_service.table_exists(name, namespace=namespace):
+            table = iceberg_service.get_catalog().load_table((namespace, name))
+            existing = {field.name for field in table.schema().fields}
+            if not names.issubset(existing):
+                with table.update_schema() as update:
+                    update.union_by_name(target)
+            return False
+        iceberg_service.ensure_namespace(namespace)
+        config = resolve_destination_slice_config_for_fields(name, spec, names)
+        partition_spec = build_iceberg_partition_spec(target, config, pyarrow_safe=True)
+        iceberg_service.get_catalog().create_table((namespace, name), schema=target, partition_spec=partition_spec)
+        return True
+
+
+def publish_metric_profile_rows(
+    rows: Iterable[Mapping], *, connection_id: int, snapshot_date: str,
+    namespace: str = "silver",
+) -> int:
+    """Idempotently replace profile rows for a connection and end day."""
+    import pandas as pd
+
+    from app.services import iceberg_service
+    from app.services.destination_slice import build_slice_row_filter, resolve_destination_slice_config_for_fields
+    from app.services.silver_models import RESOURCE_PROFILE_DAILY_WINDOW
+    from app.services.write_lock import exclusive_write_lock
+
+    incoming = [dict(row) for row in rows]
+    if not incoming:
+        return 0
+    name = RESOURCE_PROFILE_DAILY_WINDOW.table
+    spec = {"grain": "snapshot_date", "snapshot_column": "window_to_day",
+            "connection_column": "series_source_connection_id"}
+    for row in incoming:
+        if int(row.get("series_source_connection_id", -1)) != int(connection_id):
+            raise ValueError("profile rows mix source connections")
+        if str(row.get("window_to_day")) != snapshot_date:
+            raise ValueError("profile rows mix snapshot dates")
+    with exclusive_write_lock():
+        table = iceberg_service.get_catalog().load_table((namespace, name))
+        config = resolve_destination_slice_config_for_fields(name, spec, {f.name for f in table.schema().fields})
+        old = table.scan(row_filter=build_slice_row_filter(
+            config, connection_id=connection_id, snapshot_date=snapshot_date,
+        )).to_arrow().to_pylist()
+        key_fields = ("series_source_connection_id", "series_owner", "series_id", "resolution_seconds",
+                      "value_statistic", "window_start_utc", "window_end_utc", "algorithm_version", "policy_version")
+        merged = {tuple(row.get(key) for key in key_fields): dict(row) for row in old}
+        for row in incoming:
+            merged[tuple(row.get(key) for key in key_fields)] = row
+        frame = pd.DataFrame(list(merged.values()))
+        columns = {field.name: {"varchar": "VARCHAR", "bigint": "BIGINT", "double": "DOUBLE",
+                               "decimal": "DOUBLE", "boolean": "BOOLEAN"}.get(field.type, "TIMESTAMP")
+                   for field in RESOURCE_PROFILE_DAILY_WINDOW.fields}
+        for field in RESOURCE_PROFILE_DAILY_WINDOW.fields:
+            if field.type == "timestamp" and field.name in frame.columns:
+                frame[field.name] = pd.to_datetime(frame[field.name], errors="coerce", utc=True).dt.tz_localize(None)
+        iceberg_service.publish_silver_dataframe_slice(
+            name, frame, connection_id=connection_id, snapshot_date=snapshot_date,
+            namespace=namespace, partition_spec_json=spec, column_types=columns,
+        )
+    return len(merged)
         iceberg_service.ensure_namespace(namespace)
         config = resolve_destination_slice_config_for_fields(
             table_name, {"grain": "metric_day", "connection_column": "_source_connection_id"}, fields,
