@@ -104,7 +104,7 @@ export default function AnomaliesCasesDataGrid({ cases, currency, onOpen }: Prop
       width: 120,
       valueFormatter: (v) => money(v == null ? null : Number(v), currency),
     },
-    { field: "event_date", headerName: "Data do evento", width: 110 },
+    { field: "event_date", headerName: "Data da anomalia", width: 150, minWidth: 150, flex: 0 },
   ];
 
   return (
