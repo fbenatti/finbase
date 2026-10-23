@@ -216,75 +216,58 @@ export default function Forecast() {
         )}
 
         {tab === "config" && (
-          <Paper elevation={0} sx={{ p: { xs: 1.5, md: 2 }, borderRadius: 2, bgcolor: "background.paper", border: "1px solid", borderColor: "divider" }}>
-            <Stack direction={{ xs: "column", md: "row" }} justifyContent="space-between" alignItems={{ md: "flex-start" }} sx={{ mb: 2, gap: 2 }}>
-              <Box>
-                <Typography variant="h6">Perfis de Forecast</Typography>
-                <Typography variant="body2" color="text.secondary">
-                  Cada perfil define como uma base consolidada é projetada. Rode um perfil quando quiser atualizar o Forecast.
-                </Typography>
-              </Box>
-              <Stack direction="row" spacing={1} flexShrink={0}>
-                <Button size="small" startIcon={<RefreshOutlined />} onClick={() => { void load(); void loadConfigsGrid(configsQueryRef.current); }}>
-                  Atualizar
-                </Button>
-                <Button size="small" variant="contained" startIcon={<AddOutlined />} onClick={() => setConfigDialog({ open: true, initial: null })}>
-                  Novo perfil
-                </Button>
+          <Stack spacing={2}>
+            <Paper elevation={0} sx={{ p: { xs: 1.5, md: 2 }, borderRadius: 2, bgcolor: "background.paper", border: "1px solid", borderColor: "divider" }}>
+              <Stack direction={{ xs: "column", md: "row" }} justifyContent="space-between" alignItems={{ md: "center" }} sx={{ gap: 2 }}>
+                <Box>
+                  <Typography variant="h6">Perfil único de Forecast</Typography>
+                  <Typography variant="body2" color="text.secondary">
+                    Este perfil concentra a base, as medidas e os parâmetros usados em todas as execuções.
+                  </Typography>
+                </Box>
+                <Stack direction="row" spacing={1} flexShrink={0}>
+                  <Button size="small" startIcon={<RefreshOutlined />} onClick={() => void load()}>
+                    Atualizar
+                  </Button>
+                  <Button
+                    size="small"
+                    variant="contained"
+                    disabled={!profile || runningConfigId !== null}
+                    startIcon={runningConfigId !== null ? <CircularProgress size={16} /> : undefined}
+                    onClick={() => profile && void runConfig(profile)}
+                  >
+                    Executar Forecast
+                  </Button>
+                </Stack>
               </Stack>
-            </Stack>
-            <Box sx={{ display: "grid", gap: 1.5, mb: 2, gridTemplateColumns: { xs: "1fr 1fr", md: "repeat(3, minmax(0, 1fr))" } }}>
-              {[
-                { label: "Perfis criados", value: configsGridTotal },
-                { label: "Em execução", value: runningConfigId !== null ? 1 : 0 },
-                { label: "Bases sem perfil de Forecast", value: Math.max(0, tables.length - configs.length) },
-              ].map((kpi) => (
-                <Paper key={kpi.label} variant="outlined" sx={{ p: 1.5, borderRadius: 2, bgcolor: "#FAFBFD" }}>
-                  <Typography variant="caption" color="text.secondary">{kpi.label}</Typography>
-                  <Typography variant="h5" fontWeight={700}>{kpi.value}</Typography>
-                </Paper>
-              ))}
-            </Box>
-            <TextField
-              fullWidth
-              size="small"
-              placeholder="Buscar por nome, base, medida ou modelo"
-              value={configsSearch}
-              onChange={(event) => setConfigsSearch(event.target.value)}
-              slotProps={{
-                input: {
-                  startAdornment: (
-                    <InputAdornment position="start">
-                      <SearchOutlined fontSize="small" />
-                    </InputAdornment>
-                  ),
-                  sx: { height: 40 },
-                },
-              }}
-              sx={{ mb: 2, maxWidth: 520 }}
-            />
-            {!configsGridLoading && configsGridRows.length === 0 ? (
-              <Box sx={{ py: 7 }}>
-                <EmptyState
-                  message={configsSearch ? "Nenhum perfil corresponde à busca." : "Nenhum perfil cadastrado. Crie um para começar."}
-                />
+              <Box sx={{ display: "grid", gap: 1.5, mt: 2, gridTemplateColumns: { xs: "1fr", md: "repeat(3, minmax(0, 1fr))" } }}>
+                {[
+                  { label: "Perfil", value: profile?.name ?? "Não configurado" },
+                  { label: "Base consolidada", value: profile?.table_name ?? tables.find((table) => table.id === profile?.destination_table_id)?.name ?? "—" },
+                  { label: "Situação", value: runningConfigId !== null ? "Executando" : profile?.active ? "Ativo" : "Inativo" },
+                ].map((item) => (
+                  <Paper key={item.label} variant="outlined" sx={{ p: 1.5, borderRadius: 2, bgcolor: "#FAFBFD", minWidth: 0 }}>
+                    <Typography variant="caption" color="text.secondary">{item.label}</Typography>
+                    <Typography variant="subtitle1" fontWeight={700} noWrap>{item.value}</Typography>
+                  </Paper>
+                ))}
               </Box>
-            ) : (
-              <ForecastConfigsDataGrid
-                rows={configsGridRows}
-                total={configsGridTotal}
-                loading={configsGridLoading}
-                search={configsSearch}
-                runningConfigId={runningConfigId}
-                onQuery={handleConfigsGridQuery}
-                onEdit={(config) => {
-                  setConfigDialog({ open: true, initial: config });
+            </Paper>
+            {profile ? (
+              <ForecastConfigForm
+                key={profile.id}
+                initial={profile}
+                tables={tables}
+                onSaved={async (savedName) => {
+                  setError("");
+                  setMessage(`Configuração "${savedName}" salva com sucesso.`);
+                  await load();
                 }}
-                onRun={(config) => void runConfig(config)}
-                onDelete={setDeleteConfigPending}
               />
+            ) : (
+              <Alert severity="info">O perfil único ainda está sendo inicializado. Atualize a tela em alguns instantes.</Alert>
             )}
-          </Paper>
+          </Stack>
         )}
 
         {tab === "rules" && (
